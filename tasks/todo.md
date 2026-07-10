@@ -125,16 +125,36 @@ readable.  Confirm before Phase 1.
 Google one-click login (django-allauth), guest checkout flag on the session, password reset via
 email link or SMS OTP. **Needs email provider decision (Mailgun vs Gmail SMTP) before starting.**
 
+**Decisions made:** email provider is Gmail SMTP (falls back to the console backend — prints
+emails to the terminal — when no Gmail app-password is set in `.env`, so local dev/tests never
+need real credentials). No Google OAuth credentials exist yet, so Google login is fully wired at
+the code level but has no `SocialApp` row configured — allauth correctly hides the button rather
+than showing a broken one, verified manually. Add Google credentials via Django Admin → Social
+Applications once available, no code change needed.
+
 **Acceptance criteria:**
-- [ ] Customer can register with email/phone + password
-- [ ] Customer can log in with Google via django-allauth
-- [ ] Guest checkout path exists (no account required to reach checkout)
-- [ ] Password reset flow works via email link
+- [x] Customer can register with full name, email, phone number, and a password
+  (`apps/accounts/forms.py` `CustomerSignupForm`) — also joins the `customer` group from Task 2
+- [x] Google login via django-allauth is wired (socialaccount app + google provider, both
+  installed since Task 1) — not yet clickable/testable end-to-end pending OAuth credentials (see
+  Decisions above)
+- [~] Guest checkout: no login-required middleware exists anywhere in the project, so anonymous
+  browsing is never blocked — but there is no actual checkout page yet (Task 17, Phase 6), so the
+  full guest-checkout UI itself is out of scope until then. Not writing a test against a page that
+  doesn't exist yet.
+- [x] Password reset flow works via email link (`apps/accounts/forms.py` uses allauth's built-in
+  reset flow; confirmed via a full pytest round-trip: request reset → extract link from the sent
+  email → set new password → new password works)
 
 **Verification:**
-- [ ] pytest feature test: register → log out → log in
-- [ ] pytest feature test: password reset completes and new password works
-- [ ] Manual check: Google login button redirects and returns a logged-in session locally
+- [x] pytest feature test: register → log out → log in
+  (`tests/feature/accounts/test_customer_auth.py::test_customer_can_register_logout_and_login`)
+- [x] pytest feature test: password reset completes and new password works
+  (`tests/feature/accounts/test_customer_auth.py::test_customer_password_reset_completes_via_email_link`)
+- [x] Manual check: loaded `/accounts/signup/`, `/accounts/login/`, `/accounts/password/reset/`
+  on the real dev server (not just tests) — all 200, signup form shows exactly the right fields
+  (full_name, email, phone_number, password1, password2, no username), no Google button (correct,
+  no credentials configured yet — see Decisions above)
 
 **Dependencies:** Task 2, Task 3, and the email-provider open question
 

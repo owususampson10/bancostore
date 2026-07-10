@@ -116,6 +116,16 @@ AUTHENTICATION_BACKENDS = [
 
 SITE_ID = 1
 
+# django-allauth — regular customer registration/login (see apps/accounts/forms.py for
+# the custom signup form collecting full_name/phone_number, per docs Section 4.1).
+# Distributor and admin login have their own rules, built in later tasks (5 and 6).
+ACCOUNT_AUTHENTICATION_METHOD = "email"
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_UNIQUE_EMAIL = True
+ACCOUNT_EMAIL_VERIFICATION = "optional"
+ACCOUNT_FORMS = {"signup": "apps.accounts.forms.CustomerSignupForm"}
+
 # django-two-factor-auth patches admin's login to redirect through LOGIN_URL, so this
 # must point at the 2FA-aware login view (admin requires mandatory 2FA — see SPEC.md).
 LOGIN_URL = "two_factor:login"
@@ -218,6 +228,23 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
+
+
+# Email — Gmail SMTP for password-reset links (customer decision, tasks/todo.md Task 4).
+# Falls back to the console backend (prints emails to the terminal) when no Gmail
+# credentials are set in .env, so local dev/tests never need real credentials for this.
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+
+if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = "smtp.gmail.com"
+    EMAIL_PORT = 587
+    EMAIL_USE_TLS = True
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@bancostore.test")
 
 
 # Internationalization

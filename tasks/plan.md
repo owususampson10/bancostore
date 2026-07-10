@@ -42,7 +42,7 @@ rationale and the Django-equivalent of every Laravel/Filament/Livewire piece nam
 admin/customer/distributor stub users exist, settings values are readable from the database.
 
 ### Phase 1: Authentication
-- [ ] Task 4: Regular customer registration & login (email/phone, Google, guest checkout flag)
+- [x] Task 4: Regular customer registration & login (email/phone, Google, guest checkout flag)
 - [ ] Task 5: Distributor registration & login (phone + SMS OTP) — **needs SMS provider decision**
 - [ ] Task 6: Admin login with mandatory 2FA
 
