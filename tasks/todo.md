@@ -619,3 +619,54 @@ distributors hit the weekly cap, full binary tree view for any distributor, PV b
 **Checkpoint I (final MVP checkpoint):** the full Section 14 distributor journey works end to end
 through the UI. All pytest tests pass, `black`/`ruff` clean. Verify against `SPEC.md` Success
 Criteria before calling the MVP done.
+
+---
+
+## Phase 10: Deployment
+
+### Task 24: Deploy to Hostinger VPS (production)
+
+**This is a production deployment — confirm with the user before running any step against the
+real VPS or domain**, per `SPEC.md` Boundaries (production deploys are an "ask first" action).
+
+**Description:** Stand up the Hostinger KVM 2 VPS (Ubuntu 22.04 LTS) as the production host and
+move Bancostore onto it: MySQL 8 (real concurrent writes, replacing local SQLite), Redis, Nginx as
+reverse proxy + static/media file server, Let's Encrypt for HTTPS, and Supervisor to keep Daphne
+(ASGI) and the Celery worker/beat processes running permanently, including across reboots. This is
+the point where every "local dev uses SQLite / MySQL doesn't run on this Mac" workaround in
+`SPEC.md` stops applying — production runs the real stack end to end.
+
+**Acceptance criteria:**
+- [ ] Hostinger KVM 2 VPS provisioned (Ubuntu 22.04 LTS), SSH key-based access configured, root
+  login disabled in favor of a sudo user
+- [ ] MySQL 8, Redis, Nginx, and Python installed on the VPS via `apt` (native install works here —
+  unlike this Mac, Ubuntu 22.04 has current bottles/build tools for all of these)
+- [ ] Production `.env` created directly on the server (never committed): real `SECRET_KEY`,
+  `DEBUG=False`, `ALLOWED_HOSTS` set to the production domain, `DATABASE_URL` pointing at the VPS's
+  MySQL, `REDIS_URL`, and the Paystack/email/SMS provider keys from `SPEC.md` Open Questions
+- [ ] `pip install -r requirements.txt`, `npm run build`, `python manage.py collectstatic`, and
+  `python manage.py migrate` all run clean against real MySQL on the VPS
+- [ ] Supervisor configs for Daphne, `celery worker`, and `celery beat` — auto-restart on crash and
+  on VPS reboot
+- [ ] Nginx reverse-proxies to Daphne, serves `static/`/`media/` directly, and Let's Encrypt issues
+  a valid HTTPS certificate (with auto-renewal) for the production domain
+- [ ] A deploy process is documented (manual runbook at minimum; GitHub Actions auto-deploy on
+  push to `main` if the CI provider from Open Question #1 is confirmed by this point)
+
+**Verification:**
+- [ ] Visiting the production domain over HTTPS loads the app with no errors
+- [ ] `sudo supervisorctl status` shows Daphne, Celery worker, and Celery beat all `RUNNING` after
+  a `sudo reboot` of the VPS
+- [ ] One full smoke-test purchase (mirroring Checkpoint I) succeeds against real MySQL/Redis on
+  the VPS, before any real user account exists on it — per `SPEC.md` Boundaries, never test or
+  develop against the live production server/database once real users and real money are on it
+
+**Dependencies:** Task 23 (Checkpoint I — full MVP complete and verified locally), Open Question #1
+(CI provider confirmed)
+
+**Files likely touched:** a new `deploy/` directory (Nginx site config, Supervisor program
+configs), `.env.example` (document the production-only variables), `SPEC.md` Commands section
+(add the verified production commands, matching how Task 1 updated the local dev commands),
+possibly `.github/workflows/deploy.yml`
+
+**Estimated scope:** L

@@ -105,6 +105,14 @@ another session — proves Django Channels real-time wiring works.
 through the UI. All pytest tests pass, `black`/`ruff` clean. Verify against `SPEC.md` Success
 Criteria.
 
+### Phase 10: Deployment
+- [ ] Task 24: Deploy to Hostinger VPS (production) — **needs Hostinger KVM 2 VPS provisioned
+  first, and a CI provider confirmed (Open Question #1) before this task starts**
+
+**Checkpoint J (go-live):** Bancostore is reachable over HTTPS at the production domain, running
+on the Hostinger VPS against real MySQL, with Celery/Celery Beat/Daphne kept alive by Supervisor
+and surviving a server reboot.
+
 ## Risks and Mitigations
 
 | Risk | Impact | Mitigation |
