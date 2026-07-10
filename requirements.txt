@@ -1,0 +1,67 @@
+# Bancostore backend dependencies — see SPEC.md Tech Stack for rationale per package.
+# Install: pip install -r requirements.txt
+
+# Core framework
+Django>=5,<5.1
+
+# Frontend integration (Django Templates + HTMX)
+django-htmx>=1.19,<2
+
+# Real-time (Channels + Daphne, Redis channel layer)
+channels>=4,<5
+channels-redis>=4,<5
+daphne>=4,<5
+# daphne -> autobahn requires cbor2, whose current release needs a Rust compiler to build
+# (not available on this Mac, same class of issue as the PHP/MySQL native-build failures
+# documented in SPEC.md). Pin to the last pure-Python cbor2 wheel to avoid that entirely.
+cbor2==5.5.0
+
+# Database
+dj-database-url>=2,<3
+PyMySQL>=1,<2
+
+# Cache / sessions / queue
+django-redis>=5,<6
+celery>=5,<6
+django-celery-beat>=2,<3
+flower>=2,<3
+
+# Auth
+django-allauth>=0.63,<0.64
+django-two-factor-auth>=1.16,<2
+# django-two-factor-auth's phonenumber plugin needs this optional extra of django-phonenumber-field
+phonenumbers>=8,<9
+# allauth's Google OAuth2 provider needs PyJWT to verify ID tokens
+PyJWT>=2,<3
+
+# Admin-editable settings
+django-constance[database]>=3,<4
+
+# Files
+Pillow>=10,<11
+
+# Payments / HTTP
+requests>=2,<3
+
+# PDF / audit trail
+WeasyPrint>=62,<63
+django-simple-history>=3,<4
+
+# Dev debugging / query profiling
+django-debug-toolbar>=4,<5
+django-silk>=5,<6
+
+# Rate limiting
+django-ratelimit>=4,<5
+
+# Field-level encryption
+django-cryptography>=1,<2
+
+# Testing
+pytest>=8,<9
+pytest-django>=4,<5
+
+# Formatting / linting
+black>=24,<25
+isort>=5,<6
+ruff>=0.6,<1
