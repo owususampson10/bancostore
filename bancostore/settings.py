@@ -75,6 +75,9 @@ INSTALLED_APPS = [
     # Dev tooling (safe to always list; middleware below is gated on DEBUG)
     "debug_toolbar",
     "silk",
+    # Bancostore apps
+    "apps.accounts",
+    "apps.distributors",
 ]
 
 MIDDLEWARE = [
