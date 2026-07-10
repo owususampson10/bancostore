@@ -84,13 +84,25 @@ Payout (13.4), KYC (13.9), IR ID Number (13.13), Payment Gateway (13.14), Genera
 Seed default values from `SPEC.md`/`docs/` Section 13 and 15 tables.
 
 **Acceptance criteria:**
-- [ ] `CONSTANCE_CONFIG` covers every field in the categories above, grouped by `CONSTANCE_CONFIG_FIELDSETS`
-- [ ] Defaults match every value listed in Section 15 (Key Rules Summary)
-- [ ] Settings are Redis-cached per `django-constance`'s Redis backend (no per-request DB hit)
+- [x] `CONSTANCE_CONFIG` covers every field in the categories above (73 settings), grouped by
+  `CONSTANCE_CONFIG_FIELDSETS` (8 fieldsets, one per category) — defined in
+  `apps/platform_settings/config.py` and imported into `bancostore/settings.py`
+- [x] Defaults match every value listed in Section 15 (Key Rules Summary) that falls within these
+  8 categories — the 70% Retail Rule (13.12) and Delivery Fees (13.5) are Section 15 rules
+  controlled by out-of-scope sections and are intentionally not seeded here, per SPEC.md's own
+  scope note (13.5–13.8, 13.10–13.12 stubbed elsewhere)
+- [x] Settings are Redis-cached via `CONSTANCE_DATABASE_CACHE_BACKEND = "default"` (constance stays
+  DB-backed/admin-editable per SPEC.md Tech Stack, with Redis as a read-through cache in front of it)
 
 **Verification:**
-- [ ] pytest test: reading `constance.config.BINARY_BONUS_RATE` returns `7.5`
-- [ ] pytest test: updating a setting value (e.g. via Django Admin) takes effect on the next read without a code change
+- [x] pytest test: reading `constance.config.BINARY_BONUS_RATE` returns `7.5`
+  (`tests/unit/platform_settings/test_constance_config.py`)
+- [x] pytest test: updating a setting value takes effect on the next read without a code change —
+  also verified manually via the Django Admin constance page
+  (`/admin/constance/config/`, confirmed rendering all 8 fieldsets and the correct `7.5` default)
+- Note: found that Redis-backed constance caching doesn't get cleared by pytest-django's normal
+  per-test DB rollback, so a value written in one test was leaking into the next via Redis. Added
+  an autouse `tests/conftest.py` fixture that clears the Django cache before/after every test.
 
 **Dependencies:** Task 1
 

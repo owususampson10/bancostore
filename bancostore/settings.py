@@ -9,6 +9,13 @@ from pathlib import Path
 
 import dj_database_url
 
+# These become Django settings by being module-level names here, not by being
+# referenced below — the normal pattern for settings.py, not a real unused import.
+from apps.platform_settings.config import (  # noqa: F401
+    CONSTANCE_CONFIG,
+    CONSTANCE_CONFIG_FIELDSETS,
+)
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -78,6 +85,7 @@ INSTALLED_APPS = [
     # Bancostore apps
     "apps.accounts",
     "apps.distributors",
+    "apps.platform_settings",
 ]
 
 MIDDLEWARE = [
@@ -189,10 +197,12 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 
 
-# django-constance — DB-backed, admin-editable business rules (seeded in Task 3)
+# django-constance — DB-backed, admin-editable business rules, Redis-cached so
+# reads don't hit the database every time (CONSTANCE_CONFIG/FIELDSETS are imported
+# above from apps.platform_settings.config — see SPEC.md Section 13/15).
 
 CONSTANCE_BACKEND = "constance.backends.database.DatabaseBackend"
-CONSTANCE_CONFIG = {}
+CONSTANCE_DATABASE_CACHE_BACKEND = "default"
 
 
 # Password validation

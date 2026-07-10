@@ -36,7 +36,7 @@ rationale and the Django-equivalent of every Laravel/Filament/Livewire piece nam
 ### Phase 0: Foundation
 - [x] Task 1: Scaffold the Django 5 project and install the full stack
 - [x] Task 2: Roles & permissions (Customer / Distributor / Admin)
-- [ ] Task 3: Settings foundation — seed all MVP-relevant business rules
+- [x] Task 3: Settings foundation — seed all MVP-relevant business rules
 
 **Checkpoint A:** `pytest` passes, `black --check . && ruff check .` clean, seeded
 admin/customer/distributor stub users exist, settings values are readable from the database.
