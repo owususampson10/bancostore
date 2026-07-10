@@ -56,13 +56,17 @@ model (migration) for distributor-only fields (sponsor_id, rank, kyc_status, ir_
 Task 10/11 fill them in). Seed one test user per role.
 
 **Acceptance criteria:**
-- [ ] Three groups exist: `customer`, `distributor`, `admin`
-- [ ] `Distributor` model/migration exists with at least `user`, `sponsor`, `rank`, `kyc_status`
-- [ ] A management command creates one user per role for local testing
+- [x] Three groups exist: `customer`, `distributor`, `admin` (created by an `apps.accounts` data
+  migration, so they exist after `migrate` alone, not only after seeding)
+- [x] `Distributor` model/migration exists with at least `user`, `sponsor`, `rank`, `kyc_status`
+  (plus `ir_id`, all nullable/blank until Tasks 10/11 fill them in)
+- [x] A management command (`seed_roles`) creates one stub user per role for local testing
 
 **Verification:**
-- [ ] pytest test: a user assigned the `distributor` group has a `Distributor` row and passes an `is_distributor()` check
-- [ ] `python manage.py migrate` runs clean; seed command populates the three stub users
+- [x] pytest test: a user assigned the `distributor` group has a `Distributor` row and passes an
+  `is_distributor()` check (`tests/unit/accounts/test_permissions.py`)
+- [x] `python manage.py migrate` runs clean; `seed_roles` populates the three stub users, and is
+  idempotent (`tests/feature/test_seed_roles.py`) — verified manually from a fresh `db.sqlite3` too
 
 **Dependencies:** Task 1
 
