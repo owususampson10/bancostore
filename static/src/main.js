@@ -1,3 +1,4 @@
+import "./main.css";
 import Alpine from "alpinejs";
 import "htmx.org";
 

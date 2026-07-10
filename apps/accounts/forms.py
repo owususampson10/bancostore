@@ -1,18 +1,59 @@
 from django import forms
 from django.contrib.auth.models import Group
 
-from allauth.account.forms import SignupForm
+from allauth.account.forms import (
+    LoginForm,
+    ResetPasswordForm,
+    ResetPasswordKeyForm,
+    SignupForm,
+)
 from phonenumber_field.formfields import PhoneNumberField
 
 from .models import CustomerProfile
+
+# Shared Tailwind classes matching the Bancostore Stitch design system
+# (see static/src/main.css @theme and templates/account/*.html).
+INPUT_CLASSES = (
+    "w-full pl-10 pr-4 py-3 bg-white border border-outline-variant rounded-lg "
+    "font-body-md text-body-md focus:ring-2 focus:ring-secondary "
+    "focus:border-secondary outline-none transition-all"
+)
+CHECKBOX_CLASSES = (
+    "w-4 h-4 rounded border-outline-variant text-primary focus:ring-primary"
+)
 
 
 class CustomerSignupForm(SignupForm):
     """ACCOUNT_USERNAME_REQUIRED=False already makes the base form drop the
     username field itself, so there's no need to remove it here too."""
 
-    full_name = forms.CharField(max_length=150, label="Full name")
-    phone_number = PhoneNumberField(label="Phone number")
+    full_name = forms.CharField(
+        max_length=150,
+        label="Full name",
+        widget=forms.TextInput(
+            attrs={"class": INPUT_CLASSES, "placeholder": "John Doe"}
+        ),
+    )
+    phone_number = PhoneNumberField(
+        label="Phone number",
+        widget=forms.TextInput(
+            attrs={"class": INPUT_CLASSES, "placeholder": "+233 XX XXX XXXX"}
+        ),
+    )
+    terms_accepted = forms.BooleanField(
+        required=True,
+        label="I agree to the Terms of Service and Privacy Policy.",
+        error_messages={
+            "required": "You must agree to the Terms of Service and Privacy Policy."
+        },
+        widget=forms.CheckboxInput(attrs={"class": CHECKBOX_CLASSES}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["email"].widget.attrs["class"] = INPUT_CLASSES
+        self.fields["password1"].widget.attrs["class"] = INPUT_CLASSES
+        self.fields["password2"].widget.attrs["class"] = INPUT_CLASSES
 
     def save(self, request):
         user = super().save(request)
@@ -24,3 +65,29 @@ class CustomerSignupForm(SignupForm):
         customer_group, _ = Group.objects.get_or_create(name="customer")
         user.groups.add(customer_group)
         return user
+
+
+class CustomerLoginForm(LoginForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["login"].widget.attrs["class"] = INPUT_CLASSES
+        self.fields["password"].widget.attrs["class"] = INPUT_CLASSES
+        # The template renders its own "Forgot password?" link next to the
+        # label, matching the Stitch design, so drop allauth's auto help_text
+        # link to avoid showing it twice.
+        self.fields["password"].help_text = ""
+        if "remember" in self.fields:
+            self.fields["remember"].widget.attrs["class"] = CHECKBOX_CLASSES
+
+
+class CustomerResetPasswordForm(ResetPasswordForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["email"].widget.attrs["class"] = INPUT_CLASSES
+
+
+class CustomerResetPasswordKeyForm(ResetPasswordKeyForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["password1"].widget.attrs["class"] = INPUT_CLASSES
+        self.fields["password2"].widget.attrs["class"] = INPUT_CLASSES

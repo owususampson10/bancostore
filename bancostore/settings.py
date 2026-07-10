@@ -124,7 +124,12 @@ ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_EMAIL_VERIFICATION = "optional"
-ACCOUNT_FORMS = {"signup": "apps.accounts.forms.CustomerSignupForm"}
+ACCOUNT_FORMS = {
+    "signup": "apps.accounts.forms.CustomerSignupForm",
+    "login": "apps.accounts.forms.CustomerLoginForm",
+    "reset_password": "apps.accounts.forms.CustomerResetPasswordForm",
+    "reset_password_from_key": "apps.accounts.forms.CustomerResetPasswordKeyForm",
+}
 
 # django-two-factor-auth patches admin's login to redirect through LOGIN_URL, so this
 # must point at the 2FA-aware login view (admin requires mandatory 2FA — see SPEC.md).

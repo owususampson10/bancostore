@@ -23,6 +23,7 @@ def test_customer_can_register_logout_and_login(client):
             "phone_number": "+233241234567",
             "password1": "S3cure-Passw0rd!",
             "password2": "S3cure-Passw0rd!",
+            "terms_accepted": "on",
         },
     )
 
@@ -44,6 +45,24 @@ def test_customer_can_register_logout_and_login(client):
 
     assert login_response.status_code == 302
     assert int(client.session["_auth_user_id"]) == user.id
+
+
+@pytest.mark.django_db
+def test_customer_cannot_register_without_accepting_terms(client):
+    response = client.post(
+        reverse("account_signup"),
+        {
+            "full_name": "Kojo Antwi",
+            "email": "kojo@example.test",
+            "phone_number": "+233241234568",
+            "password1": "S3cure-Passw0rd!",
+            "password2": "S3cure-Passw0rd!",
+        },
+    )
+
+    assert response.status_code == 200
+    assert not User.objects.filter(email="kojo@example.test").exists()
+    assert "terms_accepted" in response.context["form"].errors
 
 
 @pytest.mark.django_db

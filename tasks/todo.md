@@ -160,6 +160,37 @@ Applications once available, no code change needed.
 
 **Files likely touched:** `apps/accounts/views.py`, `bancostore/urls.py`, `templates/accounts/*.html`, `tests/feature/accounts/test_customer_auth.py`
 
+**Update 2026-07-10 — real UI built from the "Bancostore" Stitch project.** The frontend slice was
+initially skipped (django-allauth's bare default templates only) — caught by the user as a broken
+vertical slice, see `feedback_vertical_slice_build_process.md`. Fixed by fetching all 6 screens
+from the user's "Bancostore" Stitch project (desktop-width, 1280px) and building real templates:
+`templates/base_auth.html` (shell only — no header/footer, those come with the landing page) plus
+`templates/account/{signup,login,password_reset,password_reset_done,password_reset_from_key,
+password_reset_from_key_done}.html`. The full Stitch design system (colors, typography, spacing,
+radii — the "Kinetic Retail Narrative" system) is now in `static/src/main.css` as a Tailwind v4
+`@theme` block, generated programmatically from the Stitch-exported config to avoid transcription
+errors. `CustomerLoginForm`, `CustomerResetPasswordForm`, and `CustomerResetPasswordKeyForm` were
+added (`apps/accounts/forms.py`) purely to attach matching Tailwind classes to allauth's built-in
+fields — no behavior change. A `terms_accepted` checkbox (required) was added to signup, matching
+the Stitch design, since consent should be enforced regardless of whether the actual Terms/Privacy
+pages exist yet.
+
+Two real bugs surfaced and got fixed during this pass, both pre-existing from Task 1, not
+introduced here: (1) `static/src/main.js` never imported `main.css`, so Tailwind was never
+actually being bundled at all until now — nothing had rendered a real page to notice; (2) Vite's
+default hashed output filenames had no way to be resolved from a Django template, so
+`vite.config.js` now emits stable filenames (`assets/main.css`/`assets/main.js`) — revisit with
+real cache-busting once there's a deploy pipeline (Task 24).
+
+Verified: full pytest suite (17 tests, including a new one proving `terms_accepted` is actually
+enforced), and a real end-to-end manual walk of all 6 pages via the dev server and curl — signup,
+login, forgot password, check-your-email, reset password (via a real emailed reset link, not a
+fabricated URL), and reset success, confirming the new password actually works afterward. Could
+not get a live browser screenshot — the Claude in Chrome extension wasn't connected this session —
+so the visual check was structural (rendered HTML, correct field IDs, correct CSS classes, correct
+compiled stylesheet) rather than a literal look at the page. Recommend an actual visual pass in a
+browser before this is considered fully signed off.
+
 **Estimated scope:** M
 
 ---
