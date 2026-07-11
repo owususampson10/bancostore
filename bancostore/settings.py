@@ -118,6 +118,11 @@ AUTHENTICATION_BACKENDS = [
 
 SITE_ID = 1
 
+# Bancostore is Ghana-only — without this, a locally-formatted number like
+# "0545488681" (no +233) fails PhoneNumberField validation outright, since it
+# has no way to know which country's numbering plan to check it against.
+PHONENUMBER_DEFAULT_REGION = "GH"
+
 # django-allauth — regular customer registration/login (see apps/accounts/forms.py for
 # the custom signup form collecting full_name/phone_number, per docs Section 4.1).
 # Distributor and admin login have their own rules, built in later tasks (5 and 6).

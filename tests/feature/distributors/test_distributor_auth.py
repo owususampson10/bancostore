@@ -56,6 +56,26 @@ def test_distributor_can_register_verify_otp_and_login(client):
 
 
 @pytest.mark.django_db
+def test_distributor_can_register_with_a_local_format_phone_number(client):
+    """Ghana numbers typed without +233 (e.g. "0545488681", as a real user
+    would type it) must still validate — PHONENUMBER_DEFAULT_REGION makes
+    this work. Regression test for a bug caught during manual testing."""
+    response = client.post(
+        reverse("distributors:register"),
+        {
+            "phone_number": "0545488681",
+            "email": "ama@example.test",
+            "password1": "S3cure-Passw0rd!",
+            "password2": "S3cure-Passw0rd!",
+            "terms_accepted": "on",
+        },
+    )
+
+    assert response.status_code == 302
+    assert Distributor.objects.filter(phone_number="+233545488681").exists()
+
+
+@pytest.mark.django_db
 def test_wrong_otp_does_not_verify_the_phone(client):
     client.post(
         reverse("distributors:register"),

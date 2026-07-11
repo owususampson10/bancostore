@@ -23,3 +23,15 @@ def _clear_fake_sms_outbox():
     fake_outbox.clear()
     yield
     fake_outbox.clear()
+
+
+@pytest.fixture(autouse=True)
+def _force_fake_sms_sender(settings):
+    """Django's test runner automatically forces EMAIL_BACKEND to locmem
+    regardless of what's in .env, so real Gmail sends never happen in tests —
+    but there's no equivalent built-in protection for our own MNOTIFY_API_KEY
+    setting. Once a real key is added to .env (Task 5's final verification
+    step), every test run started silently hitting the real mNotify API
+    instead of the fake sender. Force it empty here so tests can never spend
+    real SMS credit, no matter what's configured locally."""
+    settings.MNOTIFY_API_KEY = ""

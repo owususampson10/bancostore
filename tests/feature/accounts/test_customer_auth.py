@@ -48,6 +48,28 @@ def test_customer_can_register_logout_and_login(client):
 
 
 @pytest.mark.django_db
+def test_customer_can_register_with_a_local_format_phone_number(client):
+    """Ghana numbers typed without +233 (e.g. "0545488681", as a real user
+    would type it) must still validate — PHONENUMBER_DEFAULT_REGION makes
+    this work. Regression test for a bug caught during manual testing."""
+    response = client.post(
+        reverse("account_signup"),
+        {
+            "full_name": "Kojo Mensah",
+            "email": "kojo2@example.test",
+            "phone_number": "0545488681",
+            "password1": "S3cure-Passw0rd!",
+            "password2": "S3cure-Passw0rd!",
+            "terms_accepted": "on",
+        },
+    )
+
+    assert response.status_code == 302
+    user = User.objects.get(email="kojo2@example.test")
+    assert str(user.customer_profile.phone_number) == "+233545488681"
+
+
+@pytest.mark.django_db
 def test_customer_cannot_register_without_accepting_terms(client):
     response = client.post(
         reverse("account_signup"),
