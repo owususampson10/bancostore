@@ -99,6 +99,7 @@ INSTALLED_APPS = [
     "silk",
     # Bancostore apps
     "apps.accounts",
+    "apps.catalog",
     "apps.distributors",
     "apps.notifications",
     "apps.platform_settings",

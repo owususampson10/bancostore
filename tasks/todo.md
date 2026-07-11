@@ -414,19 +414,33 @@ since this screen has its own standalone layout with no shared header/footer, un
 variants, stock, active/hidden, featured flag). Django Admin customization for full admin CRUD.
 
 **Acceptance criteria:**
-- [ ] Admin can create/edit/delete a product with photos (Pillow resize/WebP) via Django Admin
-- [ ] Product has a PV value used only for distributor purchases
-- [ ] Out-of-stock products show correctly (behavior stubbed per settings default)
+- [x] Admin can create/edit/delete a product with photos (Pillow resize/WebP) via Django Admin
+- [x] Product has a PV value used only for distributor purchases
+- [x] Out-of-stock products show correctly (behavior stubbed per settings default)
 
 **Verification:**
-- [ ] pytest test: creating a product via Django Admin persists correctly
-- [ ] pytest test: stock decremented on sale (basic case, full order flow comes in Phase 6)
+- [x] pytest test: creating a product via Django Admin persists correctly
+- [x] pytest test: stock decremented on sale (basic case, full order flow comes in Phase 6)
 
 **Dependencies:** Task 1, Task 3
 
 **Files likely touched:** `apps/catalog/models.py`, `apps/catalog/admin.py`, `apps/catalog/migrations/*.py`
 
 **Estimated scope:** M
+
+**Done 2026-07-12.** Built `Category`, `Product`, `ProductImage`, `ProductVariant` models plus
+`apps/catalog/services.py::decrement_stock` (concurrency-safe via `select_for_update()` — two
+simultaneous purchases of the last unit can't both succeed). Photo uploads are resized (long edge
+capped at 1600px) and converted to WebP on save, verified with real image bytes via Pillow, with a
+mutation test confirming the resize/conversion logic is actually exercised (temporarily disabled
+it, confirmed the tests fail, restored it). Out-of-stock behavior is deliberately hardcoded (not a
+constance setting) — Section 13.10 "Product & Inventory Settings" is explicitly out of MVP scope
+per SPEC.md ("stubbed with sane hardcoded defaults"); almost built an unnecessary settings toggle
+here before checking the source doc and catching that. 12 new tests, all passing; full suite still
+green (61/61). Verified live in a real browser through actual Django Admin: created a category,
+created a product with a variant, confirmed list view/filters/search all work, confirmed the
+unique-slug constraint rejects an accidental double-submit correctly. No customer-facing UI — that
+starts in Task 8.
 
 ---
 

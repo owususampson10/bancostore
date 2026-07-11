@@ -49,7 +49,7 @@ admin/customer/distributor stub users exist, settings values are readable from t
 **Checkpoint B:** all three roles can register and log in end-to-end, with passing tests.
 
 ### Phase 2: Catalog & Storefront
-- [ ] Task 7: Product model + Django Admin CRUD (photos, price, PV, category, variants, stock)
+- [x] Task 7: Product model + Django Admin CRUD (photos, price, PV, category, variants, stock)
 - [ ] Task 8: Public storefront — home page, product listing/detail, search/filter/sort
 
 **Checkpoint C:** admin adds a product in Django Admin; it appears correctly on the public
