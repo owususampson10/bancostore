@@ -157,6 +157,23 @@ def test_successful_login_resets_the_failed_attempt_counter(client):
 
 
 @pytest.mark.django_db
+def test_successful_login_does_not_redirect_back_to_the_login_page(client):
+    """Regression test: a successful login used to redirect straight back to
+    distributors:login, which just re-shows the empty login form — logged in
+    but looking exactly like the login silently failed. Caught by the user
+    manually testing and reporting 'nothing happened' after logging in."""
+    _create_verified_distributor()
+
+    response = client.post(
+        reverse("distributors:login"),
+        {"phone_number": "+233551234567", "password": "Passw0rd!"},
+    )
+
+    assert response.status_code == 302
+    assert response.url != reverse("distributors:login")
+
+
+@pytest.mark.django_db
 def test_distributor_login_page_has_no_google_login_option(client):
     response = client.get(reverse("distributors:login"))
 

@@ -238,11 +238,38 @@ commissioned Stitch screens):** distributor password reset via SMS OTP
 - [x] Manual check: full register → verify → login flow walked through the real dev server (not
   just the test client) via curl, confirmed `phone_verified=True` and `failed_login_attempts=0`
   in the database afterward
-- [ ] Manual check: OTP sent through mNotify's real API (not sandbox — mNotify has no separate
-  sandbox mode) — **pending**, deferred until the user adds their real API key to `.env`, per an
-  explicit decision to build/test everything against a fake SMS sender during development (logs
-  to terminal, `apps/notifications/sms.py::fake_outbox`) and only spend real mNotify credit once,
-  at the end, rather than on every test run
+- [x] Manual check: OTP sent through mNotify's real API — **confirmed working end to end
+  2026-07-11**, including the user actually receiving a real SMS and logging in through the real
+  browser UI (driven live via the Claude in Chrome extension once connected). Getting here surfaced
+  several real, non-code issues along the way, all resolved:
+  - mNotify rejected the send with "sender id is not registered or approved" until the user got
+    "Bancostore" approved as a sender ID on their account — not a bug, an mNotify account step
+  - A follow-up diagnostic send got a 419 "fraudulent content suspected" — caused by the
+    diagnostic message's own wording (e.g. "please ignore"), not a real problem; the app's actual
+    OTP message text is normal transactional copy and wasn't affected
+  - Real-world delivery took longer than the original 5-minute OTP expiry — temporarily raised
+    `OTP_CODE_EXPIRY_MINUTES` to 15 via the live django-constance value (no code/deploy needed,
+    exactly what Task 3 built constance for) while confirming; revisit whether 15 should be the
+    permanent default given this is Ghana telecom delivery latency, not a one-off
+  - **Real bug found and fixed:** a successful distributor login redirected straight back to
+    `distributors:login` — same page, empty form, no error — which looked exactly like the login
+    had silently failed even though it had actually succeeded (session created). No dashboard
+    exists yet (that's Task 20), so there was nowhere honest to send a logged-in user. Added a
+    minimal `distributors:dashboard` placeholder view (`apps/distributors/views.py`,
+    `templates/distributors/dashboard.html`) as a real, honest landing spot, and fixed both
+    places that log a user in (registration-completion and direct login) to redirect there
+    instead. Caught by the user's own manual testing, not by the automated test suite — added a
+    regression test (`test_successful_login_does_not_redirect_back_to_the_login_page`) afterward
+  - **Test isolation bug found and fixed:** once a real `MNOTIFY_API_KEY` existed in `.env`, the
+    entire test suite started silently calling the real mNotify API on every run — Django's test
+    runner auto-forces `EMAIL_BACKEND` to locmem regardless of `.env`, but there's no equivalent
+    built-in protection for custom settings like ours. Added an autouse fixture in
+    `tests/conftest.py` forcing `MNOTIFY_API_KEY` empty for every test run, permanently
+  - **Real bug found and fixed:** `PhoneNumberField` rejected local-format Ghana numbers (e.g.
+    `0545488681`, typed without `+233`, exactly how a real user types it) because no default
+    region was configured. Added `PHONENUMBER_DEFAULT_REGION = "GH"` (Bancostore is Ghana-only),
+    fixing this for both the customer and distributor forms with one setting; added a regression
+    test for each
 
 **UI status: done (2026-07-11).** All 7 distributor screens (Register, Verify Code, Log In,
 Account Locked, Forgot Password, Set New Password, Reset Success) were designed by the user in

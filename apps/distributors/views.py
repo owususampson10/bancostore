@@ -3,6 +3,7 @@ import math
 from django.contrib.auth import get_user_model
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import Group
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -68,7 +69,7 @@ def verify_otp_view(request):
                 distributor.phone_verified = True
                 distributor.save(update_fields=["phone_verified"])
                 auth_login(request, distributor.user, backend=AUTH_BACKEND)
-                return redirect("distributors:login")
+                return redirect("distributors:dashboard")
             # password_reset: hold the verified phone number for the next
             # step, but don't log the user in yet — they haven't set a new
             # password.
@@ -112,7 +113,7 @@ def login_view(request):
             return redirect("distributors:verify_otp")
         elif result.success:
             auth_login(request, result.user, backend=AUTH_BACKEND)
-            return redirect("distributors:login")
+            return redirect("distributors:dashboard")
         else:
             form.add_error(None, "Incorrect phone number or password.")
 
@@ -158,3 +159,12 @@ def set_new_password(request):
 
 def reset_success(request):
     return render(request, "distributors/reset_success.html")
+
+
+@login_required(login_url="distributors:login")
+def dashboard(request):
+    """Placeholder landing page after a successful login/registration — the
+    real dashboard is Task 20. Exists so login has somewhere honest to send
+    a distributor, instead of back to the login page itself (which looked
+    exactly like the login had silently failed)."""
+    return render(request, "distributors/dashboard.html")
