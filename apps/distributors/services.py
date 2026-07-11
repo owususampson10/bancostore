@@ -22,7 +22,13 @@ class LoginAttempt:
 def attempt_distributor_login(phone_number: str, password: str) -> LoginAttempt:
     """Phone+password login with wrong-password lockout, using
     django-constance thresholds (MAX_FAILED_LOGIN_ATTEMPTS,
-    ACCOUNT_LOCKOUT_DURATION_MINUTES) rather than hardcoded numbers."""
+    ACCOUNT_LOCKOUT_DURATION_MINUTES) rather than hardcoded numbers.
+
+    An already-locked account only reports locked=True if the submitted
+    password is actually correct. Checking lock state before the password
+    would let anyone who knows/guesses a phone number confirm it's locked —
+    and therefore a real, currently-targeted account — without ever
+    needing to know the real password."""
     try:
         distributor = Distributor.objects.select_related("user").get(
             phone_number=phone_number
@@ -32,9 +38,11 @@ def attempt_distributor_login(phone_number: str, password: str) -> LoginAttempt:
 
     now = timezone.now()
     if distributor.locked_until and distributor.locked_until > now:
-        return LoginAttempt(
-            success=False, locked=True, locked_until=distributor.locked_until
-        )
+        if distributor.user.check_password(password):
+            return LoginAttempt(
+                success=False, locked=True, locked_until=distributor.locked_until
+            )
+        return LoginAttempt(success=False)
 
     if distributor.locked_until and distributor.locked_until <= now:
         # Lock has expired — give them a fresh set of attempts.

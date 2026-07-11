@@ -224,6 +224,28 @@ def test_admin_authentication_form_flags_a_locked_account():
 
 
 @pytest.mark.django_db
+def test_wrong_password_against_a_locked_admin_does_not_reveal_lock_state():
+    """Regression test: submitting a wrong password against an already-locked
+    admin account must not report locked=True — otherwise an attacker who
+    doesn't know the real password can still confirm the account is locked
+    just by resubmitting any wrong guess, without ever needing the correct
+    password."""
+    user = _create_admin()
+    AdminProfile.objects.create(
+        user=user,
+        failed_login_attempts=config.MAX_FAILED_LOGIN_ATTEMPTS,
+        locked_until=timezone.now() + timedelta(minutes=30),
+    )
+
+    form = AdminAuthenticationForm(
+        data={"username": "admin@example.test", "password": "SomeWrongGuess!"}
+    )
+
+    assert form.is_valid() is False
+    assert form.locked is False
+
+
+@pytest.mark.django_db
 def test_admin_authentication_form_does_not_flag_a_plain_wrong_password():
     _create_admin()
 

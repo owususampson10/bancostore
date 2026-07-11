@@ -138,6 +138,40 @@ def test_n_failed_logins_locks_the_account_for_the_configured_duration(client):
 
 
 @pytest.mark.django_db
+def test_wrong_password_against_a_locked_account_does_not_reveal_lock_state():
+    """Regression test: submitting a wrong password against an already-locked
+    account must not report locked=True — otherwise an attacker who doesn't
+    know the real password can still confirm the account is locked just by
+    resubmitting any wrong guess, without ever needing the correct password."""
+    from apps.distributors.services import attempt_distributor_login
+
+    distributor = _create_verified_distributor()
+    distributor.failed_login_attempts = config.MAX_FAILED_LOGIN_ATTEMPTS
+    distributor.locked_until = timezone.now() + timedelta(minutes=30)
+    distributor.save(update_fields=["failed_login_attempts", "locked_until"])
+
+    result = attempt_distributor_login("+233551234567", "SomeWrongGuess!")
+
+    assert result.success is False
+    assert result.locked is False
+
+
+@pytest.mark.django_db
+def test_correct_password_against_a_locked_account_still_reports_locked():
+    from apps.distributors.services import attempt_distributor_login
+
+    distributor = _create_verified_distributor()
+    distributor.failed_login_attempts = config.MAX_FAILED_LOGIN_ATTEMPTS
+    distributor.locked_until = timezone.now() + timedelta(minutes=30)
+    distributor.save(update_fields=["failed_login_attempts", "locked_until"])
+
+    result = attempt_distributor_login("+233551234567", "Passw0rd!")
+
+    assert result.success is False
+    assert result.locked is True
+
+
+@pytest.mark.django_db
 def test_successful_login_resets_the_failed_attempt_counter(client):
     distributor = _create_verified_distributor()
 

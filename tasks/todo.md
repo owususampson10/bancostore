@@ -29,11 +29,15 @@ it's unimportant:
   `apps/distributors/services.py` both do a non-atomic read-increment-save with no
   `select_for_update()`/`F()` expression, so concurrent guesses can slip past
   `MAX_FAILED_LOGIN_ATTEMPTS` before the lock engages.
-- [ ] **Admin login form leaks lock state before checking the password** —
-  `apps/accounts/forms.py::AdminAuthenticationForm.clean()` checks `AdminProfile.locked_until`
-  before calling `super().clean()` (the actual password check), so a distinct "Account temporarily
-  locked" message (and a faster response) reveals which emails are `is_staff` accounts to an
-  unauthenticated caller regardless of whether they know the password.
+- [x] ~~Admin login form leaks lock state before checking the password~~ — **Fixed 2026-07-11.**
+  Reproduced live (curl comparison of locked+wrong-password vs. locked+correct-password vs.
+  unlocked/nonexistent accounts) before fixing. Root cause existed identically in
+  `apps/distributors/services.py::attempt_distributor_login` too, so both were fixed together:
+  lock state is now only revealed after the submitted password is confirmed correct
+  (`apps/accounts/forms.py::AdminAuthenticationForm.clean()`,
+  `apps/distributors/services.py::attempt_distributor_login`). Regression tests added for both
+  (wrong-password-stays-generic, correct-password-still-shows-locked) and verified live again
+  post-fix.
 - [ ] **Several constance settings are decorative — they exist and look live in the admin panel but
   nothing reads them**: `MIN_PASSWORD_LENGTH`, `PASSWORD_COMPLEXITY_ENABLED`,
   `SESSION_TIMEOUT_MINUTES`, `ADMIN_SESSION_TIMEOUT_MINUTES`, `PASSWORD_RESET_EXPIRY_MINUTES`

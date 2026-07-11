@@ -1,4 +1,5 @@
 from django import forms
+from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
@@ -13,6 +14,8 @@ from allauth.account.forms import (
 from phonenumber_field.formfields import PhoneNumberField
 
 from .models import AdminProfile, CustomerProfile
+
+User = get_user_model()
 
 # Shared Tailwind classes matching the Bancostore Stitch design system
 # (see static/src/main.css @theme and templates/account/*.html).
@@ -111,7 +114,13 @@ class AdminAuthenticationForm(AuthenticationForm):
     authenticate() swallows the PermissionDenied that apps.accounts.backends.
     EmailBackend raises and just returns None either way. This form looks up
     the lockout state directly so the login template can render the
-    dedicated Account Locked screen instead of a generic error."""
+    dedicated Account Locked screen instead of a generic error.
+
+    The lock check only runs after confirming the submitted password is
+    actually correct. Checking lock state first (regardless of password)
+    would let anyone who knows/guesses a staff email confirm it's locked —
+    and therefore that it's a real, currently-targeted admin account —
+    without ever needing to know the real password."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -126,12 +135,13 @@ class AdminAuthenticationForm(AuthenticationForm):
 
     def clean(self):
         email = self.cleaned_data.get("username")
-        if email:
-            self.locked = AdminProfile.objects.filter(
-                user__email__iexact=email,
-                user__is_staff=True,
-                locked_until__gt=timezone.now(),
-            ).exists()
-            if self.locked:
-                raise ValidationError("Account temporarily locked.")
+        password = self.cleaned_data.get("password")
+        if email and password:
+            user = User.objects.filter(email__iexact=email, is_staff=True).first()
+            if user and user.check_password(password):
+                self.locked = AdminProfile.objects.filter(
+                    user=user, locked_until__gt=timezone.now()
+                ).exists()
+                if self.locked:
+                    raise ValidationError("Account temporarily locked.")
         return super().clean()
