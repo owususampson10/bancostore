@@ -24,8 +24,10 @@ AUTHENTICATION_SETTINGS = {
         "Whether distributors log in with a phone number or email",
     ),
     "OTP_CODE_EXPIRY_MINUTES": (
-        5,
-        "Minutes before a one-time SMS code expires",
+        15,
+        "Minutes before a one-time SMS code expires — raised from the original "
+        "spec value of 5 after real mNotify delivery testing (Task 5) showed "
+        "5 minutes often wasn't enough",
     ),
     "OTP_MAX_ATTEMPTS": (
         3,
