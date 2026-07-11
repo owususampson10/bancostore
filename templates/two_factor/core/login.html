@@ -1,0 +1,125 @@
+{% extends "base_admin_auth.html" %}
+{% block title %}Bancostore Admin Portal - Login{% endblock %}
+{% block content %}
+{% if wizard.steps.current == 'auth' and wizard.form.locked %}
+{# ===== Account Locked (matches the "Account Locked - Bancostore Admin" Stitch screen) ===== #}
+<div class="w-full max-w-lg bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="h-48 relative overflow-hidden bg-admin-primary/90 flex items-center justify-center">
+<div class="relative z-10 bg-white/10 backdrop-blur-md p-6 rounded-full border border-white/20">
+<span class="material-symbols-outlined text-white text-[64px]" style="font-variation-settings: 'FILL' 1;">lock_person</span>
+</div>
+</div>
+<div class="p-stack-xl text-center space-y-stack-lg">
+<div class="space-y-stack-xs">
+<h1 class="font-headline-lg text-headline-lg text-on-surface">Security Alert</h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant max-w-md mx-auto">This administrative account is temporarily locked due to too many failed login attempts.</p>
+</div>
+<div class="bg-surface-container-low p-stack-md rounded-lg border-l-4 border-admin-primary text-left flex gap-stack-md items-start">
+<span class="material-symbols-outlined text-admin-primary mt-0.5">mail</span>
+<div>
+<p class="font-label-lg text-label-lg text-on-surface">Verification Pending</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">A security alert email has been sent to your registered address with instructions to unlock your access.</p>
+</div>
+</div>
+<div class="pt-stack-md flex justify-center gap-stack-lg opacity-50 grayscale">
+<div class="flex flex-col items-center gap-1">
+<span class="material-symbols-outlined text-label-md">shield</span>
+<span class="font-label-md text-label-md">ENCRYPTED</span>
+</div>
+<div class="flex flex-col items-center gap-1">
+<span class="material-symbols-outlined text-label-md">history</span>
+<span class="font-label-md text-label-md">IP LOGGED</span>
+</div>
+<div class="flex flex-col items-center gap-1">
+<span class="material-symbols-outlined text-label-md">policy</span>
+<span class="font-label-md text-label-md">VERIFIED</span>
+</div>
+</div>
+</div>
+<div class="bg-surface-container-highest px-stack-xl py-stack-md flex justify-center border-t border-outline-variant">
+<span class="font-label-md text-label-md text-on-surface-variant flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-admin-error animate-pulse"></span>
+Account Access Restricted
+</span>
+</div>
+</div>
+{% elif wizard.steps.current == 'auth' %}
+{# ===== Admin Login (matches the "Admin Login - Bancostore" Stitch screen) ===== #}
+<div class="w-full max-w-md">
+<div class="bg-surface-container-lowest rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.05)] p-stack-xl border border-outline-variant">
+<div class="text-center mb-stack-xl">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-xs">Admin Portal</h1>
+<p class="font-body-md text-body-md text-on-surface-variant">Internal access only. Authenticate to proceed.</p>
+</div>
+<form class="space-y-stack-lg" method="post" action="">
+{% csrf_token %}
+{{ wizard.management_form }}
+{% if wizard.form.non_field_errors %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">{{ wizard.form.non_field_errors.0 }}</div>
+{% endif %}
+<div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface-variant block" for="{{ wizard.form.username.id_for_label }}">Email Address</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60">mail</span>
+{{ wizard.form.username }}
+</div>
+{% if wizard.form.username.errors %}<p class="text-admin-error text-body-sm mt-1">{{ wizard.form.username.errors.0 }}</p>{% endif %}
+</div>
+<div class="space-y-stack-xs">
+<div class="flex justify-between items-center">
+<label class="font-label-lg text-label-lg text-on-surface-variant" for="{{ wizard.form.password.id_for_label }}">Password</label>
+<a class="font-label-md text-label-md text-admin-primary hover:underline" href="#">Forgot password?</a>
+</div>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60">lock</span>
+{{ wizard.form.password }}
+</div>
+{% if wizard.form.password.errors %}<p class="text-admin-error text-body-sm mt-1">{{ wizard.form.password.errors.0 }}</p>{% endif %}
+</div>
+<button class="w-full bg-admin-primary text-white py-4 px-6 rounded-lg font-label-lg text-label-lg font-bold shadow-lg hover:opacity-90 active:scale-[0.98] transition-all duration-150 mt-stack-md flex items-center justify-center gap-2" type="submit">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">login</span>
+Log In
+</button>
+</form>
+<div class="mt-stack-xl pt-stack-lg border-t border-outline-variant text-center">
+<p class="font-body-sm text-body-sm text-on-surface-variant flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">verified_user</span>
+Secure Encrypted Session
+</p>
+</div>
+</div>
+<div class="mt-stack-lg text-center">
+<p class="font-label-md text-label-md text-on-surface-variant/60">Accessing this system signifies agreement to Bancostore's security policies. Unauthorised access attempts are strictly monitored and logged.</p>
+</div>
+</div>
+{% else %}
+{# ===== Token / backup steps: no Stitch screen for these yet (the screen ===== #}
+{# meant for this — "Two-Factor Verification - Bancostore Admin" — was     #}
+{# generated with the wrong content; see tasks/todo.md Task 6). Minimal    #}
+{# placeholder using the same admin shell until that screen is fixed.     #}
+<div class="w-full max-w-md">
+<div class="bg-surface-container-lowest rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.05)] p-stack-xl border border-outline-variant">
+<div class="text-center mb-stack-xl">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-xs">Verify It's You</h1>
+{% if wizard.steps.current == 'token' %}
+<p class="font-body-md text-body-md text-on-surface-variant">Enter the code from your authenticator app.</p>
+{% else %}
+<p class="font-body-md text-body-md text-on-surface-variant">Enter one of your backup tokens.</p>
+{% endif %}
+</div>
+<form class="space-y-stack-lg" method="post" action="">
+{% csrf_token %}
+{{ wizard.management_form }}
+{% if wizard.form.non_field_errors %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">{{ wizard.form.non_field_errors.0 }}</div>
+{% endif %}
+<div class="space-y-stack-xs">
+{{ wizard.form.as_p }}
+</div>
+<input type="submit" value="" hidden>
+{% include "two_factor/_wizard_actions.html" %}
+</form>
+</div>
+</div>
+{% endif %}
+{% endblock %}

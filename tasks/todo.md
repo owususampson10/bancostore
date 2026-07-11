@@ -330,10 +330,14 @@ Failed attempts trigger lockout + alert email.
   TOTP setup wizard (QR/secret + token), and lands on the real Django Admin panel — full mandatory
   2FA flow confirmed end-to-end live, not just via pytest
 
-**Backend status: done.** UI is still django-two-factor-auth's stock/default templates (with the
-"Provide a template named two_factor/_base.html..." placeholder banner) — real Stitch-designed
-admin/2FA screens are a separate follow-up pass once those 6 screens are designed, same two-pass
-pattern used for Tasks 4 and 5.
+**Backend status: done.** UI status: 5 of 6 real Stitch screens built and wired in
+(Admin Login, 2FA Setup intro, Scan QR Code, Setup Complete, Account Locked) — verified live in a
+real browser, matching their Stitch designs exactly. The 6th screen ("Two-Factor Verification -
+Bancostore Admin", meant for the returning-login code-entry step) was generated in Stitch with the
+wrong content (a "check your email" password-reset screen instead of a code entry form) — flagged
+to the user, who will fix it in Stitch. That one step still uses a minimal unstyled placeholder
+(templates/two_factor/core/login.html, 'token'/'backup' branches) until the corrected screen
+arrives.
 
 **Dependencies:** Task 2, Task 3
 

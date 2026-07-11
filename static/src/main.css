@@ -56,6 +56,13 @@
   --color-inverse-on-surface: #f1f1f1;
   --color-on-primary-container: #fffbff;
 
+  /* Admin Portal accent — the admin/2FA Stitch screens share every other
+     token above but use a darker maroon primary and darker red error than
+     the rest of the site (deliberate visual distinction for internal/admin
+     tooling). */
+  --color-admin-primary: #a63500;
+  --color-admin-error: #ba1a1a;
+
   /* Border radius */
   --radius: 0.125rem;
   --radius-lg: 0.25rem;
@@ -143,4 +150,9 @@
 .auth-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+}
+
+/* Admin portal background glow (matches the admin/2FA Stitch screens) */
+.admin-glow-bg {
+  background: radial-gradient(circle at 50% 50%, rgba(247, 86, 9, 0.03) 0%, rgba(249, 249, 249, 0) 70%);
 }

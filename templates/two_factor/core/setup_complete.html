@@ -1,0 +1,29 @@
+{% extends "base_admin_auth.html" %}
+{% block title %}2FA Setup Complete | Bancostore Admin{% endblock %}
+{% block content %}
+<div class="max-w-md w-full bg-surface-container-lowest rounded-xl shadow-lg p-stack-xl text-center border border-outline-variant">
+<div class="relative inline-block mb-stack-lg">
+<div class="relative w-24 h-24 bg-admin-primary/10 rounded-full flex items-center justify-center text-admin-primary">
+<span class="material-symbols-outlined text-[48px]" style="font-variation-settings: 'FILL' 1;">verified_user</span>
+</div>
+</div>
+<h1 class="font-headline-lg text-headline-lg mb-stack-sm text-admin-primary">Setup Complete</h1>
+<p class="font-body-md text-on-surface-variant mb-stack-xl">Two-factor authentication is now active. Your account is secured with an additional layer of protection against unauthorized access.</p>
+<div class="grid grid-cols-2 gap-stack-sm mb-stack-xl text-left">
+<div class="bg-surface-container p-stack-md rounded-lg flex flex-col gap-1">
+<span class="material-symbols-outlined text-secondary text-[20px]">check_circle</span>
+<span class="font-label-md text-on-surface-variant">Auth Method</span>
+<span class="font-label-lg text-on-surface">Authenticator App</span>
+</div>
+<div class="bg-surface-container p-stack-md rounded-lg flex flex-col gap-1">
+<span class="material-symbols-outlined text-secondary text-[20px]">schedule</span>
+<span class="font-label-md text-on-surface-variant">Last Verified</span>
+<span class="font-label-lg text-on-surface">Just now</span>
+</div>
+</div>
+<a href="{% url 'admin:index' %}" class="w-full bg-admin-primary text-white font-label-lg py-stack-md rounded-lg hover:opacity-90 transition-colors shadow-md active:scale-95 duration-150 flex items-center justify-center gap-2">
+Continue to Admin Panel
+<span class="material-symbols-outlined">arrow_forward</span>
+</a>
+</div>
+{% endblock %}

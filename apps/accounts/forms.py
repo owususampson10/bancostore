@@ -1,5 +1,8 @@
 from django import forms
+from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import Group
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from allauth.account.forms import (
     LoginForm,
@@ -9,7 +12,7 @@ from allauth.account.forms import (
 )
 from phonenumber_field.formfields import PhoneNumberField
 
-from .models import CustomerProfile
+from .models import AdminProfile, CustomerProfile
 
 # Shared Tailwind classes matching the Bancostore Stitch design system
 # (see static/src/main.css @theme and templates/account/*.html).
@@ -91,3 +94,44 @@ class CustomerResetPasswordKeyForm(ResetPasswordKeyForm):
         super().__init__(*args, **kwargs)
         self.fields["password1"].widget.attrs["class"] = INPUT_CLASSES
         self.fields["password2"].widget.attrs["class"] = INPUT_CLASSES
+
+
+# Matches the admin/2FA Stitch screens' input styling (templates/base_admin_auth.html).
+ADMIN_INPUT_CLASSES = (
+    "w-full pl-10 pr-4 py-3 bg-surface rounded-lg border border-outline-variant "
+    "focus:border-secondary focus:ring-1 focus:ring-secondary transition-all "
+    "outline-none font-body-md"
+)
+
+
+class AdminAuthenticationForm(AuthenticationForm):
+    """The 'auth' step form for two_factor's login wizard (see
+    apps.accounts.views.AdminLoginView). Django's stock AuthenticationForm
+    can't tell a locked-out account apart from a plain wrong password —
+    authenticate() swallows the PermissionDenied that apps.accounts.backends.
+    EmailBackend raises and just returns None either way. This form looks up
+    the lockout state directly so the login template can render the
+    dedicated Account Locked screen instead of a generic error."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.locked = False
+        self.fields["username"].label = "Email Address"
+        self.fields["username"].widget.attrs.update(
+            {"class": ADMIN_INPUT_CLASSES, "placeholder": "name@bancostore.internal"}
+        )
+        self.fields["password"].widget.attrs.update(
+            {"class": ADMIN_INPUT_CLASSES, "placeholder": "••••••••"}
+        )
+
+    def clean(self):
+        email = self.cleaned_data.get("username")
+        if email:
+            self.locked = AdminProfile.objects.filter(
+                user__email__iexact=email,
+                user__is_staff=True,
+                locked_until__gt=timezone.now(),
+            ).exists()
+            if self.locked:
+                raise ValidationError("Account temporarily locked.")
+        return super().clean()

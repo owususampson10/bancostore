@@ -1,0 +1,36 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Bancostore Admin{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'assets/main.css' %}">
+</head>
+<body class="bg-background text-on-surface font-body-md min-h-screen flex flex-col admin-glow-bg">
+<header class="bg-surface border-b border-outline-variant h-16 flex items-center px-margin-desktop">
+<div class="flex justify-between items-center w-full max-w-container-max mx-auto">
+<span class="font-headline-md text-headline-md font-bold text-admin-primary">Bancostore Admin</span>
+<div class="flex items-center gap-stack-md text-on-surface-variant">
+<span class="material-symbols-outlined p-2 rounded-full">security</span>
+<span class="material-symbols-outlined p-2 rounded-full">help_outline</span>
+</div>
+</div>
+</header>
+<main class="flex-grow flex items-center justify-center px-margin-mobile py-stack-xl">
+{% block content %}{% endblock %}
+</main>
+<footer class="bg-surface-container-lowest border-t border-outline-variant py-stack-md">
+<div class="flex flex-col md:flex-row justify-between items-center px-margin-desktop w-full max-w-container-max mx-auto gap-stack-sm">
+<span class="font-label-lg text-label-lg font-semibold text-on-surface">© 2024 Bancostore Internal Systems. All rights reserved.</span>
+<div class="flex gap-stack-lg">
+<a class="font-label-md text-label-md text-secondary hover:text-admin-primary transition-colors underline-offset-4 hover:underline" href="#">Privacy Policy</a>
+<a class="font-label-md text-label-md text-secondary hover:text-admin-primary transition-colors underline-offset-4 hover:underline" href="#">Security Standards</a>
+<a class="font-label-md text-label-md text-secondary hover:text-admin-primary transition-colors underline-offset-4 hover:underline" href="#">Support</a>
+</div>
+</div>
+</footer>
+</body>
+</html>

@@ -9,6 +9,7 @@ from constance import config
 from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
+from apps.accounts.forms import AdminAuthenticationForm
 from apps.accounts.models import AdminProfile
 
 User = get_user_model()
@@ -169,3 +170,48 @@ def test_completing_login_clears_a_previously_expired_lock(client):
     profile = AdminProfile.objects.get(user=user)
     assert profile.locked_until is None
     assert profile.failed_login_attempts == 0
+
+
+@pytest.mark.django_db
+def test_admin_authentication_form_flags_a_locked_account():
+    """AdminAuthenticationForm.locked lets the login template distinguish a
+    locked account from a plain wrong password (see
+    templates/two_factor/core/login.html), since Django's authenticate()
+    swallows the PermissionDenied that EmailBackend raises either way."""
+    user = _create_admin()
+    AdminProfile.objects.create(
+        user=user,
+        failed_login_attempts=config.MAX_FAILED_LOGIN_ATTEMPTS,
+        locked_until=timezone.now() + timedelta(minutes=30),
+    )
+
+    form = AdminAuthenticationForm(
+        data={"username": "admin@example.test", "password": "AdminPassw0rd!"}
+    )
+
+    assert form.is_valid() is False
+    assert form.locked is True
+
+
+@pytest.mark.django_db
+def test_admin_authentication_form_does_not_flag_a_plain_wrong_password():
+    _create_admin()
+
+    form = AdminAuthenticationForm(
+        data={"username": "admin@example.test", "password": "WrongPassword!"}
+    )
+
+    assert form.is_valid() is False
+    assert form.locked is False
+
+
+@pytest.mark.django_db
+def test_admin_authentication_form_succeeds_for_a_correct_unlocked_login():
+    _create_admin()
+
+    form = AdminAuthenticationForm(
+        data={"username": "admin@example.test", "password": "AdminPassw0rd!"}
+    )
+
+    assert form.is_valid() is True
+    assert form.locked is False
