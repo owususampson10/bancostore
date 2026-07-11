@@ -34,3 +34,10 @@ class ProductAdmin(admin.ModelAdmin):
     search_fields = ["name", "description"]
     prepopulated_fields = {"slug": ("name",)}
     inlines = [ProductImageInline, ProductVariantInline]
+    # Not required — Django's ChangeList already auto-applies select_related()
+    # when a relation field appears in list_display and list_select_related
+    # is left at its False default (see apply_select_related() /
+    # has_related_field_in_list_display() in django.contrib.admin.views.main).
+    # Kept explicit anyway so the query behavior doesn't depend on a reader
+    # knowing that fallback exists.
+    list_select_related = ["category"]

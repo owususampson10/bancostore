@@ -90,3 +90,40 @@ def test_product_can_have_multiple_variants():
 
     assert product.variants.count() == 2
     assert {v.value for v in product.variants.all()} == {"Silver", "Gold"}
+
+
+@pytest.mark.django_db
+def test_product_changelist_does_not_n_plus_one_on_category(staff_client):
+    """ProductAdmin.list_display includes "category" — without
+    list_select_related, the changelist issues one extra query per row to
+    resolve str(product.category). Compares query count at two product
+    counts rather than asserting an absolute number, since silk's
+    middleware (active locally under DEBUG=True) adds its own DB writes on
+    every request and would make a fixed threshold flaky."""
+    from django.db import connection, reset_queries
+    from django.test.utils import CaptureQueriesContext
+
+    category = Category.objects.create(name="Watches", slug="watches")
+    url = reverse("admin:catalog_product_changelist")
+
+    Product.objects.create(
+        name="Watch 1", category=category, price=Decimal("1500.00"), stock=1
+    )
+    reset_queries()
+    with CaptureQueriesContext(connection) as one_product:
+        response = staff_client.get(url)
+    assert response.status_code == 200
+
+    for i in range(2, 7):
+        Product.objects.create(
+            name=f"Watch {i}", category=category, price=Decimal("1500.00"), stock=1
+        )
+    reset_queries()
+    with CaptureQueriesContext(connection) as six_products:
+        response = staff_client.get(url)
+    assert response.status_code == 200
+
+    # Adding 5 more products must not add ~5 more queries (the N+1
+    # signature) — it should add none, since select_related fetches every
+    # product's category in the same query as the product itself.
+    assert len(six_products) == len(one_product)

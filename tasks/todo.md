@@ -436,11 +436,27 @@ mutation test confirming the resize/conversion logic is actually exercised (temp
 it, confirmed the tests fail, restored it). Out-of-stock behavior is deliberately hardcoded (not a
 constance setting) — Section 13.10 "Product & Inventory Settings" is explicitly out of MVP scope
 per SPEC.md ("stubbed with sane hardcoded defaults"); almost built an unnecessary settings toggle
-here before checking the source doc and catching that. 12 new tests, all passing; full suite still
-green (61/61). Verified live in a real browser through actual Django Admin: created a category,
-created a product with a variant, confirmed list view/filters/search all work, confirmed the
-unique-slug constraint rejects an accidental double-submit correctly. No customer-facing UI — that
-starts in Task 8.
+here before checking the source doc and catching that. Verified live in a real browser through
+actual Django Admin: created a category, created a product with a variant, confirmed
+list view/filters/search all work, confirmed the unique-slug constraint rejects an accidental
+double-submit correctly. No customer-facing UI — that starts in Task 8.
+
+**Post-build review (agent-skills:code-review-and-quality) found two Required issues, both fixed
+same day:**
+- A claimed N+1 query on `ProductAdmin`'s changelist turned out to be a false positive — Django's
+  own `ChangeList.apply_select_related()` already auto-applies `select_related()` when a relation
+  field appears in `list_display`, verified by reading `django/contrib/admin/views/main.py`
+  directly and confirming empirically (captured real queries at 1 vs. 6 products, identical count
+  either way). Kept `list_select_related = ["category"]` anyway as self-documenting, but the
+  original "Required" framing was wrong — should have verified before reporting it.
+- `decrement_stock`'s `select_for_update()` was correct in design but never verified under real
+  concurrency. A genuine multi-threaded test (`test_concurrent_decrements_never_oversell_the_last_
+  unit`) reproduced an actual crash: `OperationalError: database table is locked` on SQLite
+  instead of the intended `InsufficientStockError` — not a theoretical gap, a real one. Fixed with
+  bounded retry-on-lock-contention (10 attempts, short backoff) in `decrement_stock`. First retry
+  attempt still failed because the SQLite error message is "database table is locked", not
+  "database is locked" as guessed — caught by actually running the test rather than trusting the
+  fix on read-through. Stable across 5 repeated runs after the fix. Full suite: 63/63.
 
 ---
 
