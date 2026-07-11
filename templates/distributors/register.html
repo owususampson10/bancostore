@@ -1,0 +1,15 @@
+{# TEMPORARY placeholder — no design, replaced wholesale once the Stitch #}
+{# distributor screens are ready. Do not style this file; build the real #}
+{# templates/distributors/*.html from Stitch instead. #}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Distributor Register</title></head>
+<body>
+<h1>Register as a Distributor</h1>
+<form method="post">
+{% csrf_token %}
+{{ form.as_p }}
+<button type="submit">Register</button>
+</form>
+</body>
+</html>

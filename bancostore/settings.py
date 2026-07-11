@@ -85,6 +85,7 @@ INSTALLED_APPS = [
     # Bancostore apps
     "apps.accounts",
     "apps.distributors",
+    "apps.notifications",
     "apps.platform_settings",
 ]
 
@@ -112,6 +113,7 @@ if DEBUG:
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
+    "apps.distributors.backends.PhoneNumberBackend",
 ]
 
 SITE_ID = 1
@@ -257,6 +259,13 @@ else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@bancostore.test")
+
+
+# mNotify — SMS OTP for distributor registration/login/password reset (Task 5).
+# Falls back to a fake sender (apps/notifications/sms.py) when no API key is set in
+# .env, so local dev/tests never spend real mNotify credit.
+MNOTIFY_API_KEY = os.environ.get("MNOTIFY_API_KEY", "")
+MNOTIFY_SENDER_ID = os.environ.get("MNOTIFY_SENDER_ID", "Bancostore")
 
 
 # Internationalization

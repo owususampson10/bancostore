@@ -1,0 +1,16 @@
+{# TEMPORARY placeholder — no design, replaced wholesale once the Stitch #}
+{# distributor screens are ready. #}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Verify Code</title></head>
+<body>
+<h1>Verify Code</h1>
+<p>We sent a code to {{ phone_number }}.</p>
+<form method="post">
+{% csrf_token %}
+{{ form.as_p }}
+<button type="submit">Verify</button>
+</form>
+<a href="{% url 'distributors:resend_otp' %}">Resend code</a>
+</body>
+</html>

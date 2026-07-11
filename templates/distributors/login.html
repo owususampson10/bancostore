@@ -1,0 +1,16 @@
+{# TEMPORARY placeholder — no design, replaced wholesale once the Stitch #}
+{# distributor screens are ready. #}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Distributor Log In</title></head>
+<body>
+<h1>Log In</h1>
+<form method="post">
+{% csrf_token %}
+{{ form.as_p }}
+<button type="submit">Log In</button>
+</form>
+<a href="{% url 'distributors:forgot_password' %}">Forgot password?</a>
+<a href="{% url 'distributors:register' %}">Register</a>
+</body>
+</html>

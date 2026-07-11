@@ -11,6 +11,7 @@ from two_factor.urls import urlpatterns as two_factor_urls
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
+    path("distributors/", include("apps.distributors.urls")),
     path("", include(two_factor_urls)),
     path("silk/", include("silk.urls", namespace="silk")),
 ]

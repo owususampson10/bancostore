@@ -47,6 +47,8 @@ class Command(BaseCommand):
             user.groups.add(group)
 
             if role == "distributor":
-                Distributor.objects.get_or_create(user=user)
+                Distributor.objects.get_or_create(
+                    user=user, defaults={"phone_number": "+233200000000"}
+                )
 
         self.stdout.write(self.style.SUCCESS("Seeded roles and stub users."))

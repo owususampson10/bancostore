@@ -2,6 +2,8 @@ from django.core.cache import cache
 
 import pytest
 
+from apps.notifications.sms import fake_outbox
+
 
 @pytest.fixture(autouse=True)
 def _clear_django_cache():
@@ -11,3 +13,13 @@ def _clear_django_cache():
     cache.clear()
     yield
     cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_fake_sms_outbox():
+    """fake_outbox is a plain module-level list (mirrors django.core.mail.outbox),
+    so nothing resets it between tests automatically — same class of leak as the
+    Redis-backed constance cache above."""
+    fake_outbox.clear()
+    yield
+    fake_outbox.clear()

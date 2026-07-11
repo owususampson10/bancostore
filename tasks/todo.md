@@ -215,14 +215,44 @@ password reset, account lockout after N failed attempts (from settings).
 in the docs — see `SPEC.md` Open Question #2). User has an API key.
 
 **Acceptance criteria:**
-- [ ] Distributor registers with phone + password; phone verified via OTP
-- [ ] Login uses phone + password only (no Google login)
-- [ ] Wrong-password lockout uses `django-constance` values, not hardcoded numbers
+- [x] Distributor registers with phone + password; phone verified via OTP
+  (`apps/distributors/views.py`, `apps/notifications/otp.py`)
+- [x] Login uses phone + password only (no Google login) — custom `PhoneNumberBackend`
+  (`apps/distributors/backends.py`), no allauth/social auth involved at all for distributors
+- [x] Wrong-password lockout uses `django-constance` values
+  (`MAX_FAILED_LOGIN_ATTEMPTS`, `ACCOUNT_LOCKOUT_DURATION_MINUTES`, seeded in Task 3), not
+  hardcoded numbers — `apps/distributors/services.py::attempt_distributor_login`
+
+**Also built (beyond the 3 literal criteria above, to match the Description and the already-
+commissioned Stitch screens):** distributor password reset via SMS OTP
+(`forgot_password`/`set_new_password` views), reusing the same OTP infrastructure.
 
 **Verification:**
-- [ ] pytest feature test: registration + OTP verification + login
-- [ ] pytest feature test: N failed logins locks the account for the configured duration
-- [ ] Manual check: OTP is sent through mNotify's sandbox/test mode
+- [x] pytest feature test: registration + OTP verification + login
+  (`tests/feature/distributors/test_distributor_auth.py::test_distributor_can_register_verify_otp_and_login`)
+- [x] pytest feature test: N failed logins locks the account for the configured duration
+  (`test_n_failed_logins_locks_the_account_for_the_configured_duration` — also verified the lock
+  clears once the window passes, and that a successful login resets the counter). Deliberately
+  broke the lockout condition and re-ran this test to confirm it actually fails when the logic is
+  wrong, not just passing vacuously.
+- [x] Manual check: full register → verify → login flow walked through the real dev server (not
+  just the test client) via curl, confirmed `phone_verified=True` and `failed_login_attempts=0`
+  in the database afterward
+- [ ] Manual check: OTP sent through mNotify's real API (not sandbox — mNotify has no separate
+  sandbox mode) — **pending**, deferred until the user adds their real API key to `.env`, per an
+  explicit decision to build/test everything against a fake SMS sender during development (logs
+  to terminal, `apps/notifications/sms.py::fake_outbox`) and only spend real mNotify credit once,
+  at the end, rather than on every test run
+
+**UI status:** no Stitch design exists yet for distributor screens (checked
+`mcp__stitch__list_projects` — only the customer auth screens from Task 4 exist in the
+"Bancostore" project). User is designing them in parallel; a prompt was given for register, OTP
+verification, login, account-locked, forgot-password, set-new-password, and reset-success screens.
+Backend was built and tested against **temporary, deliberately unstyled placeholder templates**
+(`templates/distributors/*.html` — plain `{{ form.as_p }}`, no Tailwind, no design effort) purely
+so the feature tests could exercise real HTTP views end-to-end. These get replaced wholesale once
+the real Stitch screens are fetched, same as Task 4's allauth-default-templates gap — flagging
+this explicitly this time rather than letting it be a silent, discovered-later gap.
 
 **Dependencies:** Task 2, Task 3, SMS provider decision (resolved)
 
