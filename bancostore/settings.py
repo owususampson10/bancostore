@@ -246,6 +246,13 @@ if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
     EMAIL_HOST = "smtp.gmail.com"
     EMAIL_PORT = 587
     EMAIL_USE_TLS = True
+    # This Mac's python.org-installed Python doesn't pick up the system CA trust
+    # store, so STARTTLS to Gmail fails with CERTIFICATE_VERIFY_FAILED without
+    # this. certifi is already installed (a transitive dep of `requests`), so
+    # this needs no new package — just point Python's default SSL context at it.
+    import certifi
+
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 

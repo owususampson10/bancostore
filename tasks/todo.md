@@ -191,6 +191,17 @@ so the visual check was structural (rendered HTML, correct field IDs, correct CS
 compiled stylesheet) rather than a literal look at the page. Recommend an actual visual pass in a
 browser before this is considered fully signed off.
 
+**Update 2026-07-11 — visual check done in browser, and real Gmail SMTP verified.** The user
+opened all 6 pages directly in their own browser and confirmed they look correct — closes the gap
+noted above. Separately, the user set up a real Gmail account + app password for password-reset
+email and added it to `.env` (not committed, per `.gitignore`). First real send attempt failed
+with `ssl.SSLCertVerificationError: CERTIFICATE_VERIFY_FAILED` — this Mac's python.org-installed
+Python doesn't pick up the system CA trust store, so STARTTLS to Gmail fails without an explicit
+cert bundle. Fixed in `bancostore/settings.py` by pointing `SSL_CERT_FILE` at `certifi`'s bundle
+(already installed as a transitive dependency of `requests`, no new package needed) whenever the
+SMTP backend is active. Retried and got a clean 302 with no server error — a real password-reset
+email sent successfully through Gmail SMTP.
+
 **Estimated scope:** M
 
 ---
