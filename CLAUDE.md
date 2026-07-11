@@ -101,6 +101,35 @@ Directory layout, full settings categories, and the complete MVP feature scope (
 explicitly deferred to a Phase 2 spec) are documented in `SPEC.md` — refer there rather than
 duplicating it here.
 
+## Agent Skills Workflow
+
+Every task in this repo goes through the `agent-skills` plugin — the matching skill invoked fresh
+at the point it applies, every time, not once per session. Skill guidance loaded earlier fades
+(especially after context compaction), so "I already called this once" is never a reason to skip
+re-invoking it.
+
+- **Before a build**: if the task isn't already scoped, `planning-and-task-breakdown` (or
+  `spec-driven-development` if requirements are unclear). For unfamiliar or high-stakes changes
+  (auth, money, migrations, irreversible operations), `doubt-driven-development`.
+- **During a build**: `incremental-implementation` (small slices) + `test-driven-development`
+  (test before/with the code), always. Add `frontend-ui-engineering` for UI work,
+  `security-and-hardening` for anything touching auth/input/external integrations,
+  `source-driven-development` when correctness depends on a framework's documented behavior.
+- **After every build, no matter how small**: `debugging-and-error-recovery` if anything breaks
+  (root-cause it, don't guess), `code-review-and-quality` before calling the change done, and
+  `code-simplification` if the result is more complex than it needs to be. Run the full test
+  suite, not just the new tests, before moving to the next task.
+
+Draw from the full 24-skill catalog as the activity actually calls for it — not a default few,
+and not all 24 on every task: `api-and-interface-design`, `browser-testing-with-devtools`,
+`ci-cd-and-automation`, `code-review-and-quality`, `code-simplification`, `context-engineering`,
+`debugging-and-error-recovery`, `deprecation-and-migration`, `documentation-and-adrs`,
+`doubt-driven-development`, `frontend-ui-engineering`, `git-workflow-and-versioning`,
+`idea-refine`, `incremental-implementation`, `interview-me`, `observability-and-instrumentation`,
+`performance-optimization`, `planning-and-task-breakdown`, `security-and-hardening`,
+`shipping-and-launch`, `source-driven-development`, `spec-driven-development`,
+`test-driven-development`, `using-agent-skills`.
+
 ## Testing
 
 pytest + pytest-django. `apps/commissions/services.py`, `apps/wallet/services.py`, and
