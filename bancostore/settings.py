@@ -7,6 +7,8 @@ See SPEC.md Tech Stack / Architecture for the rationale behind each piece wired 
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 import dj_database_url
 
 # These become Django settings by being module-level names here, not by being
@@ -35,10 +37,23 @@ _load_dotenv(BASE_DIR / ".env")
 
 
 # Security
+#
+# Both of these fail CLOSED rather than open: if .env is missing, misnamed,
+# or not loaded for any reason on a real host, the app must not silently
+# fall back to DEBUG=True (exposes full tracebacks/settings to visitors) or
+# a publicly-known SECRET_KEY (lets an attacker forge sessions, password
+# reset tokens, and CSRF tokens). Local dev always has .env with both set
+# explicitly, so this doesn't change anything for local dev.
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-local-dev-only")
 
-DEBUG = os.environ.get("DEBUG", "True") == "True"
+DEBUG = os.environ.get("DEBUG", "False") == "True"
+
+if not DEBUG and SECRET_KEY == "django-insecure-local-dev-only":
+    raise ImproperlyConfigured(
+        "SECRET_KEY is not set. Refusing to run with the insecure default "
+        "outside DEBUG — set SECRET_KEY in the environment."
+    )
 
 ALLOWED_HOSTS = [
     host.strip()
@@ -114,14 +129,36 @@ if DEBUG:
     # constance's bulk config lookup) — pure dev-tooling issue, so just skip the
     # pretty-printing step instead of pinning an older sqlparse.
     DEBUG_TOOLBAR_CONFIG = {"PRETTIFY_SQL": False}
+    # silk defaults to open access (SILKY_AUTHENTICATION/SILKY_AUTHORISATION
+    # are both False out of the box) and records full request bodies —
+    # including plaintext passwords and OTP codes typed into login forms —
+    # with no size cap. Its URL is only ever registered inside DEBUG (see
+    # bancostore/urls.py), but require a logged-in superuser too, as
+    # defense in depth in case DEBUG is ever left on somewhere it shouldn't be.
+    SILKY_AUTHENTICATION = True
+    SILKY_AUTHORISATION = True
+    SILKY_PERMISSIONS = lambda user: user.is_superuser  # noqa: E731
 
+# The stock ModelBackend is deliberately NOT listed here. It authenticates
+# by the raw `username` field with no notion of AdminProfile.locked_until —
+# and Django's createsuperuser naturally produces username == email if the
+# operator types the same value at both prompts. Since authenticate() stops
+# at the first backend that returns a user, ModelBackend being present at
+# all (regardless of position) let it silently authenticate a locked-out
+# admin whose username happened to equal their email, before the
+# lockout-aware EmailBackend below ever got a chance to run. Permission
+# checks (user.has_perm()) still work without it: EmailBackend and
+# PhoneNumberBackend both subclass ModelBackend, so they inherit its
+# has_perm()/has_module_perms() logic regardless of which one authenticated
+# a given request — see tests/feature/accounts/test_admin_auth.py::
+# test_lockout_holds_even_when_username_equals_email.
+#
 # apps.accounts.backends.EmailBackend must come before allauth's backend:
 # allauth also matches by email (ACCOUNT_AUTHENTICATION_METHOD="email") with
 # no concept of "staff-only" or lockout, so if it ran first it would happily
 # authenticate a locked-out admin before our lockout check ever got a chance
 # to raise PermissionDenied and stop the backend chain.
 AUTHENTICATION_BACKENDS = [
-    "django.contrib.auth.backends.ModelBackend",
     "apps.accounts.backends.EmailBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
     "apps.distributors.backends.PhoneNumberBackend",

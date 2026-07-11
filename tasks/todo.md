@@ -10,6 +10,55 @@ instead of Livewire components, Celery tasks instead of Jobs, pytest instead of 
 
 ---
 
+## Known issues — tracked, not blocking (from Tasks 1-6 code review + security audit, 2026-07-11)
+
+Two independent review passes (code-reviewer + security-auditor subagents) ran against the full
+Tasks 1-6 codebase. The two most serious findings were fixed immediately (see commit "Fix admin
+lockout bypass + lock down /silk/ + fail-closed DEBUG/SECRET_KEY"): the `ModelBackend` admin-lockout
+bypass, `/silk/` being reachable with no authentication, and `DEBUG`/`SECRET_KEY` defaulting
+fail-open. Everything below was deliberately deferred — logged here so it isn't lost, not because
+it's unimportant:
+
+- [ ] **No rate limiting anywhere**, despite `django-ratelimit` being installed and in
+  `MIDDLEWARE`. `apps/distributors/views.py::resend_otp` can trigger unlimited real SMS sends
+  (financial-abuse risk once a real `MNOTIFY_API_KEY` is live); no IP-level throttle exists on any
+  login endpoint on top of the per-account lockout, so an attacker can grief-lock any known
+  phone/email with 5 wrong guesses. Add `@ratelimit` to `register`, `resend_otp`,
+  `forgot_password`, `distributors:login`, and `AdminLoginView`'s auth step.
+- [ ] **Race condition in the failed-login-attempt counters** — `apps/accounts/signals.py` and
+  `apps/distributors/services.py` both do a non-atomic read-increment-save with no
+  `select_for_update()`/`F()` expression, so concurrent guesses can slip past
+  `MAX_FAILED_LOGIN_ATTEMPTS` before the lock engages.
+- [ ] **Admin login form leaks lock state before checking the password** —
+  `apps/accounts/forms.py::AdminAuthenticationForm.clean()` checks `AdminProfile.locked_until`
+  before calling `super().clean()` (the actual password check), so a distinct "Account temporarily
+  locked" message (and a faster response) reveals which emails are `is_staff` accounts to an
+  unauthenticated caller regardless of whether they know the password.
+- [ ] **Several constance settings are decorative — they exist and look live in the admin panel but
+  nothing reads them**: `MIN_PASSWORD_LENGTH`, `PASSWORD_COMPLEXITY_ENABLED`,
+  `SESSION_TIMEOUT_MINUTES`, `ADMIN_SESSION_TIMEOUT_MINUTES`, `PASSWORD_RESET_EXPIRY_MINUTES`
+  (allauth actually uses Django's own `PASSWORD_RESET_TIMEOUT`, unset, so it defaults to 3 days
+  regardless of what the panel says), `ADMIN_2FA_METHOD` (default value `"sms"` is actively wrong
+  since only authenticator-app 2FA is implemented), `GOOGLE_LOGIN_CUSTOMERS_ENABLED` /
+  `GOOGLE_LOGIN_DISTRIBUTORS_ENABLED` (Google button visibility is actually driven by whether a
+  `SocialApp` row exists, not this flag). Either wire these into real enforcement or mark them
+  "not yet enforced" in the fieldset help text.
+- [ ] `apps/accounts/management/commands/seed_roles.py` creates a hardcoded-password
+  (`bancostore-dev-only`) `is_staff=True` account with no guard against running in a non-DEBUG
+  environment.
+- [ ] `apps/notifications/otp.py` compares OTP codes with `!=` instead of
+  `secrets.compare_digest()` — low priority alone (capped at `OTP_MAX_ATTEMPTS`), but cheap to fix
+  alongside the rate-limiting item above.
+- [ ] No production security headers configured yet (`SESSION_COOKIE_SECURE`,
+  `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`) — not exploitable until
+  something is actually deployed (Task 24), but should be added as an `if not DEBUG:` block before
+  go-live rather than forgotten.
+- [ ] `DEFAULT_FROM_EMAIL` uses the reserved `.test` TLD — fine for dev, must be swapped to a real
+  deliverable domain (with SPF/DKIM) before production or reset/lockout emails may bounce or land
+  in spam.
+
+---
+
 ## Phase 0: Foundation
 
 ### Task 1: Scaffold the Django 5 project and install the full stack

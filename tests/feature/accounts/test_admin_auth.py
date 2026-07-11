@@ -100,6 +100,36 @@ def test_n_failed_admin_logins_locks_the_account(client):
 
 
 @pytest.mark.django_db
+def test_lockout_holds_even_when_username_equals_email():
+    """Regression test: `manage.py createsuperuser` naturally produces an
+    account whose username equals its email if the operator types the same
+    value at both prompts — a very ordinary setup. AUTHENTICATION_BACKENDS
+    previously listed the stock ModelBackend, which matches on `username`
+    and has no notion of AdminProfile.locked_until, so it authenticated a
+    locked-out account before the lockout-aware EmailBackend ever got a
+    chance to run. authenticate() stops at the first backend that returns a
+    user, so this bypassed lockout entirely for any account shaped this
+    way."""
+    from django.contrib.auth import authenticate
+
+    User.objects.create_user(
+        username="admin@example.test",
+        email="admin@example.test",
+        password="AdminPassw0rd!",
+        is_staff=True,
+    )
+    AdminProfile.objects.create(
+        user=User.objects.get(email="admin@example.test"),
+        failed_login_attempts=config.MAX_FAILED_LOGIN_ATTEMPTS,
+        locked_until=timezone.now() + timedelta(minutes=30),
+    )
+
+    user = authenticate(username="admin@example.test", password="AdminPassw0rd!")
+
+    assert user is None
+
+
+@pytest.mark.django_db
 def test_lockout_sends_an_alert_email(settings):
     from django.contrib.auth import authenticate
 

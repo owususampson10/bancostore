@@ -32,10 +32,16 @@ urlpatterns = [
     path("accounts/", include("allauth.urls")),
     path("distributors/", include("apps.distributors.urls")),
     path("", include(two_factor_urls)),
-    path("silk/", include("silk.urls", namespace="silk")),
 ]
 
 if settings.DEBUG:
+    # silk was previously registered unconditionally above, with no
+    # SILKY_AUTHENTICATION/SILKY_AUTHORISATION set — its dashboard defaults
+    # to open access and records full request bodies (passwords, OTP codes)
+    # with no size cap, so it must never be reachable outside DEBUG. Even
+    # with DEBUG on, SILKY_AUTHENTICATION/SILKY_AUTHORISATION (settings.py)
+    # now require a logged-in superuser to view it.
     urlpatterns += [
+        path("silk/", include("silk.urls", namespace="silk")),
         path("__debug__/", include("debug_toolbar.urls")),
     ]
