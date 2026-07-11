@@ -43,7 +43,7 @@ Account Access Restricted
 </span>
 </div>
 </div>
-{% elif wizard.steps.current == 'auth' %}
+{% else %}
 {# ===== Admin Login (matches the "Admin Login - Bancostore" Stitch screen) ===== #}
 <div class="w-full max-w-md">
 <div class="bg-surface-container-lowest rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.05)] p-stack-xl border border-outline-variant">
@@ -90,35 +90,6 @@ Secure Encrypted Session
 </div>
 <div class="mt-stack-lg text-center">
 <p class="font-label-md text-label-md text-on-surface-variant/60">Accessing this system signifies agreement to Bancostore's security policies. Unauthorised access attempts are strictly monitored and logged.</p>
-</div>
-</div>
-{% else %}
-{# ===== Token / backup steps: no Stitch screen for these yet (the screen ===== #}
-{# meant for this — "Two-Factor Verification - Bancostore Admin" — was     #}
-{# generated with the wrong content; see tasks/todo.md Task 6). Minimal    #}
-{# placeholder using the same admin shell until that screen is fixed.     #}
-<div class="w-full max-w-md">
-<div class="bg-surface-container-lowest rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.05)] p-stack-xl border border-outline-variant">
-<div class="text-center mb-stack-xl">
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-xs">Verify It's You</h1>
-{% if wizard.steps.current == 'token' %}
-<p class="font-body-md text-body-md text-on-surface-variant">Enter the code from your authenticator app.</p>
-{% else %}
-<p class="font-body-md text-body-md text-on-surface-variant">Enter one of your backup tokens.</p>
-{% endif %}
-</div>
-<form class="space-y-stack-lg" method="post" action="">
-{% csrf_token %}
-{{ wizard.management_form }}
-{% if wizard.form.non_field_errors %}
-<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">{{ wizard.form.non_field_errors.0 }}</div>
-{% endif %}
-<div class="space-y-stack-xs">
-{{ wizard.form.as_p }}
-</div>
-<input type="submit" value="" hidden>
-{% include "two_factor/_wizard_actions.html" %}
-</form>
 </div>
 </div>
 {% endif %}

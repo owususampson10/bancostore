@@ -16,3 +16,13 @@ class AdminLoginView(BaseLoginView):
         (BaseLoginView.TOKEN_STEP, AuthenticationTokenForm),
         (BaseLoginView.BACKUP_STEP, BackupTokenForm),
     )
+
+    def get_template_names(self):
+        # The 'token'/'backup' steps use their own standalone screen (no
+        # shared header/footer) — that's how it was designed in Stitch
+        # ("Two-Factor Verification - Bancostore Admin"), unlike the 'auth'
+        # step and the rest of the admin screens which share
+        # base_admin_auth.html's chrome.
+        if self.steps.current in (self.TOKEN_STEP, self.BACKUP_STEP):
+            return ["two_factor/core/login_token.html"]
+        return [self.template_name]

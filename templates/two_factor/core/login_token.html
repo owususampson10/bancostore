@@ -1,0 +1,112 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Two-Factor Verification | Bancostore Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'assets/main.css' %}">
+</head>
+<body class="bg-background font-body-md text-on-surface min-h-screen flex flex-col items-center justify-center relative overflow-hidden">
+<div class="absolute inset-0 z-0 pointer-events-none opacity-20 overflow-hidden">
+<div class="absolute top-[-10%] right-[-10%] w-[40vw] h-[40vw] bg-primary-fixed rounded-full blur-[120px]"></div>
+<div class="absolute bottom-[-10%] left-[-10%] w-[35vw] h-[35vw] bg-secondary-fixed rounded-full blur-[100px]"></div>
+</div>
+<main class="z-10 w-full max-w-[480px] px-margin-mobile md:px-0 py-stack-xl">
+<div class="bg-surface-container-lowest border border-outline-variant p-stack-xl rounded-xl shadow-lg flex flex-col items-center">
+<div class="mb-stack-lg text-center">
+<div class="flex items-center justify-center mb-stack-md text-admin-primary">
+<span class="material-symbols-outlined text-[48px]" style="font-variation-settings: 'FILL' 1;">security</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">Bancostore Admin</h1>
+<p class="font-body-md text-on-surface-variant mt-stack-xs">Two-Factor Authentication</p>
+</div>
+
+<form method="post" action="" class="w-full space-y-stack-lg" id="token-form">
+{% csrf_token %}
+{{ wizard.management_form }}
+{% if wizard.form.non_field_errors %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm text-center">{{ wizard.form.non_field_errors.0 }}</div>
+{% endif %}
+
+{% if wizard.steps.current == 'backup' %}
+<div class="text-center">
+<p class="font-body-md text-on-surface-variant">Enter one of your backup tokens</p>
+</div>
+<div class="space-y-stack-xs">
+{{ wizard.form.otp_token }}
+</div>
+{% if wizard.form.otp_token.errors %}<p class="text-admin-error text-body-sm text-center">{{ wizard.form.otp_token.errors.0 }}</p>{% endif %}
+{% else %}
+<div class="text-center">
+<p class="font-body-md text-on-surface-variant">Enter the 6-digit code from your authenticator app</p>
+</div>
+<div class="hidden">{{ wizard.form.otp_token }}</div>
+<div class="flex justify-center gap-2 w-full max-w-full" id="otp-container">
+<input aria-label="Digit 1" type="text" maxlength="1" inputmode="numeric" pattern="\d*" class="otp-input h-16 w-12 md:w-14 md:h-20 text-center font-headline-md text-headline-md bg-surface-container rounded-lg border-2 border-outline-variant transition-all duration-200">
+<input aria-label="Digit 2" type="text" maxlength="1" inputmode="numeric" pattern="\d*" class="otp-input h-16 w-12 md:w-14 md:h-20 text-center font-headline-md text-headline-md bg-surface-container rounded-lg border-2 border-outline-variant transition-all duration-200">
+<input aria-label="Digit 3" type="text" maxlength="1" inputmode="numeric" pattern="\d*" class="otp-input h-16 w-12 md:w-14 md:h-20 text-center font-headline-md text-headline-md bg-surface-container rounded-lg border-2 border-outline-variant transition-all duration-200">
+<input aria-label="Digit 4" type="text" maxlength="1" inputmode="numeric" pattern="\d*" class="otp-input h-16 w-12 md:w-14 md:h-20 text-center font-headline-md text-headline-md bg-surface-container rounded-lg border-2 border-outline-variant transition-all duration-200">
+<input aria-label="Digit 5" type="text" maxlength="1" inputmode="numeric" pattern="\d*" class="otp-input h-16 w-12 md:w-14 md:h-20 text-center font-headline-md text-headline-md bg-surface-container rounded-lg border-2 border-outline-variant transition-all duration-200">
+<input aria-label="Digit 6" type="text" maxlength="1" inputmode="numeric" pattern="\d*" class="otp-input h-16 w-12 md:w-14 md:h-20 text-center font-headline-md text-headline-md bg-surface-container rounded-lg border-2 border-outline-variant transition-all duration-200">
+</div>
+{% if wizard.form.otp_token.errors %}<p class="text-admin-error text-body-sm text-center">{{ wizard.form.otp_token.errors.0 }}</p>{% endif %}
+{% endif %}
+
+<button type="submit" class="w-full h-14 bg-admin-primary text-white font-label-lg text-label-lg rounded-lg shadow-md hover:opacity-90 active:scale-[0.98] transition-all duration-150 flex items-center justify-center gap-2">
+<span>Verify</span>
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</form>
+
+{% if wizard.steps.current == 'token' and backup_tokens %}
+<form method="post" action="" class="w-full mt-stack-md">
+{% csrf_token %}
+{{ wizard.management_form }}
+<button name="wizard_goto_step" type="submit" value="backup" class="w-full text-center font-label-md text-label-md text-admin-primary hover:underline">Use a backup code instead</button>
+</form>
+{% endif %}
+
+<div class="mt-stack-xl flex items-center gap-2 text-on-surface-variant/60 font-label-md text-label-md">
+<span class="material-symbols-outlined text-[16px]">lock</span>
+<span>Secure Administrative Session</span>
+</div>
+</div>
+</main>
+<footer class="absolute bottom-0 w-full">
+<div class="flex flex-col md:flex-row justify-center items-center px-margin-desktop py-stack-md w-full max-w-container-max mx-auto">
+<p class="font-label-md text-label-md text-on-surface-variant/40">© 2024 Bancostore Internal Systems. All rights reserved.</p>
+</div>
+</footer>
+{% if wizard.steps.current == 'token' %}
+<script>
+(function () {
+    var inputs = document.querySelectorAll("#token-form .otp-input");
+    var hiddenField = document.getElementById("id_token-otp_token");
+    function syncHiddenField() {
+        hiddenField.value = Array.from(inputs).map(function (i) { return i.value; }).join("");
+    }
+    inputs.forEach(function (input, index) {
+        input.addEventListener("input", function (e) {
+            e.target.value = e.target.value.replace(/[^0-9]/g, "");
+            syncHiddenField();
+            if (e.target.value.length === 1 && index < inputs.length - 1) {
+                inputs[index + 1].focus();
+            }
+        });
+        input.addEventListener("keydown", function (e) {
+            if (e.key === "Backspace" && e.target.value.length === 0 && index > 0) {
+                inputs[index - 1].focus();
+            }
+        });
+    });
+    if (inputs.length) {
+        inputs[0].focus();
+    }
+})();
+</script>
+{% endif %}
+</body>
+</html>
