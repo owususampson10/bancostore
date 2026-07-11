@@ -79,7 +79,7 @@ not open for substitution without discussion (see Boundaries):
 | Settings | django-constance (DB-backed, admin-editable business rules) |
 | Files | Django FileField/ImageField (local disk storage), Pillow |
 | Payments | Paystack REST API via `requests` (no official first-party Python SDK) |
-| Email/SMS | Django email backend (Mailgun/Gmail SMTP), Arkesel or Hubtel via `requests` |
+| Email/SMS | Django email backend (Gmail SMTP, confirmed 2026-07-10 — revisit for Mailgun before real volume, see Local dev environment), mNotify via `requests` (confirmed 2026-07-11) |
 | PDF/Audit | WeasyPrint, django-simple-history |
 | Testing | pytest + pytest-django |
 | Local dev | Native on this Mac via `pyenv` — no remote server required (see below) |
@@ -289,7 +289,7 @@ class BinaryBonusCalculator:
   - Changing seeded default commission rates, caps, fees, or the underlying formulas in code
     (even though these are meant to be admin-editable at runtime)
   - Any database schema/migration change after the initial MVP schema is in place and reviewed
-  - Writing or modifying Paystack, Arkesel/Hubtel (or any payment/SMS provider) integration code —
+  - Writing or modifying Paystack, mNotify (or any payment/SMS provider) integration code —
     including in test/sandbox mode
   - Anything in the general defaults: secrets, production deploys, destructive git operations,
     force pushes, CI config changes
@@ -322,15 +322,20 @@ class BinaryBonusCalculator:
 ## Open Questions
 
 1. CI provider — GitHub Actions assumed but not confirmed (repo has no remote yet)
-2. Which SMS provider to actually wire up first for MVP — Arkesel or Hubtel? (Both are named as
-   options in the docs; need one default for MVP.)
-3. Which email provider first — Mailgun or Gmail SMTP?
+2. ~~Which SMS provider to actually wire up first for MVP — Arkesel or Hubtel?~~ — resolved
+   2026-07-11: **mNotify**, not either of the two originally named in the docs. User has an API
+   key already; needed before Task 5 starts.
+3. ~~Which email provider first — Mailgun or Gmail SMTP?~~ — resolved 2026-07-10: **Gmail SMTP**,
+   verified working end-to-end with a real send (see `SPEC.md` Local dev environment and
+   `tasks/todo.md` Task 4). Revisit for Mailgun before real production volume — Gmail's free-tier
+   sending cap (500/day) and deliverability aren't built for that.
 4. Exact delivery zone fee table and free-delivery threshold values (docs say "set by admin" —
    need real starting numbers to seed)
 5. Minimum/maximum withdrawal amount and withdrawal day (also "set by admin" in docs — need
    concrete seed values)
-6. Is there an existing Paystack/Arkesel/Hubtel account already, or do these need to be created
-   before integration work can start?
-7. Confirm `pyenv`-installed Python + Homebrew `mysql`/`redis` actually install cleanly on this
-   Mac (macOS 12.7.6 Monterey) before Task 1 is called done — this is the assumption the whole
-   stack switch rests on, so it needs to be verified in practice, not just in theory.
+6. Is there an existing Paystack/mNotify account already, or do these need to be created before
+   integration work can start? — mNotify: confirmed, API key in hand (2026-07-11). Paystack: still
+   open.
+7. ~~Confirm `pyenv`-installed Python + Homebrew `mysql`/`redis` actually install cleanly on this
+   Mac~~ — resolved during Task 1: Python/Redis installed cleanly, MySQL did not (see Local dev
+   environment above).

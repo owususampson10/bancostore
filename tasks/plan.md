@@ -128,11 +128,13 @@ and surviving a server reboot.
 ## Open Questions (carried from `SPEC.md`, mapped to blocking tasks)
 
 1. CI provider (GitHub Actions assumed) — not blocking; resolve before Checkpoint I / deployment
-2. SMS provider, Arkesel or Hubtel — **needed before Task 5**
-3. Email provider, Mailgun or Gmail SMTP — **needed before Task 4** (password reset emails)
+2. ~~SMS provider, Arkesel or Hubtel~~ — resolved 2026-07-11: **mNotify**, API key in hand
+3. ~~Email provider, Mailgun or Gmail SMTP~~ — resolved 2026-07-10: **Gmail SMTP**, verified with
+   a real send (Task 4); revisit for Mailgun before real production volume
 4. Delivery zone fee table + free-delivery threshold — **needed before Task 17**
 5. Min/max withdrawal amount + withdrawal day — **needed before Task 16**
-6. Existing Paystack/Arkesel/Hubtel accounts, or need to create them — **needed before Tasks 5, 10, 16, 17**
+6. Existing Paystack/mNotify accounts, or need to create them — **needed before Tasks 5, 10, 16,
+   17**. mNotify: confirmed. Paystack: still open.
 7. ~~Confirm `pyenv` Python + Homebrew `mysql`/`redis` actually install cleanly on this Mac~~ —
    resolved: Python (already present, no `pyenv` needed) and Redis installed cleanly; MySQL did
    not, so local dev uses SQLite instead (see `SPEC.md` Local dev environment)

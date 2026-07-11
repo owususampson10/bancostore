@@ -209,8 +209,10 @@ email sent successfully through Gmail SMTP.
 ### Task 5: Distributor registration & login
 
 **Description:** Phone number + password login, SMS OTP verification during registration and for
-password reset, account lockout after N failed attempts (from settings). **Needs SMS provider
-decision (Arkesel vs Hubtel) and a working sandbox/test account before starting.**
+password reset, account lockout after N failed attempts (from settings).
+
+**Decision made 2026-07-11:** SMS provider is **mNotify** (not Arkesel/Hubtel as originally named
+in the docs — see `SPEC.md` Open Question #2). User has an API key.
 
 **Acceptance criteria:**
 - [ ] Distributor registers with phone + password; phone verified via OTP
@@ -220,9 +222,9 @@ decision (Arkesel vs Hubtel) and a working sandbox/test account before starting.
 **Verification:**
 - [ ] pytest feature test: registration + OTP verification + login
 - [ ] pytest feature test: N failed logins locks the account for the configured duration
-- [ ] Manual check: OTP is sent through the chosen SMS provider's sandbox/test mode
+- [ ] Manual check: OTP is sent through mNotify's sandbox/test mode
 
-**Dependencies:** Task 2, Task 3, SMS provider decision
+**Dependencies:** Task 2, Task 3, SMS provider decision (resolved)
 
 **Files likely touched:** `apps/distributors/views.py` (auth views), `apps/notifications/otp.py`, `tests/feature/distributors/test_distributor_auth.py`
 

@@ -116,4 +116,4 @@ acting, beyond the general secrets/prod-deploy/destructive-git defaults:
 - Adding any pip/npm dependency not already named in the Tech Stack
 - Changing seeded default commission rates/caps/fees or their formulas in code
 - Any database schema/migration change after the initial MVP schema is reviewed
-- Writing or modifying Paystack/Arkesel/Hubtel integration code, including in sandbox mode
+- Writing or modifying Paystack/mNotify integration code, including in sandbox mode
