@@ -314,17 +314,26 @@ the database.
 ### Task 6: Admin login with mandatory 2FA
 
 **Description:** Email + password login for admin via Django Admin, with mandatory 2FA
-(django-two-factor-auth: SMS or authenticator app) that cannot be disabled. Failed attempts
-trigger lockout + alert email.
+(django-two-factor-auth: authenticator app only — SMS dropped since django-two-factor-auth's SMS
+method requires Twilio, and mNotify is the platform's only SMS provider) that cannot be disabled.
+Failed attempts trigger lockout + alert email.
 
 **Acceptance criteria:**
-- [ ] Admin cannot reach the admin panel without completing 2FA
-- [ ] 2FA cannot be turned off through any settings toggle
-- [ ] Lockout alert email fires on repeated failed attempts
+- [x] Admin cannot reach the admin panel without completing 2FA
+- [x] 2FA cannot be turned off through any settings toggle
+- [x] Lockout alert email fires on repeated failed attempts
 
 **Verification:**
-- [ ] pytest feature test: login without completing 2FA is rejected
-- [ ] pytest feature test: login + correct 2FA code succeeds
+- [x] pytest feature test: login without completing 2FA is rejected
+- [x] pytest feature test: login + correct 2FA code succeeds
+- [x] Manual browser verification: fresh admin logs in with email+password, is forced through the
+  TOTP setup wizard (QR/secret + token), and lands on the real Django Admin panel — full mandatory
+  2FA flow confirmed end-to-end live, not just via pytest
+
+**Backend status: done.** UI is still django-two-factor-auth's stock/default templates (with the
+"Provide a template named two_factor/_base.html..." placeholder banner) — real Stitch-designed
+admin/2FA screens are a separate follow-up pass once those 6 screens are designed, same two-pass
+pattern used for Tasks 4 and 5.
 
 **Dependencies:** Task 2, Task 3
 

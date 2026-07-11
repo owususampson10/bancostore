@@ -6,7 +6,16 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 
+from two_factor.admin import AdminSiteOTPRequired
 from two_factor.urls import urlpatterns as two_factor_urls
+
+# Mandatory 2FA for admin (Task 6, SPEC.md Section 2.3) — this must never be
+# made conditional on a settings toggle (e.g. ADMIN_2FA_ENABLED), per
+# SPEC.md Boundaries: "Never... bypass the 2FA requirement for admin, even
+# temporarily". Swapping the class on the existing global admin.site
+# singleton applies to every already-registered ModelAdmin without needing
+# to touch each app's admin.py.
+admin.site.__class__ = AdminSiteOTPRequired
 
 urlpatterns = [
     path("admin/", admin.site.urls),

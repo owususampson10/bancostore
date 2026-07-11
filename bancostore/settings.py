@@ -109,9 +109,20 @@ if DEBUG:
         "silk.middleware.SilkyMiddleware",
     ]
     INTERNAL_IPS = ["127.0.0.1"]
+    # sqlparse 0.5's hardened MAX_GROUPING_TOKENS limit crashes debug_toolbar's SQL
+    # panel with a 500 on any request whose query is large enough to exceed it (e.g.
+    # constance's bulk config lookup) — pure dev-tooling issue, so just skip the
+    # pretty-printing step instead of pinning an older sqlparse.
+    DEBUG_TOOLBAR_CONFIG = {"PRETTIFY_SQL": False}
 
+# apps.accounts.backends.EmailBackend must come before allauth's backend:
+# allauth also matches by email (ACCOUNT_AUTHENTICATION_METHOD="email") with
+# no concept of "staff-only" or lockout, so if it ran first it would happily
+# authenticate a locked-out admin before our lockout check ever got a chance
+# to raise PermissionDenied and stop the backend chain.
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
+    "apps.accounts.backends.EmailBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
     "apps.distributors.backends.PhoneNumberBackend",
 ]

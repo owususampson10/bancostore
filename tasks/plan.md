@@ -44,7 +44,7 @@ admin/customer/distributor stub users exist, settings values are readable from t
 ### Phase 1: Authentication
 - [x] Task 4: Regular customer registration & login (email/phone, Google, guest checkout flag)
 - [x] Task 5: Distributor registration & login (phone + SMS OTP) — mNotify, fully verified end to end with a real SMS and real login
-- [ ] Task 6: Admin login with mandatory 2FA
+- [ ] Task 6: Admin login with mandatory 2FA — backend done and verified live (email+password + mandatory TOTP setup + lockout), UI still pending real Stitch-designed screens
 
 **Checkpoint B:** all three roles can register and log in end-to-end, with passing tests.
 
