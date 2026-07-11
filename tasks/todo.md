@@ -244,15 +244,37 @@ commissioned Stitch screens):** distributor password reset via SMS OTP
   to terminal, `apps/notifications/sms.py::fake_outbox`) and only spend real mNotify credit once,
   at the end, rather than on every test run
 
-**UI status:** no Stitch design exists yet for distributor screens (checked
-`mcp__stitch__list_projects` — only the customer auth screens from Task 4 exist in the
-"Bancostore" project). User is designing them in parallel; a prompt was given for register, OTP
-verification, login, account-locked, forgot-password, set-new-password, and reset-success screens.
-Backend was built and tested against **temporary, deliberately unstyled placeholder templates**
-(`templates/distributors/*.html` — plain `{{ form.as_p }}`, no Tailwind, no design effort) purely
-so the feature tests could exercise real HTTP views end-to-end. These get replaced wholesale once
-the real Stitch screens are fetched, same as Task 4's allauth-default-templates gap — flagging
-this explicitly this time rather than letting it be a silent, discovered-later gap.
+**UI status: done (2026-07-11).** All 7 distributor screens (Register, Verify Code, Log In,
+Account Locked, Forgot Password, Set New Password, Reset Success) were designed by the user in
+the same "Bancostore" Stitch project as Task 4, fetched, verified field-by-field against the
+original prompt (phone number field present, no Google/social login button on register/login,
+OTP entry present on Verify Code, Account Locked has no form, etc. — all matched), and built as
+real templates in `templates/distributors/*.html`, replacing the temporary unstyled placeholders.
+No new design tokens were needed — same Stitch project, same "Kinetic Retail Narrative" theme
+already in `static/src/main.css`.
+
+Notable adaptations from the raw Stitch markup:
+- Register screen included a "Distributor Agreement" consent checkbox not in the original
+  prompt — added as a real required `terms_accepted` field (`apps/distributors/forms.py`),
+  same pattern as Task 4's customer signup.
+- Verify Code uses 6 separate digit boxes rather than one text field — kept the visual pattern,
+  added a small JS snippet to sync the 6 boxes into the real hidden `code` field
+  (`OTPVerificationForm`) instead of Stitch's non-functional `preventDefault()` mock submit.
+- Account Locked is now a real page the login view renders (not just a form error) — added
+  `locked_until` to the `LoginAttempt` result so the page can show the actual remaining lockout
+  time computed from `ACCOUNT_LOCKOUT_DURATION_MINUTES`, not a static placeholder.
+- Added a dedicated `distributors:reset_success` view/URL (POST-redirect-GET after password
+  reset) so the Reset Success screen actually gets shown, rather than skipping straight to login.
+- Dropped decorative-only elements with no functional purpose (marketing testimonial block on
+  Set New Password, live JS password-strength icons) — kept the functional core of each screen.
+
+Verified: full pytest suite (30 tests) with real templates now rendering (not placeholders) —
+required updating 2 tests to submit the new `terms_accepted` field, and fixing one test's
+Google-login check that was incorrectly matching Google Fonts `<link>` tags on every page,
+not an actual login button. Manually walked the real dev server end to end, including
+**deliberately triggering 5 real failed logins to see the actual Account Locked page** (not
+simulated) — confirmed the displayed "30 min remaining" matched the real `locked_until` value in
+the database.
 
 **Dependencies:** Task 2, Task 3, SMS provider decision (resolved)
 

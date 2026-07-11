@@ -1,16 +1,72 @@
-{# TEMPORARY placeholder — no design, replaced wholesale once the Stitch #}
-{# distributor screens are ready. #}
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Verify Code</title></head>
-<body>
-<h1>Verify Code</h1>
-<p>We sent a code to {{ phone_number }}.</p>
-<form method="post">
+{% extends "base_auth.html" %}
+{% block title %}Bancostore | Verify your account{% endblock %}
+{% block content %}
+<div class="w-full max-w-[480px] mx-auto bg-white rounded-xl auth-card border border-outline-variant p-stack-lg md:p-stack-xl">
+<div class="flex flex-col items-center text-center mb-stack-lg">
+<div class="w-16 h-16 rounded-full bg-secondary-container flex items-center justify-center mb-stack-md">
+<span class="material-symbols-outlined text-secondary text-[32px]">sms</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-xs">Verify your account</h1>
+<p class="font-body-md text-body-md text-gray-muted max-w-[340px]">
+We've sent a 6-digit code via SMS to {{ phone_number }}. Please enter it below to verify your account.
+</p>
+</div>
+<form class="space-y-stack-lg" method="post" action="{% url 'distributors:verify_otp' %}" id="otp-form">
 {% csrf_token %}
-{{ form.as_p }}
-<button type="submit">Verify</button>
+{{ form.code }}
+{% if form.non_field_errors or form.code.errors %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm text-center">
+{{ form.non_field_errors.0|default:form.code.errors.0 }}
+</div>
+{% endif %}
+<div class="flex justify-between gap-2 md:gap-3">
+<input aria-label="Digit 1" class="otp-input w-full aspect-square text-center font-headline-md text-headline-md border border-outline-variant rounded-lg bg-surface focus:outline-none focus:border-secondary transition-all" maxlength="1" type="text" inputmode="numeric"/>
+<input aria-label="Digit 2" class="otp-input w-full aspect-square text-center font-headline-md text-headline-md border border-outline-variant rounded-lg bg-surface focus:outline-none focus:border-secondary transition-all" maxlength="1" type="text" inputmode="numeric"/>
+<input aria-label="Digit 3" class="otp-input w-full aspect-square text-center font-headline-md text-headline-md border border-outline-variant rounded-lg bg-surface focus:outline-none focus:border-secondary transition-all" maxlength="1" type="text" inputmode="numeric"/>
+<input aria-label="Digit 4" class="otp-input w-full aspect-square text-center font-headline-md text-headline-md border border-outline-variant rounded-lg bg-surface focus:outline-none focus:border-secondary transition-all" maxlength="1" type="text" inputmode="numeric"/>
+<input aria-label="Digit 5" class="otp-input w-full aspect-square text-center font-headline-md text-headline-md border border-outline-variant rounded-lg bg-surface focus:outline-none focus:border-secondary transition-all" maxlength="1" type="text" inputmode="numeric"/>
+<input aria-label="Digit 6" class="otp-input w-full aspect-square text-center font-headline-md text-headline-md border border-outline-variant rounded-lg bg-surface focus:outline-none focus:border-secondary transition-all" maxlength="1" type="text" inputmode="numeric"/>
+</div>
+<div class="flex flex-col gap-stack-md pt-stack-sm">
+<button class="w-full py-4 rounded-lg font-label-lg text-label-lg text-white bg-primary hover:opacity-90 shadow-sm active:scale-95 transition-all duration-150" type="submit">
+Verify
+</button>
+<div class="flex flex-col items-center gap-stack-xs">
+<button class="text-secondary font-label-lg text-label-lg hover:underline transition-colors" type="submit" formaction="{% url 'distributors:resend_otp' %}" formnovalidate>
+Resend code
+</button>
+</div>
+</div>
 </form>
-<a href="{% url 'distributors:resend_otp' %}">Resend code</a>
-</body>
-</html>
+</div>
+<script>
+    // Keeps the 6 visual boxes but submits their combined value through the
+    // real Django form field (id_code, hidden) instead of Stitch's original
+    // preventDefault()-based mock submission.
+    const otpInputs = document.querySelectorAll(".otp-input");
+    const hiddenCodeField = document.getElementById("id_code");
+
+    function syncHiddenField() {
+        hiddenCodeField.value = Array.from(otpInputs).map((i) => i.value).join("");
+    }
+
+    otpInputs.forEach((input, index) => {
+        input.addEventListener("input", (e) => {
+            e.target.value = e.target.value.replace(/[^0-9]/g, "");
+            syncHiddenField();
+            if (e.target.value.length === 1 && index < otpInputs.length - 1) {
+                otpInputs[index + 1].focus();
+            }
+        });
+        input.addEventListener("keydown", (e) => {
+            if (e.key === "Backspace" && e.target.value.length === 0 && index > 0) {
+                otpInputs[index - 1].focus();
+            }
+        });
+    });
+
+    if (otpInputs.length) {
+        otpInputs[0].focus();
+    }
+</script>
+{% endblock %}

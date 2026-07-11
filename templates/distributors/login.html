@@ -1,16 +1,58 @@
-{# TEMPORARY placeholder — no design, replaced wholesale once the Stitch #}
-{# distributor screens are ready. #}
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Distributor Log In</title></head>
-<body>
-<h1>Log In</h1>
-<form method="post">
+{% extends "base_auth.html" %}
+{% block title %}Bancostore | Distributor Log In{% endblock %}
+{% block content %}
+<div class="w-full max-w-[440px] mx-auto">
+<div class="bg-white rounded-xl auth-card p-stack-xl border border-outline-variant/30">
+<div class="text-center mb-stack-xl">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-xs">Distributor Log In</h1>
+<p class="font-body-md text-body-md text-gray-muted">Access your business dashboard</p>
+</div>
+<form class="space-y-stack-lg" method="post" action="{% url 'distributors:login' %}">
 {% csrf_token %}
-{{ form.as_p }}
-<button type="submit">Log In</button>
+{% if form.non_field_errors %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">
+{{ form.non_field_errors.0 }}
+</div>
+{% endif %}
+<div class="flex flex-col gap-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.phone_number.id_for_label }}">Phone Number</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-muted text-[20px]">call</span>
+{{ form.phone_number }}
+</div>
+{% if form.phone_number.errors %}<p class="text-error text-body-sm mt-1">{{ form.phone_number.errors.0 }}</p>{% endif %}
+</div>
+<div class="flex flex-col gap-stack-xs">
+<div class="flex justify-between items-center">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.password.id_for_label }}">Password</label>
+<a class="font-label-md text-label-md text-primary hover:underline" href="{% url 'distributors:forgot_password' %}">Forgot password?</a>
+</div>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-muted text-[20px]">lock</span>
+{{ form.password }}
+</div>
+{% if form.password.errors %}<p class="text-error text-body-sm mt-1">{{ form.password.errors.0 }}</p>{% endif %}
+</div>
+<button class="w-full py-4 rounded-lg bg-primary hover:opacity-90 text-white font-label-lg text-label-lg uppercase tracking-wider mt-stack-md" type="submit">
+Log In
+</button>
 </form>
-<a href="{% url 'distributors:forgot_password' %}">Forgot password?</a>
-<a href="{% url 'distributors:register' %}">Register</a>
-</body>
-</html>
+<div class="mt-stack-xl pt-stack-xl border-t border-outline-variant/30 text-center">
+<p class="font-body-sm text-body-sm text-gray-muted">
+Don't have an account?
+<a class="text-primary font-bold hover:underline transition-all" href="{% url 'distributors:register' %}">Register</a>
+</p>
+</div>
+</div>
+<div class="mt-stack-lg flex justify-center gap-stack-md text-gray-muted opacity-60">
+<div class="flex items-center gap-stack-xs">
+<span class="material-symbols-outlined text-[16px]">verified_user</span>
+<span class="font-label-md text-label-md">Secure Connection</span>
+</div>
+<div class="flex items-center gap-stack-xs">
+<span class="material-symbols-outlined text-[16px]">shield_lock</span>
+<span class="font-label-md text-label-md">Data Privacy</span>
+</div>
+</div>
+</div>
+{% endblock %}

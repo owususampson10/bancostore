@@ -22,6 +22,7 @@ def test_distributor_can_register_verify_otp_and_login(client):
             "email": "kwabena@example.test",
             "password1": "S3cure-Passw0rd!",
             "password2": "S3cure-Passw0rd!",
+            "terms_accepted": "on",
         },
     )
     assert response.status_code == 302
@@ -63,6 +64,7 @@ def test_wrong_otp_does_not_verify_the_phone(client):
             "email": "kwabena@example.test",
             "password1": "S3cure-Passw0rd!",
             "password2": "S3cure-Passw0rd!",
+            "terms_accepted": "on",
         },
     )
 
@@ -138,7 +140,12 @@ def test_successful_login_resets_the_failed_attempt_counter(client):
 def test_distributor_login_page_has_no_google_login_option(client):
     response = client.get(reverse("distributors:login"))
 
-    assert b"google" not in response.content.lower()
+    # "google" alone would also match the Google Fonts <link> tags every page
+    # uses — check specifically for a social-login button, not just the word.
+    content = response.content.lower()
+    assert b"continue with google" not in content
+    assert b"provider_login_url" not in content
+    assert b"/accounts/google/" not in content
 
 
 @pytest.mark.django_db

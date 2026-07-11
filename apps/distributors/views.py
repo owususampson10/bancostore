@@ -1,8 +1,11 @@
+import math
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.models import Group
 from django.shortcuts import redirect, render
+from django.utils import timezone
 
 from apps.notifications.otp import generate_otp, verify_otp
 
@@ -95,8 +98,12 @@ def login_view(request):
         result = attempt_distributor_login(phone_number, form.cleaned_data["password"])
 
         if result.locked:
-            form.add_error(
-                None, "Too many failed attempts. Your account is temporarily locked."
+            seconds_remaining = (result.locked_until - timezone.now()).total_seconds()
+            minutes_remaining = max(1, math.ceil(seconds_remaining / 60))
+            return render(
+                request,
+                "distributors/account_locked.html",
+                {"minutes_remaining": minutes_remaining},
             )
         elif result.needs_verification:
             generate_otp(phone_number, purpose="registration")
@@ -144,6 +151,10 @@ def set_new_password(request):
         distributor.user.set_password(form.cleaned_data["password1"])
         distributor.user.save()
         del request.session["reset_verified_phone_number"]
-        return redirect("distributors:login")
+        return redirect("distributors:reset_success")
 
     return render(request, "distributors/set_new_password.html", {"form": form})
+
+
+def reset_success(request):
+    return render(request, "distributors/reset_success.html")

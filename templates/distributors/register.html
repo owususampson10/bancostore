@@ -1,15 +1,77 @@
-{# TEMPORARY placeholder — no design, replaced wholesale once the Stitch #}
-{# distributor screens are ready. Do not style this file; build the real #}
-{# templates/distributors/*.html from Stitch instead. #}
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Distributor Register</title></head>
-<body>
-<h1>Register as a Distributor</h1>
-<form method="post">
+{% extends "base_auth.html" %}
+{% block title %}Bancostore | Become a Distributor{% endblock %}
+{% block content %}
+<div class="w-full max-w-[500px] mx-auto bg-white rounded-xl auth-card overflow-hidden border border-surface-variant">
+<div class="p-stack-lg border-b border-surface-variant bg-surface-container-low/50">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-xs">Become a Distributor</h1>
+<p class="font-body-md text-body-md text-gray-muted">Empower your community. Join Ghana's leading entrepreneurial retail network today.</p>
+</div>
+<form class="p-stack-lg space-y-stack-md" method="post" action="{% url 'distributors:register' %}">
 {% csrf_token %}
-{{ form.as_p }}
-<button type="submit">Register</button>
+{% if form.non_field_errors %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">
+{{ form.non_field_errors.0 }}
+</div>
+{% endif %}
+<div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.phone_number.id_for_label }}">Phone Number</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">phone_iphone</span>
+{{ form.phone_number }}
+</div>
+{% if form.phone_number.errors %}<p class="text-error text-body-sm mt-1">{{ form.phone_number.errors.0 }}</p>{% endif %}
+</div>
+<div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.email.id_for_label }}">Email Address <span class="text-gray-muted font-normal">(for notifications only)</span></label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">mail</span>
+{{ form.email }}
+</div>
+{% if form.email.errors %}<p class="text-error text-body-sm mt-1">{{ form.email.errors.0 }}</p>{% endif %}
+</div>
+<div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.password1.id_for_label }}">Password</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">lock</span>
+{{ form.password1 }}
+</div>
+{% if form.password1.errors %}<p class="text-error text-body-sm mt-1">{{ form.password1.errors.0 }}</p>{% endif %}
+</div>
+<div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.password2.id_for_label }}">Confirm Password</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">verified_user</span>
+{{ form.password2 }}
+</div>
+{% if form.password2.errors %}<p class="text-error text-body-sm mt-1">{{ form.password2.errors.0 }}</p>{% endif %}
+</div>
+<div class="flex items-start gap-3 py-2">
+{{ form.terms_accepted }}
+<label class="font-body-sm text-body-sm text-gray-muted" for="{{ form.terms_accepted.id_for_label }}">
+I agree to the <a class="text-primary hover:underline" href="#">Distributor Agreement</a> and authorize Bancostore to send business updates to my provided contact info.
+</label>
+</div>
+{% if form.terms_accepted.errors %}<p class="text-error text-body-sm">{{ form.terms_accepted.errors.0 }}</p>{% endif %}
+<button class="w-full py-4 bg-primary hover:opacity-90 text-white rounded-lg font-label-lg text-label-lg shadow-md active:scale-[0.98] transition-all flex justify-center items-center gap-2" type="submit">
+Register
+<span class="material-symbols-outlined text-[20px]">arrow_forward</span>
+</button>
+<div class="pt-stack-md text-center">
+<p class="font-body-md text-body-md text-gray-muted">
+Already a distributor?
+<a class="text-primary font-bold hover:underline transition-colors" href="{% url 'distributors:login' %}">Log in</a>
+</p>
+</div>
 </form>
-</body>
-</html>
+<div class="bg-surface-container py-stack-md px-stack-lg flex justify-center items-center gap-stack-lg opacity-80 border-t border-surface-variant">
+<div class="flex items-center gap-2 text-gray-muted">
+<span class="material-symbols-outlined text-[18px]">security</span>
+<span class="text-label-md font-label-md">Secure Data Encryption</span>
+</div>
+<div class="flex items-center gap-2 text-gray-muted">
+<span class="material-symbols-outlined text-[18px]">verified</span>
+<span class="text-label-md font-label-md">Verified Portal</span>
+</div>
+</div>
+</div>
+{% endblock %}

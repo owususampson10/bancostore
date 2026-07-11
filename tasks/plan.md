@@ -43,7 +43,7 @@ admin/customer/distributor stub users exist, settings values are readable from t
 
 ### Phase 1: Authentication
 - [x] Task 4: Regular customer registration & login (email/phone, Google, guest checkout flag)
-- [ ] Task 5: Distributor registration & login (phone + SMS OTP) — **needs SMS provider decision**
+- [x] Task 5: Distributor registration & login (phone + SMS OTP) — mNotify, real send still pending user's API key
 - [ ] Task 6: Admin login with mandatory 2FA
 
 **Checkpoint B:** all three roles can register and log in end-to-end, with passing tests.
