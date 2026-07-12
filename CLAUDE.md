@@ -4,13 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Task 1 (scaffold) is done.** The Django 5 project is scaffolded at the repo root (`manage.py`,
-`bancostore/` project package), the full stack from `SPEC.md` Tech Stack is installed and wired up
-in `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance,
-allauth, two-factor-auth, simple-history, debug-toolbar, silk), and Tailwind v4 + Alpine.js + htmx
-are wired through Vite (`vite.config.js`, `static/src/`). No per-domain `apps/` exist yet — that
-starts with Task 2 (Roles & permissions). See `tasks/plan.md` and `tasks/todo.md` for the full task
-breakdown and what's next.
+**Tasks 1–7 are done (Phases 0–1 complete, Phase 2 started); Task 8 (public storefront) is next.**
+What exists and is verified working:
+
+- **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
+  `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
+  two-factor-auth, simple-history, debug-toolbar, silk); Tailwind v4 + Alpine.js + htmx through
+  Vite. Three roles (customer/distributor/admin) via Django groups with a `seed_roles` command
+  (DEBUG-only). 73 constance business-rule settings seeded across 8 fieldsets
+  (`apps/platform_settings/config.py`).
+- **Authentication for all three roles (Tasks 4–6), with real Stitch-designed UI:** customer
+  email/phone registration + password reset (Gmail SMTP verified live); distributor phone+password
+  with SMS OTP via mNotify (verified end to end with a real SMS) and constance-driven lockout;
+  admin login with mandatory TOTP 2FA. All flows verified in a real browser, not just pytest.
+- **Catalog (Task 7):** `Category`/`Product`/`ProductImage`/`ProductVariant` models with Django
+  Admin CRUD, WebP photo conversion, and a concurrency-safe stock decrement. No customer-facing
+  storefront yet — that's Task 8.
+- **CI:** GitHub Actions runs the full suite against a real `mysql:8` service container (local dev
+  stays on SQLite — MySQL doesn't install on this Mac).
+- **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7. All
+  Critical/High findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks,
+  lock-contention DoS, CSRF-exempt SMS send). The deliberately deferred remainder — decorative
+  constance settings, production security headers, proxy-aware rate-limit keys, Paystack secret
+  encryption, session-engine fallback — is tracked in the "Known issues" sections at the top of
+  `tasks/todo.md`; read those before touching auth or deployment code.
+
+Existing apps: `apps/{accounts,catalog,distributors,notifications,platform_settings}`. Shared
+concurrency helper: `bancostore/concurrency.py` (`retry_on_lock_contention`,
+`select_for_update_nowait_if_supported`) — use it for any counter/stock/attempt update rather than
+reinventing locking. See `tasks/plan.md` and `tasks/todo.md` for the full task breakdown and
+what's next.
 
 **Environment note:** `cbor2` (a transitive dep of `daphne`/`autobahn`) is pinned to `5.5.0` in
 `requirements.txt` — later versions need a Rust compiler to build, which isn't available on this
@@ -54,7 +77,7 @@ daphne -b 0.0.0.0 -p 8001 bancostore.asgi:application   # ASGI/Channels (WebSock
 npm run dev                                             # dev assets (watch mode)
 npm run build                                           # build assets
 python manage.py migrate
-python manage.py seed_data                              # not yet implemented (Task 2+)
+python manage.py seed_roles                             # seed one stub user per role (DEBUG-only)
 pytest                                                  # full suite
 pytest -k commission                                    # single test / group (Task 12+)
 black . && isort . && ruff check .                      # format (run before every commit)
