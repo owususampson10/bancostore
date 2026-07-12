@@ -10,6 +10,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'assets/main.css' %}">
 <script src="{% static 'assets/main.js' %}" defer></script>
+<link rel="icon" type="image/svg+xml" href="{% static 'bancostore-brand/favicon/favicon.svg' %}">
+<link rel="apple-touch-icon" href="{% static 'bancostore-brand/app-icons/icon-180x180.svg' %}">
+<link rel="manifest" href="{% static 'bancostore-brand/app-icons/site.webmanifest' %}">
+<meta name="theme-color" content="#F5821F">
 </head>
 <body class="bg-surface text-on-surface font-body-md min-h-screen flex flex-col">
 <!-- Announcement Bar (from the Storefront Home Stitch screen, applied site-wide) -->
@@ -19,7 +23,9 @@
 <!-- Header (reconciled from the Storefront Home / Product Listing / Product Detail Stitch screens) -->
 <header class="sticky top-0 z-50 bg-surface border-b border-outline-variant">
 <nav class="flex justify-between items-center w-full px-margin-mobile md:px-16 py-4 max-w-[1440px] mx-auto">
-<a href="{% url 'catalog:home' %}" class="text-2xl font-bold text-on-surface">Bancostore</a>
+<a href="{% url 'catalog:home' %}">
+<img src="{% static 'bancostore-brand/logo/bancostore-logo-light.svg' %}" alt="Bancostore" class="h-9 w-auto">
+</a>
 <div class="hidden md:flex gap-8 items-center">
 <a href="{% url 'catalog:home' %}" class="{% block nav_home_class %}text-on-surface-variant hover:text-primary{% endblock %} text-xs font-bold uppercase tracking-widest transition-colors duration-200">Home</a>
 <a href="{% url 'catalog:product_list' %}" class="{% block nav_shop_class %}text-on-surface-variant hover:text-primary{% endblock %} text-xs font-bold uppercase tracking-widest transition-colors duration-200 pb-1">Shop</a>
@@ -49,7 +55,7 @@ shopping_cart
 <footer class="bg-inverse-surface py-16 md:py-24 w-full mt-auto">
 <div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 grid grid-cols-1 md:grid-cols-4 gap-8">
 <div class="space-y-4">
-<div class="text-2xl font-black text-surface">Bancostore</div>
+<img src="{% static 'bancostore-brand/logo/bancostore-logo-dark.svg' %}" alt="Bancostore" class="h-9 w-auto">
 <p class="text-sm text-inverse-on-surface/70 max-w-[240px]">Curating quality lifestyle and wellness products, and the opportunity to build a business selling them, for the modern Ghanaian consumer.</p>
 </div>
 <div class="space-y-4">

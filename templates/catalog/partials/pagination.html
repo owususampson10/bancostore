@@ -1,5 +1,4 @@
 {% load catalog_extras %}
-{% if oob or page_obj.paginator.num_pages > 1 %}
 <nav id="pagination-results"{% if oob %} hx-swap-oob="true"{% endif %} class="flex justify-center items-center mt-16 gap-2">
 {% if page_obj.paginator.num_pages > 1 %}
 {% if page_obj.has_previous %}
@@ -21,4 +20,3 @@
 {% endif %}
 {% endif %}
 </nav>
-{% endif %}

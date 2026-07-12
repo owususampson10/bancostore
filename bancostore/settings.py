@@ -336,10 +336,12 @@ USE_I18N = True
 USE_TZ = True
 
 
-# Static files — Vite-built assets land in static/dist (see vite.config.js)
-
+# Static files — Vite-built assets land in static/dist (see vite.config.js).
+# static/images holds hand-placed assets (logos, favicon, app icons) that
+# don't go through Vite — nothing imports/references them from main.js or
+# main.css, so Vite's bundler would never copy them into static/dist.
 STATIC_URL = "static/"
-STATICFILES_DIRS = [BASE_DIR / "static" / "dist"]
+STATICFILES_DIRS = [BASE_DIR / "static" / "dist", BASE_DIR / "static" / "images"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Uploaded files (Django FileField/ImageField + Pillow, local disk storage)

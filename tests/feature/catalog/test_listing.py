@@ -97,6 +97,27 @@ def test_page_two_preserves_active_filters(client, watches, perfumes):
 
 
 @pytest.mark.django_db
+def test_pagination_anchor_exists_even_with_a_single_page_of_results(client, watches):
+    """Regression test: the pagination nav used to only render (with its
+    id="pagination-results" anchor) when there was more than one page.
+    That meant landing directly on a single-page result (e.g. a narrow
+    search) left no element in the DOM for a later htmx out-of-band swap
+    to target — so if the user then cleared the filter and the result set
+    grew to multiple pages, the pagination controls silently never
+    appeared. Reproduced live in a real browser (search "Chrono" -> 1
+    result, no pagination anchor -> clear search -> 10 results across 2
+    pages -> #pagination-results still missing) before fixing. The anchor
+    must always be present, even empty, so the swap always has a target."""
+    _product(watches, name="Only Result")
+
+    response = client.get(reverse("catalog:product_list"))
+
+    content = response.content.decode()
+    assert response.context["page_obj"].paginator.num_pages == 1
+    assert 'id="pagination-results"' in content
+
+
+@pytest.mark.django_db
 def test_htmx_request_returns_partial_without_header_or_footer(client, watches):
     _product(watches, name="Any Product")
 

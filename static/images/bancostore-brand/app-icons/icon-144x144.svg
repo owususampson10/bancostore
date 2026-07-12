@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 144" width="144" height="144" role="img" aria-label="Bancostore app icon">
+  <rect width="144" height="144" rx="18" fill="#F5821F"/>
+  <!-- icon mark centred and scaled to size -->
+  <svg x="24" y="24" width="96" height="96" viewBox="0 0 120 120" fill="none">
+    <path d="M45 34 L60 18 L75 34" stroke="#FFFFFF" stroke-width="9.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="60" cy="65" r="26" stroke="#FFFFFF" stroke-width="11"/>
+    <circle cx="60" cy="65" r="8.5" fill="#FFFFFF"/>
+    <path d="M8 92 Q60 132 112 92" stroke="#FFFFFF" stroke-width="9.5" stroke-linecap="round"/>
+  </svg>
+</svg>
