@@ -156,6 +156,43 @@ def test_wrong_password_against_a_locked_account_does_not_reveal_lock_state():
     assert result.locked is False
 
 
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_failed_logins_do_not_lose_increments():
+    """Regression test: attempt_distributor_login used to read
+    distributor.failed_login_attempts, increment in memory, and save — a
+    classic lost-update race under real concurrent failed logins. Fire
+    MAX_FAILED_LOGIN_ATTEMPTS failed logins from separate threads/
+    connections simultaneously and confirm the account still ends up
+    locked with the exact right count, not undercounted."""
+    import threading
+
+    from django.db import connection
+
+    from apps.distributors.services import attempt_distributor_login
+
+    _create_verified_distributor()
+
+    def attempt():
+        try:
+            attempt_distributor_login("+233551234567", "WrongPassword!")
+        finally:
+            connection.close()
+
+    threads = [
+        threading.Thread(target=attempt)
+        for _ in range(config.MAX_FAILED_LOGIN_ATTEMPTS)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    distributor = Distributor.objects.get(phone_number="+233551234567")
+    assert distributor.failed_login_attempts == config.MAX_FAILED_LOGIN_ATTEMPTS
+    assert distributor.locked_until is not None
+    assert distributor.locked_until > timezone.now()
+
+
 @pytest.mark.django_db
 def test_correct_password_against_a_locked_account_still_reports_locked():
     from apps.distributors.services import attempt_distributor_login

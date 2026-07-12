@@ -1,3 +1,4 @@
+import threading
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -97,6 +98,40 @@ def test_n_failed_admin_logins_locks_the_account(client):
     # Even the correct password is rejected while locked.
     user = authenticate(username="admin@example.test", password="AdminPassw0rd!")
     assert user is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_failed_logins_do_not_lose_increments():
+    """Regression test: lock_admin_after_repeated_failures used to read
+    profile.failed_login_attempts, increment in memory, and save — a
+    classic lost-update race under real concurrent failed logins. Fire
+    MAX_FAILED_LOGIN_ATTEMPTS failed logins from separate threads/
+    connections simultaneously and confirm the account still ends up
+    locked with the exact right count, not undercounted."""
+    from django.contrib.auth import authenticate
+    from django.db import connection
+
+    _create_admin()
+
+    def attempt():
+        try:
+            authenticate(username="admin@example.test", password="WrongPassword!")
+        finally:
+            connection.close()
+
+    threads = [
+        threading.Thread(target=attempt)
+        for _ in range(config.MAX_FAILED_LOGIN_ATTEMPTS)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    profile = AdminProfile.objects.get(user__email="admin@example.test")
+    assert profile.failed_login_attempts == config.MAX_FAILED_LOGIN_ATTEMPTS
+    assert profile.locked_until is not None
+    assert profile.locked_until > timezone.now()
 
 
 @pytest.mark.django_db
