@@ -119,6 +119,11 @@ MIDDLEWARE = [
     "django_ratelimit.middleware.RatelimitMiddleware",
 ]
 
+# django-ratelimit's middleware requires this — without it, a rate-limited
+# request raises Ratelimited with no configured handler, itself crashing
+# with an AttributeError instead of returning a clean response.
+RATELIMIT_VIEW = "bancostore.views.ratelimited_view"
+
 if DEBUG:
     MIDDLEWARE += [
         "debug_toolbar.middleware.DebugToolbarMiddleware",

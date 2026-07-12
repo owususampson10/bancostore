@@ -19,16 +19,22 @@ bypass, `/silk/` being reachable with no authentication, and `DEBUG`/`SECRET_KEY
 fail-open. Everything below was deliberately deferred — logged here so it isn't lost, not because
 it's unimportant:
 
-- [ ] **No rate limiting anywhere**, despite `django-ratelimit` being installed and in
-  `MIDDLEWARE`. `apps/distributors/views.py::resend_otp` can trigger unlimited real SMS sends
-  (financial-abuse risk once a real `MNOTIFY_API_KEY` is live); no IP-level throttle exists on any
-  login endpoint on top of the per-account lockout, so an attacker can grief-lock any known
-  phone/email with 5 wrong guesses. Add `@ratelimit` to `register`, `resend_otp`,
-  `forgot_password`, `distributors:login`, and `AdminLoginView`'s auth step.
-- [ ] **Race condition in the failed-login-attempt counters** — `apps/accounts/signals.py` and
-  `apps/distributors/services.py` both do a non-atomic read-increment-save with no
-  `select_for_update()`/`F()` expression, so concurrent guesses can slip past
-  `MAX_FAILED_LOGIN_ATTEMPTS` before the lock engages.
+- [x] ~~No rate limiting anywhere~~ — **Fixed 2026-07-12.** `@ratelimit` (per-IP) added to
+  `register` (5/h), `resend_otp` (5/h), `forgot_password` (5/h), and `distributors:login` (20/m);
+  `AdminLoginView.post()` throttled the same way via `django_ratelimit.core.is_ratelimited()`
+  directly, since it's a class-based wizard view the decorator can't wrap. `RATELIMIT_VIEW`
+  (`bancostore/views.py::ratelimited_view`) added — without it the middleware itself would crash
+  on the first rate-limited request. Verified with real tests that fire past each limit and assert
+  a 429, not just that the decorator is present.
+- [x] ~~Race condition in the failed-login-attempt counters~~ — **Fixed 2026-07-12.** Both
+  `apps/accounts/signals.py` and `apps/distributors/services.py` reproduced a genuine lost-update
+  race with real multi-threaded tests before fixing (not just asserted as a risk). Fixed with
+  `select_for_update()` + a new shared `bancostore/concurrency.py::retry_on_lock_contention`
+  helper (third use of the pattern after Task 7's stock decrement — the threshold for extracting
+  it). The admin fix needed a second pass: `AdminProfile.objects.get_or_create()` was left outside
+  the retry-protected block on the first attempt, reasoning Django's own create-race handling was
+  enough — a 15-run flake-rate check (2/15 failures) proved that wrong before it shipped quietly
+  broken. 20/20 clean after folding it into the same retried block.
 - [x] ~~Admin login form leaks lock state before checking the password~~ — **Fixed 2026-07-11.**
   Reproduced live (curl comparison of locked+wrong-password vs. locked+correct-password vs.
   unlocked/nonexistent accounts) before fixing. Root cause existed identically in

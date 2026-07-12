@@ -302,3 +302,24 @@ def test_admin_authentication_form_succeeds_for_a_correct_unlocked_login():
 
     assert form.is_valid() is True
     assert form.locked is False
+
+
+@pytest.mark.django_db
+def test_admin_login_is_rate_limited_per_ip(client):
+    """Account-level lockout only protects one email at a time — an
+    attacker can spray guesses across many different admin emails from one
+    IP with no limit. Confirm the view itself throttles by IP."""
+    responses = []
+    for i in range(30):
+        responses.append(
+            client.post(
+                "/account/login/",
+                {
+                    "admin_login_view-current_step": "auth",
+                    "auth-username": f"admin{i}@example.test",
+                    "auth-password": "WrongPassword!",
+                },
+            )
+        )
+
+    assert any(r.status_code == 429 for r in responses)

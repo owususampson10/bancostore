@@ -279,3 +279,83 @@ def test_distributor_password_reset_via_otp(client):
 
     distributor.user.refresh_from_db()
     assert distributor.user.check_password("BrandNewPassw0rd!")
+
+
+@pytest.mark.django_db
+def test_resend_otp_is_rate_limited(client):
+    """resend_otp sends a real SMS on every call with no throttle — an
+    unlimited-resend endpoint is a direct SMS-cost DoS vector once a real
+    MNOTIFY_API_KEY is live. Confirm it stops sending past a per-IP limit
+    instead of accepting requests forever."""
+    session = client.session
+    session["otp_phone_number"] = "+233551234567"
+    session["otp_purpose"] = "registration"
+    session.save()
+
+    responses = []
+    for _ in range(10):
+        # The real UI submits this as a form POST
+        # (templates/distributors/verify_otp.html), not a bare GET.
+        responses.append(client.post(reverse("distributors:resend_otp")))
+
+    assert any(r.status_code == 429 for r in responses)
+    # Not every one of the 10 requests actually sent an SMS once the limit
+    # kicked in.
+    assert len(fake_outbox) < 10
+
+
+@pytest.mark.django_db
+def test_register_is_rate_limited_per_ip(client):
+    responses = []
+    for i in range(10):
+        responses.append(
+            client.post(
+                reverse("distributors:register"),
+                {
+                    "phone_number": f"+23355001{i:04d}",
+                    "email": f"dist{i}@example.test",
+                    "password1": "S3cure-Passw0rd!",
+                    "password2": "S3cure-Passw0rd!",
+                    "terms_accepted": "on",
+                },
+            )
+        )
+
+    assert any(r.status_code == 429 for r in responses)
+
+
+@pytest.mark.django_db
+def test_forgot_password_is_rate_limited_per_ip(client):
+    _create_verified_distributor()
+
+    responses = []
+    for _ in range(10):
+        responses.append(
+            client.post(
+                reverse("distributors:forgot_password"),
+                {"phone_number": "+233551234567"},
+            )
+        )
+
+    assert any(r.status_code == 429 for r in responses)
+
+
+@pytest.mark.django_db
+def test_distributor_login_is_rate_limited_per_ip(client):
+    """Account-level lockout only protects one phone number at a time — an
+    attacker can spray guesses across many different phone numbers from one
+    IP with no limit. Confirm the view itself throttles by IP well before
+    it would take to brute-force even a handful of distinct accounts."""
+    responses = []
+    for i in range(30):
+        responses.append(
+            client.post(
+                reverse("distributors:login"),
+                {
+                    "phone_number": f"+23355000{i:04d}",
+                    "password": "WrongPassword!",
+                },
+            )
+        )
+
+    assert any(r.status_code == 429 for r in responses)

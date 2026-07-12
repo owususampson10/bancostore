@@ -8,6 +8,8 @@ from django.contrib.auth.models import Group
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
+from django_ratelimit.decorators import ratelimit
+
 from apps.notifications.otp import generate_otp, verify_otp
 
 from .forms import (
@@ -25,6 +27,7 @@ User = get_user_model()
 AUTH_BACKEND = "apps.distributors.backends.PhoneNumberBackend"
 
 
+@ratelimit(key="ip", rate="5/h", method="POST")
 def register(request):
     if request.method == "POST":
         form = DistributorRegistrationForm(request.POST)
@@ -84,6 +87,7 @@ def verify_otp_view(request):
     )
 
 
+@ratelimit(key="ip", rate="5/h")
 def resend_otp(request):
     phone_number = request.session.get("otp_phone_number")
     purpose = request.session.get("otp_purpose")
@@ -92,6 +96,7 @@ def resend_otp(request):
     return redirect("distributors:verify_otp")
 
 
+@ratelimit(key="ip", rate="20/m", method="POST")
 def login_view(request):
     form = DistributorLoginForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -125,6 +130,7 @@ def logout_view(request):
     return redirect("distributors:login")
 
 
+@ratelimit(key="ip", rate="5/h", method="POST")
 def forgot_password(request):
     form = DistributorForgotPasswordForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
