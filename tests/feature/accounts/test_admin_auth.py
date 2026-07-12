@@ -323,3 +323,43 @@ def test_admin_login_is_rate_limited_per_ip(client):
         )
 
     assert any(r.status_code == 429 for r in responses)
+
+
+@pytest.mark.django_db
+def test_email_backend_does_not_check_lock_state_before_the_password():
+    """Regression test: EmailBackend.authenticate() used to check
+    profile.locked_until BEFORE user.check_password() — a locked account
+    would raise PermissionDenied (skipping the slow password-hash check
+    entirely) for ANY submitted password, while an unlocked account always
+    ran the full hash check. That's a measurable timing side-channel that
+    leaks "this account is currently locked" to a caller who doesn't know
+    the real password — reopening, one layer under the form, exactly what
+    AdminAuthenticationForm.clean() was rewritten to close. A wrong
+    password against a locked account must behave identically (return
+    None, no exception) to a wrong password against an unlocked one."""
+    from django.core.exceptions import PermissionDenied
+
+    from apps.accounts.backends import EmailBackend
+
+    user = _create_admin()
+    AdminProfile.objects.create(
+        user=user,
+        failed_login_attempts=config.MAX_FAILED_LOGIN_ATTEMPTS,
+        locked_until=timezone.now() + timedelta(minutes=30),
+    )
+
+    backend = EmailBackend()
+
+    # Wrong password against a locked account: must NOT raise — that would
+    # mean the lock check ran (and won) before the password check.
+    result = backend.authenticate(
+        request=None, username="admin@example.test", password="WrongPassword!"
+    )
+    assert result is None
+
+    # Correct password against a locked account: only now should the lock
+    # be enforced.
+    with pytest.raises(PermissionDenied):
+        backend.authenticate(
+            request=None, username="admin@example.test", password="AdminPassw0rd!"
+        )

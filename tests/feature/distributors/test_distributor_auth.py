@@ -305,6 +305,43 @@ def test_resend_otp_is_rate_limited(client):
 
 
 @pytest.mark.django_db
+def test_resend_otp_rejects_get_and_does_not_send_sms(client):
+    """resend_otp has a real side effect (a billed SMS send) but used to
+    accept any HTTP method — a bare GET bypasses Django's CSRF check
+    entirely (CSRF only applies to state-changing methods), so something
+    as simple as an <img> tag could trigger a send while a victim had an
+    in-progress OTP flow."""
+    session = client.session
+    session["otp_phone_number"] = "+233551234567"
+    session["otp_purpose"] = "registration"
+    session.save()
+
+    response = client.get(reverse("distributors:resend_otp"))
+
+    assert response.status_code == 405
+    assert not fake_outbox
+
+
+@pytest.mark.django_db
+def test_verify_otp_is_rate_limited_per_ip(client):
+    """verify_otp_view is where OTP guesses actually land — it had no
+    throttle at all while its siblings (register, resend_otp,
+    forgot_password, login) all did."""
+    session = client.session
+    session["otp_phone_number"] = "+233551234567"
+    session["otp_purpose"] = "registration"
+    session.save()
+
+    responses = []
+    for _ in range(30):
+        responses.append(
+            client.post(reverse("distributors:verify_otp"), {"code": "000000"})
+        )
+
+    assert any(r.status_code == 429 for r in responses)
+
+
+@pytest.mark.django_db
 def test_register_is_rate_limited_per_ip(client):
     responses = []
     for i in range(10):

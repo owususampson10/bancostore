@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import Group
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from django_ratelimit.decorators import ratelimit
 
@@ -52,6 +53,7 @@ def register(request):
     return render(request, "distributors/register.html", {"form": form})
 
 
+@ratelimit(key="ip", rate="10/m", method="POST")
 def verify_otp_view(request):
     phone_number = request.session.get("otp_phone_number")
     purpose = request.session.get("otp_purpose")
@@ -87,8 +89,14 @@ def verify_otp_view(request):
     )
 
 
-@ratelimit(key="ip", rate="5/h")
+@require_POST
+@ratelimit(key="ip", rate="5/h", method="POST")
 def resend_otp(request):
+    # require_POST closes a real gap: this view has a side effect (a real,
+    # billed SMS send) but previously accepted any method — a bare GET
+    # bypasses Django's CSRF check entirely (CSRF only applies to
+    # state-changing methods), so an <img> tag or similar could trigger a
+    # send while a victim had an in-progress OTP flow.
     phone_number = request.session.get("otp_phone_number")
     purpose = request.session.get("otp_purpose")
     if phone_number and purpose:

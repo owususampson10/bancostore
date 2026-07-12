@@ -90,3 +90,40 @@ def test_verify_otp_only_matches_the_right_purpose():
         verify_otp("+233241234567", purpose="password_reset", submitted_code=otp.code)
         is False
     )
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_wrong_guesses_do_not_exceed_max_attempts():
+    """Regression test: otp.attempts was read, incremented in memory, and
+    saved with no locking — the same lost-update race already fixed for
+    admin/distributor login counters and stock decrement, just missed here.
+    Fire more concurrent wrong guesses than OTP_MAX_ATTEMPTS allows and
+    confirm the recorded attempt count is exact, not undercounted from
+    lost increments."""
+    import threading
+
+    from django.db import connection
+
+    from apps.notifications.models import OTPCode
+
+    generate_otp("+233241234567", purpose="registration")
+
+    def guess():
+        try:
+            verify_otp("+233241234567", purpose="registration", submitted_code="000000")
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=guess) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    otp = OTPCode.objects.get(phone_number="+233241234567", purpose="registration")
+    # With real locking, each of the 10 concurrent guesses is serialized:
+    # the first OTP_MAX_ATTEMPTS see the cap not yet reached and increment;
+    # the rest see it already reached and bail without incrementing. A lost
+    # -update race would let more than OTP_MAX_ATTEMPTS guesses each read a
+    # stale count and increment past the intended cap.
+    assert otp.attempts == config.OTP_MAX_ATTEMPTS

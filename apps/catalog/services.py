@@ -1,6 +1,9 @@
 from django.db import transaction
 
-from bancostore.concurrency import retry_on_lock_contention
+from bancostore.concurrency import (
+    retry_on_lock_contention,
+    select_for_update_nowait_if_supported,
+)
 
 from .models import Product
 
@@ -15,14 +18,17 @@ def decrement_stock(product: Product, quantity: int = 1) -> Product:
     (Phase 6) will call this from within its own transaction once it
     exists. select_for_update() still matters even at this basic scope:
     two concurrent purchases of the last unit in stock must not both
-    succeed. See bancostore/concurrency.py for why retry_on_lock_contention
-    is needed on top of select_for_update() alone."""
+    succeed. See bancostore/concurrency.py for why
+    retry_on_lock_contention/select_for_update_nowait_if_supported are
+    needed on top of select_for_update() alone."""
     if quantity < 1:
         raise ValueError("quantity must be at least 1")
 
     def _attempt():
         with transaction.atomic():
-            locked_product = Product.objects.select_for_update().get(pk=product.pk)
+            locked_product = select_for_update_nowait_if_supported(Product.objects).get(
+                pk=product.pk
+            )
             if locked_product.stock < quantity:
                 raise InsufficientStockError(
                     f"Cannot decrement {quantity} from stock of "

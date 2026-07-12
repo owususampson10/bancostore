@@ -1,6 +1,7 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from apps.distributors.models import Distributor
 
@@ -29,6 +30,11 @@ class Command(BaseCommand):
     )
 
     def handle(self, *args, **options):
+        if not settings.DEBUG:
+            raise CommandError(
+                "seed_roles creates a hardcoded-password admin account — "
+                "refusing to run outside DEBUG (local dev only)."
+            )
         for role, fields in STUB_USERS.items():
             group, _ = Group.objects.get_or_create(name=role)
 

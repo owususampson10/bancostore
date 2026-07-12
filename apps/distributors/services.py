@@ -8,7 +8,10 @@ from django.utils import timezone
 
 from constance import config
 
-from bancostore.concurrency import retry_on_lock_contention
+from bancostore.concurrency import (
+    retry_on_lock_contention,
+    select_for_update_nowait_if_supported,
+)
 
 from .models import Distributor
 
@@ -64,7 +67,9 @@ def attempt_distributor_login(phone_number: str, password: str) -> LoginAttempt:
 
         def _record_failure():
             with transaction.atomic():
-                locked = Distributor.objects.select_for_update().get(pk=distributor.pk)
+                locked = select_for_update_nowait_if_supported(Distributor.objects).get(
+                    pk=distributor.pk
+                )
                 lock_now = timezone.now()
                 if locked.locked_until and locked.locked_until <= lock_now:
                     # Lock had expired since the initial fetch — fresh
@@ -88,7 +93,9 @@ def attempt_distributor_login(phone_number: str, password: str) -> LoginAttempt:
 
     def _record_success():
         with transaction.atomic():
-            locked = Distributor.objects.select_for_update().get(pk=distributor.pk)
+            locked = select_for_update_nowait_if_supported(Distributor.objects).get(
+                pk=distributor.pk
+            )
             locked.failed_login_attempts = 0
             locked.locked_until = None
             locked.save(update_fields=["failed_login_attempts", "locked_until"])

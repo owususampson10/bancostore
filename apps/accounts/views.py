@@ -18,7 +18,16 @@ class AdminLoginView(BaseLoginView):
     only protects one email at a time — an attacker can spray guesses
     across many different admin emails from one IP with no limit at all.
     is_ratelimited() is used directly (not the @ratelimit decorator, which
-    only wraps function views) to throttle every POST to this view by IP."""
+    only wraps function views) to throttle the 'auth' step by IP,
+    specifically — a tight limit here, since admin is the highest-value
+    target on the platform with the lowest legitimate traffic of the three
+    roles (unlike the public register/login endpoints, which need a more
+    generous limit for real user volume). The 'token'/'backup' steps are
+    NOT throttled the same way: they only matter to a caller who has
+    already supplied a correct password for one specific account, so they
+    aren't useful for spraying guesses across different admin emails —
+    throttling them here too would just risk blocking a legitimate admin
+    mistyping their 2FA code a few times in one sitting."""
 
     form_list = (
         (BaseLoginView.AUTH_STEP, AdminAuthenticationForm),
@@ -27,11 +36,14 @@ class AdminLoginView(BaseLoginView):
     )
 
     def post(self, request, *args, **kwargs):
-        if is_ratelimited(
+        is_auth_step = (
+            request.POST.get("admin_login_view-current_step") == self.AUTH_STEP
+        )
+        if is_auth_step and is_ratelimited(
             request,
-            group="admin_login",
+            group="admin_login_auth_step",
             key="ip",
-            rate="20/m",
+            rate="5/m",
             method="POST",
             increment=True,
         ):

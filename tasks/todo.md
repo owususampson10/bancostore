@@ -53,19 +53,102 @@ it's unimportant:
   `GOOGLE_LOGIN_DISTRIBUTORS_ENABLED` (Google button visibility is actually driven by whether a
   `SocialApp` row exists, not this flag). Either wire these into real enforcement or mark them
   "not yet enforced" in the fieldset help text.
-- [ ] `apps/accounts/management/commands/seed_roles.py` creates a hardcoded-password
-  (`bancostore-dev-only`) `is_staff=True` account with no guard against running in a non-DEBUG
-  environment.
-- [ ] `apps/notifications/otp.py` compares OTP codes with `!=` instead of
-  `secrets.compare_digest()` — low priority alone (capped at `OTP_MAX_ATTEMPTS`), but cheap to fix
-  alongside the rate-limiting item above.
+- [x] ~~`seed_roles` has no guard against running in a non-DEBUG environment~~ — **Fixed
+  2026-07-12.** Raises `CommandError` outside `DEBUG`. Existing tests updated to force
+  `settings.DEBUG = True` (matching CI's deliberate `DEBUG=False`), new test confirms the guard
+  actually blocks the command and creates no stub account when `DEBUG=False`.
+- [x] ~~OTP codes compared with `!=` instead of `secrets.compare_digest()`~~ — **Fixed 2026-07-12**,
+  bundled with the OTP concurrency fix below since it touched the same line.
 - [ ] No production security headers configured yet (`SESSION_COOKIE_SECURE`,
   `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`) — not exploitable until
   something is actually deployed (Task 24), but should be added as an `if not DEBUG:` block before
-  go-live rather than forgotten.
+  go-live rather than forgotten. **Fix together with the proxy-IP-trust item below** — both need
+  the exact same "trust exactly one hop from Nginx" care and are easy to get subtly wrong
+  (`SECURE_PROXY_SSL_HEADER` trusting a header an external client can also set is the same class of
+  mistake as the rate-limit IP key doing the same).
 - [ ] `DEFAULT_FROM_EMAIL` uses the reserved `.test` TLD — fine for dev, must be swapped to a real
   deliverable domain (with SPF/DKIM) before production or reset/lockout emails may bounce or land
   in spam.
+
+## Known issues — round 2 (fresh code-review + security audit of Tasks 1-7, 2026-07-12)
+
+Both subagents ran again after the round-1 fixes above landed, specifically to catch anything the
+first pass missed and to review Task 7 (catalog) fresh. All Critical/High findings below were
+fixed the same day; two need real deployment context to fix correctly and are tracked instead of
+guessed at.
+
+- [x] ~~OTP attempts counter had the same lost-update race as the login counters~~ — **Fixed
+  2026-07-12.** The 4th spot the "comprehensive" round-1 fix actually missed —
+  `apps/notifications/otp.py::verify_otp` read `otp.attempts`, incremented in memory, and saved
+  with no locking. Fixed with the same `select_for_update()` +
+  `retry_on_lock_contention()` pattern; a real multi-threaded test (10 concurrent wrong guesses
+  against `OTP_MAX_ATTEMPTS=3`) reproduced the race first (only 1 of 10 attempts got recorded),
+  confirmed the fix caps the count at exactly 3, stable across 15 repeated runs. Also switched the
+  code comparison to `secrets.compare_digest()` while in the same function.
+- [x] ~~`verify_otp_view` had no rate limiting~~ — **Fixed 2026-07-12.** Its siblings
+  (`register`/`resend_otp`/`forgot_password`/`login_view`) all got `@ratelimit` in round 1; this
+  one — the endpoint that actually receives OTP guesses — didn't. Added `10/m` per IP.
+- [x] ~~`resend_otp` accepted any HTTP method, so a bare GET triggered a real (billed) SMS send~~ —
+  **Fixed 2026-07-12.** GET requests bypass Django's CSRF check entirely (CSRF only applies to
+  state-changing methods), so this was triggerable via something as simple as an `<img>` tag while
+  a victim had an in-progress OTP flow. Added `@require_POST`; new test confirms GET now returns
+  405 and sends no SMS.
+- [x] ~~`EmailBackend.authenticate()` re-leaked lock state via a timing side-channel~~ — **Fixed
+  2026-07-12.** The round-1 fix closed the *message*-level leak in
+  `AdminAuthenticationForm.clean()`, but `EmailBackend` itself still checked `locked_until` before
+  `check_password()` one layer underneath — a locked account skipped the slow password-hash
+  comparison entirely for any submitted password, while an unlocked account always paid that cost.
+  A sophisticated attacker measuring response times could still statistically distinguish the two.
+  Reordered to check the password first, matching the pattern used everywhere else. Regression test
+  asserts the backend behaves identically (returns `None`, no exception) for a wrong password
+  whether the account is locked or not.
+- [x] ~~`retry_on_lock_contention` could itself become a denial-of-service vector~~ — **Fixed
+  2026-07-12.** MySQL's default `innodb_lock_wait_timeout` is 50 seconds — `select_for_update()`
+  without `NOWAIT` blocks the calling thread for up to that long *before* the retry loop's own
+  error handling even engages, and the loop retries up to 10 times. A handful of concurrent
+  requests against the same row (e.g. several people submitting the same wrong password
+  simultaneously) could tie up a disproportionate share of the site's limited worker pool for
+  minutes. Added `select_for_update_nowait_if_supported()` — uses `NOWAIT` on backends that support
+  it (MySQL/Postgres) so contention fails immediately instead of blocking; falls back to plain
+  `select_for_update()` on SQLite, which doesn't support `NOWAIT` at all (Django raises
+  `NotSupportedError` if you pass `nowait=True` there — confirmed by reading Django's compiler
+  source before implementing, not assumed). All three call sites (stock decrement, admin lockout,
+  distributor lockout, OTP attempts) updated. The MySQL-specific behavior can only be fully
+  verified in CI (no local MySQL on this machine) — pushed and confirmed via the real `mysql:8` CI
+  service container, not just asserted from reading documentation.
+- [x] ~~Admin login rate limit was as loose as the public endpoints~~ — **Fixed 2026-07-12.**
+  `AdminLoginView`'s `20/m` matched public distributor register/login despite admin being the
+  highest-value target with the lowest legitimate traffic of the three roles. Tightened to `5/m`,
+  scoped specifically to the wizard's `auth` step (not the 2FA token/backup steps, which aren't
+  useful for spraying guesses across different admin emails and shouldn't risk blocking a
+  legitimate admin mistyping their code a few times).
+- [ ] **Rate limiting (and the future `SECURE_PROXY_SSL_HEADER` header work above) will collapse
+  into a single shared bucket — or become spoofable — once this sits behind Hostinger's Nginx.**
+  `key="ip"` resolves via `request.META['REMOTE_ADDR']`, which is identical for every visitor once
+  a reverse proxy sits in front (Nginx's own connection, not the real client's). Two failure modes:
+  everyone shares one rate-limit bucket (a single confused user could trip it for the whole site),
+  or — if `X-Forwarded-For` is ever naively trusted without restricting to exactly one hop from
+  Nginx — an attacker can spoof a fresh IP per request and bypass rate limiting entirely. Needs the
+  real Nginx config to fix correctly (set `X-Real-IP`/`X-Forwarded-For` in Nginx, then configure
+  `RATELIMIT_IP_META_KEY` to trust exactly that one hop) — tracked for Task 24, not guessed at now.
+- [ ] **`PAYSTACK_SECRET_KEY` (and the rest of the payment-gateway constance settings) will be
+  stored in plaintext in the database** once Paystack integration is built (still an open SPEC.md
+  question) — `django-cryptography` is in `requirements.txt` specifically for this per SPEC.md Tech
+  Stack, but isn't wired up anywhere yet. Not exploitable today (the field is empty, no Paystack
+  code exists), but easy to ship silently once that work lands since the admin-panel scaffolding
+  already looks "done." Add `CONSTANCE_ADDITIONAL_FIELDS` with an encrypted field type (or move it
+  to an environment variable like `MNOTIFY_API_KEY`/`EMAIL_HOST_PASSWORD` already are) when Paystack
+  work starts, not after.
+- [ ] `SESSION_ENGINE = "django.contrib.sessions.backends.cache"` has no DB fallback
+  (`cached_db`) — any Redis eviction/restart logs out every user platform-wide, including admin's
+  mandatory-2FA state. Worth a documented mitigation before go-live.
+- [ ] Distributor registration reveals phone-number existence (`apps/distributors/forms.py`'s
+  uniqueness check) while password-reset deliberately doesn't — a minor, largely unavoidable
+  enumeration inconsistency. Low priority; document as an accepted tradeoff or align both flows.
+- [ ] CI hygiene, not urgent: `.github/workflows/ci.yml` has no explicit `permissions:` block
+  (defaults to broader `GITHUB_TOKEN` scope than needed), `actions/checkout@v4` is pinned to a
+  mutable tag rather than a commit SHA, and there's no dependency vulnerability scan step
+  (`pip-audit`/`safety`) yet — cheap to add now while the dependency set is still small.
 
 ---
 

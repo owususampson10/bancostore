@@ -9,7 +9,10 @@ from django.utils import timezone
 
 from constance import config
 
-from bancostore.concurrency import retry_on_lock_contention
+from bancostore.concurrency import (
+    retry_on_lock_contention,
+    select_for_update_nowait_if_supported,
+)
 
 from .models import AdminProfile
 
@@ -50,7 +53,9 @@ def lock_admin_after_repeated_failures(sender, credentials, request=None, **kwar
         nonlocal should_alert
         with transaction.atomic():
             AdminProfile.objects.get_or_create(user=user)
-            profile = AdminProfile.objects.select_for_update().get(user=user)
+            profile = select_for_update_nowait_if_supported(AdminProfile.objects).get(
+                user=user
+            )
             now = timezone.now()
 
             if profile.locked_until and profile.locked_until > now:

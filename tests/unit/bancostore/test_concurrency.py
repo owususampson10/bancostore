@@ -1,8 +1,12 @@
+from django.contrib.auth.models import Group
 from django.db import OperationalError
 
 import pytest
 
-from bancostore.concurrency import retry_on_lock_contention
+from bancostore.concurrency import (
+    retry_on_lock_contention,
+    select_for_update_nowait_if_supported,
+)
 
 
 def test_returns_the_function_result_on_first_success():
@@ -70,3 +74,31 @@ def test_a_non_operational_exception_propagates_immediately_without_retrying():
         retry_on_lock_contention(business_error, max_retries=5, backoff_seconds=0)
 
     assert len(calls) == 1
+
+
+@pytest.mark.django_db
+def test_uses_nowait_when_the_backend_supports_it(monkeypatch):
+    from django.db import connection
+
+    monkeypatch.setattr(
+        connection.features, "has_select_for_update_nowait", True, raising=False
+    )
+    Group.objects.create(name="test-group")
+
+    qs = select_for_update_nowait_if_supported(Group.objects)
+
+    assert qs.query.select_for_update_nowait is True
+
+
+@pytest.mark.django_db
+def test_does_not_use_nowait_when_the_backend_does_not_support_it(monkeypatch):
+    from django.db import connection
+
+    monkeypatch.setattr(
+        connection.features, "has_select_for_update_nowait", False, raising=False
+    )
+    Group.objects.create(name="test-group")
+
+    qs = select_for_update_nowait_if_supported(Group.objects)
+
+    assert qs.query.select_for_update_nowait is False
