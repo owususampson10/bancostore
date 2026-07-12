@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Real MySQL, not SQLite — this is the whole point of this workflow.
+    # SQLite silently drops SELECT ... FOR UPDATE locking clauses
+    # (connection.features.has_select_for_update is False), so any
+    # concurrency-sensitive code (stock decrements now, PV
+    # ledger/wallet/commission code later) is unverified against SQLite no
+    # matter how many local tests pass. See tasks/todo.md Task 7 notes for
+    # the real bug this exact gap caused.
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: bancostore_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      # Not a real secret — CI never touches production data, this only
+      # needs to satisfy the fail-closed check in bancostore/settings.py
+      # (refuses to start outside DEBUG with the insecure placeholder key).
+      SECRET_KEY: ci-only-dummy-secret-key-never-used-in-production
+      DEBUG: "False"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/bancostore_test
+      REDIS_URL: redis://127.0.0.1:6379/0
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 30); do
+            mysqladmin ping -h 127.0.0.1 -P 3306 -u root -proot --silent && break
+            sleep 1
+          done
+
+      - name: Check for missing migrations
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Run migrations
+        run: python manage.py migrate
+
+      - name: Django system checks
+        run: python manage.py check
+
+      - name: Lint (black, isort, ruff)
+        run: |
+          black --check .
+          isort --check .
+          ruff check .
+
+      - name: Run tests
+        run: pytest -q
