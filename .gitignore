@@ -1,6 +1,10 @@
 # macOS
 .DS_Store
 
+# Claude Code hook runtime state (not configuration — .claude/settings.json
+# and .claude/hooks/ themselves ARE committed)
+.claude/.skill-marker
+
 # Original requirement docs (not tracked in git)
 docs/
 
