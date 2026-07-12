@@ -1,0 +1,24 @@
+{% load catalog_extras %}
+{% if oob or page_obj.paginator.num_pages > 1 %}
+<nav id="pagination-results"{% if oob %} hx-swap-oob="true"{% endif %} class="flex justify-center items-center mt-16 gap-2">
+{% if page_obj.paginator.num_pages > 1 %}
+{% if page_obj.has_previous %}
+<a href="{{ querystring_no_page|page_url:page_obj.previous_page_number }}" hx-get="{{ querystring_no_page|page_url:page_obj.previous_page_number }}" hx-target="#product-results" hx-swap="outerHTML" hx-push-url="true" class="w-10 h-10 flex items-center justify-center rounded-full border border-outline-variant text-on-surface hover:bg-surface-container transition-all">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</a>
+{% endif %}
+{% for num in page_obj.paginator.page_range %}
+{% if num == page_obj.number %}
+<span class="w-10 h-10 flex items-center justify-center rounded-full bg-primary text-on-primary font-bold">{{ num }}</span>
+{% else %}
+<a href="{{ querystring_no_page|page_url:num }}" hx-get="{{ querystring_no_page|page_url:num }}" hx-target="#product-results" hx-swap="outerHTML" hx-push-url="true" class="w-10 h-10 flex items-center justify-center rounded-full text-on-surface hover:bg-surface-container transition-all">{{ num }}</a>
+{% endif %}
+{% endfor %}
+{% if page_obj.has_next %}
+<a href="{{ querystring_no_page|page_url:page_obj.next_page_number }}" hx-get="{{ querystring_no_page|page_url:page_obj.next_page_number }}" hx-target="#product-results" hx-swap="outerHTML" hx-push-url="true" class="w-10 h-10 flex items-center justify-center rounded-full border border-outline-variant text-on-surface hover:bg-surface-container transition-all">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</a>
+{% endif %}
+{% endif %}
+</nav>
+{% endif %}

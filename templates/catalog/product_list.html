@@ -1,0 +1,78 @@
+{% extends "base_store.html" %}
+{% load static %}
+
+{% block title %}Shop All Products | Bancostore{% endblock %}
+{% block nav_shop_class %}text-primary border-b-2 border-primary font-bold{% endblock %}
+
+{% block content %}
+<section class="bg-surface-container-low py-8">
+<div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16">
+<nav class="mb-2 text-xs font-bold uppercase tracking-widest text-gray-600 flex items-center gap-2">
+<a href="{% url 'catalog:home' %}" class="hover:text-primary">Home</a>
+<span class="opacity-50">/</span>
+<span class="text-on-surface">Shop</span>
+</nav>
+<h1 class="text-3xl md:text-4xl font-bold">Shop All Products</h1>
+</div>
+</section>
+
+<form
+  id="filter-form"
+  hx-get="{% url 'catalog:product_list' %}"
+  hx-target="#product-results"
+  hx-swap="outerHTML"
+  hx-push-url="true"
+  hx-trigger="change, submit, keyup changed delay:500ms from:#search-input"
+  class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 py-8"
+>
+<div class="flex flex-col md:flex-row gap-8">
+<aside class="w-full md:w-1/4 space-y-8">
+<div class="space-y-2">
+<h3 class="text-xs font-bold uppercase tracking-widest mb-4">Search</h3>
+<div class="relative">
+<input id="search-input" type="text" name="q" value="{{ query }}" placeholder="Search products…" class="w-full rounded-full border border-outline-variant bg-surface px-5 py-3 pr-12 focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all">
+<span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">search</span>
+</div>
+</div>
+
+<div class="space-y-2">
+<h3 class="text-xs font-bold uppercase tracking-widest mb-4">Category</h3>
+<ul class="space-y-2">
+<li>
+<label class="block cursor-pointer">
+<input type="radio" name="category" value="" class="hidden peer" {% if not category_slug %}checked{% endif %}>
+<span class="peer-checked:bg-primary peer-checked:text-on-primary block w-full text-left px-4 py-2 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors">All Products</span>
+</label>
+</li>
+{% for cat in categories %}
+<li>
+<label class="block cursor-pointer">
+<input type="radio" name="category" value="{{ cat.slug }}" class="hidden peer" {% if category_slug == cat.slug %}checked{% endif %}>
+<span class="peer-checked:bg-primary peer-checked:text-on-primary block w-full text-left px-4 py-2 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors">{{ cat.name }}</span>
+</label>
+</li>
+{% endfor %}
+</ul>
+</div>
+
+<div class="space-y-2">
+<h3 class="text-xs font-bold uppercase tracking-widest mb-4">Price (GHS)</h3>
+<div class="grid grid-cols-2 gap-2">
+<input type="number" name="min_price" value="{{ min_price }}" placeholder="Min" class="w-full rounded-full border border-outline-variant bg-surface px-4 py-2 focus:ring-1 focus:ring-primary focus:border-primary outline-none">
+<input type="number" name="max_price" value="{{ max_price }}" placeholder="Max" class="w-full rounded-full border border-outline-variant bg-surface px-4 py-2 focus:ring-1 focus:ring-primary focus:border-primary outline-none">
+</div>
+<button type="submit" class="w-full mt-2 bg-inverse-surface text-inverse-on-surface py-2 rounded-full text-sm font-bold hover:opacity-90 transition-all uppercase tracking-widest">Apply Filter</button>
+</div>
+
+<div class="pt-4 border-t border-surface-variant">
+<a href="{% url 'catalog:product_list' %}" class="text-primary text-xs font-bold underline underline-offset-4 uppercase">Clear all filters</a>
+</div>
+</aside>
+
+<div class="w-full md:w-3/4">
+{% include "catalog/partials/product_grid.html" %}
+</div>
+</div>
+{% include "catalog/partials/pagination.html" %}
+</form>
+{% endblock %}

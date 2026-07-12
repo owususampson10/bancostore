@@ -16,12 +16,35 @@ MAX_IMAGE_DIMENSION = 1600
 WEBP_QUALITY = 85
 
 
+def _resize_and_convert_to_webp(image_field):
+    """Shared by ProductImage and Category.image — every freshly-uploaded
+    photo is resized and converted to WebP in-process (Django Admin's file
+    widget has no async processing step of its own)."""
+    img = Image.open(image_field)
+    img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION))
+    if img.mode not in ("RGB", "RGBA"):
+        img = img.convert("RGB")
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="WEBP", quality=WEBP_QUALITY)
+    buffer.seek(0)
+
+    original_stem = Path(image_field.name).stem
+    return ContentFile(buffer.read(), name=f"{original_stem}.webp")
+
+
 class Category(models.Model):
     """Product categories (Watches, Jewellery, Perfumes, etc.) — admin-managed
     via Django Admin so new categories can be added without code changes."""
 
     name = models.CharField(max_length=100, unique=True)
     slug = models.SlugField(max_length=100, unique=True, blank=True)
+    image = models.ImageField(
+        upload_to="categories/",
+        blank=True,
+        help_text="Shown on the storefront's category tile (Task 8). Optional — "
+        "categories without one render as a plain text tile.",
+    )
 
     class Meta:
         verbose_name_plural = "categories"
@@ -33,7 +56,26 @@ class Category(models.Model):
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = slugify(self.name)
+        # Same freshly-uploaded-vs-already-saved guard as ProductImage below
+        # — avoids reprocessing (and double-compressing) on every unrelated
+        # field edit.
+        if self.image and isinstance(self.image.file, UploadedFile):
+            self.image = _resize_and_convert_to_webp(self.image)
         super().save(*args, **kwargs)
+
+
+class ProductQuerySet(models.QuerySet):
+    def storefront_visible(self):
+        """Only ever show active products publicly (Task 8) — every
+        storefront view needs this exact filter/select_related/
+        prefetch_related combination, so it's named once here rather than
+        repeated at each call site, where it would be easy to forget the
+        is_active=True filter on a new page."""
+        return (
+            self.filter(is_active=True)
+            .select_related("category")
+            .prefetch_related("images")
+        )
 
 
 class Product(models.Model):
@@ -41,6 +83,8 @@ class Product(models.Model):
     pv_value is the separate Point Value credited toward the binary tree
     only when a distributor buys it (Section 1.4), never for regular
     customer purchases."""
+
+    objects = ProductQuerySet.as_manager()
 
     name = models.CharField(max_length=200)
     slug = models.SlugField(max_length=200, unique=True, blank=True)
@@ -68,6 +112,18 @@ class Product(models.Model):
         if not self.slug:
             self.slug = slugify(self.name)
         super().save(*args, **kwargs)
+
+    @property
+    def primary_image(self):
+        """Task 8's storefront always shows the primary image first. Reads
+        from the already-prefetched `images` queryset (list()/iteration,
+        never .first()/.filter()) so this never adds an extra query on top
+        of a view's own prefetch_related("images")."""
+        images = list(self.images.all())
+        for image in images:
+            if image.is_primary:
+                return image
+        return images[0] if images else None
 
     @property
     def in_stock(self):
@@ -108,21 +164,8 @@ class ProductImage(models.Model):
         # which is NOT an UploadedFile. This avoids reprocessing (and
         # double-compressing) the image on every unrelated field edit.
         if self.image and isinstance(self.image.file, UploadedFile):
-            self._resize_and_convert_to_webp()
+            self.image = _resize_and_convert_to_webp(self.image)
         super().save(*args, **kwargs)
-
-    def _resize_and_convert_to_webp(self):
-        img = Image.open(self.image)
-        img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION))
-        if img.mode not in ("RGB", "RGBA"):
-            img = img.convert("RGB")
-
-        buffer = io.BytesIO()
-        img.save(buffer, format="WEBP", quality=WEBP_QUALITY)
-        buffer.seek(0)
-
-        original_stem = Path(self.image.name).stem
-        self.image = ContentFile(buffer.read(), name=f"{original_stem}.webp")
 
 
 class ProductVariant(models.Model):

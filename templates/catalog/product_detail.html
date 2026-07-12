@@ -1,0 +1,118 @@
+{% extends "base_store.html" %}
+{% load static humanize %}
+
+{% block title %}{{ product.name }} | Bancostore{% endblock %}
+{% block meta_description %}{{ product.description|truncatechars:150 }}{% endblock %}
+{% block nav_shop_class %}text-primary border-b-2 border-primary font-bold{% endblock %}
+
+{% block content %}
+<main class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 py-8">
+<nav class="mb-8 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-gray-600">
+<a href="{% url 'catalog:home' %}" class="hover:text-primary">Home</a>
+<span class="material-symbols-outlined text-[12px]">chevron_right</span>
+<a href="{% url 'catalog:product_list' %}" class="hover:text-primary">Shop</a>
+<span class="material-symbols-outlined text-[12px]">chevron_right</span>
+<a href="{% url 'catalog:product_list' %}?category={{ product.category.slug }}" class="hover:text-primary">{{ product.category.name }}</a>
+<span class="material-symbols-outlined text-[12px]">chevron_right</span>
+<span class="text-on-surface">{{ product.name }}</span>
+</nav>
+
+<div class="grid grid-cols-1 lg:grid-cols-[55fr_45fr] gap-8 lg:gap-16">
+<!-- Gallery -->
+<div class="flex flex-col gap-4">
+<div class="aspect-square bg-surface-variant rounded-lg overflow-hidden group">
+{% if product.primary_image %}
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src="{{ product.primary_image.image.url }}" alt="{{ product.name }}">
+{% endif %}
+</div>
+{% if product.images.all|length > 1 %}
+<div class="grid grid-cols-4 gap-4">
+{% for image in product.images.all %}
+<div class="aspect-square rounded-lg overflow-hidden bg-surface-variant{% if image == product.primary_image %} ring-2 ring-primary{% endif %} hover:opacity-80 transition-opacity">
+<img class="w-full h-full object-cover" src="{{ image.image.url }}" alt="{{ product.name }}">
+</div>
+{% endfor %}
+</div>
+{% endif %}
+</div>
+
+<!-- Product Info -->
+<div class="flex flex-col">
+<span class="text-xs font-bold uppercase tracking-[0.2em] text-gray-600 mb-2">{{ product.category.name }}</span>
+<h1 class="text-3xl font-bold mb-2">{{ product.name }}</h1>
+<div class="flex items-center gap-4 mb-6">
+<span class="text-2xl font-bold text-primary">GHS {{ product.price|intcomma }}</span>
+<span class="bg-primary-fixed text-on-primary-fixed-variant px-3 py-1 rounded-full text-[10px] font-bold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">stars</span>
+Earns {{ product.pv_value }} PV for distributors
+</span>
+</div>
+<div class="flex items-center gap-2 mb-8">
+{% if product.in_stock %}
+<div class="w-2 h-2 rounded-full bg-primary"></div>
+<span>In Stock</span>
+{% else %}
+<div class="w-2 h-2 rounded-full bg-gray-400"></div>
+<span class="text-gray-600">Out of Stock</span>
+{% endif %}
+</div>
+
+{% regroup product.variants.all by name as variant_groups %}
+{% if variant_groups %}
+<div class="space-y-6 mb-8">
+{% for group in variant_groups %}
+<div>
+<span class="text-xs font-bold uppercase tracking-widest block mb-3">{{ group.grouper }}</span>
+<div class="flex flex-wrap gap-3">
+{% for variant in group.list %}
+<span class="px-6 py-2 rounded-full border border-outline text-sm">{{ variant.value }}</span>
+{% endfor %}
+</div>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+
+<div class="mb-8">
+{% if product.in_stock %}
+<button type="button" disabled class="w-full bg-surface-variant text-gray-500 rounded-full py-4 px-8 font-semibold flex items-center justify-center gap-2 cursor-not-allowed">
+<span class="material-symbols-outlined">shopping_cart</span>
+Add to Cart — Coming Soon
+</button>
+{% else %}
+<span class="block text-center bg-surface-variant text-gray-600 rounded-full py-4 px-8 font-semibold">Out of Stock</span>
+{% endif %}
+</div>
+
+<div class="flex items-center gap-4 p-4 bg-surface-container-low rounded-lg border border-outline-variant">
+<span class="material-symbols-outlined text-primary">verified_user</span>
+<span class="text-sm text-gray-600">Secure checkout &middot; Delivery across Ghana or free pickup</span>
+</div>
+</div>
+</div>
+
+<!-- Description -->
+<section class="mt-16 max-w-3xl">
+<h2 class="text-2xl font-bold mb-6">Description</h2>
+<div class="space-y-4 text-gray-700 text-lg">
+{% if product.description %}
+<p>{{ product.description|linebreaksbr }}</p>
+{% else %}
+<p class="text-gray-500">No description available yet.</p>
+{% endif %}
+</div>
+</section>
+
+<!-- Related Products -->
+{% if related_products %}
+<section class="mt-16 mb-16">
+<h3 class="text-2xl font-bold mb-8">You may also like</h3>
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+{% for related_product in related_products %}
+{% include "catalog/partials/product_card.html" with product=related_product %}
+{% endfor %}
+</div>
+</section>
+{% endif %}
+</main>
+{% endblock %}

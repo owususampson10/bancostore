@@ -50,10 +50,12 @@ admin/customer/distributor stub users exist, settings values are readable from t
 
 ### Phase 2: Catalog & Storefront
 - [x] Task 7: Product model + Django Admin CRUD (photos, price, PV, category, variants, stock)
-- [ ] Task 8: Public storefront — home page, product listing/detail, search/filter/sort
+- [x] Task 8: Public storefront — home page, product listing/detail, search/filter/sort
+  (split 2026-07-12 into 8a: site shell + home, 8b: listing with HTMX search/filter/sort,
+  8c: product detail — see `tasks/todo.md`)
 
-**Checkpoint C:** admin adds a product in Django Admin; it appears correctly on the public
-storefront.
+**Checkpoint C — verified 2026-07-12:** admin adds a product in Django Admin; it appears correctly
+on the public storefront (home, listing with working search/filter/sort, detail page).
 
 ### Phase 3: Distributor Core Domain (MLM)
 - [ ] Task 9: Binary tree schema (closure table + `pv_ledger`) and placement/spillover service

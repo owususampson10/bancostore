@@ -555,25 +555,170 @@ same day:**
 category filter, price range filter, sort (newest/price/popular), and product detail page, using
 Django views + HTMX for reactive filtering without full-page reloads.
 
-**Acceptance criteria:**
-- [ ] Home page shows featured products from Task 7 data
-- [ ] Search, category filter, and sort all work together on the listing page
-- [ ] Product detail page shows photos, price, PV, stock state, add-to-cart button
+**Planned 2026-07-12 — split into three vertical slices (8a–8c), each shippable and tested on its
+own.** Shared context for all three:
 
-**Verification:**
-- [ ] pytest test: searching for a product name returns the right result
-- [ ] pytest test: filtering by category narrows results correctly
-- [ ] Manual check: visually confirm the storefront in browser
+- This is the first public-facing chrome of the site. `templates/base_auth.html` is deliberately a
+  header/footer-less shell (Task 4 noted "those come with the landing page" — this is that task).
+  8a introduces `templates/base_store.html` with the real site header/footer/nav; 8b/8c extend it.
+- UI follows the Tasks 4–6 pattern: real screens from the "Bancostore" Stitch project ("Kinetic
+  Retail Narrative" theme, desktop 1280px), design tokens already in `static/src/main.css`. Three
+  screens needed — Home, Product Listing, Product Detail — **not yet designed in Stitch** (open
+  question below). No backend slice ships with placeholder templates (see
+  `feedback_vertical_slice_build_process.md` — that mistake was already made once in Task 4).
+- The root URL `/` is currently a 404; 8a claims it for the home page.
+- Listing/home queries must prefetch primary images and `select_related("category")` from the
+  start — this is the highest-traffic page of the site (see SPEC.md Scale Architecture).
+- Only `is_active=True` products ever appear anywhere public. Out-of-stock products still show,
+  with an "Out of Stock" label instead of add-to-cart (`Product.in_stock` — behavior deliberately
+  hardcoded per Task 7's note, not a constance setting).
 
-**Dependencies:** Task 7
-
-**Files likely touched:** `apps/catalog/views.py`, `templates/catalog/*.html`, `tests/feature/catalog/*.py`
-
-**Estimated scope:** M
+**Decisions made 2026-07-12:**
+1. **"Popular" sort ships now, interim-backed by `is_featured` first then `created_at`** — no
+   orders exist until Task 17, so there's no sales signal yet. Swap in real sales data after
+   Task 18; the UI option doesn't change, only the ordering behind it. Comment the interim query
+   accordingly so it isn't mistaken for the final definition.
+2. **Stitch screens: Claude writes detailed per-screen prompts, the user builds them in the
+   Bancostore Stitch project, Claude fetches the results via the Stitch MCP** (Tasks 4–5 pattern,
+   revised from the earlier "Claude generates via MCP" decision). Homepage layout/structure is
+   modeled on the QNET homepage (user-provided screenshot, 2026-07-12): typographic hero,
+   lifestyle photo strip, category tile grid, how-it-works cards, discover bento, featured
+   product cards, distributor CTA band, dark multi-column footer — adapted to Bancostore's
+   Kinetic Retail Narrative theme, desktop 1280px.
 
 ---
 
-**Checkpoint C:** admin-added product appears correctly on the public storefront.
+#### Task 8a: Site shell (header/footer) + home page
+
+**Acceptance criteria:**
+- [x] `templates/base_store.html` exists with the real site header (logo, Shop link, cart icon
+  stub, Login/Register, "Join as Distributor" CTA) and footer, from the Stitch design
+- [x] `/` renders the home page: featured products (`is_active=True, is_featured=True`) with
+  primary image, name, GHS price; join/shop CTAs
+- [x] Inactive or unfeatured products never appear on the home page
+
+**Verification:**
+- [x] pytest: featured+active products shown; inactive and unfeatured excluded
+- [x] pytest: home page renders with zero products (empty state, no crash)
+- [x] Manual browser check of the real page against the Stitch design
+
+**Dependencies:** Task 7, Stitch Home screen
+**Files likely touched:** `apps/catalog/views.py`, `apps/catalog/urls.py`, `bancostore/urls.py`,
+`templates/base_store.html`, `templates/catalog/home.html`, `tests/feature/catalog/test_home.py`
+**Estimated scope:** M
+
+**Done 2026-07-12.** Header reconciled from the Storefront Home Stitch screen (pill-button style,
+consistent with the site's already-shipped auth-page buttons); footer reconciled from the
+Product Listing/Detail screens' 4-column pattern (home.html's own footer was the outlier of the
+three fetched screens, so the majority pattern was adopted as canonical). `Product.primary_image`
+property added (reads the already-prefetched `images` queryset, never re-queries) since three
+templates needed "primary image first" logic. **Real bug caught by the mandated browser check,
+not by tests:** the home view never passed `categories` into context even though the template
+looped over it — the category tile grid silently rendered as a single "View All Products" tile
+with nothing else. No test had asserted category tiles render at all. Fixed (view now queries
+`Category.objects.all()`) and a regression test added (`test_home_shows_category_tiles`) — this is
+exactly the class of gap "type-checking passes, feature is broken" that the mandated browser
+check exists to catch.
+
+#### Task 8b: Product listing — search, filters, sort, pagination (HTMX)
+
+**Acceptance criteria:**
+- [x] Search (name/description), category filter, price min/max, and sort
+  (newest / price ↑ / price ↓ / popular-per-open-question-1) all compose — any combination
+  narrows correctly, and filters survive pagination
+- [x] HTMX swaps just the product grid (no full-page reload) and pushes the querystring
+  (`hx-push-url`) so filtered results are shareable/bookmarkable; the same URL loaded directly
+  (non-HTMX) renders the identical full page
+- [x] Out-of-stock products show the label; inactive products are excluded; grid is paginated
+
+**Verification:**
+- [x] pytest: search returns the right product; category filter narrows; search+filter+sort
+  combined return the correct intersection; page 2 preserves active filters
+- [x] pytest: `assertNumQueries` — product grid query count is constant regardless of product
+  count (prefetched images/category, no N+1)
+- [x] Manual browser check: filter reactively without reload, confirm URL updates
+
+**Dependencies:** Task 8a, Stitch Listing screen, open question 1
+**Files likely touched:** `apps/catalog/views.py`, `templates/catalog/product_list.html`,
+`templates/catalog/partials/product_grid.html`, `tests/feature/catalog/test_listing.py`
+**Estimated scope:** M
+
+**Done 2026-07-12.** One `<form>` wraps sidebar filters + toolbar + grid; `hx-trigger="change,
+submit, keyup changed delay:500ms from:#search-input"` on the form itself means new content
+swapped into `#product-results` (pagination links, sort option) stays covered by the same
+delegated listener without needing per-element `hx-*` attributes. Category "buttons" are real
+radio inputs styled with `peer-checked` (no JS needed, works with the form's native `change`
+event). django-htmx (already in `requirements.txt`, unused until now) branches the view between
+the full-page and partial-only template via `request.htmx`, which also makes the non-JS
+progressive-enhancement path work for free — the same view returns the full page on a plain GET.
+Query-count regression test follows the exact tolerance-of-2 pattern already established in
+`test_product_admin.py::test_product_changelist_does_not_n_plus_one_on_category` (silk's
+middleware adds its own DB writes per request under local `DEBUG=True`, so exact equality would
+be flaky — confirmed by hitting that same flake here first, not assumed).
+
+#### Task 8c: Product detail page
+
+**Acceptance criteria:**
+- [x] Detail page (by slug) shows all photos (primary first), name, description, GHS price,
+  PV value, variants (name/value pairs), and category
+- [x] In-stock: add-to-cart button rendered as an honest stub (disabled with "coming soon" state —
+  no dead link) until Task 17 wires it; out-of-stock: "Out of Stock" label, no button
+- [x] Inactive or nonexistent slug → 404
+
+**Verification:**
+- [x] pytest: detail renders all fields; out-of-stock shows label and no add-to-cart; inactive
+  product 404s
+- [x] Manual browser check against the Stitch design
+
+**Dependencies:** Task 8a, Stitch Detail screen
+**Files likely touched:** `apps/catalog/views.py`, `templates/catalog/product_detail.html`,
+`tests/feature/catalog/test_detail.py`
+**Estimated scope:** S
+
+**Done 2026-07-12.** Variant name/value pairs grouped via Django's built-in `{% regroup %}` tag
+(relies on `ProductVariant.Meta.ordering = ["name", "value"]` already sorting them correctly, so
+no grouping logic needed in the view). Added `django.contrib.humanize` (built-in Django contrib
+app, not a new pip dependency) so prices render comma-formatted ("GHS 2,450.00") matching the
+Stitch design, applied to both this page and the shared product card partial.
+
+**Post-build note (all of 8a–8c):** `django.contrib.humanize` added to `INSTALLED_APPS`
+(`bancostore/settings.py`). Full suite: 100/100 passing (up from 99 — all pre-existing tests still
+green, no regressions). `black`/`ruff` clean. Demo products with real generated images were seeded
+into the local `db.sqlite3` (gitignored, not committed) to verify visually — left in place for
+convenience since they don't affect tests or ship anywhere.
+
+**Post-ship fixes 2026-07-12, found by the user's own review, not caught before calling 8a–8c
+done** (see `feedback_vertical_slice_build_process.md` for the full retrospective on why): the home
+view never passed `categories` to its template despite the template looping over it (empty category
+grid — fixed, regression test added); header/footer CTAs pointed to `href="#"` instead of real URLs
+(fixed — Log In → `account_login`, Become a Distributor → `distributors:register`; regression test
+added in `test_navigation_links.py`; About/Contact left as `title="Coming soon"` since no such
+pages exist in MVP scope); decorative Stitch images (photo strip, bento tile, CTA band) were
+placeholder divs instead of the real fetched image URLs (fixed); `product_detail.html`'s
+`grid-cols-[55%_45%]` plus a 64px gap summed past 100% width, pushing the right column off-screen
+(fixed by switching to `fr` units, which correctly account for gaps); a background-image div had
+`bg-cover` without `bg-no-repeat`, causing visible tiling (fixed) — and the fix appeared not to
+work at first because Vite's stable filenames mean the browser can serve a stale cached
+`main.css` after a rebuild (documented in `CLAUDE.md`'s Commands section: rebuild *and*
+hard-refresh, always). Separately, the homepage photo strip's floating keyframe animation and
+several hover/zoom micro-interactions present in the original Stitch HTML had been dropped during
+the rebuild — restored, including `@media (prefers-reduced-motion: no-preference)` around the
+animation (an a11y improvement beyond the raw Stitch output). Two more acceptance-criteria-vs-test
+gaps found on a literal re-read of the checklist above: 8a's "primary image, GHS price" and 8c's
+"all photos (primary first)" both lacked a test that would actually fail if the feature broke —
+both closed. `apps/catalog/views.py` simplified: `Product.objects.storefront_visible()` (new
+queryset method, `apps/catalog/models.py`) replaces the repeated
+`.filter(is_active=True).select_related("category").prefetch_related("images")` that appeared in
+all three views — makes the is_active invariant impossible to forget at a new call site, not just
+shorter. `product_grid.html`'s six near-duplicate pagination-link expressions replaced with a
+`page_url` template filter (`apps/catalog/templatetags/catalog_extras.py`). Full suite: 105/105.
+
+---
+
+**Checkpoint C:** admin-added product appears correctly on the public storefront. **Verified
+2026-07-12** — the demo products created via Django Admin/shell for the manual browser check
+render correctly on the home page, listing page (with working search/filter/sort via HTMX), and
+detail page.
 
 ---
 

@@ -1,0 +1,88 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Bancostore | Quality Products. Real Opportunity.{% endblock %}</title>
+<meta name="description" content="{% block meta_description %}Shop quality lifestyle and wellness products or build a business with Bancostore.{% endblock %}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'assets/main.css' %}">
+<script src="{% static 'assets/main.js' %}" defer></script>
+</head>
+<body class="bg-surface text-on-surface font-body-md min-h-screen flex flex-col">
+<!-- Announcement Bar (from the Storefront Home Stitch screen, applied site-wide) -->
+<div class="bg-primary text-on-primary py-2 px-4 text-center">
+<span class="text-xs font-bold uppercase tracking-widest">Free Shipping on orders over GHS 1000 — Shop Now</span>
+</div>
+<!-- Header (reconciled from the Storefront Home / Product Listing / Product Detail Stitch screens) -->
+<header class="sticky top-0 z-50 bg-surface border-b border-outline-variant">
+<nav class="flex justify-between items-center w-full px-margin-mobile md:px-16 py-4 max-w-[1440px] mx-auto">
+<a href="{% url 'catalog:home' %}" class="text-2xl font-bold text-on-surface">Bancostore</a>
+<div class="hidden md:flex gap-8 items-center">
+<a href="{% url 'catalog:home' %}" class="{% block nav_home_class %}text-on-surface-variant hover:text-primary{% endblock %} text-xs font-bold uppercase tracking-widest transition-colors duration-200">Home</a>
+<a href="{% url 'catalog:product_list' %}" class="{% block nav_shop_class %}text-on-surface-variant hover:text-primary{% endblock %} text-xs font-bold uppercase tracking-widest transition-colors duration-200 pb-1">Shop</a>
+<a href="#" title="Coming soon" class="text-on-surface-variant hover:text-primary text-xs font-bold uppercase tracking-widest transition-colors duration-200">About</a>
+<a href="#" title="Coming soon" class="text-on-surface-variant hover:text-primary text-xs font-bold uppercase tracking-widest transition-colors duration-200">Contact</a>
+</div>
+<div class="hidden lg:flex items-center gap-4">
+<a href="{% url 'account_login' %}" class="px-6 py-2 rounded-full border border-primary text-primary text-sm font-semibold hover:bg-primary/10 transition-all active:scale-95">Log In</a>
+<a href="{% url 'distributors:register' %}" class="px-6 py-2 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Become a Distributor</a>
+<div class="flex gap-4 ml-2">
+<a href="{% url 'catalog:product_list' %}" class="material-symbols-outlined hover:text-primary transition-colors" title="Search products">search</a>
+<span class="relative material-symbols-outlined text-on-surface-variant" title="Cart — coming soon">
+shopping_cart
+<span class="absolute -top-1.5 -right-1.5 bg-primary text-on-primary text-[10px] w-4 h-4 flex items-center justify-center rounded-full">0</span>
+</span>
+</div>
+</div>
+<button class="md:hidden">
+<span class="material-symbols-outlined">menu</span>
+</button>
+</nav>
+</header>
+<main class="flex-grow">
+{% block content %}{% endblock %}
+</main>
+<!-- Footer (reconciled from the Product Listing / Product Detail Stitch screens) -->
+<footer class="bg-inverse-surface py-16 md:py-24 w-full mt-auto">
+<div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 grid grid-cols-1 md:grid-cols-4 gap-8">
+<div class="space-y-4">
+<div class="text-2xl font-black text-surface">Bancostore</div>
+<p class="text-sm text-inverse-on-surface/70 max-w-[240px]">Curating quality lifestyle and wellness products, and the opportunity to build a business selling them, for the modern Ghanaian consumer.</p>
+</div>
+<div class="space-y-4">
+<h4 class="text-xs font-bold uppercase tracking-widest text-surface">Shop</h4>
+<ul class="space-y-2 text-sm text-inverse-on-surface/70">
+<li><a class="hover:text-surface transition-all" href="{% url 'catalog:product_list' %}">All Products</a></li>
+<li><a class="hover:text-surface transition-all" href="{% url 'catalog:product_list' %}?sort=newest">New Arrivals</a></li>
+<li><a class="hover:text-surface transition-all" href="{% url 'catalog:product_list' %}?sort=popular">Featured</a></li>
+</ul>
+</div>
+<div class="space-y-4">
+<h4 class="text-xs font-bold uppercase tracking-widest text-surface">Company</h4>
+<ul class="space-y-2 text-sm text-inverse-on-surface/70">
+<li><a class="hover:text-surface transition-all" href="#" title="Coming soon">About Us</a></li>
+<li><a class="hover:text-surface transition-all" href="{% url 'distributors:register' %}">Become a Distributor</a></li>
+<li><a class="hover:text-surface transition-all" href="#" title="Coming soon">Contact</a></li>
+</ul>
+</div>
+<div class="space-y-4">
+<h4 class="text-xs font-bold uppercase tracking-widest text-surface">Follow Us</h4>
+<div class="flex gap-4">
+<span class="w-9 h-9 rounded-full border border-inverse-on-surface/30 flex items-center justify-center" title="Coming soon"><span class="material-symbols-outlined text-[18px]">public</span></span>
+<span class="w-9 h-9 rounded-full border border-inverse-on-surface/30 flex items-center justify-center" title="Coming soon"><span class="material-symbols-outlined text-[18px]">camera</span></span>
+<span class="w-9 h-9 rounded-full border border-inverse-on-surface/30 flex items-center justify-center" title="Coming soon"><span class="material-symbols-outlined text-[18px]">chat</span></span>
+</div>
+<p class="text-xs text-inverse-on-surface/60">Bancostore is committed to responsible direct selling in Ghana.</p>
+</div>
+</div>
+<div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 mt-12 pt-8 border-t border-inverse-on-surface/10 flex flex-col md:flex-row justify-between items-center gap-2 text-xs text-inverse-on-surface/60">
+<p>&copy; {% now "Y" %} Bancostore. All rights reserved.</p>
+<p>Secure payments via Paystack — Mobile Money, Visa, Mastercard</p>
+</div>
+</footer>
+{% block extra_body %}{% endblock %}
+</body>
+</html>

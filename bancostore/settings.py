@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
+    "django.contrib.humanize",  # comma-formatted prices on the storefront (Task 8)
     # Real-time
     "channels",
     # Auth

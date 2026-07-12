@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–7 are done (Phases 0–1 complete, Phase 2 started); Task 8 (public storefront) is next.**
-What exists and is verified working:
+**Tasks 1–8 are done (Phases 0–2 complete); Task 9 (binary tree schema, Phase 3/MLM core) is
+next.** What exists and is verified working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -18,8 +18,14 @@ What exists and is verified working:
   with SMS OTP via mNotify (verified end to end with a real SMS) and constance-driven lockout;
   admin login with mandatory TOTP 2FA. All flows verified in a real browser, not just pytest.
 - **Catalog (Task 7):** `Category`/`Product`/`ProductImage`/`ProductVariant` models with Django
-  Admin CRUD, WebP photo conversion, and a concurrency-safe stock decrement. No customer-facing
-  storefront yet — that's Task 8.
+  Admin CRUD, WebP photo conversion, and a concurrency-safe stock decrement.
+- **Public storefront (Task 8), with real Stitch-designed UI:** home page (featured products,
+  category tiles), product listing (search/category/price filters + sort, reactive via HTMX with
+  `hx-push-url` so filtered results stay shareable), and product detail page (gallery, variants,
+  an honest disabled add-to-cart stub until Task 17 builds the real cart). `templates/base_store.html`
+  is the first template carrying the real site header/footer/nav (`templates/base_auth.html` stays
+  a header-less shell, used only by the auth screens). First template to load `main.js`
+  (htmx + Alpine, bundled since Task 1 but unused until now).
 - **CI:** GitHub Actions runs the full suite against a real `mysql:8` service container (local dev
   stays on SQLite — MySQL doesn't install on this Mac).
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7. All
@@ -90,6 +96,28 @@ Redis must be running locally (`redis-server` via Homebrew) for cache/sessions/C
 work — it's already installed on this Mac. Local dev config lives in `.env` (gitignored; copy from
 `.env.example`).
 
+**Frontend edit-verify loop (Task 8 gotcha, hit twice before being written down here):**
+editing a template's Tailwind classes has no visible effect until `npm run build` runs — Vite only
+compiles the classes it sees scanning templates at build time, and Django serves whatever's already
+in `static/dist/assets/`. Worse, `vite.config.js` deliberately uses stable (non-hashed) output
+filenames so templates can reference `{% static 'assets/main.css' %}` directly without reading the
+Vite manifest — the tradeoff is no automatic cache-busting, so a browser tab can keep serving a
+stale cached `main.css` even after a real rebuild. When verifying a UI change in the browser: run
+`npm run build` after any template edit that adds/removes Tailwind classes, then hard-refresh
+(Cmd+Shift+R) before screenshotting — don't trust a screenshot that wasn't preceded by both.
+Revisit with real cache-busting once there's a deploy pipeline (Task 24). To skip the manual
+rebuild step, run `npm run dev` (Vite watch mode) instead of `npm run build` — it recompiles on
+every save; a hard-refresh is still needed to see it.
+
+**Media files need an explicit URL route that pytest can never verify.** `django.contrib.staticfiles`
+auto-serves `STATIC_URL` under `runserver`, but `MEDIA_URL` (uploaded product photos) doesn't get
+served automatically — `bancostore/urls.py` needs its own `if DEBUG: urlpatterns += static(...)`
+block (added Task 8, was missing since Task 7 — every product photo 404d in local dev the whole
+time, unnoticed). This is a real bug class with **no possible pytest coverage**: Django's test
+runner always forces `DEBUG=False` regardless of `.env`, so that `if DEBUG:` block never executes
+under pytest. Verify media serving by curling a real file against the live `runserver` — a green
+test suite proves nothing here.
+
 ## Architecture
 
 **Stack**: Django 5 / Python 3.13 (whatever's already on this Mac — no `pyenv` needed), Django
@@ -135,9 +163,17 @@ re-invoking it.
   `spec-driven-development` if requirements are unclear). For unfamiliar or high-stakes changes
   (auth, money, migrations, irreversible operations), `doubt-driven-development`.
 - **During a build**: `incremental-implementation` (small slices) + `test-driven-development`
-  (test before/with the code), always. Add `frontend-ui-engineering` for UI work,
-  `security-and-hardening` for anything touching auth/input/external integrations,
-  `source-driven-development` when correctness depends on a framework's documented behavior.
+  (test before the code, not alongside it in the same breath — see
+  `feedback_vertical_slice_build_process.md`'s 2026-07-12 entry for what happened when Task 8's
+  three planned slices got built and tested together instead of checkpointed one at a time). Add
+  `frontend-ui-engineering` for UI work, `security-and-hardening` for anything touching
+  auth/input/external integrations, `source-driven-development` when correctness depends on a
+  framework's documented behavior.
+- **When a task is planned as multiple slices** (e.g. 8a/8b/8c in `tasks/todo.md`): ship and fully
+  verify one slice — full suite green, real browser check, then re-read that slice's acceptance
+  criteria line by line and confirm each has a test that would fail without the fix — before
+  starting the next slice. A slice that renders correctly in a screenshot is not the same as a
+  slice whose checklist items each have a falsifiable test.
 - **After every build, no matter how small**: `debugging-and-error-recovery` if anything breaks
   (root-cause it, don't guess), `code-review-and-quality` before calling the change done, and
   `code-simplification` if the result is more complex than it needs to be. Run the full test

@@ -156,3 +156,24 @@
 .admin-glow-bg {
   background: radial-gradient(circle at 50% 50%, rgba(247, 86, 9, 0.03) 0%, rgba(249, 249, 249, 0) 70%);
 }
+
+/* Floating micro-animation for the homepage lifestyle photo strip (Task 8,
+   Storefront Home Stitch screen) — alternating durations/offsets on
+   even/odd children so the strip doesn't move in lockstep. */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .float-item:nth-child(even) {
+    animation: float 6s ease-in-out infinite;
+  }
+  .float-item:nth-child(odd) {
+    animation: float 5s ease-in-out infinite 1s;
+  }
+}
