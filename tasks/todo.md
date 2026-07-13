@@ -1047,28 +1047,33 @@ directly**: it always re-fetches the authoritative result via `get_session_decis
 storing anything, exactly the same "always re-verify server-side" pattern already used for
 Paystack. Downloads and WebP-converts the three images at this point.
 
-**Unverified, must confirm before/during this task:** `verify_webhook_signature()`'s scheme
-(`X-Signature-Simple` = HMAC-SHA256 of `"{session_id}|{status}|{created_at}"`) was sourced from a
-community demo repo's README during Task 11a's planning, not Didit's own primary docs (which
-404'd via direct fetch). Confirm the real header name/message format against an actual webhook
-delivery (or Didit's dashboard/support) once the user's real workflow is set up — don't assume
-Task 11a's implementation is correct just because its tests pass (the tests only prove the HMAC
-math is self-consistent, not that it matches what Didit actually sends).
+**Still unverified against a real Didit account (carried over from Task 11a, not yet closed):**
+`verify_webhook_signature()`'s scheme (`X-Signature-Simple` = HMAC-SHA256 of
+`"{session_id}|{status}|{created_at}"`) and the `front_image`/`back_image`/`portrait_image` field
+names on the decision response's `id_verifications[]` are both sourced from secondary references
+(a community demo repo's README; analogy with Didit's standalone-API response shape), not Didit's
+own primary docs directly. The full pytest suite passing here only proves this code is internally
+consistent — it does NOT prove it matches what Didit actually sends. Re-check both against a real
+session/webhook once the user's Didit workflow is live.
 
 **Acceptance criteria:**
-- [ ] Distributor is redirected to Didit's hosted page with a real session, and redirected back afterward
-- [ ] Both the callback and the webhook path resolve to the same stored result (idempotent, no double-processing)
-- [ ] The stored result always comes from re-querying Didit's decision endpoint, never from trusting the callback/webhook payload alone
-- [ ] Webhook requests with an invalid/missing signature are rejected
-- [ ] Fetched images are converted to WebP and stored on `DiditVerification`
+- [x] Distributor is redirected to Didit's hosted page with a real session, and redirected back afterward
+- [x] Both the callback and the webhook path resolve to the same stored result (idempotent, no double-processing)
+- [x] The stored result always comes from re-querying Didit's decision endpoint, never from trusting the callback/webhook payload alone
+- [x] Webhook requests with an invalid/missing signature are rejected
+- [x] Fetched images are converted to WebP and stored on `DiditVerification`
 
 **Verification:**
-- [ ] pytest feature test (mocked HTTP): full flow — start session → simulate callback → `DiditVerification` updated with the re-fetched result
-- [ ] pytest feature test: webhook with a valid signature updates the result; invalid signature is rejected (400)
-- [ ] pytest test: calling the consume path twice for the same session is a safe no-op the second time
-- [ ] pytest test: images fetched from Didit are stored as WebP
+- [x] pytest feature test (mocked HTTP): full flow — start session → simulate callback → `DiditVerification` updated with the re-fetched result
+- [x] pytest feature test: webhook with a valid signature updates the result; invalid signature is rejected (400)
+- [x] pytest test: calling the consume path twice for the same session is a safe no-op the second time
+- [x] pytest test: images fetched from Didit are stored as WebP
 
 **Dependencies:** Task 11a
+
+**Done 2026-07-13 (commit `746d38b`).** Also added an SSRF guard on image downloads (found during
+`code-review-and-quality`/`security-and-hardening`, not in the original acceptance criteria) — see
+`apps/distributors/services.py::_assert_safe_media_url`.
 
 **Files likely touched:** `apps/distributors/views.py` (`start_kyc_verification`, callback, webhook; removes `submit_kyc`), `apps/distributors/services.py` (`consume_didit_result`), `apps/distributors/urls.py`, `templates/distributors/kyc_verification_callback.html` (new), `tests/feature/distributors/test_kyc_verification.py` (new)
 

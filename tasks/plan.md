@@ -70,7 +70,7 @@ on the public storefront (home, listing with working search/filter/sort, detail 
   self-hosted upload form shipped in commit `ebf8e22` with Didit's hosted ID+selfie verification
   flow, a Boundary-tier external integration like Paystack; see tasks/todo.md for the full
   rationale and the old-code removal step)
-- [ ] Task 11b: Didit verification flow end-to-end (session creation, callback, webhook,
+- [x] Task 11b: Didit verification flow end-to-end (session creation, callback, webhook,
   idempotent re-verify-server-side consume)
 - [ ] Task 11c: Admin KYC review + IR ID generation on approval (Didit's result is informational
   only -- admin always makes the final call, never auto-approved, per SPEC.md's Boundary;
