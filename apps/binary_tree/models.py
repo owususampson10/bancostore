@@ -29,6 +29,15 @@ class BinaryTreeEdge(models.Model):
     depth = models.PositiveIntegerField()
     leg = models.CharField(max_length=1, choices=Leg.choices)
 
+    # A node has exactly one direct (depth=1) parent -- but that can't be a
+    # DB constraint here: it would need a partial/filtered unique index
+    # (unique on `descendant` WHERE depth=1), and MySQL doesn't support
+    # partial indexes (Django's mysql backend sets
+    # supports_partial_indexes = False and silently *skips* creating such a
+    # constraint rather than erroring, so it would look enforced locally on
+    # SQLite while doing nothing against this project's real MySQL in CI).
+    # Enforced instead in BinaryTree.place_distributor via a row lock + a
+    # pre-insert check.
     class Meta:
         constraints = [
             models.UniqueConstraint(

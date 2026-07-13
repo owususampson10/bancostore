@@ -7,7 +7,7 @@ from django.db import connection
 import pytest
 
 from apps.binary_tree.models import BinaryTreeEdge
-from apps.binary_tree.services import BinaryTree
+from apps.binary_tree.services import AlreadyPlacedError, BinaryTree
 from apps.distributors.models import Distributor
 from apps.pv_ledger.models import PvLedger
 
@@ -231,3 +231,50 @@ def test_placing_with_no_sponsor_creates_no_edges():
 
     assert not BinaryTreeEdge.objects.filter(descendant=root).exists()
     assert not BinaryTreeEdge.objects.filter(ancestor=root).exists()
+
+
+@pytest.mark.django_db
+def test_root_distributor_with_no_sponsor_still_gets_a_pv_ledger():
+    """Task 9c's ancestor-aggregate query depends on every distributor having
+    a PvLedger row -- the root of the whole tree still needs one to track PV
+    from purchases beneath them, even though they have no ancestors of their
+    own."""
+    root = _make_distributor("root11")
+
+    BinaryTree.place_distributor(None, root, leg=None)
+
+    assert PvLedger.objects.filter(distributor=root).exists()
+
+
+@pytest.mark.django_db
+def test_sponsor_gets_a_pv_ledger_even_when_leg_is_given_explicitly():
+    """Auto-balance used to be the only path that created the sponsor's
+    ledger row -- a sponsor who always specifies an explicit leg would never
+    get one, leaving a gap in Task 9c's ancestor-aggregate query."""
+    sponsor = _make_distributor("sponsor12")
+    newcomer = _make_distributor("newcomer12")
+
+    BinaryTree.place_distributor(sponsor, newcomer, leg=BinaryTreeEdge.Leg.LEFT)
+
+    assert PvLedger.objects.filter(distributor=sponsor).exists()
+
+
+@pytest.mark.django_db
+def test_placing_an_already_placed_distributor_a_second_time_is_rejected():
+    """A node has exactly one direct parent. This can't be a DB constraint
+    on MySQL (see the comment in apps/binary_tree/models.py), so it's
+    enforced here: a second place_distributor call for the same
+    new_distributor -- even under a different sponsor -- must be rejected,
+    not silently give the node two parents."""
+    first_sponsor = _make_distributor("first_sponsor13")
+    second_sponsor = _make_distributor("second_sponsor13")
+    newcomer = _make_distributor("newcomer13")
+
+    BinaryTree.place_distributor(first_sponsor, newcomer, leg=BinaryTreeEdge.Leg.LEFT)
+
+    with pytest.raises(AlreadyPlacedError):
+        BinaryTree.place_distributor(
+            second_sponsor, newcomer, leg=BinaryTreeEdge.Leg.LEFT
+        )
+
+    assert BinaryTreeEdge.objects.filter(descendant=newcomer, depth=1).count() == 1
