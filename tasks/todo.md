@@ -955,34 +955,78 @@ Section 14 steps 4–7 exactly. Full suite green (209 tests) at commit `0bdc507`
 
 ### Task 11: KYC submission, admin review, and IR ID generation
 
-**Description:** Distributor uploads Ghana Card (front/back), a selfie, and verifies phone via
-OTP. Admin reviews and approves/rejects (with reason) via Django Admin. Withdrawal stays blocked
-until KYC is approved. On approval, the system generates the distributor's IR ID per
-`django-constance` IR ID settings (prefix/starting number/digits) — moved here from Task 10 per
-Section 14 step 9 ("The admin approves his KYC. He receives his IR ID Number"), confirmed with the
-user 2026-07-13.
+Split into two slices (11a/11b) per `planning-and-task-breakdown`, confirmed with the user
+2026-07-13 — submission and review/IR-ID-generation are genuinely separable (different actors,
+different files), matching how Tasks 9 and 10 were split. Also drops a duplicate/premature
+acceptance criterion found while planning: the original task said "distributor cannot request a
+withdrawal until KYC approved," but `apps/withdrawal/` doesn't exist yet (Task 16, much later) and
+Task 16 already has its own identical criterion ("Withdrawal blocked if KYC is not approved...",
+line ~1099). Task 11 only needs to leave `kyc_status` correct for Task 16 to check later; the
+withdrawal-blocking test itself belongs to Task 16.
+
+#### Task 11a: KYC submission (Ghana Card + selfie upload)
+
+**Description:** Once phone-verified, a distributor uploads Ghana Card front/back and a selfie.
+Fields live directly on `Distributor` (no separate history model — one submission per
+distributor, resubmission allowed any time `kyc_status` isn't `approved`, matching this project's
+simplicity-first convention elsewhere). Uploaded images are converted to WebP like every other
+user-uploaded image in this project (Task 7 precedent) — the conversion helper
+(`_resize_and_convert_to_webp`, currently private to `apps/catalog/models.py`) is extracted to
+`bancostore/media.py` so `apps/distributors` doesn't reach into `apps/catalog`.
 
 **Acceptance criteria:**
-- [ ] Distributor can submit all three KYC items
-- [ ] Admin sees pending KYC submissions in Django Admin and can approve or reject with a reason
-- [ ] Distributor cannot request a withdrawal until KYC status is approved
-- [ ] IR ID is generated once, only on KYC approval, is permanent, and follows the configured format
+- [ ] Distributor can submit all three KYC items only once phone-verified
+- [ ] An incomplete submission (missing any of the three items) is rejected with a clear error
+- [ ] Resubmission overwrites a previous pending/rejected submission rather than creating a new row
+- [ ] Uploaded images are converted to WebP on save
 
 **Verification:**
-- [ ] pytest feature test: KYC submission → admin approval → distributor's `kyc_status` flips to approved and an IR ID is assigned
-- [ ] pytest test: withdrawal request is rejected while `kyc_status` is not approved
-- [ ] pytest test: IR ID is never assigned before KYC approval, and never reassigned once set
+- [ ] pytest feature test: a phone-unverified distributor is blocked from submitting KYC
+- [ ] pytest feature test: a complete submission succeeds and `kyc_status` stays `pending`
+- [ ] pytest test: uploaded images are converted to WebP
 
-**Dependencies:** Task 5, Task 10d
+**Dependencies:** Task 5
 
-**Files likely touched:** `apps/distributors/kyc_services.py`, `apps/distributors/admin.py` (KYC review + IR ID generation), `apps/distributors/views.py` (KYC submission), `tests/feature/distributors/test_kyc.py`
+**Files likely touched:** `apps/distributors/models.py` (new fields + migration), `apps/distributors/views.py`, `apps/distributors/forms.py`, `bancostore/media.py` (new, shared WebP helper extracted from `apps/catalog/models.py`), `tests/feature/distributors/test_kyc_submission.py`
+
+**Estimated scope:** S-M
+
+---
+
+#### Task 11b: Admin KYC review + IR ID generation on approval
+
+**Description:** Admin approves or rejects a pending KYC submission via Django Admin (rejection
+requires a reason, from the existing `KYC_REJECTION_REASONS` constance setting). Approval
+atomically assigns a permanent IR ID in the configured format (`IR_ID_PREFIX` /
+`IR_ID_STARTING_NUMBER` / `IR_ID_NUMBER_OF_DIGITS`) — Section 14 step 9 ("The admin approves his
+KYC. He receives his IR ID Number."). IR ID generation needs a concurrency-safe sequence design
+(never duplicated or reassigned under concurrent approvals) — run this through
+`doubt-driven-development` before implementing, same rigor as the PendingRegistration/Paystack
+designs got in Task 10a/10b.
+
+**Acceptance criteria:**
+- [ ] Admin sees pending KYC submissions (with uploaded images visible) in Django Admin
+- [ ] Approve assigns a permanent, correctly-formatted IR ID; reject requires a reason and never assigns an IR ID
+- [ ] IR ID is generated exactly once per distributor and never reassigned or duplicated, even under concurrent approvals
+- [ ] Approving an already-approved distributor is a safe no-op (doesn't regenerate or overwrite the IR ID)
+
+**Verification:**
+- [ ] pytest feature test: admin approves pending KYC → `kyc_status` flips to `approved` and a correctly-formatted IR ID is assigned
+- [ ] pytest feature test: admin rejects with a reason → `kyc_status` flips to `rejected`, no IR ID assigned, reason stored
+- [ ] pytest test (threaded, same convention as Task 9b/10d): concurrent approvals of different distributors never produce duplicate or reused IR IDs
+- [ ] pytest test: IR ID is never assigned before approval, and never reassigned once set
+
+**Dependencies:** Task 11a, Task 3
+
+**Files likely touched:** `apps/distributors/admin.py`, `apps/distributors/services.py` (or a new `apps/distributors/kyc_services.py` if it grows large — IR ID generation), `apps/distributors/models.py` (`kyc_rejection_reason` field + migration), `tests/unit/distributors/test_kyc_review.py`
 
 **Estimated scope:** M
 
 ---
 
-**Checkpoint D:** a new distributor registers, pays, is placed with correct spillover, and passes
-KYC to receive an IR ID — verified end to end through the UI.
+**Checkpoint (Task 11 complete):** a distributor submits KYC once phone-verified, admin approves or
+rejects with a reason via Django Admin, and approval assigns a permanent, correctly-formatted,
+never-reused IR ID — verified by pytest, including under concurrent approvals.
 
 ---
 
