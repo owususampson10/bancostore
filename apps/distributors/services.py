@@ -10,6 +10,8 @@ from django.utils import timezone
 
 from constance import config
 
+from apps.binary_tree.services import AlreadyPlacedError, BinaryTree
+from apps.pv_ledger.services import record_purchase_pv
 from bancostore.concurrency import (
     retry_on_lock_contention,
     select_for_update_nowait_if_supported,
@@ -318,10 +320,20 @@ def snapshot_starter_pack_choice(distributor_pk, choice: str) -> Distributor:
 
 
 def consume_paid_starter_pack(reference: str) -> None:
-    """Task 10c: mirrors consume_paid_registration's idempotent,
+    """Task 10c/10d: mirrors consume_paid_registration's idempotent,
     server-verified pattern. Sets rank from the snapshotted
     starter_pack_rank (never re-derived from constance at confirmation
-    time) once Paystack confirms the exact pinned amount was paid in GHS."""
+    time) once Paystack confirms the exact pinned amount was paid in GHS.
+
+    Task 10d: this is also the distributor's first-ever binary tree
+    placement (place_distributor is never called anywhere else) and the
+    write-time PV credit up the ancestor chain -- both happen inside the
+    same locked, idempotency-checked block as the rank change, so a
+    webhook/callback race can't double-place or double-credit PV. Leg
+    choice is always auto-balance (leg=None): Task 10a's registration
+    form has no field for a sponsor to pick an explicit leg, so the
+    "sponsor picks, or auto-balance falls back" design only exercises the
+    fallback path today (confirmed with the user 2026-07-13)."""
 
     def _attempt():
         with transaction.atomic():
@@ -370,6 +382,20 @@ def consume_paid_starter_pack(reference: str) -> None:
                     distributor.starter_pack_price_pesewas,
                 )
                 return
+
+            try:
+                BinaryTree.place_distributor(distributor.sponsor, distributor, leg=None)
+            except AlreadyPlacedError:
+                logger.warning(
+                    "consume_paid_starter_pack: distributor=%s was already "
+                    "placed in the binary tree before starter-pack "
+                    "confirmation -- unexpected given the current call "
+                    "graph (place_distributor has no other caller), but "
+                    "proceeding safely; PV is still credited below.",
+                    distributor.pk,
+                )
+
+            record_purchase_pv(distributor, distributor.starter_pack_pv)
 
             distributor.rank = distributor.starter_pack_rank
             distributor.starter_pack_confirmed_at = timezone.now()
