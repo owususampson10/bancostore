@@ -9,6 +9,15 @@
             "command": "python3 .claude/hooks/check_skill_invoked.py"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/check_commit_review.py"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -17,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "mkdir -p .claude && touch .claude/.skill-marker"
+            "command": "python3 .claude/hooks/record_skill_invocation.py"
           }
         ]
       }

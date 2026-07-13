@@ -3,7 +3,7 @@
 
 # Claude Code hook runtime state (not configuration — .claude/settings.json
 # and .claude/hooks/ themselves ARE committed)
-.claude/.skill-marker
+.claude/.skill-markers/
 
 # Original requirement docs (not tracked in git)
 docs/

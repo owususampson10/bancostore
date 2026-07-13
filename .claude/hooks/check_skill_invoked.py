@@ -7,19 +7,28 @@ the point it applies, every time, not once per session"). Self-discipline
 alone failed twice in one session before this was added — this makes the
 requirement mechanical instead of a promise.
 
-Freshness is tracked via the mtime of .claude/.skill-marker, touched by a
-companion PostToolUse hook on the Skill tool (see .claude/settings.json).
-No "small change" exception: any gated file extension is blocked equally.
+Freshness is tracked via per-skill marker files in .claude/.skill-markers/,
+touched by a companion PostToolUse hook on the Skill tool (see
+record_skill_invocation.py and .claude/settings.json). This gate only checks
+that *some* skill fired recently; check_commit_review.py separately checks
+*which* skill fired before a commit. No "small change" exception: any gated
+file extension is blocked equally.
 """
 
+import glob
 import json
 import os
 import sys
 import time
 
-GATED_EXTENSIONS = (".py", ".html", ".js", ".css", ".json", ".svg")
-MAX_MARKER_AGE_SECONDS = 30 * 60
-MARKER_PATH = ".claude/.skill-marker"
+from _common import GATED_EXTENSIONS, MAX_MARKER_AGE_SECONDS, SKILL_MARKERS_DIR
+
+
+def freshest_marker_age():
+    markers = glob.glob(os.path.join(SKILL_MARKERS_DIR, "*"))
+    if not markers:
+        return MAX_MARKER_AGE_SECONDS + 1
+    return time.time() - max(os.path.getmtime(m) for m in markers)
 
 
 def main():
@@ -30,9 +39,7 @@ def main():
         print(json.dumps({"continue": True}))
         return
 
-    age = MAX_MARKER_AGE_SECONDS + 1
-    if os.path.exists(MARKER_PATH):
-        age = time.time() - os.path.getmtime(MARKER_PATH)
+    age = freshest_marker_age()
 
     if age > MAX_MARKER_AGE_SECONDS:
         reason = (
