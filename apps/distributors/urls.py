@@ -31,6 +31,13 @@ urlpatterns = [
         views.starter_pack_payment_callback,
         name="starter_pack_payment_callback",
     ),
+    path("kyc/start/", views.start_kyc_verification, name="start_kyc_verification"),
+    path(
+        "kyc/callback/",
+        views.kyc_verification_callback,
+        name="kyc_verification_callback",
+    ),
+    path("webhooks/didit/", views.didit_webhook, name="didit_webhook"),
     path("verify-otp/", views.verify_otp_view, name="verify_otp"),
     path("verify-otp/resend/", views.resend_otp, name="resend_otp"),
     path("login/", views.login_view, name="login"),

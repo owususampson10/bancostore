@@ -1,13 +1,18 @@
+import ipaddress
 import logging
+import socket
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.models import AbstractBaseUser, Group
+from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+import requests
 from constance import config
 
 from apps.binary_tree.services import AlreadyPlacedError, BinaryTree
@@ -16,8 +21,10 @@ from bancostore.concurrency import (
     retry_on_lock_contention,
     select_for_update_nowait_if_supported,
 )
+from bancostore.media import resize_and_convert_to_webp
 
-from .models import Distributor, PendingRegistration
+from .didit import DiditError, get_session_decision
+from .models import DiditVerification, Distributor, PendingRegistration
 from .paystack import PaystackError, verify_transaction
 
 logger = logging.getLogger(__name__)
@@ -400,5 +407,165 @@ def consume_paid_starter_pack(reference: str) -> None:
             distributor.rank = distributor.starter_pack_rank
             distributor.starter_pack_confirmed_at = timezone.now()
             distributor.save(update_fields=["rank", "starter_pack_confirmed_at"])
+
+    retry_on_lock_contention(_attempt)
+
+
+# Didit's own overall session status -> our Status choices. Any other value
+# (e.g. "Not Started"/"In Progress") means the hosted flow isn't finished
+# yet -- nothing final to store.
+_DIDIT_STATUS_MAP = {
+    "Approved": DiditVerification.Status.APPROVED,
+    "Declined": DiditVerification.Status.DECLINED,
+    "In Review": DiditVerification.Status.IN_REVIEW,
+}
+
+
+_ALLOWED_MEDIA_HOST_SUFFIX = ".didit.me"
+
+
+def _assert_safe_media_url(url):
+    """SSRF guard: these URLs come from Didit's own decision response, not
+    directly from a user-typed field, but the server still shouldn't
+    blindly fetch whatever string appears there -- a Didit-side bug, a
+    MITM, or a compromised session could otherwise point this at an
+    internal service (cloud metadata, localhost, a private IP). Requires
+    https, a didit.me (sub)domain, and a resolved IP that's actually
+    public."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(f"refusing to fetch non-https media URL: {url!r}")
+    hostname = parsed.hostname or ""
+    if hostname != "didit.me" and not hostname.endswith(_ALLOWED_MEDIA_HOST_SUFFIX):
+        raise ValueError(
+            f"refusing to fetch media URL from unexpected host: {hostname!r}"
+        )
+    try:
+        resolved_ip = ipaddress.ip_address(socket.gethostbyname(hostname))
+    except (socket.gaierror, ValueError) as exc:
+        raise ValueError(f"could not resolve media URL host: {hostname!r}") from exc
+    if not resolved_ip.is_global:
+        raise ValueError(
+            f"refusing to fetch media URL resolving to a non-public IP: {resolved_ip}"
+        )
+
+
+def _download_image(url):
+    """Fetch an image from one of Didit's short-lived media URLs and wrap
+    it in a ContentFile that resize_and_convert_to_webp can read (it just
+    needs something Image.open() accepts plus a .name)."""
+    _assert_safe_media_url(url)
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+    name = url.split("?")[0].rsplit("/", 1)[-1] or "image.jpg"
+    return ContentFile(response.content, name=name)
+
+
+def consume_didit_result(session_id: str) -> None:
+    """Task 11b: the single source of truth for turning a completed Didit
+    verification session into a stored `DiditVerification` result. Called
+    from both the callback-redirect view and the webhook -- whichever
+    arrives first completes it; both call sites, and repeat calls with the
+    same session_id, are always safe (idempotent).
+
+    Never trusts a caller's claims about the result -- always re-fetches
+    via get_session_decision() before storing anything, the same "always
+    re-verify server-side" rule already applied to Paystack. Purely
+    informational: never touches `Distributor.kyc_status` (only an admin's
+    explicit action does, Task 11c -- see SPEC.md's "never auto-approve
+    KYC" boundary).
+    """
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                verification = select_for_update_nowait_if_supported(
+                    DiditVerification.objects.filter(session_id=session_id)
+                ).get()
+            except DiditVerification.DoesNotExist:
+                logger.error(
+                    "consume_didit_result: no DiditVerification found for "
+                    "session_id=%s -- a result may have arrived with no "
+                    "matching record. Needs manual investigation.",
+                    session_id,
+                )
+                return
+
+            if verification.status != DiditVerification.Status.PENDING:
+                return  # Already consumed -- idempotent no-op.
+
+            try:
+                decision = get_session_decision(session_id)
+            except DiditError:
+                logger.exception(
+                    "consume_didit_result: Didit get_session_decision failed "
+                    "for session_id=%s",
+                    session_id,
+                )
+                return
+
+            mapped_status = _DIDIT_STATUS_MAP.get(decision.get("status"))
+            if mapped_status is None:
+                return  # Still in progress -- nothing final to store yet.
+
+            id_verification = (decision.get("id_verifications") or [{}])[0]
+            face_match = (decision.get("face_matches") or [{}])[0]
+            liveness_check = (decision.get("liveness_checks") or [{}])[0]
+
+            verification.status = mapped_status
+            verification.id_verification_status = id_verification.get("status", "")
+            verification.face_match_status = face_match.get("status", "")
+            verification.face_match_score = face_match.get("score")
+            verification.liveness_status = liveness_check.get("status", "")
+            verification.liveness_score = liveness_check.get("score")
+            verification.extracted_full_name = id_verification.get("full_name") or ""
+            verification.extracted_document_number = (
+                id_verification.get("document_number") or ""
+            )
+            verification.warnings = decision.get("warnings") or []
+
+            dob_raw = id_verification.get("date_of_birth")
+            if dob_raw:
+                try:
+                    verification.extracted_date_of_birth = datetime.strptime(
+                        dob_raw, "%Y-%m-%d"
+                    ).date()
+                except ValueError:
+                    logger.warning(
+                        "consume_didit_result: unexpected date_of_birth "
+                        "format %r for session_id=%s",
+                        dob_raw,
+                        session_id,
+                    )
+
+            # UNVERIFIED (see apps/distributors/didit.py and tasks/todo.md
+            # Task 11b): front_image/back_image field names on
+            # id_verifications[] are assumed by analogy with Didit's
+            # standalone API response (portrait_image is separately
+            # confirmed for this session-decision endpoint); a missing key
+            # just means no image gets stored, it doesn't crash.
+            for field_name, url_key in (
+                ("id_front_image", "front_image"),
+                ("id_back_image", "back_image"),
+                ("selfie_image", "portrait_image"),
+            ):
+                url = id_verification.get(url_key)
+                if not url:
+                    continue
+                try:
+                    downloaded = _download_image(url)
+                except (requests.RequestException, ValueError):
+                    logger.exception(
+                        "consume_didit_result: failed to download %s for "
+                        "session_id=%s",
+                        url_key,
+                        session_id,
+                    )
+                    continue
+                setattr(
+                    verification, field_name, resize_and_convert_to_webp(downloaded)
+                )
+
+            verification.save()
 
     retry_on_lock_contention(_attempt)

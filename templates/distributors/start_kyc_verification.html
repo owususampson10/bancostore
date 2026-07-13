@@ -1,0 +1,25 @@
+{% extends "base_auth.html" %}
+{% block title %}Bancostore | Start KYC Verification{% endblock %}
+{% block content %}
+<div class="w-full max-w-[500px] mx-auto bg-white rounded-xl auth-card overflow-hidden border border-surface-variant">
+<div class="p-stack-lg border-b border-surface-variant bg-surface-container-low/50">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-xs">Verify Your Identity</h1>
+<p class="font-body-md text-body-md text-gray-muted">You'll be taken to our verification partner to scan your Ghana Card and take a quick selfie. It only takes a couple of minutes.</p>
+</div>
+<div class="p-stack-lg space-y-stack-md">
+{% if error %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">
+{% if error == True %}Something went wrong starting your verification. Please try again.{% else %}{{ error }}{% endif %}
+</div>
+{% else %}
+<form method="post" action="{% url 'distributors:start_kyc_verification' %}">
+{% csrf_token %}
+<button class="w-full py-4 bg-primary hover:opacity-90 text-white rounded-lg font-label-lg text-label-lg shadow-md active:scale-[0.98] transition-all flex justify-center items-center gap-2" type="submit">
+Start Verification
+<span class="material-symbols-outlined text-[20px]">arrow_forward</span>
+</button>
+</form>
+{% endif %}
+</div>
+</div>
+{% endblock %}

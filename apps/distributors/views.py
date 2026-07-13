@@ -19,6 +19,9 @@ from django_ratelimit.decorators import ratelimit
 
 from apps.notifications.otp import generate_otp, verify_otp
 
+from .didit import DiditError
+from .didit import create_verification_session as create_didit_session
+from .didit import verify_webhook_signature as verify_didit_webhook_signature
 from .forms import (
     DistributorForgotPasswordForm,
     DistributorLoginForm,
@@ -26,13 +29,14 @@ from .forms import (
     DistributorSetNewPasswordForm,
     OTPVerificationForm,
 )
-from .models import Distributor, PendingRegistration
+from .models import DiditVerification, Distributor, PendingRegistration
 from .paystack import PaystackError, initialize_transaction, verify_webhook_signature
 from .services import (
     PendingRegistrationAlreadyConsumed,
     PendingRegistrationNotFound,
     StarterPackAlreadyConfirmed,
     attempt_distributor_login,
+    consume_didit_result,
     consume_paid_registration,
     consume_paid_starter_pack,
     snapshot_payment_reference,
@@ -394,6 +398,106 @@ def set_new_password(request):
 
 def reset_success(request):
     return render(request, "distributors/reset_success.html")
+
+
+@login_required(login_url="distributors:login")
+@ratelimit(key="user", rate="20/h", method="POST")
+def start_kyc_verification(request):
+    """Task 11b: redirects the distributor to Didit's hosted verification
+    page (ID front/back + a live selfie -- face-match + liveness + document
+    checks all happen on Didit's side). Phone-verified gate mirrors the old
+    submit_kyc's. Once already approved by an admin, resubmission is
+    blocked -- otherwise a distributor can restart as many times as needed
+    regardless of what Didit itself said last time, since Didit's result is
+    purely informational (Task 11c) and never sets kyc_status itself."""
+    distributor = request.user.distributor
+
+    if not distributor.phone_verified:
+        return render(
+            request,
+            "distributors/start_kyc_verification.html",
+            {"error": "Verify your phone number before starting KYC verification."},
+        )
+
+    if distributor.kyc_status == Distributor.KycStatus.APPROVED:
+        return redirect("distributors:dashboard")
+
+    if request.method == "POST":
+        callback_url = request.build_absolute_uri(
+            reverse("distributors:kyc_verification_callback")
+        )
+        try:
+            session = create_didit_session(
+                callback_url=callback_url, vendor_data=distributor.pk
+            )
+        except DiditError:
+            logger.exception(
+                "start_kyc_verification: Didit create_verification_session "
+                "failed for distributor=%s",
+                distributor.pk,
+            )
+            return render(
+                request, "distributors/start_kyc_verification.html", {"error": True}
+            )
+
+        DiditVerification.objects.update_or_create(
+            distributor=distributor,
+            defaults={
+                "session_id": session["session_id"],
+                "status": DiditVerification.Status.PENDING,
+            },
+        )
+        return redirect(session["url"])
+
+    return render(request, "distributors/start_kyc_verification.html")
+
+
+def kyc_verification_callback(request):
+    """The distributor's browser lands here after finishing (or
+    abandoning) Didit's hosted flow. Fast-path alongside the webhook --
+    Didit's own callback query params are read only to know which session
+    to re-check; consume_didit_result always re-fetches the authoritative
+    result from Didit rather than trusting them."""
+    session_id = request.GET.get("verificationSessionId", "")
+    if session_id:
+        consume_didit_result(session_id)
+    return render(request, "distributors/kyc_verification_callback.html")
+
+
+@csrf_exempt
+@require_POST
+def didit_webhook(request):
+    """Signature scheme is UNVERIFIED against Didit's own primary docs --
+    see apps/distributors/didit.py::verify_webhook_signature's docstring
+    and tasks/todo.md Task 11b. Must return 200 OK once accepted (Didit
+    retries otherwise, same reasoning as the Paystack webhook), so this
+    handler needs to be idempotent, which consume_didit_result is.
+
+    Unlike paystack_webhook (which verifies its signature over the whole
+    raw body before ever parsing it), this parses JSON first -- Didit's
+    "Simple" scheme signs three extracted field values, not the raw body,
+    so there's no way to compute it without parsing first. json.loads()
+    itself isn't a meaningful attack surface (no code execution, and
+    Django's DATA_UPLOAD_MAX_MEMORY_SIZE already bounds request.body size
+    before this ever runs), so this is a deliberate, understood trade-off
+    forced by Didit's scheme, not an oversight."""
+    try:
+        payload = json.loads(request.body)
+    except ValueError:
+        return HttpResponseBadRequest("invalid JSON")
+
+    session_id = payload.get("session_id", "")
+    status = payload.get("status", "")
+    created_at = payload.get("created_at", "")
+    signature = request.headers.get("X-Signature-Simple", "")
+
+    if not verify_didit_webhook_signature(session_id, status, created_at, signature):
+        return HttpResponseBadRequest("invalid signature")
+
+    if session_id:
+        consume_didit_result(session_id)
+
+    return HttpResponse(status=200)
 
 
 @login_required(login_url="distributors:login")
