@@ -14,6 +14,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from constance import config
 from django_ratelimit.decorators import ratelimit
 
 from apps.notifications.otp import generate_otp, verify_otp
@@ -30,9 +31,12 @@ from .paystack import PaystackError, initialize_transaction, verify_webhook_sign
 from .services import (
     PendingRegistrationAlreadyConsumed,
     PendingRegistrationNotFound,
+    StarterPackAlreadyConfirmed,
     attempt_distributor_login,
     consume_paid_registration,
+    consume_paid_starter_pack,
     snapshot_payment_reference,
+    snapshot_starter_pack_choice,
 )
 
 User = get_user_model()
@@ -122,11 +126,116 @@ def registration_payment_callback(request):
     hosted checkout. NOT the source of truth for account creation (the
     webhook is) -- but calls the same idempotent consume function as a
     fast-path, since Paystack's own redirect already carries the reference
-    as a query param. See project_paystack_registration_payment_design."""
+    as a query param. See project_paystack_registration_payment_design.
+
+    Auto-logs the user in once their account is confirmed created --
+    but only if this request's own session is the one that started this
+    specific registration (request.session["pending_registration_token"]
+    matches). Section 14's flow expects a seamless continue-to-checkout
+    experience with no separate login step, but logging in based on the
+    `reference` query param alone would be exploitable: it can leak via
+    browser history or a Referer header, and anyone holding a leaked
+    reference would otherwise be logged into the real owner's account.
+    Tying it to the session instead means only the browser that actually
+    submitted the registration form gets the automatic login."""
     reference = request.GET.get("reference", "")
     if reference:
         consume_paid_registration(reference)
+
+    token = request.session.get("pending_registration_token")
+    if token:
+        try:
+            pending = PendingRegistration.objects.get(token=token)
+        except PendingRegistration.DoesNotExist:
+            pending = None
+
+        if pending and pending.consumed_at is not None:
+            try:
+                distributor = Distributor.objects.select_related("user").get(
+                    phone_number=pending.phone_number
+                )
+            except Distributor.DoesNotExist:
+                distributor = None
+            if distributor:
+                auth_login(request, distributor.user, backend=AUTH_BACKEND)
+                del request.session["pending_registration_token"]
+                return redirect("distributors:select_starter_pack")
+
     return render(request, "distributors/registration_payment_callback.html")
+
+
+@login_required(login_url="distributors:login")
+@ratelimit(key="user", rate="20/h", method="POST")
+def select_starter_pack(request):
+    """Task 10c: distributor chooses Starter Pack A or B; price/PV/rank
+    read from django-constance (never hardcoded), Paystack charge, and on
+    confirmed payment (consume_paid_starter_pack) rank is set from the
+    pinned snapshot. Per Section 14 step 5, this purchase is what
+    "officially activates" the distributor."""
+    if request.method == "POST":
+        choice = request.POST.get("pack")
+        if choice not in ("A", "B"):
+            return render(
+                request,
+                "distributors/select_starter_pack.html",
+                {"error": "Please choose a valid starter pack."},
+            )
+
+        try:
+            distributor = snapshot_starter_pack_choice(
+                request.user.distributor.pk, choice
+            )
+        except StarterPackAlreadyConfirmed:
+            return redirect("distributors:dashboard")
+
+        callback_url = request.build_absolute_uri(
+            reverse("distributors:starter_pack_payment_callback")
+        )
+        email = distributor.user.email or (
+            f"{distributor.phone_number}@bancostore.test"
+        )
+
+        try:
+            data = initialize_transaction(
+                email=email,
+                amount_pesewas=distributor.starter_pack_price_pesewas,
+                reference=distributor.starter_pack_payment_reference,
+                callback_url=callback_url,
+            )
+        except PaystackError:
+            logger.exception(
+                "select_starter_pack: Paystack initialize_transaction "
+                "failed for distributor=%s",
+                distributor.pk,
+            )
+            return render(
+                request, "distributors/select_starter_pack.html", {"error": True}
+            )
+
+        return redirect(data["authorization_url"])
+
+    return render(
+        request,
+        "distributors/select_starter_pack.html",
+        {
+            "pack_a_price": config.STARTER_PACK_A_PRICE,
+            "pack_a_pv": config.STARTER_PACK_A_PV,
+            "pack_b_price": config.STARTER_PACK_B_PRICE,
+            "pack_b_pv": config.STARTER_PACK_B_PV,
+        },
+    )
+
+
+def starter_pack_payment_callback(request):
+    """The user's browser lands here after attempting starter-pack payment.
+    By this point they're already logged in (from the registration-fee
+    callback), so unlike registration_payment_callback this doesn't need
+    to handle auth -- it's just a fast-path alongside the webhook, same
+    idempotent consume function either way."""
+    reference = request.GET.get("reference", "")
+    if reference:
+        consume_paid_starter_pack(reference)
+    return render(request, "distributors/starter_pack_payment_callback.html")
 
 
 @csrf_exempt
@@ -135,7 +244,10 @@ def paystack_webhook(request):
     """Source: https://paystack.com/docs/payments/webhooks/ -- must verify
     the x-paystack-signature header before acting, and must return 200 OK
     or Paystack retries the same event for up to 72 hours (so this handler
-    must be idempotent, which consume_paid_registration is)."""
+    must be idempotent, which both consume functions are). One webhook URL
+    handles every Paystack use case in this project (Paystack has no
+    per-transaction webhook config), so it dispatches by reference prefix
+    -- "reg-" (Task 10b) vs "pack-" (Task 10c)."""
     signature = request.headers.get("x-paystack-signature", "")
     if not verify_webhook_signature(request.body, signature):
         return HttpResponseBadRequest("invalid signature")
@@ -147,8 +259,17 @@ def paystack_webhook(request):
 
     if payload.get("event") == "charge.success":
         reference = payload.get("data", {}).get("reference", "")
-        if reference:
+        # Two prefixes is still simplest as if/elif -- if a third payment
+        # type is added (e.g. checkout/order references, Task 18),
+        # consider a prefix -> handler dict instead of more branches here.
+        if reference.startswith("reg-"):
             consume_paid_registration(reference)
+        elif reference.startswith("pack-"):
+            consume_paid_starter_pack(reference)
+        elif reference:
+            logger.warning(
+                "paystack_webhook: unrecognized reference prefix: %s", reference
+            )
 
     return HttpResponse(status=200)
 

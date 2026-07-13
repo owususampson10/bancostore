@@ -49,6 +49,25 @@ class Distributor(models.Model):
     failed_login_attempts = models.PositiveIntegerField(default=0)
     locked_until = models.DateTimeField(null=True, blank=True)
 
+    # Task 10c (Paystack starter pack). Price/PV/rank are snapshotted from
+    # django-constance at selection time (never re-derived live at
+    # confirmation time) -- same reasoning as PendingRegistration's
+    # fee_amount_pesewas: an admin changing STARTER_PACK_*_PRICE between
+    # selection and webhook must not make a genuinely, correctly paid
+    # purchase fail an exact-amount check against a since-changed value.
+    # `rank` (above) is only set from starter_pack_rank once payment is
+    # confirmed; starter_pack_confirmed_at is the definitive idempotency
+    # signal, kept separate from `rank` since `rank` could conceivably be
+    # set through some other path later (e.g. admin override).
+    starter_pack_choice = models.CharField(max_length=1, blank=True, default="")
+    starter_pack_price_pesewas = models.PositiveIntegerField(null=True, blank=True)
+    starter_pack_pv = models.PositiveIntegerField(null=True, blank=True)
+    starter_pack_rank = models.CharField(max_length=50, blank=True, default="")
+    starter_pack_payment_reference = models.CharField(
+        max_length=100, null=True, blank=True, unique=True
+    )
+    starter_pack_confirmed_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         return f"Distributor<{self.user}>"
 

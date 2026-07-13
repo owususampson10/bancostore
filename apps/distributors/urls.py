@@ -21,6 +21,16 @@ urlpatterns = [
         views.paystack_webhook,
         name="paystack_webhook",
     ),
+    path(
+        "starter-pack/",
+        views.select_starter_pack,
+        name="select_starter_pack",
+    ),
+    path(
+        "starter-pack/callback/",
+        views.starter_pack_payment_callback,
+        name="starter_pack_payment_callback",
+    ),
     path("verify-otp/", views.verify_otp_view, name="verify_otp"),
     path("verify-otp/resend/", views.resend_otp, name="resend_otp"),
     path("login/", views.login_view, name="login"),

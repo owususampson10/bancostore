@@ -31,6 +31,10 @@ class PendingRegistrationAlreadyConsumed(Exception):
     pass
 
 
+class StarterPackAlreadyConfirmed(Exception):
+    pass
+
+
 @dataclass
 class LoginAttempt:
     success: bool
@@ -256,5 +260,119 @@ def consume_paid_registration(reference: str) -> None:
 
             pending.consumed_at = timezone.now()
             pending.save(update_fields=["consumed_at"])
+
+    retry_on_lock_contention(_attempt)
+
+
+def snapshot_starter_pack_choice(distributor_pk, choice: str) -> Distributor:
+    """Task 10c: atomically pins the price/PV/rank for the chosen starter
+    pack (from django-constance, at selection time -- never re-derived
+    live at confirmation time) and generates a fresh Paystack reference.
+    Locked for the same reason as snapshot_payment_reference: two
+    concurrent requests for the same distributor must not overwrite each
+    other's reference. The constance read lives inside the retried
+    transaction too -- a cold constance cache falls back to a real DB
+    query (constance.backends.database), which under SQLite's single
+    writer lock can itself raise "database is locked" under concurrent
+    threads if left unprotected, the same class of issue fixed in Task
+    10a's PvLedger creation."""
+
+    def _attempt():
+        with transaction.atomic():
+            if choice == "A":
+                price, pv, rank = (
+                    config.STARTER_PACK_A_PRICE,
+                    config.STARTER_PACK_A_PV,
+                    config.STARTER_PACK_A_RANK,
+                )
+            else:
+                price, pv, rank = (
+                    config.STARTER_PACK_B_PRICE,
+                    config.STARTER_PACK_B_PV,
+                    config.STARTER_PACK_B_RANK,
+                )
+            distributor = select_for_update_nowait_if_supported(
+                Distributor.objects.filter(pk=distributor_pk)
+            ).get()
+            if distributor.starter_pack_confirmed_at is not None:
+                raise StarterPackAlreadyConfirmed
+            distributor.starter_pack_choice = choice
+            distributor.starter_pack_price_pesewas = int(price * 100)
+            distributor.starter_pack_pv = pv
+            distributor.starter_pack_rank = rank
+            distributor.starter_pack_payment_reference = (
+                f"pack-{distributor.pk}-{uuid.uuid4().hex[:8]}"
+            )
+            distributor.save(
+                update_fields=[
+                    "starter_pack_choice",
+                    "starter_pack_price_pesewas",
+                    "starter_pack_pv",
+                    "starter_pack_rank",
+                    "starter_pack_payment_reference",
+                ]
+            )
+            return distributor
+
+    return retry_on_lock_contention(_attempt)
+
+
+def consume_paid_starter_pack(reference: str) -> None:
+    """Task 10c: mirrors consume_paid_registration's idempotent,
+    server-verified pattern. Sets rank from the snapshotted
+    starter_pack_rank (never re-derived from constance at confirmation
+    time) once Paystack confirms the exact pinned amount was paid in GHS."""
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                distributor = select_for_update_nowait_if_supported(
+                    Distributor.objects.filter(starter_pack_payment_reference=reference)
+                ).get()
+            except Distributor.DoesNotExist:
+                logger.error(
+                    "consume_paid_starter_pack: no Distributor found for "
+                    "reference=%s -- a payment may have been confirmed with "
+                    "no matching record. Needs manual investigation.",
+                    reference,
+                )
+                return
+
+            if distributor.starter_pack_confirmed_at is not None:
+                return  # Already consumed -- idempotent no-op.
+
+            try:
+                verified = verify_transaction(reference)
+            except PaystackError:
+                logger.exception(
+                    "consume_paid_starter_pack: Paystack verify_transaction "
+                    "failed for reference=%s",
+                    reference,
+                )
+                return
+
+            if verified.get("status") != "success":
+                return
+            if verified.get("currency") != "GHS":
+                logger.warning(
+                    "consume_paid_starter_pack: unexpected currency %r for "
+                    "reference=%s",
+                    verified.get("currency"),
+                    reference,
+                )
+                return
+            if verified.get("amount") != distributor.starter_pack_price_pesewas:
+                logger.warning(
+                    "consume_paid_starter_pack: amount mismatch for "
+                    "reference=%s (paid=%r, expected=%r)",
+                    reference,
+                    verified.get("amount"),
+                    distributor.starter_pack_price_pesewas,
+                )
+                return
+
+            distributor.rank = distributor.starter_pack_rank
+            distributor.starter_pack_confirmed_at = timezone.now()
+            distributor.save(update_fields=["rank", "starter_pack_confirmed_at"])
 
     retry_on_lock_contention(_attempt)

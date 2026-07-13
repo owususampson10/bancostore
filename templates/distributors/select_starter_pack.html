@@ -1,0 +1,36 @@
+{% extends "base_auth.html" %}
+{% block title %}Bancostore | Choose Your Starter Pack{% endblock %}
+{% block content %}
+<div class="w-full max-w-[500px] mx-auto bg-white rounded-xl auth-card overflow-hidden border border-surface-variant">
+<div class="p-stack-lg border-b border-surface-variant bg-surface-container-low/50">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-xs">Choose Your Starter Pack</h1>
+<p class="font-body-md text-body-md text-gray-muted">This purchase activates your distributor account and sets your starting rank.</p>
+</div>
+<form class="p-stack-lg space-y-stack-md" method="post" action="{% url 'distributors:select_starter_pack' %}">
+{% csrf_token %}
+{% if error %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">
+{% if error == True %}Something went wrong starting your payment. Please try again.{% else %}{{ error }}{% endif %}
+</div>
+{% endif %}
+<label class="flex items-start gap-3 p-stack-md border border-outline-variant rounded-lg cursor-pointer hover:border-secondary transition-all">
+<input type="radio" name="pack" value="A" class="mt-1 w-4 h-4 text-primary">
+<span>
+<span class="block font-label-lg text-label-lg text-on-surface">Starter Pack A — GHS {{ pack_a_price }}</span>
+<span class="block font-body-sm text-body-sm text-gray-muted">{{ pack_a_pv }} PV — Bronze rank</span>
+</span>
+</label>
+<label class="flex items-start gap-3 p-stack-md border border-outline-variant rounded-lg cursor-pointer hover:border-secondary transition-all">
+<input type="radio" name="pack" value="B" class="mt-1 w-4 h-4 text-primary">
+<span>
+<span class="block font-label-lg text-label-lg text-on-surface">Starter Pack B — GHS {{ pack_b_price }}</span>
+<span class="block font-body-sm text-body-sm text-gray-muted">{{ pack_b_pv }} PV — Silver rank</span>
+</span>
+</label>
+<button class="w-full py-4 bg-primary hover:opacity-90 text-white rounded-lg font-label-lg text-label-lg shadow-md active:scale-[0.98] transition-all flex justify-center items-center gap-2" type="submit">
+Continue to Payment
+<span class="material-symbols-outlined text-[20px]">arrow_forward</span>
+</button>
+</form>
+</div>
+{% endblock %}
