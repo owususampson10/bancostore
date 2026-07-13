@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–8 are done (Phases 0–2 complete); Task 9 (binary tree schema, Phase 3/MLM core) is
-next.** What exists and is verified working:
+**Tasks 1–10 are done (Phases 0–2 complete, plus the binary-tree/onboarding slice of Phase 3);
+Task 11 (KYC submission + admin review + IR ID generation) is next.** What exists and is verified
+working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -28,14 +29,28 @@ next.** What exists and is verified working:
   (htmx + Alpine, bundled since Task 1 but unused until now).
 - **CI:** GitHub Actions runs the full suite against a real `mysql:8` service container (local dev
   stays on SQLite — MySQL doesn't install on this Mac).
-- **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7. All
-  Critical/High findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks,
-  lock-contention DoS, CSRF-exempt SMS send). The deliberately deferred remainder — decorative
-  constance settings, production security headers, proxy-aware rate-limit keys, Paystack secret
-  encryption, session-engine fallback — is tracked in the "Known issues" sections at the top of
+- **Binary tree + distributor onboarding (Tasks 9–10):** `BinaryTreeEdge` closure-table schema and
+  `PvLedger` per-leg PV aggregates (`apps/binary_tree/`, `apps/pv_ledger/`); `BinaryTree.place_distributor`
+  implements the confirmed placement/spillover algorithm (sponsor picks a leg or auto-balance falls
+  back to the weaker leg; spillover stays in-leg, shallowest-first); the ancestor-aggregate read
+  path is O(1)/O(log n), verified against a 16k+-node synthetic tree. Onboarding is fully
+  Paystack-gated: registration fee payment creates the account (`PendingRegistration`, never
+  session-only), starter pack selection sets rank/PV, and confirmed starter-pack payment triggers
+  first-time tree placement plus a write-time PV credit up the ancestor chain
+  (`apps/pv_ledger/services.py::record_purchase_pv`, two bulk `F()` updates grouped by leg, not a
+  per-ancestor loop). Verified against Section 14's Kofi/Ama example exactly. **Known
+  simplification:** the registration form has no leg-choice field yet, so placement always runs
+  auto-balance — see the `project_binary_tree_placement_spillover_rule` memory before adding
+  sponsor-driven leg choice.
+- **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
+  a code-review + security-hardening pass (2026-07-13) against Tasks 9–10. All Critical/High
+  findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
+  CSRF-exempt SMS send). The deliberately deferred remainder — decorative constance settings,
+  production security headers, proxy-aware rate-limit keys, Paystack secret encryption,
+  session-engine fallback — is tracked in the "Known issues" sections at the top of
   `tasks/todo.md`; read those before touching auth or deployment code.
 
-Existing apps: `apps/{accounts,catalog,distributors,notifications,platform_settings}`. Shared
+Existing apps: `apps/{accounts,binary_tree,catalog,distributors,notifications,platform_settings,pv_ledger}`. Shared
 concurrency helper: `bancostore/concurrency.py` (`retry_on_lock_contention`,
 `select_for_update_nowait_if_supported`) — use it for any counter/stock/attempt update rather than
 reinventing locking. See `tasks/plan.md` and `tasks/todo.md` for the full task breakdown and

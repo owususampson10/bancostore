@@ -750,13 +750,13 @@ the descendant falls under from that ancestor's perspective) and the `PvLedger` 
 no placement logic yet.
 
 **Acceptance criteria:**
-- [ ] `BinaryTreeEdge` stores every ancestor→descendant pair with depth and leg
-- [ ] `PvLedger` holds per-leg PV aggregates per distributor
-- [ ] Both models are registered in Django Admin for inspection
+- [x] `BinaryTreeEdge` stores every ancestor→descendant pair with depth and leg
+- [x] `PvLedger` holds per-leg PV aggregates per distributor
+- [x] Both models are registered in Django Admin for inspection
 
 **Verification:**
-- [ ] pytest: creating an edge for a single parent-child pair produces the expected row(s)
-- [ ] Migrations apply cleanly against a fresh DB
+- [x] pytest: creating an edge for a single parent-child pair produces the expected row(s)
+- [x] Migrations apply cleanly against a fresh DB
 
 **Dependencies:** Task 2
 
@@ -775,16 +775,16 @@ same leg's subtree. Writes closure-table edges for the new distributor against e
 tagging the correct leg per ancestor.
 
 **Acceptance criteria:**
-- [ ] Direct placement succeeds when the sponsor's chosen leg slot is empty
-- [ ] Spillover places a new distributor at the correct next-available position when the direct slot is taken, staying within the originally chosen leg
-- [ ] Spillover fills the shallowest slot first, left before right at each level (verified against a specific tree shape, not just "some slot in the subtree")
-- [ ] Auto-balance picks the leg with less PV when no leg is specified
-- [ ] Closure table stays consistent after multiple sequential placements, including spillovers (no orphaned or duplicate edges)
+- [x] Direct placement succeeds when the sponsor's chosen leg slot is empty
+- [x] Spillover places a new distributor at the correct next-available position when the direct slot is taken, staying within the originally chosen leg
+- [x] Spillover fills the shallowest slot first, left before right at each level (verified against a specific tree shape, not just "some slot in the subtree")
+- [x] Auto-balance picks the leg with less PV when no leg is specified
+- [x] Closure table stays consistent after multiple sequential placements, including spillovers (no orphaned or duplicate edges)
 
 **Verification:**
-- [ ] pytest: sponsor's direct left slot taken → new distributor lands in the exact expected spillover position (assert specific ancestor/descendant/leg rows, not just "somewhere in the subtree")
-- [ ] pytest: auto-balance chooses the actually-weaker leg when leg isn't specified
-- [ ] pytest: closure table integrity holds after 5+ sequential placements including spillovers
+- [x] pytest: sponsor's direct left slot taken → new distributor lands in the exact expected spillover position (assert specific ancestor/descendant/leg rows, not just "somewhere in the subtree")
+- [x] pytest: auto-balance chooses the actually-weaker leg when leg isn't specified
+- [x] pytest: closure table integrity holds after 5+ sequential placements including spillovers
 
 **Dependencies:** Task 9a
 
@@ -802,12 +802,12 @@ This is what Task 13's binary bonus job calls every 10 minutes, so its query cos
 with tree depth or width.
 
 **Acceptance criteria:**
-- [ ] Ancestor-aggregate lookup for a single distributor executes in a small, constant number of queries regardless of tree depth
-- [ ] Query count is verified, not just wall-clock time
+- [x] Ancestor-aggregate lookup for a single distributor executes in a small, constant number of queries regardless of tree depth
+- [x] Query count is verified, not just wall-clock time
 
 **Verification:**
-- [ ] pytest test seeding a 10k+ node synthetic tree: assert query count via `django.db.connection.queries` / `assertNumQueries`
-- [ ] pytest test: aggregate values returned match manually-computed expected totals for a small hand-built tree
+- [x] pytest test seeding a 10k+ node synthetic tree: assert query count via `django.db.connection.queries` / `assertNumQueries`
+- [x] pytest test: aggregate values returned match manually-computed expected totals for a small hand-built tree
 
 **Dependencies:** Task 9a, Task 9b (needs real placement data to query against meaningfully; the query logic itself only reads Task 9a's schema)
 
@@ -847,14 +847,19 @@ sponsor IR ID resolves to a real, existing distributor. No Paystack, no account 
 account isn't created until the registration fee is confirmed paid (Task 10b).
 
 **Acceptance criteria:**
-- [ ] Form collects all required fields and validates them
-- [ ] An invalid/non-existent sponsor IR ID is rejected with a clear error
-- [ ] A referral link's IR ID pre-fills the sponsor field
-- [ ] No `User`/`Distributor` row is created at this step
+- [x] Form collects all required fields and validates them
+- [x] An invalid/non-existent sponsor IR ID is rejected with a clear error
+- [x] A referral link's IR ID pre-fills the sponsor field
+- [x] No `User`/`Distributor` row is created at this step
 
 **Verification:**
-- [ ] pytest feature test: valid form + valid sponsor IR ID passes validation
-- [ ] pytest test: invalid sponsor IR ID is rejected
+- [x] pytest feature test: valid form + valid sponsor IR ID passes validation
+- [x] pytest test: invalid sponsor IR ID is rejected
+
+**Known gap (found while building Task 10d, 2026-07-13):** no leg-choice field was added here, so
+`BinaryTree.place_distributor` (Task 10d) always runs auto-balance (`leg=None`), never a sponsor's
+explicit choice. See `project_binary_tree_placement_spillover_rule` memory. Not blocking; revisit
+if explicit leg choice is wanted later.
 
 **Dependencies:** Task 5
 
@@ -875,13 +880,13 @@ from Task 10a's validated form data. Fee is non-refundable and gates account cre
 exists until payment confirms.
 
 **Acceptance criteria:**
-- [ ] Account is created only after Paystack confirms payment, never before
-- [ ] Registration fee is recorded as non-refundable
-- [ ] A failed/abandoned payment leaves no orphaned account
+- [x] Account is created only after Paystack confirms payment, never before
+- [x] Registration fee is recorded as non-refundable
+- [x] A failed/abandoned payment leaves no orphaned account
 
 **Verification:**
-- [ ] pytest feature test using Paystack test mode: confirmed payment → account created
-- [ ] pytest test: webhook failure/non-success leaves no account created
+- [x] pytest feature test using Paystack test mode: confirmed payment → account created
+- [x] pytest test: webhook failure/non-success leaves no account created
 
 **Dependencies:** Task 10a
 
@@ -902,12 +907,12 @@ hardcoded. Paystack charge; on confirmed payment, set `distributor.rank` and rec
 Per Section 14 step 5, this purchase is what "officially activates" the distributor.
 
 **Acceptance criteria:**
-- [ ] Starter pack choice sets the correct PV and rank (Bronze/Silver) from settings, not hardcoded
-- [ ] Rank is only set once payment is confirmed
+- [x] Starter pack choice sets the correct PV and rank (Bronze/Silver) from settings, not hardcoded
+- [x] Rank is only set once payment is confirmed
 
 **Verification:**
-- [ ] pytest feature test using Paystack test mode: Pack B purchase → confirmed payment → Silver rank, 1,000 PV recorded
-- [ ] pytest test: Pack A sets Bronze rank / 500 PV
+- [x] pytest feature test using Paystack test mode: Pack B purchase → confirmed payment → Silver rank, 1,000 PV recorded
+- [x] pytest test: Pack A sets Bronze rank / 500 PV
 
 **Dependencies:** Task 10b
 
@@ -926,12 +931,12 @@ doesn't exist yet; only the schema and the read-side aggregate query (Task 9a/9c
 logic, no Paystack.
 
 **Acceptance criteria:**
-- [ ] Distributor is placed in the tree (correct spillover) immediately on confirmed starter-pack payment
-- [ ] Every ancestor's `PvLedger` leg-PV total updates immediately, matching the purchased pack's PV
+- [x] Distributor is placed in the tree (correct spillover) immediately on confirmed starter-pack payment
+- [x] Every ancestor's `PvLedger` leg-PV total updates immediately, matching the purchased pack's PV
 
 **Verification:**
-- [ ] pytest feature test reproducing Section 14 steps 4–7 exactly: Kofi joins under Ama, Pack B → Ama's right leg gets +1,000 PV
-- [ ] pytest test: PV ledger ancestor totals are correct immediately after a Pack B purchase, several levels up
+- [x] pytest feature test reproducing Section 14 steps 4–7 exactly: Kofi joins under Ama, Pack B → Ama's right leg gets +1,000 PV
+- [x] pytest test: PV ledger ancestor totals are correct immediately after a Pack B purchase, several levels up
 
 **Dependencies:** Task 9a, Task 9b, Task 9c, Task 10c
 
@@ -941,9 +946,10 @@ logic, no Paystack.
 
 ---
 
-**Checkpoint (Task 10 complete):** a new distributor can register, pay the registration fee, choose
-and pay for a starter pack, and end up correctly placed in the binary tree with ancestor PV ledgers
-updated — verified end to end through Paystack test mode, reproducing Section 14 steps 4–7 exactly.
+**Checkpoint (Task 10 complete — verified 2026-07-13):** a new distributor can register, pay the
+registration fee, choose and pay for a starter pack, and end up correctly placed in the binary tree
+with ancestor PV ledgers updated — verified end to end through Paystack test mode, reproducing
+Section 14 steps 4–7 exactly. Full suite green (209 tests) at commit `0bdc507`.
 
 ---
 

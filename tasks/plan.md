@@ -58,19 +58,22 @@ admin/customer/distributor stub users exist, settings values are readable from t
 on the public storefront (home, listing with working search/filter/sort, detail page).
 
 ### Phase 3: Distributor Core Domain (MLM)
-- [ ] Task 9a: Binary tree closure table schema (`binary_tree_edges`, `pv_ledger`)
-- [ ] Task 9b: Placement + spillover service (sponsor picks leg, auto-balance fallback,
+- [x] Task 9a: Binary tree closure table schema (`binary_tree_edges`, `pv_ledger`)
+- [x] Task 9b: Placement + spillover service (sponsor picks leg, auto-balance fallback,
   in-leg shallowest-first spillover — confirmed with user 2026-07-13)
-- [ ] Task 9c: Ancestor-aggregate query service (O(log n)/O(1), feeds Task 13)
-- [ ] Task 10a: Registration form + sponsor validation (no payment)
-- [ ] Task 10b: Registration fee payment (Paystack — Boundary) — creates the account
-- [ ] Task 10c: Starter pack selection + payment (Paystack — Boundary) — sets rank
-- [ ] Task 10d: Binary tree placement + PV ledger update on starter-pack confirmation
+- [x] Task 9c: Ancestor-aggregate query service (O(log n)/O(1), feeds Task 13)
+- [x] Task 10a: Registration form + sponsor validation (no payment)
+- [x] Task 10b: Registration fee payment (Paystack — Boundary) — creates the account
+- [x] Task 10c: Starter pack selection + payment (Paystack — Boundary) — sets rank
+- [x] Task 10d: Binary tree placement + PV ledger update on starter-pack confirmation
 - [ ] Task 11: KYC submission (distributor) + review/approve (admin) + IR ID generation
   (moved from Task 10 to match Section 14's exact order — confirmed with user 2026-07-13)
 
-**Checkpoint D:** a new distributor can register, pay, get placed with correct spillover, and pass
-KYC to receive an IR ID — verified end to end.
+**Checkpoint D — verified 2026-07-13 (Tasks 9–10 only; Task 11/KYC/IR ID still open):** a new
+distributor can register, pay the registration fee, choose and pay for a starter pack, and end up
+correctly placed in the binary tree with ancestor PV ledgers updated — verified end to end through
+Paystack test mode, reproducing Section 14 steps 4–7 exactly. KYC + IR ID generation (Task 11) is
+still needed before the full "register → pay → place → pass KYC → get IR ID" checkpoint is done.
 
 ### Phase 4: Commission Engine (elevated test rigor)
 - [ ] Task 12: Direct Referral Bonus — instant credit on starter pack purchase
