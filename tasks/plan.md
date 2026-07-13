@@ -66,9 +66,15 @@ on the public storefront (home, listing with working search/filter/sort, detail 
 - [x] Task 10b: Registration fee payment (Paystack — Boundary) — creates the account
 - [x] Task 10c: Starter pack selection + payment (Paystack — Boundary) — sets rank
 - [x] Task 10d: Binary tree placement + PV ledger update on starter-pack confirmation
-- [x] Task 11a: KYC submission (Ghana Card front/back + selfie upload, phone-verified gated)
-- [ ] Task 11b: Admin KYC review + IR ID generation on approval (concurrency-safe sequence,
-  doubt-driven-development pass before implementing — split from Task 11, confirmed 2026-07-13;
+- [ ] Task 11a: Didit verification model + API client (revised 2026-07-13 -- replaces the
+  self-hosted upload form shipped in commit `ebf8e22` with Didit's hosted ID+selfie verification
+  flow, a Boundary-tier external integration like Paystack; see tasks/todo.md for the full
+  rationale and the old-code removal step)
+- [ ] Task 11b: Didit verification flow end-to-end (session creation, callback, webhook,
+  idempotent re-verify-server-side consume)
+- [ ] Task 11c: Admin KYC review + IR ID generation on approval (Didit's result is informational
+  only -- admin always makes the final call, never auto-approved, per SPEC.md's Boundary;
+  concurrency-safe IR ID sequence needs a doubt-driven-development pass before implementing;
   IR ID generation moved from Task 10 to match Section 14's exact order, confirmed 2026-07-13)
 
 **Checkpoint D — verified 2026-07-13 (Tasks 9–10 only; Task 11/KYC/IR ID still open):** a new

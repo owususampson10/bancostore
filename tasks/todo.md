@@ -953,74 +953,145 @@ Section 14 steps 4–7 exactly. Full suite green (209 tests) at commit `0bdc507`
 
 ---
 
-### Task 11: KYC submission, admin review, and IR ID generation
+### Task 11: KYC verification (Didit), admin review, and IR ID generation
 
-Split into two slices (11a/11b) per `planning-and-task-breakdown`, confirmed with the user
-2026-07-13 — submission and review/IR-ID-generation are genuinely separable (different actors,
-different files), matching how Tasks 9 and 10 were split. Also drops a duplicate/premature
-acceptance criterion found while planning: the original task said "distributor cannot request a
-withdrawal until KYC approved," but `apps/withdrawal/` doesn't exist yet (Task 16, much later) and
-Task 16 already has its own identical criterion ("Withdrawal blocked if KYC is not approved...",
-line ~1099). Task 11 only needs to leave `kyc_status` correct for Task 16 to check later; the
-withdrawal-blocking test itself belongs to Task 16.
+**Revised 2026-07-13.** Task 11a originally shipped as a self-hosted upload form (commit `ebf8e22`)
+— distributor uploads Ghana Card front/back + a selfie directly through our own form, admin
+eyeballs them manually with no automated check. The user then asked whether a real ID-verification
+check was possible; research (see chat log) found **Didit** (didit.me), which supports Ghana Card
+and offers a free tier (500 checks/month) via its **hosted verification flow** specifically (their
+standalone/server-to-server API explicitly has no free tier and has no selfie/face-match support at
+all — only the hosted flow does). The user chose to replace the self-hosted upload form entirely
+with Didit's hosted flow: Didit checks the ID front/back AND the selfie (face-match + liveness),
+distributor is redirected back afterward (Didit's `callback` parameter, same shape as this
+project's existing Paystack `callback_url`), and results are shown to the admin — who still must
+manually click approve/reject (Didit is never auto-approve/auto-reject; `SPEC.md`'s Boundaries
+section explicitly says "Never: Auto-approve ... KYC ... even temporarily for admin").
 
-#### Task 11a: KYC submission (Ghana Card + selfie upload)
+This reshapes Task 11 into three slices instead of two, following the same reasoning as Tasks 9/10's
+splits (genuinely separable concerns: data model, the session/webhook flow, and admin review are
+different actors and different files) — plus a preliminary cleanup step removing the now-obsolete
+upload-form code.
 
-**Description:** Once phone-verified, a distributor uploads Ghana Card front/back and a selfie.
-Fields live directly on `Distributor` (no separate history model — one submission per
-distributor, resubmission allowed any time `kyc_status` isn't `approved`, matching this project's
-simplicity-first convention elsewhere). Uploaded images are converted to WebP like every other
-user-uploaded image in this project (Task 7 precedent) — the conversion helper
-(`_resize_and_convert_to_webp`, currently private to `apps/catalog/models.py`) is extracted to
-`bancostore/media.py` so `apps/distributors` doesn't reach into `apps/catalog`.
+**Preliminary: remove the old upload-form implementation.** Its own clean commit before any new
+code lands (separate refactor-vs-feature, per `code-review-and-quality`): delete
+`ghana_card_front`/`ghana_card_back`/`selfie`/`kyc_submitted_at` fields and the `Distributor.save()`
+override that WebP-converts them (migration to drop the columns), `KycSubmissionForm` and its
+`MAX_KYC_UPLOAD_SIZE_BYTES`/`_validate_kyc_upload_size` (now dead code), the `submit_kyc` view and
+its URL, `templates/distributors/submit_kyc.html`, and `tests/feature/distributors/test_kyc_submission.py`
+(7 tests). `bancostore/media.py` (the shared WebP helper) stays — Category/ProductImage still use it.
+
+**Also drops a duplicate/premature acceptance criterion found while originally planning this task:**
+the original task said "distributor cannot request a withdrawal until KYC approved," but
+`apps/withdrawal/` doesn't exist yet (Task 16, much later) and Task 16 already has its own identical
+criterion ("Withdrawal blocked if KYC is not approved...", line ~1099). Task 11 only needs to leave
+`kyc_status` correct for Task 16 to check later; the withdrawal-blocking test itself belongs to
+Task 16.
+
+**User-side setup (not code):** the user needs a Didit account with an API key (confirmed ready), a
+"workflow" created in Didit's dashboard bundling ID Verification + Face Match + Liveness (gives a
+`workflow_id`), and a webhook secret for signature verification. `DIDIT_API_KEY`,
+`DIDIT_WEBHOOK_SECRET`, and `DIDIT_WORKFLOW_ID` go in `.env` as environment variables, matching
+`PAYSTACK_SECRET_KEY`/`MNOTIFY_API_KEY` — never `django-constance` (credentials/integration IDs,
+not business rules).
+
+#### Task 11a: Didit verification model + API client
+
+**Description:** Foundation only, no views yet. A new `DiditVerification` model
+(`apps/distributors/models.py`, one-to-one with `Distributor`) holds Didit's structured response:
+`session_id`, overall `status` (`pending`/`approved`/`declined`/`in_review` — Didit's own three
+decision states plus our initial `pending`), separate id-verification/face-match/liveness
+statuses and scores, extracted document fields (name, date of birth, document number), a
+`warnings` JSON list, and the three images (fetched from Didit and stored locally per the user's
+choice — WebP-converted via the existing shared helper). A new `apps/distributors/didit.py` module
+(mirrors `apps/distributors/paystack.py`'s shape exactly) provides `create_verification_session()`,
+`get_session_decision()`, and `verify_webhook_signature()`, grounded in Didit's real API docs
+(`source-driven-development` — endpoints, request/response shapes, and the HMAC-SHA256
+`X-Signature-Simple` scheme were fetched and verified during planning, not written from memory).
 
 **Acceptance criteria:**
-- [x] Distributor can submit all three KYC items only once phone-verified
-- [x] An incomplete submission (missing any of the three items) is rejected with a clear error
-- [x] Resubmission overwrites a previous pending/rejected submission rather than creating a new row
-- [x] Uploaded images are converted to WebP on save
+- [ ] `DiditVerification` stores session id, overall status, and per-check (ID/face-match/liveness) status+score
+- [ ] `create_verification_session()` calls Didit's real session-creation endpoint and returns the redirect URL + session id
+- [ ] `get_session_decision()` calls Didit's real retrieve-decision endpoint and returns a parsed result
+- [ ] `verify_webhook_signature()` correctly validates a genuine HMAC-SHA256 signature and rejects a tampered/wrong one
 
 **Verification:**
-- [x] pytest feature test: a phone-unverified distributor is blocked from submitting KYC
-- [x] pytest feature test: a complete submission succeeds and `kyc_status` stays `pending`
-- [x] pytest test: uploaded images are converted to WebP
+- [ ] pytest test: model fields round-trip correctly (create, save, reload)
+- [ ] pytest test (mocked HTTP): `create_verification_session()` sends the correct request shape and parses a real-shaped response
+- [ ] pytest test (mocked HTTP): `get_session_decision()` parses a real-shaped decision response into the expected fields
+- [ ] pytest test: `verify_webhook_signature()` accepts a correctly-signed payload and rejects an incorrect one
 
 **Dependencies:** Task 5
 
-**Files likely touched:** `apps/distributors/models.py` (new fields + migration), `apps/distributors/views.py`, `apps/distributors/forms.py`, `bancostore/media.py` (new, shared WebP helper extracted from `apps/catalog/models.py`), `tests/feature/distributors/test_kyc_submission.py`
+**Files likely touched:** `apps/distributors/models.py`, `apps/distributors/migrations/` (drop old KYC fields, add `DiditVerification`), `apps/distributors/didit.py` (new), `bancostore/settings.py`/`.env.example` (new env vars), `tests/unit/distributors/test_didit_client.py` (new), `tests/unit/distributors/test_didit_verification_model.py` (new)
 
-**Estimated scope:** S-M
-
-**Done 2026-07-13 (commit `ebf8e22`).** Also added a 5MB upload-size cap (found during
-`code-review-and-quality`/`security-and-hardening`, not in the original acceptance criteria) since
-this is the first file-upload endpoint reachable by a non-admin actor.
+**Estimated scope:** M
 
 ---
 
-#### Task 11b: Admin KYC review + IR ID generation on approval
+#### Task 11b: Didit verification flow end-to-end (session, callback, webhook)
 
-**Description:** Admin approves or rejects a pending KYC submission via Django Admin (rejection
-requires a reason, from the existing `KYC_REJECTION_REASONS` constance setting). Approval
-atomically assigns a permanent IR ID in the configured format (`IR_ID_PREFIX` /
-`IR_ID_STARTING_NUMBER` / `IR_ID_NUMBER_OF_DIGITS`) — Section 14 step 9 ("The admin approves his
-KYC. He receives his IR ID Number."). IR ID generation needs a concurrency-safe sequence design
-(never duplicated or reassigned under concurrent approvals) — run this through
-`doubt-driven-development` before implementing, same rigor as the PendingRegistration/Paystack
-designs got in Task 10a/10b.
+**Description:** Wires Task 11a's model/client into the actual distributor-facing flow.
+`start_kyc_verification` view (phone-verified gate, same as the old `submit_kyc`) creates a Didit
+session and redirects the distributor to Didit's hosted page. A callback view (fast path, mirrors
+`starter_pack_payment_callback`) and a webhook view (HMAC-verified via `verify_webhook_signature()`,
+mirrors `paystack_webhook`) both call one idempotent `consume_didit_result(session_id)` service —
+locked the same way `consume_paid_starter_pack` is (`select_for_update_nowait_if_supported` +
+`retry_on_lock_contention`), and **never trusts the callback query string or webhook payload
+directly**: it always re-fetches the authoritative result via `get_session_decision()` before
+storing anything, exactly the same "always re-verify server-side" pattern already used for
+Paystack. Downloads and WebP-converts the three images at this point.
 
 **Acceptance criteria:**
-- [ ] Admin sees pending KYC submissions (with uploaded images visible) in Django Admin
+- [ ] Distributor is redirected to Didit's hosted page with a real session, and redirected back afterward
+- [ ] Both the callback and the webhook path resolve to the same stored result (idempotent, no double-processing)
+- [ ] The stored result always comes from re-querying Didit's decision endpoint, never from trusting the callback/webhook payload alone
+- [ ] Webhook requests with an invalid/missing signature are rejected
+- [ ] Fetched images are converted to WebP and stored on `DiditVerification`
+
+**Verification:**
+- [ ] pytest feature test (mocked HTTP): full flow — start session → simulate callback → `DiditVerification` updated with the re-fetched result
+- [ ] pytest feature test: webhook with a valid signature updates the result; invalid signature is rejected (400)
+- [ ] pytest test: calling the consume path twice for the same session is a safe no-op the second time
+- [ ] pytest test: images fetched from Didit are stored as WebP
+
+**Dependencies:** Task 11a
+
+**Files likely touched:** `apps/distributors/views.py` (`start_kyc_verification`, callback, webhook; removes `submit_kyc`), `apps/distributors/services.py` (`consume_didit_result`), `apps/distributors/urls.py`, `templates/distributors/kyc_verification_callback.html` (new), `tests/feature/distributors/test_kyc_verification.py` (new)
+
+**Estimated scope:** M
+
+---
+
+#### Task 11c: Admin KYC review + IR ID generation on approval
+
+**Description:** Admin sees Didit's result (status, scores, extracted data, warnings, and the
+locally-stored images) alongside each pending `Distributor` in Django Admin, and approves or
+rejects (rejection requires a reason, from the existing `KYC_REJECTION_REASONS` constance setting).
+Didit's own status (including its `in_review` "I can't decide this one" state) is shown as
+context, never used to auto-decide — the admin's click is always what sets `kyc_status`, per
+`SPEC.md`'s "never auto-approve KYC" boundary. Approval atomically assigns a permanent IR ID in the
+configured format (`IR_ID_PREFIX` / `IR_ID_STARTING_NUMBER` / `IR_ID_NUMBER_OF_DIGITS`) — Section 14
+step 9 ("The admin approves his KYC. He receives his IR ID Number."). IR ID generation needs a
+concurrency-safe sequence design (never duplicated or reassigned under concurrent approvals) — run
+this through `doubt-driven-development` before implementing, same rigor as the
+PendingRegistration/Paystack designs got in Task 10a/10b.
+
+**Acceptance criteria:**
+- [ ] Admin sees pending KYC submissions, with Didit's result and images, in Django Admin
 - [ ] Approve assigns a permanent, correctly-formatted IR ID; reject requires a reason and never assigns an IR ID
 - [ ] IR ID is generated exactly once per distributor and never reassigned or duplicated, even under concurrent approvals
 - [ ] Approving an already-approved distributor is a safe no-op (doesn't regenerate or overwrite the IR ID)
+- [ ] Didit's result is informational only — it never sets `kyc_status` by itself, regardless of its own status value
 
 **Verification:**
 - [ ] pytest feature test: admin approves pending KYC → `kyc_status` flips to `approved` and a correctly-formatted IR ID is assigned
 - [ ] pytest feature test: admin rejects with a reason → `kyc_status` flips to `rejected`, no IR ID assigned, reason stored
 - [ ] pytest test (threaded, same convention as Task 9b/10d): concurrent approvals of different distributors never produce duplicate or reused IR IDs
 - [ ] pytest test: IR ID is never assigned before approval, and never reassigned once set
+- [ ] pytest test: a `DiditVerification` with status `declined` or `in_review` does not change `kyc_status` on its own (only an explicit admin action does)
 
-**Dependencies:** Task 11a, Task 3
+**Dependencies:** Task 11b, Task 3
 
 **Files likely touched:** `apps/distributors/admin.py`, `apps/distributors/services.py` (or a new `apps/distributors/kyc_services.py` if it grows large — IR ID generation), `apps/distributors/models.py` (`kyc_rejection_reason` field + migration), `tests/unit/distributors/test_kyc_review.py`
 
@@ -1028,9 +1099,11 @@ designs got in Task 10a/10b.
 
 ---
 
-**Checkpoint (Task 11 complete):** a distributor submits KYC once phone-verified, admin approves or
-rejects with a reason via Django Admin, and approval assigns a permanent, correctly-formatted,
-never-reused IR ID — verified by pytest, including under concurrent approvals.
+**Checkpoint (Task 11 complete):** a distributor is redirected through Didit's hosted verification
+(ID + selfie), the result (plus images) is stored and shown to admin, admin approves or rejects
+with a reason via Django Admin, and approval assigns a permanent, correctly-formatted, never-reused
+IR ID — verified by pytest, including under concurrent approvals. Didit never decides `kyc_status`
+by itself.
 
 ---
 
