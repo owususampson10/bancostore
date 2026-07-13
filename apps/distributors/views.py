@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import Group
+from django.contrib.auth.hashers import make_password
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -20,7 +20,7 @@ from .forms import (
     DistributorSetNewPasswordForm,
     OTPVerificationForm,
 )
-from .models import Distributor
+from .models import Distributor, PendingRegistration
 from .services import attempt_distributor_login
 
 User = get_user_model()
@@ -30,27 +30,38 @@ AUTH_BACKEND = "apps.distributors.backends.PhoneNumberBackend"
 
 @ratelimit(key="ip", rate="5/h", method="POST")
 def register(request):
+    """Task 10a: creates a PendingRegistration, not a live account -- the
+    real User/Distributor is only created once the registration fee is
+    confirmed paid (Task 10b, not built yet). See tests/feature/
+    distributors/test_registration_pending.py and the doubt-driven-development
+    design note in apps/distributors/models.py::PendingRegistration."""
     if request.method == "POST":
         form = DistributorRegistrationForm(request.POST)
         if form.is_valid():
-            phone_number = str(form.cleaned_data["phone_number"])
-            user = User.objects.create_user(
-                username=phone_number,
+            PendingRegistration.objects.create(
+                full_name=form.cleaned_data["full_name"],
+                phone_number=str(form.cleaned_data["phone_number"]),
                 email=form.cleaned_data.get("email", ""),
+                address=form.cleaned_data["address"],
+                area=form.cleaned_data["area"],
+                landmark=form.cleaned_data.get("landmark", ""),
+                password_hash=make_password(form.cleaned_data["password1"]),
+                sponsor=form.cleaned_data["sponsor"],
             )
-            user.set_password(form.cleaned_data["password1"])
-            user.save()
-            Distributor.objects.create(user=user, phone_number=phone_number)
-            distributor_group, _ = Group.objects.get_or_create(name="distributor")
-            user.groups.add(distributor_group)
-
-            generate_otp(phone_number, purpose="registration")
-            request.session["otp_phone_number"] = phone_number
-            request.session["otp_purpose"] = "registration"
-            return redirect("distributors:verify_otp")
+            return redirect("distributors:pay_registration_fee")
     else:
-        form = DistributorRegistrationForm()
+        form = DistributorRegistrationForm(
+            initial={"sponsor_ir_id": request.GET.get("ref", "")}
+        )
     return render(request, "distributors/register.html", {"form": form})
+
+
+def pay_registration_fee(request):
+    """Placeholder for Task 10b (Paystack registration-fee payment --
+    a project Boundary item, built in a separate slice with explicit
+    go-ahead). Task 10a stops here: the PendingRegistration exists and
+    waits for this step to consume it."""
+    return render(request, "distributors/pay_registration_fee.html")
 
 
 @ratelimit(key="ip", rate="10/m", method="POST")

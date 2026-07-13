@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.urls import reverse
 from django.utils import timezone
 
@@ -8,32 +9,41 @@ import pytest
 from constance import config
 
 from apps.distributors.models import Distributor
+from apps.notifications.otp import generate_otp
 from apps.notifications.sms import fake_outbox
 
 User = get_user_model()
 
 
-@pytest.mark.django_db
-def test_distributor_can_register_verify_otp_and_login(client):
-    response = client.post(
-        reverse("distributors:register"),
-        {
-            "phone_number": "+233241234567",
-            "email": "kwabena@example.test",
-            "password1": "S3cure-Passw0rd!",
-            "password2": "S3cure-Passw0rd!",
-            "terms_accepted": "on",
-        },
-    )
-    assert response.status_code == 302
+def _create_unverified_distributor_with_registration_otp(
+    phone_number="+233241234567", password="S3cure-Passw0rd!"
+):
+    """Task 10a decoupled account creation from OTP verification (accounts
+    are no longer created by register() -- see tests/feature/distributors/
+    test_registration_pending.py). OTP verification and login still need
+    coverage on their own terms until Task 10b/11 decide where phone
+    verification fits in the payment-gated sequence, so these tests set up
+    an already-existing, unverified Distributor directly rather than going
+    through register()."""
+    user = User.objects.create_user(username=phone_number, password=password)
+    distributor_group, _ = Group.objects.get_or_create(name="distributor")
+    user.groups.add(distributor_group)
+    distributor = Distributor.objects.create(user=user, phone_number=phone_number)
+    generate_otp(phone_number, purpose="registration")
+    return distributor
 
-    distributor = Distributor.objects.get(phone_number="+233241234567")
-    assert distributor.phone_verified is False
-    assert distributor.user.groups.filter(name="distributor").exists()
+
+@pytest.mark.django_db
+def test_distributor_can_verify_otp_and_login(client):
+    distributor = _create_unverified_distributor_with_registration_otp()
+    session = client.session
+    session["otp_phone_number"] = distributor.phone_number
+    session["otp_purpose"] = "registration"
+    session.save()
 
     # A real OTP was "sent" via the fake sender — pull the actual code out of it
     # rather than reaching into the database, since that's what a real user does.
-    assert fake_outbox, "no OTP SMS was sent on registration"
+    assert fake_outbox, "no OTP SMS was sent"
     sent_message = fake_outbox[-1]["message"]
     code = "".join(ch for ch in sent_message if ch.isdigit())[:6]
 
@@ -49,49 +59,24 @@ def test_distributor_can_register_verify_otp_and_login(client):
 
     login_response = client.post(
         reverse("distributors:login"),
-        {"phone_number": "+233241234567", "password": "S3cure-Passw0rd!"},
+        {"phone_number": str(distributor.phone_number), "password": "S3cure-Passw0rd!"},
     )
     assert login_response.status_code == 302
     assert int(client.session["_auth_user_id"]) == distributor.user.id
 
 
 @pytest.mark.django_db
-def test_distributor_can_register_with_a_local_format_phone_number(client):
-    """Ghana numbers typed without +233 (e.g. "0545488681", as a real user
-    would type it) must still validate — PHONENUMBER_DEFAULT_REGION makes
-    this work. Regression test for a bug caught during manual testing."""
-    response = client.post(
-        reverse("distributors:register"),
-        {
-            "phone_number": "0545488681",
-            "email": "ama@example.test",
-            "password1": "S3cure-Passw0rd!",
-            "password2": "S3cure-Passw0rd!",
-            "terms_accepted": "on",
-        },
-    )
-
-    assert response.status_code == 302
-    assert Distributor.objects.filter(phone_number="+233545488681").exists()
-
-
-@pytest.mark.django_db
 def test_wrong_otp_does_not_verify_the_phone(client):
-    client.post(
-        reverse("distributors:register"),
-        {
-            "phone_number": "+233241234567",
-            "email": "kwabena@example.test",
-            "password1": "S3cure-Passw0rd!",
-            "password2": "S3cure-Passw0rd!",
-            "terms_accepted": "on",
-        },
-    )
+    distributor = _create_unverified_distributor_with_registration_otp()
+    session = client.session
+    session["otp_phone_number"] = distributor.phone_number
+    session["otp_purpose"] = "registration"
+    session.save()
 
     response = client.post(reverse("distributors:verify_otp"), {"code": "000000"})
 
     assert response.status_code == 200
-    distributor = Distributor.objects.get(phone_number="+233241234567")
+    distributor.refresh_from_db()
     assert distributor.phone_verified is False
 
 
@@ -336,26 +321,6 @@ def test_verify_otp_is_rate_limited_per_ip(client):
     for _ in range(30):
         responses.append(
             client.post(reverse("distributors:verify_otp"), {"code": "000000"})
-        )
-
-    assert any(r.status_code == 429 for r in responses)
-
-
-@pytest.mark.django_db
-def test_register_is_rate_limited_per_ip(client):
-    responses = []
-    for i in range(10):
-        responses.append(
-            client.post(
-                reverse("distributors:register"),
-                {
-                    "phone_number": f"+23355001{i:04d}",
-                    "email": f"dist{i}@example.test",
-                    "password1": "S3cure-Passw0rd!",
-                    "password2": "S3cure-Passw0rd!",
-                    "terms_accepted": "on",
-                },
-            )
         )
 
     assert any(r.status_code == 429 for r in responses)

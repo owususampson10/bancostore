@@ -3,7 +3,7 @@ from django.contrib.auth.password_validation import validate_password
 
 from phonenumber_field.formfields import PhoneNumberField
 
-from .models import Distributor
+from .models import Distributor, PendingRegistration
 
 # Shared Tailwind classes matching the Bancostore Stitch design system
 # (see static/src/main.css @theme and templates/distributors/*.html).
@@ -18,6 +18,22 @@ CHECKBOX_CLASSES = (
 
 
 class DistributorRegistrationForm(forms.Form):
+    """Task 10a extends this with the fields Section 4 step 1 requires
+    beyond basic auth mechanics (full name, address, area, landmark,
+    sponsor's IR ID). Deliberately does NOT check phone/email against
+    existing Distributor rows here (see clean() below) -- enumeration
+    prevention confirmed via doubt-driven-development 2026-07-13: the real
+    uniqueness check happens later, at account-creation time in Task 10b's
+    webhook handler, not in this synchronous, probeable response.
+    """
+
+    full_name = forms.CharField(
+        label="Full name",
+        max_length=255,
+        widget=forms.TextInput(
+            attrs={"class": INPUT_CLASSES, "placeholder": "Full name"}
+        ),
+    )
     phone_number = PhoneNumberField(
         label="Phone number",
         widget=forms.TextInput(
@@ -30,6 +46,33 @@ class DistributorRegistrationForm(forms.Form):
         help_text="For notifications only — not used to log in.",
         widget=forms.EmailInput(
             attrs={"class": INPUT_CLASSES, "placeholder": "you@example.com"}
+        ),
+    )
+    address = forms.CharField(
+        label="House address",
+        max_length=255,
+        widget=forms.TextInput(
+            attrs={"class": INPUT_CLASSES, "placeholder": "House address"}
+        ),
+    )
+    area = forms.CharField(
+        label="Area",
+        max_length=255,
+        widget=forms.TextInput(attrs={"class": INPUT_CLASSES, "placeholder": "Area"}),
+    )
+    landmark = forms.CharField(
+        label="Landmark",
+        max_length=255,
+        required=False,
+        widget=forms.TextInput(
+            attrs={"class": INPUT_CLASSES, "placeholder": "Nearby landmark"}
+        ),
+    )
+    sponsor_ir_id = forms.CharField(
+        label="Sponsor's IR ID",
+        max_length=50,
+        widget=forms.TextInput(
+            attrs={"class": INPUT_CLASSES, "placeholder": "e.g. IR00245"}
         ),
     )
     password1 = forms.CharField(
@@ -54,11 +97,25 @@ class DistributorRegistrationForm(forms.Form):
         widget=forms.CheckboxInput(attrs={"class": CHECKBOX_CLASSES}),
     )
 
+    def clean_sponsor_ir_id(self):
+        ir_id = self.cleaned_data["sponsor_ir_id"]
+        sponsor = Distributor.objects.filter(ir_id=ir_id).first()
+        if sponsor is None:
+            raise forms.ValidationError("This sponsor IR ID could not be found.")
+        self.cleaned_data["sponsor"] = sponsor
+        return ir_id
+
     def clean_phone_number(self):
+        # Checking PendingRegistration (not Distributor) here isn't the
+        # enumeration channel the class docstring warns about: it only
+        # reveals "a signup is already in progress" for this number, never
+        # whether it belongs to an actual distributor. Needed regardless,
+        # to avoid an unhandled IntegrityError from PendingRegistration's
+        # unique phone_number constraint.
         phone_number = self.cleaned_data["phone_number"]
-        if Distributor.objects.filter(phone_number=phone_number).exists():
+        if PendingRegistration.objects.filter(phone_number=phone_number).exists():
             raise forms.ValidationError(
-                "An account with this phone number already exists."
+                "A registration for this phone number is already in progress."
             )
         return phone_number
 

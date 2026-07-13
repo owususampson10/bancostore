@@ -14,6 +14,14 @@
 </div>
 {% endif %}
 <div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.full_name.id_for_label }}">Full Name</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">person</span>
+{{ form.full_name }}
+</div>
+{% if form.full_name.errors %}<p class="text-error text-body-sm mt-1">{{ form.full_name.errors.0 }}</p>{% endif %}
+</div>
+<div class="space-y-stack-xs">
 <label class="font-label-lg text-label-lg text-on-surface" for="{{ form.phone_number.id_for_label }}">Phone Number</label>
 <div class="relative">
 <span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">phone_iphone</span>
@@ -28,6 +36,38 @@
 {{ form.email }}
 </div>
 {% if form.email.errors %}<p class="text-error text-body-sm mt-1">{{ form.email.errors.0 }}</p>{% endif %}
+</div>
+<div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.address.id_for_label }}">House Address</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">home</span>
+{{ form.address }}
+</div>
+{% if form.address.errors %}<p class="text-error text-body-sm mt-1">{{ form.address.errors.0 }}</p>{% endif %}
+</div>
+<div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.area.id_for_label }}">Area</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">location_on</span>
+{{ form.area }}
+</div>
+{% if form.area.errors %}<p class="text-error text-body-sm mt-1">{{ form.area.errors.0 }}</p>{% endif %}
+</div>
+<div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.landmark.id_for_label }}">Landmark <span class="text-gray-muted font-normal">(optional)</span></label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">near_me</span>
+{{ form.landmark }}
+</div>
+{% if form.landmark.errors %}<p class="text-error text-body-sm mt-1">{{ form.landmark.errors.0 }}</p>{% endif %}
+</div>
+<div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.sponsor_ir_id.id_for_label }}">Sponsor's IR ID</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">group</span>
+{{ form.sponsor_ir_id }}
+</div>
+{% if form.sponsor_ir_id.errors %}<p class="text-error text-body-sm mt-1">{{ form.sponsor_ir_id.errors.0 }}</p>{% endif %}
 </div>
 <div class="space-y-stack-xs">
 <label class="font-label-lg text-label-lg text-on-surface" for="{{ form.password1.id_for_label }}">Password</label>

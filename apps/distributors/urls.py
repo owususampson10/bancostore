@@ -6,6 +6,11 @@ app_name = "distributors"
 
 urlpatterns = [
     path("register/", views.register, name="register"),
+    path(
+        "register/pay-fee/",
+        views.pay_registration_fee,
+        name="pay_registration_fee",
+    ),
     path("verify-otp/", views.verify_otp_view, name="verify_otp"),
     path("verify-otp/resend/", views.resend_otp, name="resend_otp"),
     path("login/", views.login_view, name="login"),

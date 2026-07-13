@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.db import models
 
@@ -40,3 +42,38 @@ class Distributor(models.Model):
 
     def __str__(self):
         return f"Distributor<{self.user}>"
+
+
+class PendingRegistration(models.Model):
+    """Holds a validated registration submission (Task 10a) until the GHS
+    100 registration fee is confirmed paid (Task 10b) -- the real User and
+    Distributor aren't created until then. Design confirmed via
+    doubt-driven-development 2026-07-13: a DB table (not a Redis cache
+    entry) because cache entries are evictable under memory pressure, a
+    real durability risk for this data.
+
+    Deliberately NOT tracked by django-simple-history (installed
+    project-wide) -- the cleanup task's deletion must actually remove this
+    PII, not leave it sitting in a historical table forever.
+    """
+
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    full_name = models.CharField(max_length=255)
+    phone_number = PhoneNumberField(unique=True)
+    email = models.EmailField()
+    address = models.CharField(max_length=255)
+    area = models.CharField(max_length=255)
+    landmark = models.CharField(max_length=255, blank=True)
+    # Pre-hashed via django.contrib.auth.hashers.make_password -- never the
+    # plaintext password.
+    password_hash = models.CharField(max_length=255)
+    sponsor = models.ForeignKey(
+        Distributor,
+        on_delete=models.CASCADE,
+        related_name="pending_registrations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"PendingRegistration<{self.phone_number}>"
