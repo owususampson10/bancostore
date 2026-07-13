@@ -66,7 +66,7 @@ on the public storefront (home, listing with working search/filter/sort, detail 
 - [x] Task 10b: Registration fee payment (Paystack — Boundary) — creates the account
 - [x] Task 10c: Starter pack selection + payment (Paystack — Boundary) — sets rank
 - [x] Task 10d: Binary tree placement + PV ledger update on starter-pack confirmation
-- [ ] Task 11a: Didit verification model + API client (revised 2026-07-13 -- replaces the
+- [x] Task 11a: Didit verification model + API client (revised 2026-07-13 -- replaces the
   self-hosted upload form shipped in commit `ebf8e22` with Didit's hosted ID+selfie verification
   flow, a Boundary-tier external integration like Paystack; see tasks/todo.md for the full
   rationale and the old-code removal step)

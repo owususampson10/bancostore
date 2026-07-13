@@ -1005,27 +1005,32 @@ statuses and scores, extracted document fields (name, date of birth, document nu
 `warnings` JSON list, and the three images (fetched from Didit and stored locally per the user's
 choice — WebP-converted via the existing shared helper). A new `apps/distributors/didit.py` module
 (mirrors `apps/distributors/paystack.py`'s shape exactly) provides `create_verification_session()`,
-`get_session_decision()`, and `verify_webhook_signature()`, grounded in Didit's real API docs
-(`source-driven-development` — endpoints, request/response shapes, and the HMAC-SHA256
-`X-Signature-Simple` scheme were fetched and verified during planning, not written from memory).
+`get_session_decision()`, and `verify_webhook_signature()`. Session-creation and decision-retrieval
+endpoints/shapes were fetched and confirmed against Didit's real API docs
+(`source-driven-development`); the webhook `X-Signature-Simple` HMAC-SHA256 scheme was **not**
+confirmed against Didit's own docs (their webhook page 404'd via direct fetch) and is flagged
+UNVERIFIED in the function's docstring — see Task 11b's note on re-checking it against a real
+webhook delivery.
 
 **Acceptance criteria:**
-- [ ] `DiditVerification` stores session id, overall status, and per-check (ID/face-match/liveness) status+score
-- [ ] `create_verification_session()` calls Didit's real session-creation endpoint and returns the redirect URL + session id
-- [ ] `get_session_decision()` calls Didit's real retrieve-decision endpoint and returns a parsed result
-- [ ] `verify_webhook_signature()` correctly validates a genuine HMAC-SHA256 signature and rejects a tampered/wrong one
+- [x] `DiditVerification` stores session id, overall status, and per-check (ID/face-match/liveness) status+score
+- [x] `create_verification_session()` calls Didit's real session-creation endpoint and returns the redirect URL + session id
+- [x] `get_session_decision()` calls Didit's real retrieve-decision endpoint and returns a parsed result
+- [x] `verify_webhook_signature()` correctly validates a genuine HMAC-SHA256 signature and rejects a tampered/wrong one (scheme itself still unverified against Didit's real webhook -- see above)
 
 **Verification:**
-- [ ] pytest test: model fields round-trip correctly (create, save, reload)
-- [ ] pytest test (mocked HTTP): `create_verification_session()` sends the correct request shape and parses a real-shaped response
-- [ ] pytest test (mocked HTTP): `get_session_decision()` parses a real-shaped decision response into the expected fields
-- [ ] pytest test: `verify_webhook_signature()` accepts a correctly-signed payload and rejects an incorrect one
+- [x] pytest test: model fields round-trip correctly (create, save, reload)
+- [x] pytest test (mocked HTTP): `create_verification_session()` sends the correct request shape and parses a real-shaped response
+- [x] pytest test (mocked HTTP): `get_session_decision()` parses a real-shaped decision response into the expected fields
+- [x] pytest test: `verify_webhook_signature()` accepts a correctly-signed payload and rejects an incorrect one
 
 **Dependencies:** Task 5
 
 **Files likely touched:** `apps/distributors/models.py`, `apps/distributors/migrations/` (drop old KYC fields, add `DiditVerification`), `apps/distributors/didit.py` (new), `bancostore/settings.py`/`.env.example` (new env vars), `tests/unit/distributors/test_didit_client.py` (new), `tests/unit/distributors/test_didit_verification_model.py` (new)
 
 **Estimated scope:** M
+
+**Done 2026-07-13 (commit `fb7f857`).**
 
 ---
 
