@@ -64,6 +64,19 @@ def test_registration_redirects_to_the_payment_step(client):
 
 
 @pytest.mark.django_db
+def test_registration_stores_the_pending_registration_token_in_session(client):
+    sponsor = _make_sponsor()
+
+    client.post(
+        reverse("distributors:register"),
+        {**VALID_REGISTRATION_DATA, "sponsor_ir_id": sponsor.ir_id},
+    )
+
+    pending = PendingRegistration.objects.get(phone_number="+233241234567")
+    assert client.session["pending_registration_token"] == str(pending.token)
+
+
+@pytest.mark.django_db
 def test_registration_rejects_a_nonexistent_sponsor_ir_id(client):
     response = client.post(
         reverse("distributors:register"),

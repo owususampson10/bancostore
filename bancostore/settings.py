@@ -329,6 +329,13 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@bancostore.t
 MNOTIFY_API_KEY = os.environ.get("MNOTIFY_API_KEY", "")
 MNOTIFY_SENDER_ID = os.environ.get("MNOTIFY_SENDER_ID", "Bancostore")
 
+# Paystack — registration fee / starter pack payments (Task 10). Environment
+# variables, not django-constance: constance is plaintext in the database,
+# fine for business-rule copy (PAYSTACK_PAYMENT_CHANNELS etc., still in
+# apps/platform_settings/config.py) but not for real secret API keys.
+PAYSTACK_PUBLIC_KEY = os.environ.get("PAYSTACK_PUBLIC_KEY", "")
+PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
+
 
 # Internationalization
 

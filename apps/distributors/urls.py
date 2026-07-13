@@ -11,6 +11,16 @@ urlpatterns = [
         views.pay_registration_fee,
         name="pay_registration_fee",
     ),
+    path(
+        "register/pay-fee/callback/",
+        views.registration_payment_callback,
+        name="registration_payment_callback",
+    ),
+    path(
+        "webhooks/paystack/",
+        views.paystack_webhook,
+        name="paystack_webhook",
+    ),
     path("verify-otp/", views.verify_otp_view, name="verify_otp"),
     path("verify-otp/resend/", views.resend_otp, name="resend_otp"),
     path("login/", views.login_view, name="login"),

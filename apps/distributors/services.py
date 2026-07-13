@@ -1,9 +1,11 @@
+import logging
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from django.contrib.auth import authenticate
-from django.contrib.auth.models import AbstractBaseUser
-from django.db import transaction
+from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.models import AbstractBaseUser, Group
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from constance import config
@@ -13,7 +15,20 @@ from bancostore.concurrency import (
     select_for_update_nowait_if_supported,
 )
 
-from .models import Distributor
+from .models import Distributor, PendingRegistration
+from .paystack import PaystackError, verify_transaction
+
+logger = logging.getLogger(__name__)
+
+User = get_user_model()
+
+
+class PendingRegistrationNotFound(Exception):
+    pass
+
+
+class PendingRegistrationAlreadyConsumed(Exception):
+    pass
 
 
 @dataclass
@@ -107,3 +122,139 @@ def attempt_distributor_login(phone_number: str, password: str) -> LoginAttempt:
         return LoginAttempt(success=False, needs_verification=True, user=user)
 
     return LoginAttempt(success=True, user=user)
+
+
+def snapshot_payment_reference(token) -> PendingRegistration:
+    """Task 10b: atomically regenerates PendingRegistration.payment_reference
+    and snapshots the current registration fee. Locked (matching this
+    project's existing convention) so two concurrent requests for the same
+    token -- a double-click, two open tabs -- can't overwrite each other's
+    reference: the loser's reference would silently stop matching anything,
+    and a customer who then pays via that now-orphaned checkout page would
+    have no way to complete their registration."""
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                pending = select_for_update_nowait_if_supported(
+                    PendingRegistration.objects.filter(token=token)
+                ).get()
+            except PendingRegistration.DoesNotExist:
+                raise PendingRegistrationNotFound from None
+            if pending.consumed_at is not None:
+                raise PendingRegistrationAlreadyConsumed
+            pending.fee_amount_pesewas = int(config.REGISTRATION_FEE * 100)
+            pending.payment_reference = (
+                f"reg-{pending.token.hex}-{uuid.uuid4().hex[:8]}"
+            )
+            pending.save(update_fields=["fee_amount_pesewas", "payment_reference"])
+            return pending
+
+    return retry_on_lock_contention(_attempt)
+
+
+def consume_paid_registration(reference: str) -> None:
+    """Task 10b: the single source of truth for turning a paid
+    PendingRegistration into a real account. Called from BOTH the Paystack
+    webhook and the callback-redirect view -- whichever arrives first
+    completes it; both call sites, and repeat calls with the same
+    reference, are always safe (idempotent). Design confirmed via
+    doubt-driven-development 2026-07-13 -- see the
+    project_paystack_registration_payment_design memory.
+
+    Never trusts a caller's claims about payment status/amount/currency --
+    always re-verifies server-side against Paystack's authoritative
+    /transaction/verify endpoint before creating anything. Never raises:
+    every failure path logs and returns, since a webhook handler crashing
+    just means Paystack retries the same request for up to 72 hours.
+    """
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                pending = select_for_update_nowait_if_supported(
+                    PendingRegistration.objects.filter(payment_reference=reference)
+                ).get()
+            except PendingRegistration.DoesNotExist:
+                logger.error(
+                    "consume_paid_registration: no PendingRegistration found for "
+                    "reference=%s -- a payment may have been confirmed with no "
+                    "matching record (cleaned up, or a reference mismatch). "
+                    "Needs manual investigation.",
+                    reference,
+                )
+                return
+
+            if pending.consumed_at is not None:
+                return  # Already consumed -- idempotent no-op.
+
+            try:
+                verified = verify_transaction(reference)
+            except PaystackError:
+                logger.exception(
+                    "consume_paid_registration: Paystack verify_transaction "
+                    "failed for reference=%s",
+                    reference,
+                )
+                return
+
+            if verified.get("status") != "success":
+                return
+            if verified.get("currency") != "GHS":
+                logger.warning(
+                    "consume_paid_registration: unexpected currency %r for "
+                    "reference=%s",
+                    verified.get("currency"),
+                    reference,
+                )
+                return
+            if verified.get("amount") != pending.fee_amount_pesewas:
+                logger.warning(
+                    "consume_paid_registration: amount mismatch for "
+                    "reference=%s (paid=%r, expected=%r)",
+                    reference,
+                    verified.get("amount"),
+                    pending.fee_amount_pesewas,
+                )
+                return
+
+            if Distributor.objects.filter(phone_number=pending.phone_number).exists():
+                logger.error(
+                    "consume_paid_registration: a Distributor with phone=%s "
+                    "already exists -- refusing to create a duplicate for "
+                    "reference=%s",
+                    pending.phone_number,
+                    reference,
+                )
+                return
+
+            try:
+                user = User(username=str(pending.phone_number), email=pending.email)
+                # Already hashed in Task 10a via make_password() -- assigning
+                # directly avoids double-hashing it through set_password().
+                user.password = pending.password_hash
+                user.save()
+                distributor_group, _ = Group.objects.get_or_create(name="distributor")
+                user.groups.add(distributor_group)
+                Distributor.objects.create(
+                    user=user,
+                    phone_number=pending.phone_number,
+                    full_name=pending.full_name,
+                    address=pending.address,
+                    area=pending.area,
+                    landmark=pending.landmark,
+                    sponsor=pending.sponsor,
+                )
+            except IntegrityError:
+                logger.exception(
+                    "consume_paid_registration: IntegrityError creating "
+                    "account for reference=%s (likely a duplicate phone/"
+                    "username race)",
+                    reference,
+                )
+                return
+
+            pending.consumed_at = timezone.now()
+            pending.save(update_fields=["consumed_at"])
+
+    retry_on_lock_contention(_attempt)

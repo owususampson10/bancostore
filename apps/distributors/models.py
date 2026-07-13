@@ -30,6 +30,15 @@ class Distributor(models.Model):
     )
     ir_id = models.CharField(max_length=50, unique=True, null=True, blank=True)
 
+    # Copied over from PendingRegistration (Task 10a/10b) when the
+    # registration fee is confirmed paid. Plain fields here, not split into
+    # User.first_name/last_name -- those aren't used anywhere else in this
+    # project.
+    full_name = models.CharField(max_length=255, blank=True, default="")
+    address = models.CharField(max_length=255, blank=True, default="")
+    area = models.CharField(max_length=255, blank=True, default="")
+    landmark = models.CharField(max_length=255, blank=True, default="")
+
     # Distributors log in with phone + password, not email (see SPEC.md Section 2.2) —
     # unique so it doubles as the login lookup key.
     phone_number = PhoneNumberField(unique=True)
@@ -74,6 +83,20 @@ class PendingRegistration(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     consumed_at = models.DateTimeField(null=True, blank=True)
+
+    # Task 10b (Paystack). Both confirmed via doubt-driven-development
+    # 2026-07-13 -- see project_paystack_registration_payment_design memory:
+    # fee_amount_pesewas snapshots REGISTRATION_FEE at Paystack-initialize
+    # time so a later admin change to the fee can't make a genuinely,
+    # correctly paid registration fail an exact-amount check against a
+    # since-changed value. payment_reference is regenerated on every visit
+    # to the payment step (not the stable `token` above) so a retried
+    # payment (declined card, abandoned checkout) gets a fresh Paystack
+    # reference rather than reusing one across multiple initialize calls.
+    fee_amount_pesewas = models.PositiveIntegerField(null=True, blank=True)
+    payment_reference = models.CharField(
+        max_length=100, null=True, blank=True, unique=True
+    )
 
     def __str__(self):
         return f"PendingRegistration<{self.phone_number}>"

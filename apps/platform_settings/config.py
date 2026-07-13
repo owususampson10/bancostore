@@ -244,14 +244,15 @@ IR_ID_NUMBER_SETTINGS = {
 }
 
 PAYMENT_GATEWAY_SETTINGS = {
-    "PAYSTACK_PUBLIC_KEY": (
-        "",
-        "Paystack public API key",
-    ),
-    "PAYSTACK_SECRET_KEY": (
-        "",
-        "Paystack secret API key — never commit a real value (see SPEC.md Boundaries)",
-    ),
+    # PAYSTACK_PUBLIC_KEY / PAYSTACK_SECRET_KEY deliberately do NOT live here.
+    # This dict is django-constance -- plaintext in the database, fine for
+    # business-rule copy but not for real API keys. They're environment
+    # variables instead (bancostore/settings.py, matching MNOTIFY_API_KEY /
+    # EMAIL_HOST_PASSWORD) -- fixed here, when Paystack work actually
+    # started, per the standing note in tasks/todo.md's known issues (added
+    # before any Paystack code existed, specifically so this wasn't shipped
+    # silently once the "done-looking" admin scaffolding tempted someone to
+    # just fill in the empty constance field instead).
     "PAYSTACK_PAYMENT_CHANNELS": (
         "card,mobile_money",
         "Comma-separated payment methods to enable",

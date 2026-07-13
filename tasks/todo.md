@@ -131,20 +131,22 @@ guessed at.
   Nginx — an attacker can spoof a fresh IP per request and bypass rate limiting entirely. Needs the
   real Nginx config to fix correctly (set `X-Real-IP`/`X-Forwarded-For` in Nginx, then configure
   `RATELIMIT_IP_META_KEY` to trust exactly that one hop) — tracked for Task 24, not guessed at now.
-- [ ] **`PAYSTACK_SECRET_KEY` (and the rest of the payment-gateway constance settings) will be
-  stored in plaintext in the database** once Paystack integration is built (still an open SPEC.md
-  question) — `django-cryptography` is in `requirements.txt` specifically for this per SPEC.md Tech
-  Stack, but isn't wired up anywhere yet. Not exploitable today (the field is empty, no Paystack
-  code exists), but easy to ship silently once that work lands since the admin-panel scaffolding
-  already looks "done." Add `CONSTANCE_ADDITIONAL_FIELDS` with an encrypted field type (or move it
-  to an environment variable like `MNOTIFY_API_KEY`/`EMAIL_HOST_PASSWORD` already are) when Paystack
-  work starts, not after.
+- [x] ~~`PAYSTACK_SECRET_KEY` (and the rest of the payment-gateway constance settings) will be
+  stored in plaintext in the database~~ — **Fixed 2026-07-13**, when Paystack work actually
+  started (Task 10b), per this note's own instruction not to defer it. `PAYSTACK_PUBLIC_KEY` /
+  `PAYSTACK_SECRET_KEY` moved to environment variables (`bancostore/settings.py`, matching
+  `MNOTIFY_API_KEY`/`EMAIL_HOST_PASSWORD`) instead of `django-constance`. The rest of
+  `PAYMENT_GATEWAY_SETTINGS` (channels, mode toggle, copy) stays in constance — legitimate
+  business-rule config, not secrets.
 - [ ] `SESSION_ENGINE = "django.contrib.sessions.backends.cache"` has no DB fallback
   (`cached_db`) — any Redis eviction/restart logs out every user platform-wide, including admin's
   mandatory-2FA state. Worth a documented mitigation before go-live.
-- [ ] Distributor registration reveals phone-number existence (`apps/distributors/forms.py`'s
-  uniqueness check) while password-reset deliberately doesn't — a minor, largely unavoidable
-  enumeration inconsistency. Low priority; document as an accepted tradeoff or align both flows.
+- [x] ~~Distributor registration reveals phone-number existence (`apps/distributors/forms.py`'s
+  uniqueness check)~~ — **Fixed 2026-07-13** as part of Task 10a, for an unrelated reason (payment
+  gating the account, not this issue specifically): `clean_phone_number` no longer checks the
+  `Distributor` table at all. It only checks `PendingRegistration` (to avoid an unhandled
+  `IntegrityError` on a duplicate submission), which doesn't reveal whether a phone number belongs
+  to a real, existing distributor.
 - [ ] CI hygiene, not urgent: `.github/workflows/ci.yml` has no explicit `permissions:` block
   (defaults to broader `GITHUB_TOKEN` scope than needed), `actions/checkout@v4` is pinned to a
   mutable tag rather than a commit SHA, and there's no dependency vulnerability scan step
