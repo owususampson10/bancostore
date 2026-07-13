@@ -975,21 +975,25 @@ user-uploaded image in this project (Task 7 precedent) — the conversion helper
 `bancostore/media.py` so `apps/distributors` doesn't reach into `apps/catalog`.
 
 **Acceptance criteria:**
-- [ ] Distributor can submit all three KYC items only once phone-verified
-- [ ] An incomplete submission (missing any of the three items) is rejected with a clear error
-- [ ] Resubmission overwrites a previous pending/rejected submission rather than creating a new row
-- [ ] Uploaded images are converted to WebP on save
+- [x] Distributor can submit all three KYC items only once phone-verified
+- [x] An incomplete submission (missing any of the three items) is rejected with a clear error
+- [x] Resubmission overwrites a previous pending/rejected submission rather than creating a new row
+- [x] Uploaded images are converted to WebP on save
 
 **Verification:**
-- [ ] pytest feature test: a phone-unverified distributor is blocked from submitting KYC
-- [ ] pytest feature test: a complete submission succeeds and `kyc_status` stays `pending`
-- [ ] pytest test: uploaded images are converted to WebP
+- [x] pytest feature test: a phone-unverified distributor is blocked from submitting KYC
+- [x] pytest feature test: a complete submission succeeds and `kyc_status` stays `pending`
+- [x] pytest test: uploaded images are converted to WebP
 
 **Dependencies:** Task 5
 
 **Files likely touched:** `apps/distributors/models.py` (new fields + migration), `apps/distributors/views.py`, `apps/distributors/forms.py`, `bancostore/media.py` (new, shared WebP helper extracted from `apps/catalog/models.py`), `tests/feature/distributors/test_kyc_submission.py`
 
 **Estimated scope:** S-M
+
+**Done 2026-07-13 (commit `ebf8e22`).** Also added a 5MB upload-size cap (found during
+`code-review-and-quality`/`security-and-hardening`, not in the original acceptance criteria) since
+this is the first file-upload endpoint reachable by a non-admin actor.
 
 ---
 
