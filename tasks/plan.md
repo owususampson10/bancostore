@@ -62,8 +62,12 @@ on the public storefront (home, listing with working search/filter/sort, detail 
 - [ ] Task 9b: Placement + spillover service (sponsor picks leg, auto-balance fallback,
   in-leg shallowest-first spillover — confirmed with user 2026-07-13)
 - [ ] Task 9c: Ancestor-aggregate query service (O(log n)/O(1), feeds Task 13)
-- [ ] Task 10: Distributor onboarding — registration fee, starter pack, tree placement, IR ID
-- [ ] Task 11: KYC submission (distributor) + review/approve (admin)
+- [ ] Task 10a: Registration form + sponsor validation (no payment)
+- [ ] Task 10b: Registration fee payment (Paystack — Boundary) — creates the account
+- [ ] Task 10c: Starter pack selection + payment (Paystack — Boundary) — sets rank
+- [ ] Task 10d: Binary tree placement + PV ledger update on starter-pack confirmation
+- [ ] Task 11: KYC submission (distributor) + review/approve (admin) + IR ID generation
+  (moved from Task 10 to match Section 14's exact order — confirmed with user 2026-07-13)
 
 **Checkpoint D:** a new distributor can register, pay, get placed with correct spillover, and pass
 KYC to receive an IR ID — verified end to end.

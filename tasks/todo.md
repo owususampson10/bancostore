@@ -822,49 +822,152 @@ count — all verified by pytest, not just asserted.
 
 ---
 
-### Task 10: Distributor onboarding — registration fee, starter pack, placement, IR ID
+### Task 10: Distributor onboarding — registration fee, starter pack, placement
 
-**Description:** Full onboarding vertical slice: pay GHS 100 registration fee (Paystack sandbox) →
-choose Starter Pack A or B → pay for it → get placed in the binary tree (Task 9b's service) → PV
-ledger updated up the ancestor chain at write time → IR ID generated per `django-constance` IR ID
-settings (prefix/starting number/digits).
+Split into four slices (10a–10d) per `planning-and-task-breakdown` — the original single task was
+sized L with a note to split payment handling from tree-placement-and-ledger if it grew past ~5
+files, and it does. Also corrects a scope error found while planning: the original task bundled IR
+ID generation in here, but `docs/Bancostore_Features_and_Workflow_v4.docx` Section 14 (the exact
+numbered example `SPEC.md` cites for these tests) generates the IR ID *after* KYC approval (step
+9), not during registration/placement (steps 4–6). IR ID generation moves to Task 11. Confirmed
+with the user 2026-07-13.
+
+**Paystack:** the user has a Paystack account with both test and live API keys (SPEC.md Open
+Question #6 resolved 2026-07-13) — no credentials blocker. Writing/modifying the actual Paystack
+integration code is still a `CLAUDE.md` Boundary item requiring explicit go-ahead before each of
+10b/10c specifically, separate from having the keys.
+
+#### Task 10a: Registration form + sponsor validation (no payment)
+
+**Description:** Registration form (full name, phone, email, address, area, landmark, password,
+sponsor's IR ID — auto-filled from a referral link query param per Section 4 step 1). Validates the
+sponsor IR ID resolves to a real, existing distributor. No Paystack, no account creation yet — the
+account isn't created until the registration fee is confirmed paid (Task 10b).
 
 **Acceptance criteria:**
-- [ ] Registration fee payment is non-refundable and gates account creation
-- [ ] Starter pack choice sets the correct PV and rank (Bronze/Silver) from settings
-- [ ] Distributor is placed in the tree and ancestor PV ledgers update immediately on purchase
-- [ ] IR ID is generated once, is permanent, and follows the configured format
+- [ ] Form collects all required fields and validates them
+- [ ] An invalid/non-existent sponsor IR ID is rejected with a clear error
+- [ ] A referral link's IR ID pre-fills the sponsor field
+- [ ] No `User`/`Distributor` row is created at this step
 
 **Verification:**
-- [ ] pytest feature test reproducing Section 14 steps 1–9 (through IR ID issuance, before KYC gating withdrawal)
-- [ ] pytest test: PV ledger ancestor totals are correct immediately after a Pack B purchase
+- [ ] pytest feature test: valid form + valid sponsor IR ID passes validation
+- [ ] pytest test: invalid sponsor IR ID is rejected
 
-**Dependencies:** Task 5, Task 9a, Task 9b, Paystack sandbox access
+**Dependencies:** Task 5
 
-**Files likely touched:** `apps/pv_ledger/services.py`, `apps/distributors/views.py` (onboarding), `apps/orders/paystack_webhook.py`, `tests/feature/distributors/test_onboarding.py`
+**Files likely touched:** `apps/distributors/forms.py`, `apps/distributors/views.py` (registration form), `tests/feature/distributors/test_registration_form.py`
 
-**Estimated scope:** L (if it grows past ~5 files, split payment handling from tree-placement-and-ledger)
+**Estimated scope:** S-M
 
 ---
 
-### Task 11: KYC submission and admin review
+#### Task 10b: Registration fee payment (Paystack) — creates the account
+
+**Boundary:** Paystack integration code — confirm with the user immediately before writing this
+slice's payment/webhook code, per `CLAUDE.md`.
+
+**Description:** GHS 100 registration fee (`REGISTRATION_FEE` setting) charged via Paystack
+(Mobile Money or card). On confirmed payment (webhook), create the `User` + `Distributor` account
+from Task 10a's validated form data. Fee is non-refundable and gates account creation — no account
+exists until payment confirms.
+
+**Acceptance criteria:**
+- [ ] Account is created only after Paystack confirms payment, never before
+- [ ] Registration fee is recorded as non-refundable
+- [ ] A failed/abandoned payment leaves no orphaned account
+
+**Verification:**
+- [ ] pytest feature test using Paystack test mode: confirmed payment → account created
+- [ ] pytest test: webhook failure/non-success leaves no account created
+
+**Dependencies:** Task 10a
+
+**Files likely touched:** `apps/orders/paystack_webhook.py` (or `apps/distributors/`), `tests/feature/distributors/test_registration_payment.py`
+
+**Estimated scope:** M
+
+---
+
+#### Task 10c: Starter pack selection + payment (Paystack) — sets rank
+
+**Boundary:** Paystack integration code — confirm with the user immediately before writing this
+slice's payment/webhook code, per `CLAUDE.md`.
+
+**Description:** Newly-created distributor chooses Starter Pack A (GHS 1,500 / 500 PV / Bronze) or
+B (GHS 2,000 / 1,000 PV / Silver) — price, PV, and rank read from `django-constance`, never
+hardcoded. Paystack charge; on confirmed payment, set `distributor.rank` and record the purchase.
+Per Section 14 step 5, this purchase is what "officially activates" the distributor.
+
+**Acceptance criteria:**
+- [ ] Starter pack choice sets the correct PV and rank (Bronze/Silver) from settings, not hardcoded
+- [ ] Rank is only set once payment is confirmed
+
+**Verification:**
+- [ ] pytest feature test using Paystack test mode: Pack B purchase → confirmed payment → Silver rank, 1,000 PV recorded
+- [ ] pytest test: Pack A sets Bronze rank / 500 PV
+
+**Dependencies:** Task 10b
+
+**Files likely touched:** `apps/distributors/views.py` (starter pack selection), `apps/orders/paystack_webhook.py`, `tests/feature/distributors/test_starter_pack.py`
+
+**Estimated scope:** M
+
+---
+
+#### Task 10d: Binary tree placement + PV ledger update on starter-pack confirmation
+
+**Description:** On Task 10c's confirmed starter-pack payment, call Task 9b's
+`BinaryTree.place_distributor` and increment PV up the ancestor chain at write time (event-driven,
+per `SPEC.md` Scale Architecture) via a new `apps/pv_ledger/services.py` — this write-side logic
+doesn't exist yet; only the schema and the read-side aggregate query (Task 9a/9c) do. Pure internal
+logic, no Paystack.
+
+**Acceptance criteria:**
+- [ ] Distributor is placed in the tree (correct spillover) immediately on confirmed starter-pack payment
+- [ ] Every ancestor's `PvLedger` leg-PV total updates immediately, matching the purchased pack's PV
+
+**Verification:**
+- [ ] pytest feature test reproducing Section 14 steps 4–7 exactly: Kofi joins under Ama, Pack B → Ama's right leg gets +1,000 PV
+- [ ] pytest test: PV ledger ancestor totals are correct immediately after a Pack B purchase, several levels up
+
+**Dependencies:** Task 9a, Task 9b, Task 9c, Task 10c
+
+**Files likely touched:** `apps/pv_ledger/services.py`, `tests/unit/pv_ledger/test_purchase_increment.py`
+
+**Estimated scope:** S-M
+
+---
+
+**Checkpoint (Task 10 complete):** a new distributor can register, pay the registration fee, choose
+and pay for a starter pack, and end up correctly placed in the binary tree with ancestor PV ledgers
+updated — verified end to end through Paystack test mode, reproducing Section 14 steps 4–7 exactly.
+
+---
+
+### Task 11: KYC submission, admin review, and IR ID generation
 
 **Description:** Distributor uploads Ghana Card (front/back), a selfie, and verifies phone via
 OTP. Admin reviews and approves/rejects (with reason) via Django Admin. Withdrawal stays blocked
-until KYC is approved.
+until KYC is approved. On approval, the system generates the distributor's IR ID per
+`django-constance` IR ID settings (prefix/starting number/digits) — moved here from Task 10 per
+Section 14 step 9 ("The admin approves his KYC. He receives his IR ID Number"), confirmed with the
+user 2026-07-13.
 
 **Acceptance criteria:**
 - [ ] Distributor can submit all three KYC items
 - [ ] Admin sees pending KYC submissions in Django Admin and can approve or reject with a reason
 - [ ] Distributor cannot request a withdrawal until KYC status is approved
+- [ ] IR ID is generated once, only on KYC approval, is permanent, and follows the configured format
 
 **Verification:**
-- [ ] pytest feature test: KYC submission → admin approval → distributor's `kyc_status` flips to approved
+- [ ] pytest feature test: KYC submission → admin approval → distributor's `kyc_status` flips to approved and an IR ID is assigned
 - [ ] pytest test: withdrawal request is rejected while `kyc_status` is not approved
+- [ ] pytest test: IR ID is never assigned before KYC approval, and never reassigned once set
 
-**Dependencies:** Task 5, Task 10
+**Dependencies:** Task 5, Task 10d
 
-**Files likely touched:** `apps/distributors/kyc_services.py`, `apps/distributors/admin.py` (KYC review), `apps/distributors/views.py` (KYC submission), `tests/feature/distributors/test_kyc.py`
+**Files likely touched:** `apps/distributors/kyc_services.py`, `apps/distributors/admin.py` (KYC review + IR ID generation), `apps/distributors/views.py` (KYC submission), `tests/feature/distributors/test_kyc.py`
 
 **Estimated scope:** M
 
@@ -891,7 +994,7 @@ KYC to receive an IR ID — verified end to end through the UI.
 - [ ] pytest test reproducing the doc example exactly: Pack B purchase → sponsor credited GHS 100 (10% of 1,000 PV)
 - [ ] pytest test: rounding to the pesewa is correct on a non-round PV value
 
-**Dependencies:** Task 10, Task 3
+**Dependencies:** Task 10c, Task 10d, Task 3
 
 **Files likely touched:** `apps/commissions/services.py` (`DirectReferralCalculator`), `apps/wallet/services.py` (`WalletService`), `tests/unit/commissions/test_direct_referral.py`
 
@@ -917,7 +1020,7 @@ must only read pre-aggregated counters — never walk the tree.
 - [ ] pytest test: weekly cap enforcement, zero/tie-leg case, expired carry-forward exclusion
 - [ ] Scale test: seed 10k+ node tree, assert the task's DB query count does not grow with tree depth/width (reads aggregates only)
 
-**Dependencies:** Task 9c, Task 10, Task 3
+**Dependencies:** Task 9c, Task 10d, Task 3
 
 **Files likely touched:** `apps/commissions/tasks.py` (`calculate_binary_bonus`, Celery Beat schedule), `apps/commissions/services.py` (`BinaryBonusCalculator`), `tests/unit/commissions/test_binary_bonus.py`
 
@@ -1016,14 +1119,14 @@ delivery zone fee table + free-delivery threshold decided before starting.**
 
 **Acceptance criteria:**
 - [ ] Delivery fee is correctly looked up by zone from settings, or free above the threshold
-- [ ] A distributor's purchase generates PV and updates the ledger (Task 10's write path); a regular customer's does not
+- [ ] A distributor's purchase generates PV and updates the ledger (Task 10d's write path); a regular customer's does not
 - [ ] Order confirmation is sent (SMS/email) on successful payment
 
 **Verification:**
 - [ ] pytest test: distributor purchase increments PV ledger; regular customer purchase does not
 - [ ] pytest test: delivery fee matches the configured zone table, and is zero above the free threshold
 
-**Dependencies:** Task 8, Task 10, delivery zone fee decision
+**Dependencies:** Task 8, Task 10d, delivery zone fee decision
 
 **Files likely touched:** `apps/orders/views.py` (checkout), `apps/orders/services.py` (`DeliveryFeeCalculator`), `tests/feature/orders/test_checkout.py`
 
@@ -1076,7 +1179,7 @@ upline's legs, any commissions already paid on this signup reversed.
 - [ ] pytest test reproducing the doc example exactly
 - [ ] pytest test: request after day 7 is rejected
 
-**Dependencies:** Task 10, Task 12
+**Dependencies:** Task 10b, Task 10c, Task 10d, Task 12
 
 **Files likely touched:** `apps/distributors/cooling_off_services.py`, `apps/distributors/views.py` (cancel membership), `tests/feature/distributors/test_cooling_off_refund.py`
 

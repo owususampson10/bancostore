@@ -333,9 +333,9 @@ class BinaryBonusCalculator:
    need real starting numbers to seed)
 5. Minimum/maximum withdrawal amount and withdrawal day (also "set by admin" in docs — need
    concrete seed values)
-6. Is there an existing Paystack/mNotify account already, or do these need to be created before
-   integration work can start? — mNotify: confirmed, API key in hand (2026-07-11). Paystack: still
-   open.
+6. ~~Is there an existing Paystack/mNotify account already, or do these need to be created before
+   integration work can start?~~ — resolved: mNotify confirmed, API key in hand (2026-07-11);
+   Paystack confirmed, both test and live API keys in hand (2026-07-13).
 7. ~~Confirm `pyenv`-installed Python + Homebrew `mysql`/`redis` actually install cleanly on this
    Mac~~ — resolved during Task 1: Python/Redis installed cleanly, MySQL did not (see Local dev
    environment above).
