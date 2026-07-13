@@ -1,9 +1,14 @@
 import uuid
 
 from django.conf import settings
+from django.core.files.uploadedfile import UploadedFile
 from django.db import models
 
 from phonenumber_field.modelfields import PhoneNumberField
+
+from bancostore.media import resize_and_convert_to_webp
+
+KYC_IMAGE_FIELDS = ("ghana_card_front", "ghana_card_back", "selfie")
 
 
 class Distributor(models.Model):
@@ -68,8 +73,32 @@ class Distributor(models.Model):
     )
     starter_pack_confirmed_at = models.DateTimeField(null=True, blank=True)
 
+    # Task 11a (KYC submission). Fields live directly on Distributor rather
+    # than a separate history-tracking model -- there's exactly one KYC
+    # submission per distributor at a time, and resubmission (after a
+    # rejection, or before first review) simply overwrites these, matching
+    # the same simplicity-first convention as the starter_pack_* fields
+    # above. Converted to WebP on save like every other user-uploaded image
+    # in this project (Task 7 precedent) via bancostore/media.py.
+    ghana_card_front = models.ImageField(upload_to="kyc/ghana_card_front/", blank=True)
+    ghana_card_back = models.ImageField(upload_to="kyc/ghana_card_back/", blank=True)
+    selfie = models.ImageField(upload_to="kyc/selfie/", blank=True)
+    kyc_submitted_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         return f"Distributor<{self.user}>"
+
+    def save(self, *args, **kwargs):
+        # Same freshly-uploaded-vs-already-saved guard as ProductImage/
+        # Category in apps/catalog/models.py -- self.<field>.file is an
+        # UploadedFile only for a freshly-assigned upload, avoiding
+        # reprocessing (and double-compressing) on every unrelated field
+        # save (e.g. a login-attempt counter update).
+        for field_name in KYC_IMAGE_FIELDS:
+            field = getattr(self, field_name)
+            if field and isinstance(field.file, UploadedFile):
+                setattr(self, field_name, resize_and_convert_to_webp(field))
+        super().save(*args, **kwargs)
 
 
 class PendingRegistration(models.Model):

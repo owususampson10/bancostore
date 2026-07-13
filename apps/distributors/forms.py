@@ -1,5 +1,6 @@
 from django import forms
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 
 from phonenumber_field.formfields import PhoneNumberField
 
@@ -15,6 +16,18 @@ INPUT_CLASSES = (
 CHECKBOX_CLASSES = (
     "mt-1 w-4 h-4 text-primary border-outline-variant rounded focus:ring-primary"
 )
+
+# Task 11a: KYC is this project's first file-upload endpoint reachable by a
+# non-admin, untrusted actor (Category/ProductImage uploads are admin-only).
+# Rejecting oversized files here, before Distributor.save()'s Pillow
+# resize/convert step ever runs, keeps a large upload from spending real
+# CPU/memory before it's even validated.
+MAX_KYC_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+
+
+def _validate_kyc_upload_size(uploaded_file):
+    if uploaded_file.size > MAX_KYC_UPLOAD_SIZE_BYTES:
+        raise ValidationError("File must be smaller than 5MB.")
 
 
 class DistributorRegistrationForm(forms.Form):
@@ -164,6 +177,30 @@ class DistributorForgotPasswordForm(forms.Form):
         widget=forms.TextInput(
             attrs={"class": INPUT_CLASSES, "placeholder": "024 123 4567"}
         ),
+    )
+
+
+class KycSubmissionForm(forms.Form):
+    """Task 11a: Ghana Card front/back + selfie. All three are required
+    here regardless of the underlying Distributor fields' blank=True --
+    that's just so a freshly-created Distributor (who hasn't submitted
+    KYC yet) doesn't fail model validation, not a statement that these are
+    optional for submission."""
+
+    ghana_card_front = forms.ImageField(
+        label="Ghana Card (front)",
+        validators=[_validate_kyc_upload_size],
+        widget=forms.ClearableFileInput(attrs={"class": INPUT_CLASSES}),
+    )
+    ghana_card_back = forms.ImageField(
+        label="Ghana Card (back)",
+        validators=[_validate_kyc_upload_size],
+        widget=forms.ClearableFileInput(attrs={"class": INPUT_CLASSES}),
+    )
+    selfie = forms.ImageField(
+        label="Selfie",
+        validators=[_validate_kyc_upload_size],
+        widget=forms.ClearableFileInput(attrs={"class": INPUT_CLASSES}),
     )
 
 

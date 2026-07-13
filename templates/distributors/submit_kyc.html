@@ -1,0 +1,45 @@
+{% extends "base_auth.html" %}
+{% block title %}Bancostore | Submit KYC{% endblock %}
+{% block content %}
+<div class="w-full max-w-[500px] mx-auto bg-white rounded-xl auth-card overflow-hidden border border-surface-variant">
+<div class="p-stack-lg border-b border-surface-variant bg-surface-container-low/50">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-xs">Submit Your KYC</h1>
+<p class="font-body-md text-body-md text-gray-muted">Upload your Ghana Card (front and back) and a selfie. An admin will review your submission.</p>
+</div>
+{% if error %}
+<div class="p-stack-lg">
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">{{ error }}</div>
+</div>
+{% elif submitted %}
+<div class="p-stack-lg">
+<div class="p-3 bg-secondary-container text-on-secondary-container rounded-lg font-body-sm text-body-sm">Your KYC documents were submitted successfully. We'll notify you once they've been reviewed.</div>
+</div>
+{% else %}
+<form class="p-stack-lg space-y-stack-md" method="post" action="{% url 'distributors:submit_kyc' %}" enctype="multipart/form-data">
+{% csrf_token %}
+{% if form.non_field_errors %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">{{ form.non_field_errors }}</div>
+{% endif %}
+<div>
+<label class="block font-label-md text-label-md text-on-surface mb-1" for="{{ form.ghana_card_front.id_for_label }}">{{ form.ghana_card_front.label }}</label>
+{{ form.ghana_card_front }}
+{% if form.ghana_card_front.errors %}<p class="mt-1 font-body-sm text-body-sm text-error">{{ form.ghana_card_front.errors|join:", " }}</p>{% endif %}
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface mb-1" for="{{ form.ghana_card_back.id_for_label }}">{{ form.ghana_card_back.label }}</label>
+{{ form.ghana_card_back }}
+{% if form.ghana_card_back.errors %}<p class="mt-1 font-body-sm text-body-sm text-error">{{ form.ghana_card_back.errors|join:", " }}</p>{% endif %}
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface mb-1" for="{{ form.selfie.id_for_label }}">{{ form.selfie.label }}</label>
+{{ form.selfie }}
+{% if form.selfie.errors %}<p class="mt-1 font-body-sm text-body-sm text-error">{{ form.selfie.errors|join:", " }}</p>{% endif %}
+</div>
+<button class="w-full py-4 bg-primary hover:opacity-90 text-white rounded-lg font-label-lg text-label-lg shadow-md active:scale-[0.98] transition-all flex justify-center items-center gap-2" type="submit">
+Submit KYC
+<span class="material-symbols-outlined text-[20px]">arrow_forward</span>
+</button>
+</form>
+{% endif %}
+</div>
+{% endblock %}

@@ -1,36 +1,8 @@
-import io
-from pathlib import Path
-
-from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import UploadedFile
 from django.db import models
 from django.utils.text import slugify
 
-from PIL import Image
-
-# Generous cap on the longest edge — the storefront (Task 8) will further
-# constrain display size with CSS/responsive images; this just keeps
-# original upload sizes (often several MB straight off a phone camera) from
-# being stored and served as-is.
-MAX_IMAGE_DIMENSION = 1600
-WEBP_QUALITY = 85
-
-
-def _resize_and_convert_to_webp(image_field):
-    """Shared by ProductImage and Category.image — every freshly-uploaded
-    photo is resized and converted to WebP in-process (Django Admin's file
-    widget has no async processing step of its own)."""
-    img = Image.open(image_field)
-    img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION))
-    if img.mode not in ("RGB", "RGBA"):
-        img = img.convert("RGB")
-
-    buffer = io.BytesIO()
-    img.save(buffer, format="WEBP", quality=WEBP_QUALITY)
-    buffer.seek(0)
-
-    original_stem = Path(image_field.name).stem
-    return ContentFile(buffer.read(), name=f"{original_stem}.webp")
+from bancostore.media import resize_and_convert_to_webp
 
 
 class Category(models.Model):
@@ -60,7 +32,7 @@ class Category(models.Model):
         # — avoids reprocessing (and double-compressing) on every unrelated
         # field edit.
         if self.image and isinstance(self.image.file, UploadedFile):
-            self.image = _resize_and_convert_to_webp(self.image)
+            self.image = resize_and_convert_to_webp(self.image)
         super().save(*args, **kwargs)
 
 
@@ -164,7 +136,7 @@ class ProductImage(models.Model):
         # which is NOT an UploadedFile. This avoids reprocessing (and
         # double-compressing) the image on every unrelated field edit.
         if self.image and isinstance(self.image.file, UploadedFile):
-            self.image = _resize_and_convert_to_webp(self.image)
+            self.image = resize_and_convert_to_webp(self.image)
         super().save(*args, **kwargs)
 
 
