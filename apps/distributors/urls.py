@@ -31,7 +31,6 @@ urlpatterns = [
         views.starter_pack_payment_callback,
         name="starter_pack_payment_callback",
     ),
-    path("kyc/", views.submit_kyc, name="submit_kyc"),
     path("verify-otp/", views.verify_otp_view, name="verify_otp"),
     path("verify-otp/resend/", views.resend_otp, name="resend_otp"),
     path("login/", views.login_view, name="login"),

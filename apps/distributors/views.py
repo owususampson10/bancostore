@@ -24,7 +24,6 @@ from .forms import (
     DistributorLoginForm,
     DistributorRegistrationForm,
     DistributorSetNewPasswordForm,
-    KycSubmissionForm,
     OTPVerificationForm,
 )
 from .models import Distributor, PendingRegistration
@@ -395,45 +394,6 @@ def set_new_password(request):
 
 def reset_success(request):
     return render(request, "distributors/reset_success.html")
-
-
-@login_required(login_url="distributors:login")
-@ratelimit(key="user", rate="20/h", method="POST")
-def submit_kyc(request):
-    """Task 11a: Ghana Card front/back + selfie, gated on phone
-    verification. Resubmission (while kyc_status is "pending" or
-    "rejected") overwrites the previous submission and resets kyc_status
-    to "pending" so it re-enters the admin's review queue (Task 11b) --
-    without the reset, a distributor who fixes a rejected submission would
-    silently stay invisible to admin review. Once "approved", the
-    distributor already has a permanent IR ID and resubmission is blocked
-    rather than silently reopening review."""
-    distributor = request.user.distributor
-
-    if not distributor.phone_verified:
-        return render(
-            request,
-            "distributors/submit_kyc.html",
-            {"error": "Verify your phone number before submitting KYC documents."},
-        )
-
-    if distributor.kyc_status == Distributor.KycStatus.APPROVED:
-        return redirect("distributors:dashboard")
-
-    if request.method == "POST":
-        form = KycSubmissionForm(request.POST, request.FILES)
-        if form.is_valid():
-            distributor.ghana_card_front = form.cleaned_data["ghana_card_front"]
-            distributor.ghana_card_back = form.cleaned_data["ghana_card_back"]
-            distributor.selfie = form.cleaned_data["selfie"]
-            distributor.kyc_submitted_at = timezone.now()
-            distributor.kyc_status = Distributor.KycStatus.PENDING
-            distributor.save()
-            return render(request, "distributors/submit_kyc.html", {"submitted": True})
-    else:
-        form = KycSubmissionForm()
-
-    return render(request, "distributors/submit_kyc.html", {"form": form})
 
 
 @login_required(login_url="distributors:login")
