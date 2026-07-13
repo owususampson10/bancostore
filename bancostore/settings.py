@@ -336,6 +336,16 @@ MNOTIFY_SENDER_ID = os.environ.get("MNOTIFY_SENDER_ID", "Bancostore")
 PAYSTACK_PUBLIC_KEY = os.environ.get("PAYSTACK_PUBLIC_KEY", "")
 PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
 
+# Didit — distributor KYC verification (ID + selfie face-match/liveness), Task 11.
+# Same reasoning as Paystack above: environment variables, not django-constance.
+# DIDIT_WORKFLOW_ID identifies the verification workflow configured in Didit's
+# dashboard (which checks it runs -- ID Verification + Face Match + Liveness),
+# not a secret itself, but kept alongside the others since it's
+# integration-specific, not a tunable business rule.
+DIDIT_API_KEY = os.environ.get("DIDIT_API_KEY", "")
+DIDIT_WEBHOOK_SECRET = os.environ.get("DIDIT_WEBHOOK_SECRET", "")
+DIDIT_WORKFLOW_ID = os.environ.get("DIDIT_WORKFLOW_ID", "")
+
 
 # Internationalization
 

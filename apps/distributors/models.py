@@ -119,3 +119,65 @@ class PendingRegistration(models.Model):
 
     def __str__(self):
         return f"PendingRegistration<{self.phone_number}>"
+
+
+class DiditVerification(models.Model):
+    """Task 11a: Didit's hosted KYC verification result (ID front/back +
+    selfie face-match/liveness) for one distributor. Kept separate from
+    `Distributor` rather than adding a dozen columns there -- this is
+    Didit's structured response data, not something Distributor itself
+    needs to know about beyond "has one."
+
+    Deliberately informational only: `status` here reflects Didit's own
+    decision (including its "in_review" state -- Didit's own way of saying
+    "a human should look at this"), but it never sets `Distributor.
+    kyc_status` by itself. SPEC.md's Boundaries section is explicit: "Never:
+    Auto-approve ... KYC ... even temporarily for admin." Only an admin's
+    explicit approve/reject action (Task 11c) can change `kyc_status`.
+
+    Images are fetched from Didit's decision-response media URLs and
+    WebP-converted via bancostore/media.py -- a one-time server-side fetch,
+    not a Django-form upload, so there's no "freshly uploaded" isinstance
+    guard here like Category/ProductImage/the old Task 11a fields had.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        DECLINED = "declined", "Declined"
+        IN_REVIEW = "in_review", "In Review"
+
+    distributor = models.OneToOneField(
+        Distributor,
+        on_delete=models.CASCADE,
+        related_name="didit_verification",
+    )
+    session_id = models.CharField(max_length=100, unique=True)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+
+    # Didit's own per-check status strings (e.g. "Approved"/"Declined"),
+    # stored as-is rather than mapped onto our own Status choices -- Didit
+    # controls this vocabulary, and normalizing it here risks silently
+    # dropping a status value they add later that we haven't accounted for.
+    id_verification_status = models.CharField(max_length=20, blank=True, default="")
+    face_match_status = models.CharField(max_length=20, blank=True, default="")
+    face_match_score = models.FloatField(null=True, blank=True)
+    liveness_status = models.CharField(max_length=20, blank=True, default="")
+    liveness_score = models.FloatField(null=True, blank=True)
+
+    extracted_full_name = models.CharField(max_length=255, blank=True, default="")
+    extracted_document_number = models.CharField(max_length=100, blank=True, default="")
+    extracted_date_of_birth = models.DateField(null=True, blank=True)
+    warnings = models.JSONField(default=list, blank=True)
+
+    id_front_image = models.ImageField(upload_to="kyc/didit/id_front/", blank=True)
+    id_back_image = models.ImageField(upload_to="kyc/didit/id_back/", blank=True)
+    selfie_image = models.ImageField(upload_to="kyc/didit/selfie/", blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"DiditVerification<{self.distributor} {self.status}>"

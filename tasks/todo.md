@@ -1042,6 +1042,14 @@ directly**: it always re-fetches the authoritative result via `get_session_decis
 storing anything, exactly the same "always re-verify server-side" pattern already used for
 Paystack. Downloads and WebP-converts the three images at this point.
 
+**Unverified, must confirm before/during this task:** `verify_webhook_signature()`'s scheme
+(`X-Signature-Simple` = HMAC-SHA256 of `"{session_id}|{status}|{created_at}"`) was sourced from a
+community demo repo's README during Task 11a's planning, not Didit's own primary docs (which
+404'd via direct fetch). Confirm the real header name/message format against an actual webhook
+delivery (or Didit's dashboard/support) once the user's real workflow is set up — don't assume
+Task 11a's implementation is correct just because its tests pass (the tests only prove the HMAC
+math is self-consistent, not that it matches what Didit actually sends).
+
 **Acceptance criteria:**
 - [ ] Distributor is redirected to Didit's hosted page with a real session, and redirected back afterward
 - [ ] Both the callback and the webhook path resolve to the same stored result (idempotent, no double-processing)
