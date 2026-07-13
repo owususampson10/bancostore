@@ -726,33 +726,106 @@ detail page.
 
 ### Task 9: Binary tree schema and placement/spillover service
 
-**Description:** Build the `binary_tree_edges` closure table and `pv_ledger` aggregate table
-(see `SPEC.md` Scale Architecture). Build the `BinaryTree` service: place a new distributor under
-a sponsor's left/right leg, implement spillover when the direct slot is taken, and provide an
-O(log n)/O(1) ancestor-aggregate query. No purchase/commission logic yet — schema and placement
-only.
+Split into three slices (9a/9b/9c) per `planning-and-task-breakdown` — the original single task was
+sized L with a note to split if it grew past ~5 files; it touches three genuinely separable
+concerns (schema, placement algorithm, read-path query) so it's split up front instead.
+
+**Placement/spillover algorithm, confirmed with the user 2026-07-13** (not specified in `SPEC.md`
+or the source docs, which only say placement happens on "either leg" with spillover to "the next
+available spot"):
+- The sponsor picks left or right explicitly at registration. If they don't, auto-balance falls
+  back to whichever of the sponsor's two legs currently has less PV.
+- Spillover stays within the originally chosen leg only — it never crosses to the other leg.
+- Within that leg, the next open slot is found breadth-first: shallowest empty position first,
+  left-before-right at each level.
+
+#### Task 9a: Closure table schema (`binary_tree_edges`, `pv_ledger`)
+
+**Description:** Create the `apps/binary_tree` and `apps/pv_ledger` Django apps. Build the
+`BinaryTreeEdge` closure-table model (ancestor, descendant, depth, and which leg — left/right —
+the descendant falls under from that ancestor's perspective) and the `PvLedger` aggregate model
+(per-distributor, per-leg PV totals, updatable in O(1)). Migrations and admin registration only —
+no placement logic yet.
 
 **Acceptance criteria:**
-- [ ] Placing a distributor under a sponsor with a full leg triggers correct spillover to the next available slot
-- [ ] Ancestor-aggregate lookup does not recursively walk the tree (verified, not just asserted)
-- [ ] Closure table stays consistent after multiple placements (no orphaned or duplicate edges)
+- [ ] `BinaryTreeEdge` stores every ancestor→descendant pair with depth and leg
+- [ ] `PvLedger` holds per-leg PV aggregates per distributor
+- [ ] Both models are registered in Django Admin for inspection
 
 **Verification:**
-- [ ] pytest test: spillover places a new distributor in the correct next-available position
-- [ ] pytest test seeding a 10k+ node synthetic tree: ancestor query executes in constant/log-time query count (assert query count via Django's `django.db.connection.queries` / `assertNumQueries`, not wall-clock time)
+- [ ] pytest: creating an edge for a single parent-child pair produces the expected row(s)
+- [ ] Migrations apply cleanly against a fresh DB
 
 **Dependencies:** Task 2
 
-**Files likely touched:** `apps/binary_tree/models.py` (`BinaryTreeEdge`), `apps/pv_ledger/models.py` (`PvLedger`), `apps/binary_tree/services.py`, `tests/unit/binary_tree/*.py`
+**Files likely touched:** `apps/binary_tree/models.py`, `apps/binary_tree/admin.py`, `apps/binary_tree/migrations/`, `apps/pv_ledger/models.py`, `apps/pv_ledger/admin.py`, `apps/pv_ledger/migrations/`
 
-**Estimated scope:** L (schema-heavy; if it grows beyond ~5 files, split placement and the aggregate-query service into two tasks)
+**Estimated scope:** S-M
+
+---
+
+#### Task 9b: Placement + spillover service
+
+**Description:** Build `BinaryTree.place_distributor(sponsor, new_distributor, leg=None)`
+implementing the confirmed algorithm above: direct placement into the chosen (or auto-balanced)
+leg when open; otherwise breadth-first, shallowest-first, left-before-right spillover within that
+same leg's subtree. Writes closure-table edges for the new distributor against every ancestor,
+tagging the correct leg per ancestor.
+
+**Acceptance criteria:**
+- [ ] Direct placement succeeds when the sponsor's chosen leg slot is empty
+- [ ] Spillover places a new distributor at the correct next-available position when the direct slot is taken, staying within the originally chosen leg
+- [ ] Spillover fills the shallowest slot first, left before right at each level (verified against a specific tree shape, not just "some slot in the subtree")
+- [ ] Auto-balance picks the leg with less PV when no leg is specified
+- [ ] Closure table stays consistent after multiple sequential placements, including spillovers (no orphaned or duplicate edges)
+
+**Verification:**
+- [ ] pytest: sponsor's direct left slot taken → new distributor lands in the exact expected spillover position (assert specific ancestor/descendant/leg rows, not just "somewhere in the subtree")
+- [ ] pytest: auto-balance chooses the actually-weaker leg when leg isn't specified
+- [ ] pytest: closure table integrity holds after 5+ sequential placements including spillovers
+
+**Dependencies:** Task 9a
+
+**Files likely touched:** `apps/binary_tree/services.py`, `tests/unit/binary_tree/test_placement.py`
+
+**Estimated scope:** M-L (the algorithmic core of Task 9; if auto-balance meaningfully complicates it, consider shipping explicit-leg-only placement first and fast-following with auto-balance)
+
+---
+
+#### Task 9c: Ancestor-aggregate query service
+
+**Description:** Build the read path: given a distributor, return their full ancestor chain with
+each ancestor's current leg-PV aggregates, in O(log n) or O(1) queries — never a recursive walk.
+This is what Task 13's binary bonus job calls every 10 minutes, so its query cost must not grow
+with tree depth or width.
+
+**Acceptance criteria:**
+- [ ] Ancestor-aggregate lookup for a single distributor executes in a small, constant number of queries regardless of tree depth
+- [ ] Query count is verified, not just wall-clock time
+
+**Verification:**
+- [ ] pytest test seeding a 10k+ node synthetic tree: assert query count via `django.db.connection.queries` / `assertNumQueries`
+- [ ] pytest test: aggregate values returned match manually-computed expected totals for a small hand-built tree
+
+**Dependencies:** Task 9a, Task 9b (needs real placement data to query against meaningfully; the query logic itself only reads Task 9a's schema)
+
+**Files likely touched:** `apps/binary_tree/services.py` (or a new `apps/pv_ledger/services.py` if it grows large), `tests/unit/binary_tree/test_ancestor_query.py`
+
+**Estimated scope:** S-M
+
+---
+
+**Checkpoint (Task 9 complete):** a synthetic 10k+ node tree can be seeded, a new distributor
+placed under an arbitrary sponsor with correct spillover (both explicit-leg and auto-balance
+paths verified), and the ancestor-aggregate query returns correct totals in constant/log query
+count — all verified by pytest, not just asserted.
 
 ---
 
 ### Task 10: Distributor onboarding — registration fee, starter pack, placement, IR ID
 
 **Description:** Full onboarding vertical slice: pay GHS 100 registration fee (Paystack sandbox) →
-choose Starter Pack A or B → pay for it → get placed in the binary tree (Task 9's service) → PV
+choose Starter Pack A or B → pay for it → get placed in the binary tree (Task 9b's service) → PV
 ledger updated up the ancestor chain at write time → IR ID generated per `django-constance` IR ID
 settings (prefix/starting number/digits).
 
@@ -766,7 +839,7 @@ settings (prefix/starting number/digits).
 - [ ] pytest feature test reproducing Section 14 steps 1–9 (through IR ID issuance, before KYC gating withdrawal)
 - [ ] pytest test: PV ledger ancestor totals are correct immediately after a Pack B purchase
 
-**Dependencies:** Task 5, Task 9, Paystack sandbox access
+**Dependencies:** Task 5, Task 9a, Task 9b, Paystack sandbox access
 
 **Files likely touched:** `apps/pv_ledger/services.py`, `apps/distributors/views.py` (onboarding), `apps/orders/paystack_webhook.py`, `tests/feature/distributors/test_onboarding.py`
 
@@ -844,7 +917,7 @@ must only read pre-aggregated counters — never walk the tree.
 - [ ] pytest test: weekly cap enforcement, zero/tie-leg case, expired carry-forward exclusion
 - [ ] Scale test: seed 10k+ node tree, assert the task's DB query count does not grow with tree depth/width (reads aggregates only)
 
-**Dependencies:** Task 9, Task 10, Task 3
+**Dependencies:** Task 9c, Task 10, Task 3
 
 **Files likely touched:** `apps/commissions/tasks.py` (`calculate_binary_bonus`, Celery Beat schedule), `apps/commissions/services.py` (`BinaryBonusCalculator`), `tests/unit/commissions/test_binary_bonus.py`
 
@@ -1043,14 +1116,14 @@ list (Task 15 data), carry-forward PV tracker with expiry date, and a live notif
 (new downline join, bonus credited, withdrawal approved, KYC status change, PV nearing expiry).
 
 **Acceptance criteria:**
-- [ ] Tree view renders the distributor's downline correctly using Task 9's closure table
+- [ ] Tree view renders the distributor's downline correctly using Task 9a's closure table
 - [ ] Notification bell updates live via Django Channels for each event type listed in `SPEC.md` 6.6
 
 **Verification:**
 - [ ] pytest test: tree view shows correct nodes for a seeded downline
 - [ ] pytest test: each notification type is dispatched on its triggering event
 
-**Dependencies:** Task 9, Task 20
+**Dependencies:** Task 9a, Task 20
 
 **Files likely touched:** `apps/distributors/views.py` (tree view), `apps/notifications/models.py`, `tests/feature/distributors/test_notifications.py`
 

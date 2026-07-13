@@ -104,6 +104,8 @@ INSTALLED_APPS = [
     "apps.distributors",
     "apps.notifications",
     "apps.platform_settings",
+    "apps.binary_tree",
+    "apps.pv_ledger",
 ]
 
 MIDDLEWARE = [

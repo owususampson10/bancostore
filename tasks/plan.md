@@ -58,7 +58,10 @@ admin/customer/distributor stub users exist, settings values are readable from t
 on the public storefront (home, listing with working search/filter/sort, detail page).
 
 ### Phase 3: Distributor Core Domain (MLM)
-- [ ] Task 9: Binary tree schema (closure table + `pv_ledger`) and placement/spillover service
+- [ ] Task 9a: Binary tree closure table schema (`binary_tree_edges`, `pv_ledger`)
+- [ ] Task 9b: Placement + spillover service (sponsor picks leg, auto-balance fallback,
+  in-leg shallowest-first spillover — confirmed with user 2026-07-13)
+- [ ] Task 9c: Ancestor-aggregate query service (O(log n)/O(1), feeds Task 13)
 - [ ] Task 10: Distributor onboarding — registration fee, starter pack, tree placement, IR ID
 - [ ] Task 11: KYC submission (distributor) + review/approve (admin)
 
