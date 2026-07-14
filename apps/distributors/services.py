@@ -413,50 +413,55 @@ def consume_paid_starter_pack(reference: str) -> None:
             record_purchase_pv(distributor, distributor.starter_pack_pv)
 
             if distributor.sponsor_id:
-                # Task 12b: instant credit, same locked/idempotent block as
-                # everything else here so a webhook/callback race can't
-                # double-credit -- root-of-tree distributors have no
-                # sponsor and simply don't generate this bonus.
-                bonus = calculate_direct_referral_bonus(distributor.starter_pack_pv)
-                credit_wallet(
-                    distributor.sponsor,
-                    bonus,
-                    transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
-                    reference=reference,
-                )
-                logger.info(
-                    "consume_paid_starter_pack: direct referral bonus GHS %s "
-                    "credited to sponsor_id=%s for referred_distributor_id=%s "
-                    "reference=%s",
-                    bonus,
-                    distributor.sponsor_id,
-                    distributor.pk,
-                    reference,
-                )
-                # Task 12c: the bonus has already landed -- an SMS provider
-                # outage must never roll back money that was correctly
-                # credited, so this is best-effort and never propagates.
-                referred_name = distributor.full_name or str(distributor.phone_number)
-                try:
-                    send_sms(
-                        str(distributor.sponsor.phone_number),
-                        f"You've earned GHS {bonus} Direct Referral Bonus from "
-                        f"{referred_name}'s purchase. Check your Bancostore wallet!",
-                    )
-                except Exception:
-                    logger.exception(
-                        "consume_paid_starter_pack: failed to notify sponsor=%s "
-                        "of their GHS %s direct referral bonus -- credit already "
-                        "applied, notification only.",
-                        distributor.sponsor_id,
-                        bonus,
-                    )
+                _credit_direct_referral_bonus(distributor, reference)
 
             distributor.rank = distributor.starter_pack_rank
             distributor.starter_pack_confirmed_at = timezone.now()
             distributor.save(update_fields=["rank", "starter_pack_confirmed_at"])
 
     retry_on_lock_contention(_attempt)
+
+
+def _credit_direct_referral_bonus(distributor, reference: str) -> None:
+    """Task 12b/12c: instant credit to distributor.sponsor, plus an SMS
+    notification. Called from inside consume_paid_starter_pack's own
+    locked/idempotent block, so a webhook/callback race can't
+    double-credit -- this function does no locking of its own. Only
+    called when distributor.sponsor_id is set; root-of-tree distributors
+    don't generate this bonus."""
+    bonus = calculate_direct_referral_bonus(distributor.starter_pack_pv)
+    credit_wallet(
+        distributor.sponsor,
+        bonus,
+        transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+        reference=reference,
+    )
+    logger.info(
+        "consume_paid_starter_pack: direct referral bonus GHS %s credited to "
+        "sponsor_id=%s for referred_distributor_id=%s reference=%s",
+        bonus,
+        distributor.sponsor_id,
+        distributor.pk,
+        reference,
+    )
+    # The bonus has already landed -- an SMS provider outage must never
+    # roll back money that was correctly credited, so this is best-effort
+    # and never propagates.
+    referred_name = distributor.full_name or str(distributor.phone_number)
+    try:
+        send_sms(
+            str(distributor.sponsor.phone_number),
+            f"You've earned GHS {bonus} Direct Referral Bonus from "
+            f"{referred_name}'s purchase. Check your Bancostore wallet!",
+        )
+    except Exception:
+        logger.exception(
+            "consume_paid_starter_pack: failed to notify sponsor=%s of their "
+            "GHS %s direct referral bonus -- credit already applied, "
+            "notification only.",
+            distributor.sponsor_id,
+            bonus,
+        )
 
 
 # Didit's own overall session status -> our Status choices. Any other value
