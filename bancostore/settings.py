@@ -114,6 +114,14 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # Must come after AuthenticationMiddleware (needs request.user) -- captures
+    # who made a change on every HistoricalRecords()-tracked model save, not
+    # just ones made through Django Admin. Added for Task 11's KYC audit
+    # trail (apps/distributors/models.py::Distributor.history); CLAUDE.md
+    # already called for this ("log admin actions affecting money or KYC
+    # via django-simple-history") but no model had HistoricalRecords()
+    # attached anywhere in the codebase until this retrospective.
+    "simple_history.middleware.HistoryRequestMiddleware",
     "django_otp.middleware.OTPMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",

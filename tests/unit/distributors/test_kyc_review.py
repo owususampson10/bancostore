@@ -49,6 +49,32 @@ def test_approve_sets_approved_status_and_assigns_ir_id():
 
 
 @pytest.mark.django_db
+def test_approve_creates_an_audit_trail_entry():
+    """CLAUDE.md: "log admin actions affecting money or KYC via
+    django-simple-history" -- approving a distributor is exactly this,
+    and must leave a historical record of the kyc_status/ir_id change."""
+    distributor = _make_distributor()
+
+    approve_kyc(distributor)
+
+    history = distributor.history.order_by("history_date")
+    assert history.filter(kyc_status=Distributor.KycStatus.APPROVED).exists()
+
+
+@pytest.mark.django_db
+def test_reject_creates_an_audit_trail_entry():
+    distributor = _make_distributor()
+
+    reject_kyc(distributor, reason="Photo too blurry")
+
+    history = distributor.history.order_by("history_date")
+    assert history.filter(
+        kyc_status=Distributor.KycStatus.REJECTED,
+        kyc_rejection_reason="Photo too blurry",
+    ).exists()
+
+
+@pytest.mark.django_db
 def test_first_ever_ir_id_matches_configured_prefix_and_starting_number():
     distributor = _make_distributor()
 

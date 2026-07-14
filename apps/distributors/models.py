@@ -4,6 +4,7 @@ from django.conf import settings
 from django.db import models
 
 from phonenumber_field.modelfields import PhoneNumberField
+from simple_history.models import HistoricalRecords
 
 
 class Distributor(models.Model):
@@ -70,6 +71,16 @@ class Distributor(models.Model):
         max_length=100, null=True, blank=True, unique=True
     )
     starter_pack_confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    # Task 11 (observability-and-instrumentation retrospective, 2026-07-14):
+    # audit trail for kyc_status/ir_id changes -- who approved/rejected a
+    # distributor's KYC, and when. CLAUDE.md already called for this ("log
+    # admin actions affecting money or KYC via django-simple-history"), but
+    # no model anywhere in the codebase had HistoricalRecords() attached
+    # until this retrospective. Captures the acting user automatically via
+    # HistoryRequestMiddleware (bancostore/settings.py), which covers both
+    # Django Admin actions and any other future save() path.
+    history = HistoricalRecords()
 
     def __str__(self):
         return f"Distributor<{self.user}>"

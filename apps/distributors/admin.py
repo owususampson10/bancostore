@@ -3,6 +3,7 @@ from django.shortcuts import render
 from django.utils.html import format_html
 
 from constance import config
+from simple_history.admin import SimpleHistoryAdmin
 
 from .models import DiditVerification, Distributor
 from .services import approve_kyc, reject_kyc
@@ -56,7 +57,12 @@ class DiditVerificationInline(admin.StackedInline):
 
 
 @admin.register(Distributor)
-class DistributorAdmin(admin.ModelAdmin):
+class DistributorAdmin(SimpleHistoryAdmin):
+    """SimpleHistoryAdmin (not plain ModelAdmin) adds a "History" button on
+    the change page showing every kyc_status/ir_id change and who made it
+    -- see Distributor.history and HistoryRequestMiddleware
+    (bancostore/settings.py)."""
+
     list_display = ("user", "rank", "kyc_status", "ir_id", "sponsor")
     inlines = [DiditVerificationInline]
     actions = ["approve_selected_kyc", "reject_selected_kyc"]
