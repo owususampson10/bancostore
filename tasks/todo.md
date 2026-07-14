@@ -1096,20 +1096,26 @@ this through `doubt-driven-development` before implementing, same rigor as the
 PendingRegistration/Paystack designs got in Task 10a/10b.
 
 **Acceptance criteria:**
-- [ ] Admin sees pending KYC submissions, with Didit's result and images, in Django Admin
-- [ ] Approve assigns a permanent, correctly-formatted IR ID; reject requires a reason and never assigns an IR ID
-- [ ] IR ID is generated exactly once per distributor and never reassigned or duplicated, even under concurrent approvals
-- [ ] Approving an already-approved distributor is a safe no-op (doesn't regenerate or overwrite the IR ID)
-- [ ] Didit's result is informational only — it never sets `kyc_status` by itself, regardless of its own status value
+- [x] Admin sees pending KYC submissions, with Didit's result and images, in Django Admin
+- [x] Approve assigns a permanent, correctly-formatted IR ID; reject requires a reason and never assigns an IR ID
+- [x] IR ID is generated exactly once per distributor and never reassigned or duplicated, even under concurrent approvals
+- [x] Approving an already-approved distributor is a safe no-op (doesn't regenerate or overwrite the IR ID)
+- [x] Didit's result is informational only — it never sets `kyc_status` by itself, regardless of its own status value
 
 **Verification:**
-- [ ] pytest feature test: admin approves pending KYC → `kyc_status` flips to `approved` and a correctly-formatted IR ID is assigned
-- [ ] pytest feature test: admin rejects with a reason → `kyc_status` flips to `rejected`, no IR ID assigned, reason stored
-- [ ] pytest test (threaded, same convention as Task 9b/10d): concurrent approvals of different distributors never produce duplicate or reused IR IDs
-- [ ] pytest test: IR ID is never assigned before approval, and never reassigned once set
-- [ ] pytest test: a `DiditVerification` with status `declined` or `in_review` does not change `kyc_status` on its own (only an explicit admin action does)
+- [x] pytest feature test: admin approves pending KYC → `kyc_status` flips to `approved` and a correctly-formatted IR ID is assigned
+- [x] pytest feature test: admin rejects with a reason → `kyc_status` flips to `rejected`, no IR ID assigned, reason stored
+- [x] pytest test (threaded, same convention as Task 9b/10d): concurrent approvals of different distributors never produce duplicate or reused IR IDs
+- [x] pytest test: IR ID is never assigned before approval, and never reassigned once set
+- [x] pytest test: a `DiditVerification` with status `declined` or `in_review` does not change `kyc_status` on its own (only an explicit admin action does)
 
 **Dependencies:** Task 11b, Task 3
+
+**Done 2026-07-14 (commit `6c3fcff`).** IR ID sequence design went through a full
+`doubt-driven-development` cycle (10 findings, 8 folded in, 2 verified as noise). Also removed two
+pre-existing constance settings that contradicted this task's design
+(`KYC_AUTO_APPROVE_ENABLED`, `KYC_DOCUMENTS_REQUIRED`), and fixed a real full-suite-only test flake
+(a `transaction=True` test elsewhere flushes migration-seeded data away) uncovered while verifying.
 
 **Files likely touched:** `apps/distributors/admin.py`, `apps/distributors/services.py` (or a new `apps/distributors/kyc_services.py` if it grows large — IR ID generation), `apps/distributors/models.py` (`kyc_rejection_reason` field + migration), `tests/unit/distributors/test_kyc_review.py`
 
@@ -1117,11 +1123,12 @@ PendingRegistration/Paystack designs got in Task 10a/10b.
 
 ---
 
-**Checkpoint (Task 11 complete):** a distributor is redirected through Didit's hosted verification
-(ID + selfie), the result (plus images) is stored and shown to admin, admin approves or rejects
-with a reason via Django Admin, and approval assigns a permanent, correctly-formatted, never-reused
-IR ID — verified by pytest, including under concurrent approvals. Didit never decides `kyc_status`
-by itself.
+**Checkpoint (Task 11 complete — verified 2026-07-14):** a distributor is redirected through
+Didit's hosted verification (ID + selfie), the result (plus images) is stored and shown to admin,
+admin approves or rejects with a reason via Django Admin, and approval assigns a permanent,
+correctly-formatted, never-reused IR ID — verified by pytest, including under concurrent
+approvals. Didit never decides `kyc_status` by itself. Full suite green (261 tests) at commit
+`6c3fcff`.
 
 ---
 

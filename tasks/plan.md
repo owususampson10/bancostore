@@ -72,16 +72,16 @@ on the public storefront (home, listing with working search/filter/sort, detail 
   rationale and the old-code removal step)
 - [x] Task 11b: Didit verification flow end-to-end (session creation, callback, webhook,
   idempotent re-verify-server-side consume)
-- [ ] Task 11c: Admin KYC review + IR ID generation on approval (Didit's result is informational
+- [x] Task 11c: Admin KYC review + IR ID generation on approval (Didit's result is informational
   only -- admin always makes the final call, never auto-approved, per SPEC.md's Boundary;
   concurrency-safe IR ID sequence needs a doubt-driven-development pass before implementing;
   IR ID generation moved from Task 10 to match Section 14's exact order, confirmed 2026-07-13)
 
-**Checkpoint D — verified 2026-07-13 (Tasks 9–10 only; Task 11/KYC/IR ID still open):** a new
-distributor can register, pay the registration fee, choose and pay for a starter pack, and end up
-correctly placed in the binary tree with ancestor PV ledgers updated — verified end to end through
-Paystack test mode, reproducing Section 14 steps 4–7 exactly. KYC + IR ID generation (Task 11) is
-still needed before the full "register → pay → place → pass KYC → get IR ID" checkpoint is done.
+**Checkpoint D — verified 2026-07-14, Phase 3 complete:** a new distributor can register, pay the
+registration fee, choose and pay for a starter pack, end up correctly placed in the binary tree
+with ancestor PV ledgers updated, complete Didit's hosted KYC verification (ID + selfie), and pass
+admin review to receive a permanent IR ID — verified end to end through Paystack test mode and
+Didit's API (mocked HTTP), reproducing Section 14 steps 4–9.
 
 ### Phase 4: Commission Engine (elevated test rigor)
 - [ ] Task 12: Direct Referral Bonus — instant credit on starter pack purchase
