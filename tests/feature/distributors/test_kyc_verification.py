@@ -50,6 +50,20 @@ def test_phone_unverified_distributor_is_blocked(client):
 
 
 @pytest.mark.django_db
+def test_phone_unverified_message_links_to_dashboard(client):
+    """start_kyc_verification.html extends base_auth.html, a header-less
+    shell with no nav at all -- without an explicit link, a distributor
+    landing on this error has no way to leave the page except editing the
+    URL by hand."""
+    distributor = _make_distributor(phone_verified=False)
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:start_kyc_verification"))
+
+    assert reverse("distributors:dashboard") in response.content.decode()
+
+
+@pytest.mark.django_db
 def test_already_approved_distributor_is_redirected_to_dashboard(client):
     distributor = _make_distributor()
     distributor.kyc_status = Distributor.KycStatus.APPROVED
@@ -85,6 +99,7 @@ def test_distributor_with_a_submitted_verification_sees_a_pending_review_message
     assert response.status_code == 200
     assert "Start Verification" not in body
     assert "pending" in body.lower() or "review" in body.lower()
+    assert reverse("distributors:dashboard") in body
 
 
 @pytest.mark.django_db
