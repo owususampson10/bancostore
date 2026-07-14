@@ -13,7 +13,7 @@ from apps.binary_tree.models import BinaryTreeEdge
 from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError
 from apps.distributors.services import consume_paid_starter_pack
-from apps.pv_ledger.models import PvLedger
+from apps.pv_ledger.models import MonthlyPersonalPv, PvLedger
 from apps.wallet.models import Wallet, WalletTransaction
 
 User = get_user_model()
@@ -306,6 +306,21 @@ def test_concurrent_confirmations_under_the_same_sponsor_do_not_lose_pv(mock_ver
 
     ledger = PvLedger.objects.get(distributor=sponsor)
     assert ledger.left_leg_pv + ledger.right_leg_pv == 2000
+
+
+# --- Task 13a: monthly personal PV credited to the purchasing distributor --
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_confirmed_purchase_credits_the_purchasers_own_personal_pv(mock_verify):
+    distributor = _select_pack_b(_make_distributor())
+    mock_verify.return_value = _success_verify(amount=200000)
+
+    consume_paid_starter_pack("pack-ref-1")
+
+    row = MonthlyPersonalPv.objects.get(distributor=distributor)
+    assert row.pv == 1000
 
 
 # --- Task 12b: Direct Referral Bonus credited to the sponsor ----------------

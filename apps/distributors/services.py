@@ -18,7 +18,7 @@ from constance import config
 from apps.binary_tree.services import AlreadyPlacedError, BinaryTree
 from apps.commissions.services import calculate_direct_referral_bonus
 from apps.notifications.sms import send_sms
-from apps.pv_ledger.services import record_purchase_pv
+from apps.pv_ledger.services import record_personal_pv, record_purchase_pv
 from apps.wallet.models import WalletTransaction
 from apps.wallet.services import credit as credit_wallet
 from bancostore.concurrency import (
@@ -411,6 +411,10 @@ def consume_paid_starter_pack(reference: str) -> None:
                 )
 
             record_purchase_pv(distributor, distributor.starter_pack_pv)
+            # Task 13a: record_purchase_pv only credits ANCESTORS' legs --
+            # nothing previously credited the purchasing distributor's own
+            # personal PV, needed for Binary/Matching Bonus eligibility.
+            record_personal_pv(distributor, distributor.starter_pack_pv)
 
             if distributor.sponsor_id:
                 _credit_direct_referral_bonus(distributor, reference)
