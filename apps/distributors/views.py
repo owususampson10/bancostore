@@ -450,7 +450,15 @@ def start_kyc_verification(request):
         )
         return redirect(session["url"])
 
-    return render(request, "distributors/start_kyc_verification.html")
+    awaiting_review = (
+        distributor.kyc_status == Distributor.KycStatus.PENDING
+        and DiditVerification.objects.filter(distributor=distributor).exists()
+    )
+    return render(
+        request,
+        "distributors/start_kyc_verification.html",
+        {"awaiting_review": awaiting_review},
+    )
 
 
 def kyc_verification_callback(request):

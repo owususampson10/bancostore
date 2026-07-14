@@ -11,6 +11,10 @@
 <div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">
 {% if error == True %}Something went wrong starting your verification. Please try again.{% else %}{{ error }}{% endif %}
 </div>
+{% elif awaiting_review %}
+<div class="p-3 bg-surface-container-low text-on-surface rounded-lg font-body-sm text-body-sm">
+Your verification is submitted and pending admin review. You'll be notified once your account is fully approved.
+</div>
 {% else %}
 <form method="post" action="{% url 'distributors:start_kyc_verification' %}">
 {% csrf_token %}

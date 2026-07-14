@@ -63,6 +63,64 @@ def test_already_approved_distributor_is_redirected_to_dashboard(client):
 
 
 @pytest.mark.django_db
+def test_distributor_with_a_submitted_verification_sees_a_pending_review_message(
+    client,
+):
+    """A distributor who already went through Didit's flow but hasn't been
+    approved/rejected by an admin yet must NOT see the same "Start
+    Verification" screen again -- nothing on that screen would tell them
+    they've already submitted, so they'd be confused about whether they
+    need to redo it."""
+    distributor = _make_distributor()
+    DiditVerification.objects.create(
+        distributor=distributor,
+        session_id="sess-already-submitted",
+        status=DiditVerification.Status.IN_REVIEW,
+    )
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:start_kyc_verification"))
+    body = response.content.decode()
+
+    assert response.status_code == 200
+    assert "Start Verification" not in body
+    assert "pending" in body.lower() or "review" in body.lower()
+
+
+@pytest.mark.django_db
+def test_distributor_with_no_submission_yet_sees_the_start_button(client):
+    distributor = _make_distributor()
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:start_kyc_verification"))
+
+    assert response.status_code == 200
+    assert "Start Verification" in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_rejected_distributor_can_still_see_the_start_button_to_retry(client):
+    """Didit's result is purely informational -- only an explicit admin
+    rejection blocks kyc_status, and even then a distributor must be able
+    to restart (existing behavior, unchanged by this pending-review
+    status page)."""
+    distributor = _make_distributor()
+    distributor.kyc_status = Distributor.KycStatus.REJECTED
+    distributor.save(update_fields=["kyc_status"])
+    DiditVerification.objects.create(
+        distributor=distributor,
+        session_id="sess-declined",
+        status=DiditVerification.Status.DECLINED,
+    )
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:start_kyc_verification"))
+
+    assert response.status_code == 200
+    assert "Start Verification" in response.content.decode()
+
+
+@pytest.mark.django_db
 @patch("apps.distributors.views.create_didit_session")
 def test_post_creates_a_session_and_redirects(mock_create_session, client):
     distributor = _make_distributor()
