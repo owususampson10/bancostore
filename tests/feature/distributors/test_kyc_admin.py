@@ -128,3 +128,22 @@ def test_distributor_change_page_shows_didit_result(staff_client):
 
     assert response.status_code == 200
     assert "Ama Mensah" in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_distributor_change_page_has_a_history_link(staff_client):
+    """SimpleHistoryAdmin's "History" button -- the audit trail this
+    retrospective added for kyc_status/ir_id changes (see
+    apps/distributors/models.py::Distributor.history) is only worth
+    anything if an admin can actually find it from the change page."""
+    distributor = _make_distributor()
+
+    response = staff_client.get(
+        reverse("admin:distributors_distributor_change", args=[distributor.pk])
+    )
+
+    assert response.status_code == 200
+    assert (
+        reverse("admin:distributors_distributor_history", args=[distributor.pk])
+        in response.content.decode()
+    )
