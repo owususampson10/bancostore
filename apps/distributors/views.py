@@ -42,6 +42,7 @@ from .services import (
     snapshot_payment_reference,
     snapshot_starter_pack_choice,
 )
+from .tasks import consume_didit_result_task
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -467,35 +468,37 @@ def kyc_verification_callback(request):
 @csrf_exempt
 @require_POST
 def didit_webhook(request):
-    """Signature scheme is UNVERIFIED against Didit's own primary docs --
-    see apps/distributors/didit.py::verify_webhook_signature's docstring
-    and tasks/todo.md Task 11b. Must return 200 OK once accepted (Didit
-    retries otherwise, same reasoning as the Paystack webhook), so this
-    handler needs to be idempotent, which consume_didit_result is.
+    """Signature scheme confirmed 2026-07-14 against Didit's own primary
+    docs (docs.didit.me/integration/webhooks) -- X-Signature-V2, HMAC-SHA256
+    over the canonical form of the whole payload, plus an X-Timestamp
+    freshness check. See apps/distributors/didit.py::
+    verify_webhook_signature's docstring for the full scheme and why this
+    project's earlier "Simple" scheme was wrong (sourced from a secondary
+    reference; Didit's own docs say "Simple"... "does NOT authenticate
+    decision data"). Must return 200 OK once accepted (Didit retries
+    otherwise), so this handler needs to be idempotent, which
+    consume_didit_result is.
 
-    Unlike paystack_webhook (which verifies its signature over the whole
-    raw body before ever parsing it), this parses JSON first -- Didit's
-    "Simple" scheme signs three extracted field values, not the raw body,
-    so there's no way to compute it without parsing first. json.loads()
-    itself isn't a meaningful attack surface (no code execution, and
-    Django's DATA_UPLOAD_MAX_MEMORY_SIZE already bounds request.body size
-    before this ever runs), so this is a deliberate, understood trade-off
-    forced by Didit's scheme, not an oversight."""
+    Confirmed via the same docs page: a 5-second response timeout, 2
+    retries, then dropped -- and an explicit instruction to return 2xx as
+    soon as the work is queued. consume_didit_result does a Didit API call
+    plus up to 3 synchronous image downloads, easily exceeding 5 seconds,
+    so this enqueues it via Celery (consume_didit_result_task) instead of
+    calling it inline."""
     try:
         payload = json.loads(request.body)
     except ValueError:
         return HttpResponseBadRequest("invalid JSON")
 
-    session_id = payload.get("session_id", "")
-    status = payload.get("status", "")
-    created_at = payload.get("created_at", "")
-    signature = request.headers.get("X-Signature-Simple", "")
+    timestamp = request.headers.get("X-Timestamp", "")
+    signature = request.headers.get("X-Signature-V2", "")
 
-    if not verify_didit_webhook_signature(session_id, status, created_at, signature):
+    if not verify_didit_webhook_signature(payload, timestamp, signature):
         return HttpResponseBadRequest("invalid signature")
 
+    session_id = payload.get("session_id", "")
     if session_id:
-        consume_didit_result(session_id)
+        consume_didit_result_task.delay(session_id)
 
     return HttpResponse(status=200)
 

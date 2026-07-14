@@ -1007,16 +1007,19 @@ choice — WebP-converted via the existing shared helper). A new `apps/distribut
 (mirrors `apps/distributors/paystack.py`'s shape exactly) provides `create_verification_session()`,
 `get_session_decision()`, and `verify_webhook_signature()`. Session-creation and decision-retrieval
 endpoints/shapes were fetched and confirmed against Didit's real API docs
-(`source-driven-development`); the webhook `X-Signature-Simple` HMAC-SHA256 scheme was **not**
-confirmed against Didit's own docs (their webhook page 404'd via direct fetch) and is flagged
-UNVERIFIED in the function's docstring — see Task 11b's note on re-checking it against a real
-webhook delivery.
+(`source-driven-development`). **Update 2026-07-14:** the webhook signature scheme was initially
+shipped as `X-Signature-Simple` (a secondary-sourced, and as it turned out *wrong*, scheme —
+Didit's own docs, successfully fetched on a second, more careful research pass, state that
+"Simple"... "does NOT authenticate decision data") and has since been corrected to `X-Signature-V2`
+(HMAC-SHA256 over the canonical JSON form of the whole payload, plus an `X-Timestamp` freshness
+check), confirmed against `docs.didit.me/integration/webhooks` directly, including its exact
+Python reference implementation.
 
 **Acceptance criteria:**
 - [x] `DiditVerification` stores session id, overall status, and per-check (ID/face-match/liveness) status+score
 - [x] `create_verification_session()` calls Didit's real session-creation endpoint and returns the redirect URL + session id
 - [x] `get_session_decision()` calls Didit's real retrieve-decision endpoint and returns a parsed result
-- [x] `verify_webhook_signature()` correctly validates a genuine HMAC-SHA256 signature and rejects a tampered/wrong one (scheme itself still unverified against Didit's real webhook -- see above)
+- [x] `verify_webhook_signature()` correctly validates a genuine HMAC-SHA256 signature and rejects a tampered/wrong one -- scheme confirmed against Didit's primary docs 2026-07-14 (was `X-Signature-Simple`, corrected to `X-Signature-V2`)
 
 **Verification:**
 - [x] pytest test: model fields round-trip correctly (create, save, reload)

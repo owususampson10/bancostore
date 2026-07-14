@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+import json
+import time
 
 from django.conf import settings
 
@@ -62,24 +64,53 @@ def get_session_decision(session_id):
     return response.json()
 
 
-def verify_webhook_signature(session_id, status, created_at, signature_header) -> bool:
-    """UNVERIFIED against Didit's own primary docs -- docs.didit.me's webhook
-    page 404'd via direct fetch during planning; this scheme (X-Signature-
-    Simple = HMAC-SHA256 of "{session_id}|{status}|{created_at}" using
-    DIDIT_WEBHOOK_SECRET) is sourced from a community demo repo's README
-    description of Didit's "Simple Signature" method (the recommended of
-    Didit's three supported schemes -- V2/Original aren't implemented here,
-    matching Rule 0's "don't generalize until needed"), not confirmed
-    first-party. MUST be re-verified against a real webhook delivery once
-    Task 11b is tested end-to-end with the user's actual Didit workflow --
-    see tasks/todo.md Task 11b. Constant-time comparison, same reasoning as
-    Paystack's verify_webhook_signature."""
-    if not signature_header:
+def _shorten_floats(data):
+    """Didit's canonical form serializes whole-valued floats as ints (e.g.
+    1.0 -> 1) before hashing -- without this, a value that round-trips
+    through JSON as 1.0 instead of 1 would produce a different signature
+    than Didit computed on their side."""
+    if isinstance(data, dict):
+        return {key: _shorten_floats(value) for key, value in data.items()}
+    if isinstance(data, list):
+        return [_shorten_floats(item) for item in data]
+    if isinstance(data, float) and data.is_integer():
+        return int(data)
+    return data
+
+
+def verify_webhook_signature(payload: dict, timestamp: str, signature_header) -> bool:
+    """Source: https://docs.didit.me/integration/webhooks ("X-Signature-V2").
+    Confirmed 2026-07-14 against Didit's own primary docs (a second, more
+    careful research pass -- the page had previously 404'd; this project's
+    earlier implementation used the weaker "Simple" scheme sourced from a
+    secondary community reference, which Didit's own docs explicitly say
+    "does NOT authenticate decision data").
+
+    V2 signs the canonical form of the *entire webhook payload*: whole-
+    valued floats normalized to ints, then JSON-serialized with sorted
+    keys, no extra whitespace, and Unicode preserved (not escaped) --
+    `json.dumps(_shorten_floats(payload), sort_keys=True,
+    separators=(",", ":"), ensure_ascii=False)`. HMAC-SHA256 over that
+    string, using DIDIT_WEBHOOK_SECRET. Also enforces a timestamp
+    freshness window (reject if the X-Timestamp header is more than 5
+    minutes from now) to prevent replaying an old, validly-signed webhook.
+    """
+    if not signature_header or not timestamp:
         return False
-    message = f"{session_id}|{status}|{created_at}"
+    try:
+        if abs(int(time.time()) - int(timestamp)) > 300:
+            return False
+    except ValueError:
+        return False
+    canonical = json.dumps(
+        _shorten_floats(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
     computed = hmac.new(
         settings.DIDIT_WEBHOOK_SECRET.encode("utf-8"),
-        message.encode("utf-8"),
+        canonical.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
     return hmac.compare_digest(computed, signature_header)

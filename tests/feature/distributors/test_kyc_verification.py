@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import time
 from itertools import count
 from unittest.mock import patch
 
@@ -110,49 +111,75 @@ def test_callback_consumes_the_session_id(mock_consume, client):
     mock_consume.assert_called_once_with("sess-abc")
 
 
+def _v2_signature(payload, secret=b"whsec_fake"):
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
 @override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
 @pytest.mark.django_db
-@patch("apps.distributors.views.consume_didit_result")
-def test_webhook_with_valid_signature_consumes_the_result(mock_consume, client):
-    session_id, status, created_at = "sess-abc", "Approved", "2026-07-13T10:00:00Z"
-    body = json.dumps(
-        {"session_id": session_id, "status": status, "created_at": created_at}
-    ).encode()
-    message = f"{session_id}|{status}|{created_at}".encode("utf-8")
-    signature = hmac.new(b"whsec_fake", message, hashlib.sha256).hexdigest()
+@patch("apps.distributors.views.consume_didit_result_task.delay")
+def test_webhook_with_valid_signature_enqueues_the_consume_task(mock_delay, client):
+    """Didit's own docs require a response within 5 seconds, or the
+    delivery is retried and eventually dropped -- so the webhook must
+    enqueue the (potentially slow) consume work rather than run it inline.
+    See apps/distributors/tasks.py::consume_didit_result_task."""
+    payload = {"session_id": "sess-abc", "status": "Approved"}
+    body = json.dumps(payload).encode()
+    signature = _v2_signature(payload)
+    timestamp = str(int(time.time()))
 
     response = client.post(
         reverse("distributors:didit_webhook"),
         data=body,
         content_type="application/json",
-        HTTP_X_SIGNATURE_SIMPLE=signature,
+        HTTP_X_SIGNATURE_V2=signature,
+        HTTP_X_TIMESTAMP=timestamp,
     )
 
     assert response.status_code == 200
-    mock_consume.assert_called_once_with(session_id)
+    mock_delay.assert_called_once_with("sess-abc")
 
 
 @override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
 @pytest.mark.django_db
-@patch("apps.distributors.views.consume_didit_result")
-def test_webhook_with_an_invalid_signature_is_rejected(mock_consume, client):
-    body = json.dumps(
-        {
-            "session_id": "sess-abc",
-            "status": "Approved",
-            "created_at": "2026-07-13T10:00:00Z",
-        }
-    ).encode()
+@patch("apps.distributors.views.consume_didit_result_task.delay")
+def test_webhook_with_an_invalid_signature_is_rejected(mock_delay, client):
+    body = json.dumps({"session_id": "sess-abc", "status": "Approved"}).encode()
 
     response = client.post(
         reverse("distributors:didit_webhook"),
         data=body,
         content_type="application/json",
-        HTTP_X_SIGNATURE_SIMPLE="not-the-right-signature",
+        HTTP_X_SIGNATURE_V2="not-the-right-signature",
+        HTTP_X_TIMESTAMP=str(int(time.time())),
     )
 
     assert response.status_code == 400
-    mock_consume.assert_not_called()
+    mock_delay.assert_not_called()
+
+
+@override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
+@pytest.mark.django_db
+@patch("apps.distributors.views.consume_didit_result_task.delay")
+def test_webhook_with_a_stale_timestamp_is_rejected(mock_delay, client):
+    payload = {"session_id": "sess-abc", "status": "Approved"}
+    body = json.dumps(payload).encode()
+    signature = _v2_signature(payload)
+    stale_timestamp = str(int(time.time()) - 301)
+
+    response = client.post(
+        reverse("distributors:didit_webhook"),
+        data=body,
+        content_type="application/json",
+        HTTP_X_SIGNATURE_V2=signature,
+        HTTP_X_TIMESTAMP=stale_timestamp,
+    )
+
+    assert response.status_code == 400
+    mock_delay.assert_not_called()
 
 
 @override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
@@ -162,7 +189,8 @@ def test_webhook_with_malformed_json_returns_400_not_500(client):
         reverse("distributors:didit_webhook"),
         data=b"not valid json{{{",
         content_type="application/json",
-        HTTP_X_SIGNATURE_SIMPLE="whatever",
+        HTTP_X_SIGNATURE_V2="whatever",
+        HTTP_X_TIMESTAMP=str(int(time.time())),
     )
 
     assert response.status_code == 400

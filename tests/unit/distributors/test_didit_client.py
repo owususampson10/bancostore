@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+import json
+import time
 from unittest.mock import Mock, patch
 
 from django.test import override_settings
@@ -113,49 +115,81 @@ def test_get_session_decision_raises_didit_error_on_http_failure(mock_get):
         get_session_decision("sess-abc")
 
 
+def _v2_signature(payload, secret=b"whsec_fake"):
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
 @override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
 def test_verify_webhook_signature_accepts_a_correctly_computed_signature():
-    session_id, status, created_at = "sess-abc", "Approved", "2026-07-13T10:00:00Z"
-    message = f"{session_id}|{status}|{created_at}".encode("utf-8")
-    correct_signature = hmac.new(b"whsec_fake", message, hashlib.sha256).hexdigest()
+    payload = {"session_id": "sess-abc", "status": "Approved"}
+    timestamp = str(int(time.time()))
+    signature = _v2_signature(payload)
 
-    assert (
-        verify_webhook_signature(session_id, status, created_at, correct_signature)
-        is True
-    )
+    assert verify_webhook_signature(payload, timestamp, signature) is True
+
+
+@override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
+def test_verify_webhook_signature_normalizes_whole_valued_floats_to_ints():
+    """Didit's canonical form serializes 1.0 as 1 before hashing -- if our
+    side didn't do the same normalization, a payload that round-trips
+    through JSON as a float would produce a different signature than
+    Didit computed, even though nothing was tampered with."""
+    signed_payload = {"session_id": "sess-abc", "score": 1}
+    timestamp = str(int(time.time()))
+    signature = _v2_signature(signed_payload)
+
+    received_payload = {"session_id": "sess-abc", "score": 1.0}
+    assert verify_webhook_signature(received_payload, timestamp, signature) is True
 
 
 @override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
 def test_verify_webhook_signature_rejects_a_wrong_signature():
+    payload = {"session_id": "sess-abc", "status": "Approved"}
+    timestamp = str(int(time.time()))
+
     assert (
-        verify_webhook_signature(
-            "sess-abc", "Approved", "2026-07-13T10:00:00Z", "not-the-right-signature"
-        )
-        is False
+        verify_webhook_signature(payload, timestamp, "not-the-right-signature") is False
     )
 
 
 @override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
-def test_verify_webhook_signature_rejects_a_missing_header():
-    assert (
-        verify_webhook_signature("sess-abc", "Approved", "2026-07-13T10:00:00Z", "")
-        is False
-    )
-    assert (
-        verify_webhook_signature("sess-abc", "Approved", "2026-07-13T10:00:00Z", None)
-        is False
-    )
+def test_verify_webhook_signature_rejects_a_missing_signature_or_timestamp():
+    payload = {"session_id": "sess-abc", "status": "Approved"}
+    timestamp = str(int(time.time()))
+    signature = _v2_signature(payload)
+
+    assert verify_webhook_signature(payload, timestamp, "") is False
+    assert verify_webhook_signature(payload, timestamp, None) is False
+    assert verify_webhook_signature(payload, "", signature) is False
 
 
 @override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
-def test_verify_webhook_signature_rejects_a_tampered_status():
-    """The signature is computed over session_id|status|created_at -- if any
-    of those three values is altered after the signature was issued,
-    verification must fail."""
-    session_id, created_at = "sess-abc", "2026-07-13T10:00:00Z"
-    message = f"{session_id}|Approved|{created_at}".encode("utf-8")
-    signature = hmac.new(b"whsec_fake", message, hashlib.sha256).hexdigest()
+def test_verify_webhook_signature_rejects_a_tampered_payload():
+    payload = {"session_id": "sess-abc", "status": "Approved"}
+    timestamp = str(int(time.time()))
+    signature = _v2_signature(payload)
 
-    assert (
-        verify_webhook_signature(session_id, "Declined", created_at, signature) is False
-    )
+    tampered_payload = {"session_id": "sess-abc", "status": "Declined"}
+    assert verify_webhook_signature(tampered_payload, timestamp, signature) is False
+
+
+@override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
+def test_verify_webhook_signature_rejects_a_stale_timestamp():
+    """Prevents replaying an old, validly-signed webhook -- rejects
+    anything more than 5 minutes (300s) from now."""
+    payload = {"session_id": "sess-abc", "status": "Approved"}
+    stale_timestamp = str(int(time.time()) - 301)
+    signature = _v2_signature(payload)
+
+    assert verify_webhook_signature(payload, stale_timestamp, signature) is False
+
+
+@override_settings(DIDIT_WEBHOOK_SECRET="whsec_fake")
+def test_verify_webhook_signature_rejects_a_non_numeric_timestamp():
+    payload = {"session_id": "sess-abc", "status": "Approved"}
+    signature = _v2_signature(payload)
+
+    assert verify_webhook_signature(payload, "not-a-number", signature) is False
