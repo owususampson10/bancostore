@@ -35,6 +35,23 @@ class WalletTransaction(models.Model):
     reference = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        constraints = [
+            # Defense-in-depth, not the primary guard (the primary guard is
+            # the caller's own idempotency check, e.g.
+            # consume_paid_starter_pack's starter_pack_confirmed_at check).
+            # This stops a future call-site bug (a refactor that
+            # accidentally calls credit() twice for the same event) from
+            # silently double-crediting -- a blank reference is common
+            # (e.g. admin-initiated credits) so it's excluded rather than
+            # treated as one shared "no reference" bucket.
+            models.UniqueConstraint(
+                fields=["wallet", "reference", "transaction_type"],
+                condition=~models.Q(reference=""),
+                name="unique_wallet_reference_transaction_type",
+            )
+        ]
+
     def __str__(self):
         return (
             f"WalletTransaction<{self.wallet_id} {self.amount} {self.transaction_type}>"
