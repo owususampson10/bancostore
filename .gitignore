@@ -6,7 +6,9 @@
 .claude/.skill-markers/
 
 # Original requirement docs (not tracked in git)
-docs/
+docs/*
+# ...except ADRs (Architecture Decision Records), which are project history
+!docs/decisions/
 
 # Editors
 .vscode/
