@@ -214,14 +214,6 @@ KYC_SETTINGS = {
         True,
         "Must KYC be complete before a distributor's first withdrawal",
     ),
-    "KYC_DOCUMENTS_REQUIRED": (
-        "ghana_card,selfie,phone",
-        "Comma-separated list of documents required: Ghana Card, selfie, phone",
-    ),
-    "KYC_AUTO_APPROVE_ENABLED": (
-        False,
-        "Auto-approve KYC submissions, or require manual admin review",
-    ),
     "KYC_REJECTION_REASONS": (
         "",
         "Comma-separated pre-set list of rejection reasons admin selects from",

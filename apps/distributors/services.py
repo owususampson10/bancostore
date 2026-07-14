@@ -24,7 +24,7 @@ from bancostore.concurrency import (
 from bancostore.media import resize_and_convert_to_webp
 
 from .didit import DiditError, get_session_decision
-from .models import DiditVerification, Distributor, PendingRegistration
+from .models import DiditVerification, Distributor, IrIdSequence, PendingRegistration
 from .paystack import PaystackError, verify_transaction
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,10 @@ User = get_user_model()
 
 
 class PendingRegistrationNotFound(Exception):
+    pass
+
+
+class IrIdSequenceExhausted(Exception):
     pass
 
 
@@ -567,5 +571,116 @@ def consume_didit_result(session_id: str) -> None:
                 )
 
             verification.save()
+
+    retry_on_lock_contention(_attempt)
+
+
+def approve_kyc(distributor) -> None:
+    """Task 11c: the only place `Distributor.ir_id`/`kyc_status` transition
+    to approved. Never called from anywhere else -- Didit's own result
+    (including its "in_review" state) is informational only, per SPEC.md's
+    "never auto-approve KYC" boundary; only this explicit admin action
+    approves anyone.
+
+    IR ID generation was run through doubt-driven-development 2026-07-13
+    (see tasks/todo.md Task 11c): the sequence row is pre-seeded by a data
+    migration rather than lazily created, sidestepping a cold-start race
+    entirely rather than reasoning about whether a retry wrapper covers
+    every shape of it. The idempotency guard checks both `kyc_status` and
+    `ir_id` (not just one), since a future flow that resets `kyc_status`
+    away from approved without touching `ir_id` would otherwise mint a
+    second, ID-losing IR ID for the same distributor. Approving a
+    previously-`rejected` distributor is deliberately allowed -- rejection
+    isn't final; an admin can approve a fixed resubmission.
+    """
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                locked = select_for_update_nowait_if_supported(
+                    Distributor.objects.filter(pk=distributor.pk)
+                ).get()
+            except Distributor.DoesNotExist:
+                logger.error(
+                    "approve_kyc: distributor pk=%s no longer exists -- "
+                    "cannot approve. Needs manual investigation.",
+                    distributor.pk,
+                )
+                return
+
+            if (
+                locked.kyc_status == Distributor.KycStatus.APPROVED
+                or locked.ir_id is not None
+            ):
+                return  # Already approved -- idempotent no-op.
+
+            try:
+                sequence = select_for_update_nowait_if_supported(
+                    IrIdSequence.objects.filter(pk=1)
+                ).get()
+            except IrIdSequence.DoesNotExist:
+                logger.error(
+                    "approve_kyc: IrIdSequence row (pk=1) does not exist -- "
+                    "migration 0011_seed_ir_id_sequence should have created "
+                    "it. Cannot approve distributor pk=%s. Needs manual "
+                    "investigation.",
+                    distributor.pk,
+                )
+                return
+            number = sequence.next_number
+            max_number = 10**config.IR_ID_NUMBER_OF_DIGITS - 1
+            if number > max_number:
+                raise IrIdSequenceExhausted(
+                    f"IR ID sequence exhausted: next_number={number} exceeds "
+                    f"what IR_ID_NUMBER_OF_DIGITS={config.IR_ID_NUMBER_OF_DIGITS} "
+                    "digits can represent. Increase that setting before "
+                    "approving more distributors."
+                )
+            sequence.next_number = number + 1
+            sequence.save(update_fields=["next_number"])
+
+            locked.ir_id = (
+                f"{config.IR_ID_PREFIX}"
+                f"{str(number).zfill(config.IR_ID_NUMBER_OF_DIGITS)}"
+            )
+            locked.kyc_status = Distributor.KycStatus.APPROVED
+            locked.save(update_fields=["ir_id", "kyc_status"])
+
+    retry_on_lock_contention(_attempt)
+
+
+def reject_kyc(distributor, reason: str) -> None:
+    """Task 11c: rejects a pending (or previously-rejected) distributor's
+    KYC with a reason, from the admin's own judgment -- Didit's result is
+    shown as context only. Refuses to reject an already-`approved`
+    distributor: a permanent IR ID, once assigned, isn't something this
+    function un-does; a real "revoke approval" flow would be a separate,
+    more deliberate feature."""
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                locked = select_for_update_nowait_if_supported(
+                    Distributor.objects.filter(pk=distributor.pk)
+                ).get()
+            except Distributor.DoesNotExist:
+                logger.error(
+                    "reject_kyc: distributor pk=%s no longer exists -- "
+                    "cannot reject. Needs manual investigation.",
+                    distributor.pk,
+                )
+                return
+
+            if locked.kyc_status == Distributor.KycStatus.APPROVED:
+                logger.warning(
+                    "reject_kyc: distributor pk=%s is already approved -- "
+                    "refusing to reject an approved distributor.",
+                    locked.pk,
+                )
+                return
+
+            locked.kyc_status = Distributor.KycStatus.REJECTED
+            locked.kyc_rejection_reason = reason
+            locked.save(update_fields=["kyc_status", "kyc_rejection_reason"])
 
     retry_on_lock_contention(_attempt)

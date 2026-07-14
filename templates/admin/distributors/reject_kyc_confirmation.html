@@ -1,0 +1,37 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }}{% endblock %}
+
+{% block content %}
+<p>You are about to reject KYC for the following distributor(s). This requires a reason.</p>
+<ul>
+{% for distributor in distributors %}
+<li>{{ distributor }}</li>
+{% endfor %}
+</ul>
+
+<form method="post">{% csrf_token %}
+<div>
+{% for distributor in distributors %}
+<input type="hidden" name="{{ action_checkbox_name }}" value="{{ distributor.pk }}">
+{% endfor %}
+<input type="hidden" name="action" value="{{ action }}">
+
+{% if preset_reasons %}
+<p><strong>Pre-set reasons</strong> (click to fill in below):</p>
+{% for preset in preset_reasons %}
+<button type="button" onclick="document.getElementById('id_reason').value='{{ preset|escapejs }}';">{{ preset }}</button>
+{% endfor %}
+{% endif %}
+
+<p>
+<label for="id_reason">Reason (required):</label><br>
+<textarea id="id_reason" name="reason" rows="3" cols="60" required></textarea>
+</p>
+
+<input type="submit" value="Reject">
+<a href="#" onclick="window.history.back(); return false;" class="button">Cancel</a>
+</div>
+</form>
+{% endblock %}

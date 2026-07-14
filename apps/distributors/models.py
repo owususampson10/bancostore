@@ -29,6 +29,9 @@ class Distributor(models.Model):
         max_length=20, choices=KycStatus.choices, default=KycStatus.PENDING
     )
     ir_id = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    # Task 11c: set only on rejection, from KYC_REJECTION_REASONS (constance)
+    # or a free-text override entered by the admin.
+    kyc_rejection_reason = models.CharField(max_length=255, blank=True, default="")
 
     # Copied over from PendingRegistration (Task 10a/10b) when the
     # registration fee is confirmed paid. Plain fields here, not split into
@@ -181,3 +184,22 @@ class DiditVerification(models.Model):
 
     def __str__(self):
         return f"DiditVerification<{self.distributor} {self.status}>"
+
+
+class IrIdSequence(models.Model):
+    """Task 11c: single-row counter for IR ID generation, so concurrent
+    admin approvals never produce a duplicated or reused number. The one
+    row (pk=1) is pre-created by a data migration, seeded from
+    django-constance's IR_ID_STARTING_NUMBER at migration-run time --
+    deliberately NOT lazily created on first use (get_or_create's
+    create-then-fall-back-on-IntegrityError path is real but avoidable
+    complexity here; pre-seeding sidesteps the cold-start race entirely
+    rather than reasoning hard about whether the retry wrapper handles
+    every shape of it). IR_ID_STARTING_NUMBER is read exactly this once,
+    ever -- changing it later has no effect, since every subsequent IR ID
+    comes from incrementing this row, not from re-reading the setting."""
+
+    next_number = models.PositiveIntegerField()
+
+    def __str__(self):
+        return f"IrIdSequence<next={self.next_number}>"
