@@ -106,6 +106,7 @@ INSTALLED_APPS = [
     "apps.platform_settings",
     "apps.binary_tree",
     "apps.pv_ledger",
+    "apps.wallet",
 ]
 
 MIDDLEWARE = [

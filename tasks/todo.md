@@ -1142,7 +1142,18 @@ approvals. Didit never decides `kyc_status` by itself. Full suite green (261 tes
 ### Task 12: Direct Referral Bonus — instant credit
 
 **Description:** On starter-pack purchase confirmation, credit the sponsor's wallet with
-`DIRECT_REFERRAL_BONUS_RATE` × the new distributor's PV, instantly, plus a notification.
+`DIRECT_REFERRAL_BONUS_RATE` × the new distributor's PV (1 PV treated as GHS 1 for this
+calculation), instantly, plus a notification.
+
+**Update 2026-07-14 — formula confirmed, a real doc contradiction resolved.** The original
+requirements doc's Section 14 walkthrough states Ama earns GHS 200 for Kofi's Pack B purchase and
+Kofi earns GHS 75 per Pack A referral -- neither number is reproducible from one consistent formula
+using either "rate × PV" or "rate × price paid" across both examples at once (confirmed by working
+the arithmetic both ways), and it also contradicts this very file's own prior verification note
+(which already said GHS 100, not 200, for the same Pack B scenario). The user confirmed the
+authoritative formula is **rate × PV**: Pack A (500 PV) = **GHS 50**, Pack B (1,000 PV) = **GHS
+100**. Section 14's GHS 200 / GHS 75 figures are narrative errors in the original doc, not a
+second valid interpretation -- see the `project_direct_referral_bonus_formula` memory.
 
 **Acceptance criteria:**
 - [ ] Rate is read from `django-constance` config, not hardcoded
@@ -1150,7 +1161,8 @@ approvals. Didit never decides `kyc_status` by itself. Full suite green (261 tes
 - [ ] Sponsor receives a notification with the correct amount and referred distributor's name
 
 **Verification:**
-- [ ] pytest test reproducing the doc example exactly: Pack B purchase → sponsor credited GHS 100 (10% of 1,000 PV)
+- [ ] pytest test: Pack A purchase → sponsor credited GHS 50 (10% of 500 PV)
+- [ ] pytest test: Pack B purchase → sponsor credited GHS 100 (10% of 1,000 PV)
 - [ ] pytest test: rounding to the pesewa is correct on a non-round PV value
 
 **Dependencies:** Task 10c, Task 10d, Task 3
