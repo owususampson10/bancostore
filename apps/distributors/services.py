@@ -16,7 +16,10 @@ import requests
 from constance import config
 
 from apps.binary_tree.services import AlreadyPlacedError, BinaryTree
+from apps.commissions.services import calculate_direct_referral_bonus
 from apps.pv_ledger.services import record_purchase_pv
+from apps.wallet.models import WalletTransaction
+from apps.wallet.services import credit as credit_wallet
 from bancostore.concurrency import (
     retry_on_lock_contention,
     select_for_update_nowait_if_supported,
@@ -407,6 +410,19 @@ def consume_paid_starter_pack(reference: str) -> None:
                 )
 
             record_purchase_pv(distributor, distributor.starter_pack_pv)
+
+            if distributor.sponsor_id:
+                # Task 12b: instant credit, same locked/idempotent block as
+                # everything else here so a webhook/callback race can't
+                # double-credit -- root-of-tree distributors have no
+                # sponsor and simply don't generate this bonus.
+                bonus = calculate_direct_referral_bonus(distributor.starter_pack_pv)
+                credit_wallet(
+                    distributor.sponsor,
+                    bonus,
+                    transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+                    reference=reference,
+                )
 
             distributor.rank = distributor.starter_pack_rank
             distributor.starter_pack_confirmed_at = timezone.now()

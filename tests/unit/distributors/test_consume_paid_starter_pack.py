@@ -1,4 +1,5 @@
 import threading
+from decimal import Decimal
 from itertools import count
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError
 from apps.distributors.services import consume_paid_starter_pack
 from apps.pv_ledger.models import PvLedger
+from apps.wallet.models import Wallet, WalletTransaction
 
 User = get_user_model()
 _phone_seq = count(1)
@@ -304,3 +306,50 @@ def test_concurrent_confirmations_under_the_same_sponsor_do_not_lose_pv(mock_ver
 
     ledger = PvLedger.objects.get(distributor=sponsor)
     assert ledger.left_leg_pv + ledger.right_leg_pv == 2000
+
+
+# --- Task 12b: Direct Referral Bonus credited to the sponsor ----------------
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_confirmed_pack_b_purchase_credits_sponsor_ghs_100(mock_verify):
+    sponsor = _make_distributor()
+    _select_pack_b(_make_distributor(sponsor=sponsor))
+    mock_verify.return_value = _success_verify(amount=200000)
+
+    consume_paid_starter_pack("pack-ref-1")
+
+    wallet = Wallet.objects.get(distributor=sponsor)
+    assert wallet.balance == Decimal("100.00")
+    transaction = WalletTransaction.objects.get(wallet=wallet)
+    assert (
+        transaction.transaction_type
+        == WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS
+    )
+    assert transaction.reference == "pack-ref-1"
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_root_distributor_with_no_sponsor_credits_nothing(mock_verify):
+    _select_pack_b(_make_distributor(sponsor=None))
+    mock_verify.return_value = _success_verify(amount=200000)
+
+    consume_paid_starter_pack("pack-ref-1")  # must not raise
+
+    assert not Wallet.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_confirming_twice_does_not_double_credit_the_referral_bonus(mock_verify):
+    sponsor = _make_distributor()
+    _select_pack_b(_make_distributor(sponsor=sponsor))
+    mock_verify.return_value = _success_verify(amount=200000)
+
+    consume_paid_starter_pack("pack-ref-1")
+    consume_paid_starter_pack("pack-ref-1")
+
+    wallet = Wallet.objects.get(distributor=sponsor)
+    assert wallet.balance == Decimal("100.00")
