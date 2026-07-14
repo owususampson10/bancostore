@@ -424,6 +424,15 @@ def consume_paid_starter_pack(reference: str) -> None:
                     transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
                     reference=reference,
                 )
+                logger.info(
+                    "consume_paid_starter_pack: direct referral bonus GHS %s "
+                    "credited to sponsor_id=%s for referred_distributor_id=%s "
+                    "reference=%s",
+                    bonus,
+                    distributor.sponsor_id,
+                    distributor.pk,
+                    reference,
+                )
                 # Task 12c: the bonus has already landed -- an SMS provider
                 # outage must never roll back money that was correctly
                 # credited, so this is best-effort and never propagates.

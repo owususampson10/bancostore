@@ -46,6 +46,27 @@ def test_credit_creates_a_wallet_and_transaction_for_a_first_time_credit():
 
 
 @pytest.mark.django_db
+def test_credit_logs_the_distributor_amount_type_and_reference(caplog):
+    """The on-call question this answers: "was this wallet actually
+    credited, for how much, and from what?" -- without a log line, that's
+    a database query, not a log search."""
+    distributor = _make_distributor()
+
+    with caplog.at_level("INFO"):
+        credit(
+            distributor,
+            Decimal("50.00"),
+            transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+            reference="starter-pack-ref-1",
+        )
+
+    assert str(distributor.pk) in caplog.text
+    assert "50.00" in caplog.text
+    assert "direct_referral_bonus" in caplog.text
+    assert "starter-pack-ref-1" in caplog.text
+
+
+@pytest.mark.django_db
 def test_a_second_credit_adds_to_the_existing_balance():
     distributor = _make_distributor()
     credit(

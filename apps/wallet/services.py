@@ -1,9 +1,12 @@
+import logging
 from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import F
 
 from .models import Wallet, WalletTransaction
+
+logger = logging.getLogger(__name__)
 
 
 def credit(
@@ -56,4 +59,14 @@ def credit(
             amount=amount,
             transaction_type=transaction_type,
             reference=reference,
+        )
+        # The on-call question this answers: "was distributor X's wallet
+        # actually credited, for how much, and from which event?" --
+        # without this, that's a database query, not a log search.
+        logger.info(
+            "credit: distributor_id=%s amount=%s transaction_type=%s reference=%s",
+            distributor.pk,
+            amount,
+            transaction_type,
+            reference,
         )

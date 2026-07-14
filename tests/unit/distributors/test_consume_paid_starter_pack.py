@@ -332,6 +332,22 @@ def test_confirmed_pack_b_purchase_credits_sponsor_ghs_100(mock_verify):
 
 @pytest.mark.django_db
 @patch("apps.distributors.services.verify_transaction")
+def test_confirmed_pack_b_purchase_logs_the_referral_bonus_credit(mock_verify, caplog):
+    sponsor = _make_distributor()
+    referred = _select_pack_b(_make_distributor(sponsor=sponsor))
+    mock_verify.return_value = _success_verify(amount=200000)
+
+    with caplog.at_level("INFO"):
+        consume_paid_starter_pack("pack-ref-1")
+
+    assert "100" in caplog.text
+    assert str(sponsor.pk) in caplog.text
+    assert str(referred.pk) in caplog.text
+    assert "pack-ref-1" in caplog.text
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
 def test_root_distributor_with_no_sponsor_credits_nothing(mock_verify):
     _select_pack_b(_make_distributor(sponsor=None))
     mock_verify.return_value = _success_verify(amount=200000)
