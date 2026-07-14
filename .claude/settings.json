@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/check_skill_invoked.py"
+            "command": "python3 /Users/sampsonowusu/Documents/vibecode/bancostore/.claude/hooks/check_skill_invoked.py"
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/check_commit_review.py"
+            "command": "python3 /Users/sampsonowusu/Documents/vibecode/bancostore/.claude/hooks/check_commit_review.py"
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/record_skill_invocation.py"
+            "command": "python3 /Users/sampsonowusu/Documents/vibecode/bancostore/.claude/hooks/record_skill_invocation.py"
           }
         ]
       }
