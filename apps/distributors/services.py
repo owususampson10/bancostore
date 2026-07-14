@@ -465,6 +465,100 @@ def _download_image(url):
     return ContentFile(response.content, name=name)
 
 
+def _apply_decision_to_verification(verification, decision, session_id) -> bool:
+    """Parses a Didit decision response and updates `verification`'s fields
+    in place (caller is responsible for `.save()`). Returns False if
+    nothing should be stored yet (still in progress, or the response
+    couldn't be parsed), True once fields have been applied.
+
+    Didit's response is third-party data -- untrusted shape, not just
+    untrusted content. The parsing below assumes id_verifications/
+    face_matches/liveness_checks are lists of dicts (per Didit's
+    documented response), but a malformed or unexpected response (a bug
+    on Didit's side, or one of our own UNVERIFIED field-name assumptions
+    turning out wrong -- see apps/distributors/didit.py and tasks/todo.md
+    Task 11b) could make any of these something else entirely. Catching
+    broadly here keeps consume_didit_result's "never raises" contract
+    (matching consume_paid_starter_pack/consume_paid_registration) even
+    against a response shape we didn't anticipate. Never logs the
+    decision payload itself -- it carries extracted PII (name, document
+    number, date of birth)."""
+    mapped_status = _DIDIT_STATUS_MAP.get(decision.get("status"))
+    if mapped_status is None:
+        return False  # Still in progress -- nothing final to store yet.
+
+    try:
+        id_verification = (decision.get("id_verifications") or [{}])[0]
+        face_match = (decision.get("face_matches") or [{}])[0]
+        liveness_check = (decision.get("liveness_checks") or [{}])[0]
+        if not all(
+            isinstance(x, dict) for x in (id_verification, face_match, liveness_check)
+        ):
+            raise TypeError("expected dict entries in Didit's decision response")
+    except (TypeError, KeyError, IndexError):
+        logger.exception(
+            "consume_didit_result: unexpected decision response shape for "
+            "session_id=%s -- cannot parse. Needs manual investigation.",
+            session_id,
+        )
+        return False
+
+    verification.status = mapped_status
+    verification.id_verification_status = id_verification.get("status", "")
+    verification.face_match_status = face_match.get("status", "")
+    verification.face_match_score = face_match.get("score")
+    verification.liveness_status = liveness_check.get("status", "")
+    verification.liveness_score = liveness_check.get("score")
+    verification.extracted_full_name = id_verification.get("full_name") or ""
+    verification.extracted_document_number = (
+        id_verification.get("document_number") or ""
+    )
+    verification.warnings = decision.get("warnings") or []
+
+    dob_raw = id_verification.get("date_of_birth")
+    if dob_raw:
+        try:
+            verification.extracted_date_of_birth = datetime.strptime(
+                dob_raw, "%Y-%m-%d"
+            ).date()
+        except ValueError:
+            # Never log dob_raw itself -- it's PII (a real date of birth),
+            # and the docstring above promises this function never logs
+            # decision-payload PII.
+            logger.warning(
+                "consume_didit_result: unexpected date_of_birth format for "
+                "session_id=%s (value omitted, contains PII)",
+                session_id,
+            )
+
+    # UNVERIFIED (see apps/distributors/didit.py and tasks/todo.md Task
+    # 11b): front_image/back_image field names on id_verifications[] are
+    # assumed by analogy with Didit's standalone API response
+    # (portrait_image is separately confirmed for this session-decision
+    # endpoint); a missing key just means no image gets stored, it
+    # doesn't crash.
+    for field_name, url_key in (
+        ("id_front_image", "front_image"),
+        ("id_back_image", "back_image"),
+        ("selfie_image", "portrait_image"),
+    ):
+        url = id_verification.get(url_key)
+        if not url:
+            continue
+        try:
+            downloaded = _download_image(url)
+        except (requests.RequestException, ValueError):
+            logger.exception(
+                "consume_didit_result: failed to download %s for " "session_id=%s",
+                url_key,
+                session_id,
+            )
+            continue
+        setattr(verification, field_name, resize_and_convert_to_webp(downloaded))
+
+    return True
+
+
 def consume_didit_result(session_id: str) -> None:
     """Task 11b: the single source of truth for turning a completed Didit
     verification session into a stored `DiditVerification` result. Called
@@ -508,69 +602,19 @@ def consume_didit_result(session_id: str) -> None:
                 )
                 return
 
-            mapped_status = _DIDIT_STATUS_MAP.get(decision.get("status"))
-            if mapped_status is None:
-                return  # Still in progress -- nothing final to store yet.
-
-            id_verification = (decision.get("id_verifications") or [{}])[0]
-            face_match = (decision.get("face_matches") or [{}])[0]
-            liveness_check = (decision.get("liveness_checks") or [{}])[0]
-
-            verification.status = mapped_status
-            verification.id_verification_status = id_verification.get("status", "")
-            verification.face_match_status = face_match.get("status", "")
-            verification.face_match_score = face_match.get("score")
-            verification.liveness_status = liveness_check.get("status", "")
-            verification.liveness_score = liveness_check.get("score")
-            verification.extracted_full_name = id_verification.get("full_name") or ""
-            verification.extracted_document_number = (
-                id_verification.get("document_number") or ""
-            )
-            verification.warnings = decision.get("warnings") or []
-
-            dob_raw = id_verification.get("date_of_birth")
-            if dob_raw:
-                try:
-                    verification.extracted_date_of_birth = datetime.strptime(
-                        dob_raw, "%Y-%m-%d"
-                    ).date()
-                except ValueError:
-                    logger.warning(
-                        "consume_didit_result: unexpected date_of_birth "
-                        "format %r for session_id=%s",
-                        dob_raw,
-                        session_id,
-                    )
-
-            # UNVERIFIED (see apps/distributors/didit.py and tasks/todo.md
-            # Task 11b): front_image/back_image field names on
-            # id_verifications[] are assumed by analogy with Didit's
-            # standalone API response (portrait_image is separately
-            # confirmed for this session-decision endpoint); a missing key
-            # just means no image gets stored, it doesn't crash.
-            for field_name, url_key in (
-                ("id_front_image", "front_image"),
-                ("id_back_image", "back_image"),
-                ("selfie_image", "portrait_image"),
-            ):
-                url = id_verification.get(url_key)
-                if not url:
-                    continue
-                try:
-                    downloaded = _download_image(url)
-                except (requests.RequestException, ValueError):
-                    logger.exception(
-                        "consume_didit_result: failed to download %s for "
-                        "session_id=%s",
-                        url_key,
-                        session_id,
-                    )
-                    continue
-                setattr(
-                    verification, field_name, resize_and_convert_to_webp(downloaded)
+            if _apply_decision_to_verification(verification, decision, session_id):
+                verification.save()
+                # Significant business event -- the on-call question this
+                # answers: "did this distributor's KYC verification finish,
+                # and with what result?" Never logs PII (name, document
+                # number, DOB) -- just identifiers and the outcome.
+                logger.info(
+                    "consume_didit_result: session_id=%s distributor_id=%s "
+                    "status=%s",
+                    session_id,
+                    verification.distributor_id,
+                    verification.status,
                 )
-
-            verification.save()
 
     retry_on_lock_contention(_attempt)
 
@@ -630,6 +674,19 @@ def approve_kyc(distributor) -> None:
             number = sequence.next_number
             max_number = 10**config.IR_ID_NUMBER_OF_DIGITS - 1
             if number > max_number:
+                # A genuine operational emergency -- the business cannot
+                # onboard another distributor until IR_ID_NUMBER_OF_DIGITS
+                # is increased. Logged loudly (not just raised) so it's
+                # findable in structured logs, not just a bare traceback.
+                logger.critical(
+                    "approve_kyc: IR ID sequence exhausted (next_number=%s, "
+                    "IR_ID_NUMBER_OF_DIGITS=%s) -- cannot approve "
+                    "distributor pk=%s. Increase IR_ID_NUMBER_OF_DIGITS "
+                    "immediately.",
+                    number,
+                    config.IR_ID_NUMBER_OF_DIGITS,
+                    distributor.pk,
+                )
                 raise IrIdSequenceExhausted(
                     f"IR ID sequence exhausted: next_number={number} exceeds "
                     f"what IR_ID_NUMBER_OF_DIGITS={config.IR_ID_NUMBER_OF_DIGITS} "
@@ -645,6 +702,15 @@ def approve_kyc(distributor) -> None:
             )
             locked.kyc_status = Distributor.KycStatus.APPROVED
             locked.save(update_fields=["ir_id", "kyc_status"])
+            # Significant, financially/legally relevant business event --
+            # who approved is captured separately via Distributor.history
+            # (django-simple-history + HistoryRequestMiddleware), this log
+            # line is for fast log-based searching/alerting.
+            logger.info(
+                "approve_kyc: distributor pk=%s approved, ir_id=%s",
+                locked.pk,
+                locked.ir_id,
+            )
 
     retry_on_lock_contention(_attempt)
 
@@ -682,5 +748,10 @@ def reject_kyc(distributor, reason: str) -> None:
             locked.kyc_status = Distributor.KycStatus.REJECTED
             locked.kyc_rejection_reason = reason
             locked.save(update_fields=["kyc_status", "kyc_rejection_reason"])
+            # Who rejected + the reason text are in Distributor.history
+            # (django-simple-history); this log line is just for fast
+            # log-based searching/alerting, so it deliberately omits the
+            # reason text itself.
+            logger.info("reject_kyc: distributor pk=%s rejected", locked.pk)
 
     retry_on_lock_contention(_attempt)

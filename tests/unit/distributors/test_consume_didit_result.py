@@ -179,6 +179,25 @@ def test_missing_image_url_is_skipped_without_crashing(mock_decision, mock_get):
 
 
 @pytest.mark.django_db
+def test_malformed_decision_response_does_not_crash(caplog):
+    """Third-party response shape is untrusted, not just its content -- a
+    non-dict entry in id_verifications[] (a Didit-side bug, or one of our
+    own UNVERIFIED field-name assumptions turning out wrong) must not
+    propagate an unhandled AttributeError out of a webhook handler."""
+    verification = _make_verification()
+    with patch("apps.distributors.services.get_session_decision") as mock_decision:
+        mock_decision.return_value = _approved_decision(
+            id_verifications=["this-should-be-a-dict-not-a-string"]
+        )
+
+        consume_didit_result("sess-1")  # must not raise
+
+    verification.refresh_from_db()
+    assert verification.status == DiditVerification.Status.PENDING
+    assert "unexpected decision response shape" in caplog.text
+
+
+@pytest.mark.django_db
 @patch("apps.distributors.services.requests.get")
 def test_image_url_pointing_at_an_unexpected_host_is_rejected(mock_get):
     """SSRF guard: a media URL must actually be on a didit.me (sub)domain
