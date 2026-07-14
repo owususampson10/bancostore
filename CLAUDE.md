@@ -53,12 +53,18 @@ Commission Engine) is next.** What exists and is verified working:
   "never auto-approve KYC" boundary. Approval assigns a permanent IR ID via a
   concurrency-safe sequence (`IrIdSequence`, pre-seeded by a data migration, not lazily created)
   whose design went through a full `doubt-driven-development` cycle (10 findings from a fresh
-  adversarial review, 8 folded in) before implementation. **Known unverified assumption:** the
-  webhook signature scheme and the decision-response image-field names were sourced from secondary
-  references (a community demo repo, analogy with a different Didit endpoint), not confirmed
-  against Didit's own primary docs (which 404'd during research) — flagged in
-  `apps/distributors/didit.py`'s docstrings and must be re-checked against a real Didit workflow
-  before relying on it in production.
+  adversarial review, 8 folded in) before implementation. **Update 2026-07-14:** both assumptions
+  flagged above as unverified are now confirmed — the webhook signature scheme against Didit's real
+  primary docs (`X-Signature-V2`, not the originally-shipped and incorrect `X-Signature-Simple`),
+  and the decision-response image-field names (`front_image`/`back_image`/`portrait_image`) against
+  a real, live verification session run through a real Didit account. That same live test also
+  caught and led to fixing a genuine bug the test suite alone couldn't have: the SSRF allowlist in
+  `apps/distributors/services.py::_assert_safe_media_url` only permitted `*.didit.me` hosts, but
+  Didit actually serves images from a specific S3 bucket, so every image was silently failing to
+  download. A 12-skill retrospective pass (2026-07-13/14, covering every `agent-skills` skill never
+  invoked during the original Task 11 build) also added Celery-deferred webhook processing (Didit's
+  5s timeout), a `django-simple-history` audit trail for KYC/IR ID changes, and an ADR
+  (`docs/decisions/0001-didit-for-kyc-verification.md`).
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
