@@ -353,3 +353,62 @@ def test_confirming_twice_does_not_double_credit_the_referral_bonus(mock_verify)
 
     wallet = Wallet.objects.get(distributor=sponsor)
     assert wallet.balance == Decimal("100.00")
+
+
+# --- Task 12c: sponsor SMS notification on referral bonus -------------------
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_sponsor_is_notified_with_the_amount_and_referred_distributors_name(
+    mock_verify,
+):
+    from apps.notifications.sms import fake_outbox
+
+    sponsor = _make_distributor()
+    referred = _select_pack_b(_make_distributor(sponsor=sponsor))
+    referred.full_name = "Kofi Mensah"
+    referred.save(update_fields=["full_name"])
+    mock_verify.return_value = _success_verify(amount=200000)
+
+    consume_paid_starter_pack("pack-ref-1")
+
+    assert fake_outbox, "no SMS was sent to the sponsor"
+    message = fake_outbox[-1]
+    assert message["phone_number"] == str(sponsor.phone_number)
+    assert "100" in message["message"]
+    assert "Kofi Mensah" in message["message"]
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_sponsor_notification_falls_back_to_phone_number_with_no_full_name(
+    mock_verify,
+):
+    from apps.notifications.sms import fake_outbox
+
+    sponsor = _make_distributor()
+    referred = _select_pack_b(_make_distributor(sponsor=sponsor))
+    mock_verify.return_value = _success_verify(amount=200000)
+
+    consume_paid_starter_pack("pack-ref-1")
+
+    assert str(referred.phone_number) in fake_outbox[-1]["message"]
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.send_sms")
+@patch("apps.distributors.services.verify_transaction")
+def test_a_failed_sms_send_does_not_undo_the_wallet_credit(mock_verify, mock_send_sms):
+    """The bonus already landed in the sponsor's wallet -- an SMS
+    provider outage must not roll back real money that was correctly
+    credited."""
+    sponsor = _make_distributor()
+    _select_pack_b(_make_distributor(sponsor=sponsor))
+    mock_verify.return_value = _success_verify(amount=200000)
+    mock_send_sms.side_effect = Exception("SMS provider is down")
+
+    consume_paid_starter_pack("pack-ref-1")  # must not raise
+
+    wallet = Wallet.objects.get(distributor=sponsor)
+    assert wallet.balance == Decimal("100.00")

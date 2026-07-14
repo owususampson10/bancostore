@@ -17,6 +17,7 @@ from constance import config
 
 from apps.binary_tree.services import AlreadyPlacedError, BinaryTree
 from apps.commissions.services import calculate_direct_referral_bonus
+from apps.notifications.sms import send_sms
 from apps.pv_ledger.services import record_purchase_pv
 from apps.wallet.models import WalletTransaction
 from apps.wallet.services import credit as credit_wallet
@@ -423,6 +424,24 @@ def consume_paid_starter_pack(reference: str) -> None:
                     transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
                     reference=reference,
                 )
+                # Task 12c: the bonus has already landed -- an SMS provider
+                # outage must never roll back money that was correctly
+                # credited, so this is best-effort and never propagates.
+                referred_name = distributor.full_name or str(distributor.phone_number)
+                try:
+                    send_sms(
+                        str(distributor.sponsor.phone_number),
+                        f"You've earned GHS {bonus} Direct Referral Bonus from "
+                        f"{referred_name}'s purchase. Check your Bancostore wallet!",
+                    )
+                except Exception:
+                    logger.exception(
+                        "consume_paid_starter_pack: failed to notify sponsor=%s "
+                        "of their GHS %s direct referral bonus -- credit already "
+                        "applied, notification only.",
+                        distributor.sponsor_id,
+                        bonus,
+                    )
 
             distributor.rank = distributor.starter_pack_rank
             distributor.starter_pack_confirmed_at = timezone.now()
