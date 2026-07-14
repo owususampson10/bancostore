@@ -75,14 +75,15 @@ were deleted, not kept as a fallback.
 - **A new Boundary-tier external dependency**, subject to the same rigor as Paystack/mNotify:
   environment-variable credentials (`DIDIT_API_KEY`, `DIDIT_WEBHOOK_SECRET`, `DIDIT_WORKFLOW_ID`),
   never `django-constance`.
-- **Two genuinely unverified assumptions remain in production code**, both explicitly flagged in
-  `apps/distributors/didit.py`'s docstrings and `tasks/todo.md`: the webhook signature scheme
-  (`X-Signature-Simple`) was sourced from a community demo repo, not Didit's own primary docs
-  (which 404'd during research); and the `front_image`/`back_image` field names on the
-  decision-response's `id_verifications[]` are assumed by analogy with a different Didit endpoint's
-  documented response shape. **Both must be re-checked against a real Didit workflow before this is
-  fully trusted in production** — a green test suite only proves internal consistency, not that the
-  assumptions match what Didit actually sends.
+- **Update 2026-07-14 — both assumptions flagged above are now confirmed**, via Didit's real
+  primary docs (webhook signature: `X-Signature-V2`) and a real, live verification session run
+  through the user's own Didit account (`front_image`/`back_image`/`portrait_image` field names
+  were correct). That same live test caught a real, separate bug the test suite couldn't have
+  caught: the SSRF allowlist in `apps/distributors/services.py::_assert_safe_media_url` only
+  permitted `*.didit.me` hosts, but Didit actually serves images from a specific S3 bucket — every
+  image silently failed to download until fixed. A green test suite proves internal consistency,
+  not that assumptions match what a real vendor sends; this is the concrete example of why that
+  distinction mattered here.
 - **Free tier is a soft constraint, not a hard one.** At 500+ verifications/month, real per-check
   cost begins ($0.33/check for the full KYC bundle per Didit's pricing page at decision time) — not
   a blocker at this project's current stage, but worth revisiting if distributor volume grows.

@@ -1050,14 +1050,16 @@ directly**: it always re-fetches the authoritative result via `get_session_decis
 storing anything, exactly the same "always re-verify server-side" pattern already used for
 Paystack. Downloads and WebP-converts the three images at this point.
 
-**Still unverified against a real Didit account (carried over from Task 11a, not yet closed):**
-`verify_webhook_signature()`'s scheme (`X-Signature-Simple` = HMAC-SHA256 of
-`"{session_id}|{status}|{created_at}"`) and the `front_image`/`back_image`/`portrait_image` field
-names on the decision response's `id_verifications[]` are both sourced from secondary references
-(a community demo repo's README; analogy with Didit's standalone-API response shape), not Didit's
-own primary docs directly. The full pytest suite passing here only proves this code is internally
-consistent — it does NOT prove it matches what Didit actually sends. Re-check both against a real
-session/webhook once the user's Didit workflow is live.
+**Update 2026-07-14 — both previously-unverified assumptions are now confirmed.** The webhook
+signature scheme was corrected to `X-Signature-V2` (HMAC-SHA256 over the canonical JSON payload,
+confirmed against Didit's real primary docs). The `front_image`/`back_image`/`portrait_image`
+field names were confirmed against a real, live Didit verification session (a real Ghana Card +
+selfie, run through the actual hosted flow with the user's own Didit account) — the field names
+were correct, but that same live test caught a different real bug: `_assert_safe_media_url`'s SSRF
+allowlist only permitted `*.didit.me` hosts, while Didit actually serves images from a specific S3
+bucket (`service-didit-verification-production-a1c5f9b8.s3.amazonaws.com`), so every image silently
+failed to download until fixed. Re-ran the same session after the fix — all three images
+downloaded and converted to WebP correctly.
 
 **Acceptance criteria:**
 - [x] Distributor is redirected to Didit's hosted page with a real session, and redirected back afterward

@@ -488,15 +488,15 @@ def _apply_decision_to_verification(verification, decision, session_id) -> bool:
     Didit's response is third-party data -- untrusted shape, not just
     untrusted content. The parsing below assumes id_verifications/
     face_matches/liveness_checks are lists of dicts (per Didit's
-    documented response), but a malformed or unexpected response (a bug
-    on Didit's side, or one of our own UNVERIFIED field-name assumptions
-    turning out wrong -- see apps/distributors/didit.py and tasks/todo.md
-    Task 11b) could make any of these something else entirely. Catching
-    broadly here keeps consume_didit_result's "never raises" contract
-    (matching consume_paid_starter_pack/consume_paid_registration) even
-    against a response shape we didn't anticipate. Never logs the
-    decision payload itself -- it carries extracted PII (name, document
-    number, date of birth)."""
+    documented response, confirmed 2026-07-14 against a real live
+    verification session), but a malformed or unexpected response (a bug
+    on Didit's side, or a future field-name change) could still make any
+    of these something else entirely. Catching broadly here keeps
+    consume_didit_result's "never raises" contract (matching
+    consume_paid_starter_pack/consume_paid_registration) even against a
+    response shape we didn't anticipate. Never logs the decision payload
+    itself -- it carries extracted PII (name, document number, date of
+    birth)."""
     mapped_status = _DIDIT_STATUS_MAP.get(decision.get("status"))
     if mapped_status is None:
         return False  # Still in progress -- nothing final to store yet.
@@ -545,12 +545,9 @@ def _apply_decision_to_verification(verification, decision, session_id) -> bool:
                 session_id,
             )
 
-    # UNVERIFIED (see apps/distributors/didit.py and tasks/todo.md Task
-    # 11b): front_image/back_image field names on id_verifications[] are
-    # assumed by analogy with Didit's standalone API response
-    # (portrait_image is separately confirmed for this session-decision
-    # endpoint); a missing key just means no image gets stored, it
-    # doesn't crash.
+    # front_image/back_image/portrait_image field names confirmed 2026-07-14
+    # against a real live Didit verification session; a missing key just
+    # means no image gets stored, it doesn't crash.
     for field_name, url_key in (
         ("id_front_image", "front_image"),
         ("id_back_image", "back_image"),
