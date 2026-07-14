@@ -84,7 +84,7 @@ admin review to receive a permanent IR ID — verified end to end through Paysta
 Didit's API (mocked HTTP), reproducing Section 14 steps 4–9.
 
 ### Phase 4: Commission Engine (elevated test rigor)
-- [ ] Task 12: Direct Referral Bonus — instant credit on starter pack purchase
+- [x] Task 12: Direct Referral Bonus — instant credit on starter pack purchase
 - [ ] Task 13: Binary Bonus task — every 10 minutes, weak-leg, carry-forward, expiry, weekly cap
 - [ ] Task 14: Matching Bonus task — weekly, 3-level Bronze / unlimited Silver
 

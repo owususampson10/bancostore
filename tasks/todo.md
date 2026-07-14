@@ -1155,15 +1155,23 @@ authoritative formula is **rate × PV**: Pack A (500 PV) = **GHS 50**, Pack B (1
 100**. Section 14's GHS 200 / GHS 75 figures are narrative errors in the original doc, not a
 second valid interpretation -- see the `project_direct_referral_bonus_formula` memory.
 
+**Done 2026-07-14, built as three slices (12a/12b/12c):** 12a — new `apps/wallet` app (`Wallet`,
+`WalletTransaction`, `credit()`, atomic `F()` update + `retry_on_lock_contention`, proven
+concurrency-safe with a 5-thread test). 12b — new `apps/commissions` app
+(`calculate_direct_referral_bonus`, establishing this codebase's first money-rounding convention:
+`ROUND_HALF_UP` to the pesewa), hooked into `consume_paid_starter_pack` inside the same
+locked/idempotent block as placement and PV credit. 12c — sponsor SMS notification, wrapped so a
+notification failure can never roll back an already-committed credit.
+
 **Acceptance criteria:**
-- [ ] Rate is read from `django-constance` config, not hardcoded
-- [ ] Credit happens the moment payment is confirmed (same request/Celery task, not delayed)
-- [ ] Sponsor receives a notification with the correct amount and referred distributor's name
+- [x] Rate is read from `django-constance` config, not hardcoded
+- [x] Credit happens the moment payment is confirmed (same request/Celery task, not delayed)
+- [x] Sponsor receives a notification with the correct amount and referred distributor's name
 
 **Verification:**
-- [ ] pytest test: Pack A purchase → sponsor credited GHS 50 (10% of 500 PV)
-- [ ] pytest test: Pack B purchase → sponsor credited GHS 100 (10% of 1,000 PV)
-- [ ] pytest test: rounding to the pesewa is correct on a non-round PV value
+- [x] pytest test: Pack A purchase → sponsor credited GHS 50 (10% of 500 PV)
+- [x] pytest test: Pack B purchase → sponsor credited GHS 100 (10% of 1,000 PV)
+- [x] pytest test: rounding to the pesewa is correct on a non-round PV value
 
 **Dependencies:** Task 10c, Task 10d, Task 3
 

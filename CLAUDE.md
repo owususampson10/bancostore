@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–11 are done (Phases 0–3 complete); Task 12 (Direct Referral Bonus, start of Phase 4's
-Commission Engine) is next.** What exists and is verified working:
+**Tasks 1–12 are done (Phases 0–3 complete, Phase 4's Commission Engine started); Task 13 (Binary
+Bonus task) is next.** What exists and is verified working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -65,6 +65,21 @@ Commission Engine) is next.** What exists and is verified working:
   invoked during the original Task 11 build) also added Celery-deferred webhook processing (Didit's
   5s timeout), a `django-simple-history` audit trail for KYC/IR ID changes, and an ADR
   (`docs/decisions/0001-didit-for-kyc-verification.md`).
+- **Direct Referral Bonus (Task 12), the first Commission Engine task (elevated test rigor):** two
+  new apps from scratch, `apps/wallet` (`Wallet`/`WalletTransaction`, `credit()` — a lazily-created
+  wallet, atomic `F()` balance update, `retry_on_lock_contention`, proven concurrency-safe with a
+  5-thread test) and `apps/commissions` (`calculate_direct_referral_bonus`, establishing this
+  codebase's first money-rounding convention — `Decimal.quantize(..., ROUND_HALF_UP)` to the
+  pesewa). Hooked into `consume_paid_starter_pack` inside the same locked/idempotent block as
+  placement and PV credit, so a webhook/callback race can't double-credit any more than it can
+  double-place. **Formula confirmed by the user, not read directly from spec:** the original
+  requirements doc's Section 14 walkthrough contradicts itself between its own two worked examples
+  (Ama's GHS 200 vs. Kofi's GHS 75 don't reconcile under one consistent "rate × PV" or "rate ×
+  price" formula) and also contradicts this project's own prior planning note for the same
+  scenario — resolved as rate × PV (1 PV = GHS 1): Pack A = GHS 50, Pack B = GHS 100; see the
+  `project_direct_referral_bonus_formula` memory. Sponsor gets an SMS notification (amount +
+  referred distributor's name), wrapped so a notification failure can never roll back the
+  already-committed credit.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
@@ -74,7 +89,7 @@ Commission Engine) is next.** What exists and is verified working:
   session-engine fallback — is tracked in the "Known issues" sections at the top of
   `tasks/todo.md`; read those before touching auth or deployment code.
 
-Existing apps: `apps/{accounts,binary_tree,catalog,distributors,notifications,platform_settings,pv_ledger}`. Shared
+Existing apps: `apps/{accounts,binary_tree,catalog,commissions,distributors,notifications,platform_settings,pv_ledger,wallet}`. Shared
 concurrency helper: `bancostore/concurrency.py` (`retry_on_lock_contention`,
 `select_for_update_nowait_if_supported`) — use it for any counter/stock/attempt update rather than
 reinventing locking. See `tasks/plan.md` and `tasks/todo.md` for the full task breakdown and
