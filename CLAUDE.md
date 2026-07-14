@@ -4,9 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–10 are done (Phases 0–2 complete, plus the binary-tree/onboarding slice of Phase 3);
-Task 11 (KYC submission + admin review + IR ID generation) is next.** What exists and is verified
-working:
+**Tasks 1–11 are done (Phases 0–3 complete); Task 12 (Direct Referral Bonus, start of Phase 4's
+Commission Engine) is next.** What exists and is verified working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -42,10 +41,29 @@ working:
   simplification:** the registration form has no leg-choice field yet, so placement always runs
   auto-balance — see the `project_binary_tree_placement_spillover_rule` memory before adding
   sponsor-driven leg choice.
+- **Distributor KYC verification (Task 11), a Boundary-tier external integration:** replaces an
+  earlier self-hosted upload form (shipped, then removed) with **Didit**'s hosted verification flow
+  — distributor is redirected to Didit's page (ID front/back + a live selfie, face-match +
+  liveness + document checks all run on Didit's side), redirected back via callback + HMAC-verified
+  webhook (`apps/distributors/didit.py`, mirrors `paystack.py`'s shape), and the authoritative
+  result is always re-fetched server-side (never trusted from the callback/webhook payload alone).
+  Admin sees the result plus locally-stored images in Django Admin and approves/rejects via bulk
+  actions (reject requires a reason, Django's intermediate-confirmation-page pattern) —
+  **Didit's result is informational only; it never sets `kyc_status` itself**, per `SPEC.md`'s
+  "never auto-approve KYC" boundary. Approval assigns a permanent IR ID via a
+  concurrency-safe sequence (`IrIdSequence`, pre-seeded by a data migration, not lazily created)
+  whose design went through a full `doubt-driven-development` cycle (10 findings from a fresh
+  adversarial review, 8 folded in) before implementation. **Known unverified assumption:** the
+  webhook signature scheme and the decision-response image-field names were sourced from secondary
+  references (a community demo repo, analogy with a different Didit endpoint), not confirmed
+  against Didit's own primary docs (which 404'd during research) — flagged in
+  `apps/distributors/didit.py`'s docstrings and must be re-checked against a real Didit workflow
+  before relying on it in production.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
-  a code-review + security-hardening pass (2026-07-13) against Tasks 9–10. All Critical/High
+  code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
-  CSRF-exempt SMS send). The deliberately deferred remainder — decorative constance settings,
+  CSRF-exempt SMS send, an SSRF gap in Didit image downloads, an IR ID overflow bug caught before
+  it shipped). The deliberately deferred remainder — decorative constance settings,
   production security headers, proxy-aware rate-limit keys, Paystack secret encryption,
   session-engine fallback — is tracked in the "Known issues" sections at the top of
   `tasks/todo.md`; read those before touching auth or deployment code.
