@@ -1201,7 +1201,7 @@ must only read pre-aggregated counters — never walk the tree.
 
 **Dependencies:** Task 9c, Task 10d, Task 3
 
-**Files likely touched:** `apps/commissions/tasks.py` (`calculate_binary_bonus`, Celery Beat schedule), `apps/commissions/services.py` (`BinaryBonusCalculator`), `tests/unit/commissions/test_binary_bonus.py`
+**Files likely touched:** `apps/commissions/tasks.py` (`calculate_binary_bonus`, Celery Beat schedule), `apps/commissions/services.py` (a `BinaryBonusCalculator` class **or** a plain function -- Task 12 shipped `calculate_direct_referral_bonus` as a bare function rather than the originally-planned `DirectReferralCalculator` class, since the direct-referral case had no shared state worth a class; Binary Bonus's genuine complexity -- weak-leg detection, weekly cap, carry-forward -- may justify a class this time, but that's a real decision to make when this task starts, not a name to copy from this stale note), `tests/unit/commissions/test_binary_bonus.py`
 
 **Estimated scope:** L (if it grows past ~5 files, split carry-forward/expiry logic into its own service)
 
@@ -1223,7 +1223,7 @@ must only read pre-aggregated counters — never walk the tree.
 
 **Dependencies:** Task 13
 
-**Files likely touched:** `apps/commissions/tasks.py` (`calculate_matching_bonus`), `apps/commissions/services.py` (`MatchingBonusCalculator`), `tests/unit/commissions/test_matching_bonus.py`
+**Files likely touched:** `apps/commissions/tasks.py` (`calculate_matching_bonus`), `apps/commissions/services.py` (class or function -- match whatever Task 13 settled on for `BinaryBonusCalculator`, see that task's note), `tests/unit/commissions/test_matching_bonus.py`
 
 **Estimated scope:** M
 
