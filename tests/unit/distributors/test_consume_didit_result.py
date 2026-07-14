@@ -214,6 +214,28 @@ def test_image_url_with_non_https_scheme_is_rejected():
         _assert_safe_media_url("http://cdn.didit.me/front.jpg")
 
 
+@patch("apps.distributors.services.socket.gethostbyname", return_value="52.1.2.3")
+def test_didits_real_s3_media_host_is_allowed(mock_dns):
+    """Regression test: confirmed 2026-07-14 against a real live Didit
+    verification session that Didit serves document/selfie images from
+    this exact S3 bucket, not a didit.me (sub)domain -- the SSRF guard's
+    original *.didit.me-only allowlist rejected every real image."""
+    _assert_safe_media_url(
+        "https://service-didit-verification-production-a1c5f9b8.s3.amazonaws.com/front.jpg"
+    )
+
+
+@patch("apps.distributors.services.socket.gethostbyname", return_value="52.1.2.3")
+def test_a_lookalike_s3_bucket_is_still_rejected(mock_dns):
+    """The allowlist is an exact host match, not a "contains didit"
+    substring check -- an attacker-controlled bucket that merely mentions
+    didit in its name must not pass."""
+    with pytest.raises(ValueError, match="unexpected host"):
+        _assert_safe_media_url(
+            "https://evil-didit-verification-lookalike.s3.amazonaws.com/front.jpg"
+        )
+
+
 @patch("apps.distributors.services.socket.gethostbyname", return_value="127.0.0.1")
 def test_image_url_resolving_to_a_private_ip_is_rejected(mock_dns):
     """Even a URL on an allowed hostname is rejected if that hostname

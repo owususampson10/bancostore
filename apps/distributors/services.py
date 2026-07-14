@@ -425,6 +425,18 @@ _DIDIT_STATUS_MAP = {
 }
 
 
+# Confirmed 2026-07-14 against a real live Didit verification session: Didit
+# does NOT serve document/selfie images from a didit.me (sub)domain -- it
+# redirects to a specific S3 bucket it controls. Allowing the exact host
+# (not a broad *.amazonaws.com suffix, which anyone can get a bucket on)
+# keeps this an allowlist rather than reopening the SSRF hole this guard
+# exists to close.
+_ALLOWED_MEDIA_HOSTS = frozenset(
+    {
+        "didit.me",
+        "service-didit-verification-production-a1c5f9b8.s3.amazonaws.com",
+    }
+)
 _ALLOWED_MEDIA_HOST_SUFFIX = ".didit.me"
 
 
@@ -434,13 +446,15 @@ def _assert_safe_media_url(url):
     blindly fetch whatever string appears there -- a Didit-side bug, a
     MITM, or a compromised session could otherwise point this at an
     internal service (cloud metadata, localhost, a private IP). Requires
-    https, a didit.me (sub)domain, and a resolved IP that's actually
-    public."""
+    https, an exact match against _ALLOWED_MEDIA_HOSTS (or a didit.me
+    subdomain), and a resolved IP that's actually public."""
     parsed = urlparse(url)
     if parsed.scheme != "https":
         raise ValueError(f"refusing to fetch non-https media URL: {url!r}")
     hostname = parsed.hostname or ""
-    if hostname != "didit.me" and not hostname.endswith(_ALLOWED_MEDIA_HOST_SUFFIX):
+    if hostname not in _ALLOWED_MEDIA_HOSTS and not hostname.endswith(
+        _ALLOWED_MEDIA_HOST_SUFFIX
+    ):
         raise ValueError(
             f"refusing to fetch media URL from unexpected host: {hostname!r}"
         )
