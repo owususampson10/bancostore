@@ -107,7 +107,11 @@ def test_query_count_does_not_grow_with_ancestor_depth():
     real_queries = [
         q for q in ctx.captured_queries if not q["sql"].startswith("EXPLAIN")
     ]
-    # 1 query to fetch this distributor's ancestor edges, plus one bulk
-    # UPDATE per leg that actually has ancestors on it (at most 2) --
-    # never one query per ancestor.
-    assert len(real_queries) <= 3
+    # 1 query to fetch this distributor's ancestor edges, plus, per leg
+    # that actually has ancestors on it (at most 2): 1 bulk UPDATE for
+    # PvLedger, then _credit_daily_buckets's own bulk UPDATE + existence
+    # SELECT + a savepoint-wrapped bulk_create (SAVEPOINT/INSERT/RELEASE)
+    # for whoever has no bucket yet today -- a fixed handful of
+    # statements per leg, never one query per ancestor regardless of how
+    # deep the chain is.
+    assert len(real_queries) <= 15

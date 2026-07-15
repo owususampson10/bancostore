@@ -1188,6 +1188,32 @@ apply the rate, enforce the weekly cap, carry forward the stronger leg's excess 
 `PV_CARRY_FORWARD_EXPIRY_DAYS`), and require 100 PV monthly personal activity to be eligible. Task
 must only read pre-aggregated counters — never walk the tree.
 
+**In progress, built as slices (13a/13b/13c-design/13d-model):** 13a — real monthly personal-PV
+tracking (`MonthlyPersonalPv`, `record_personal_pv`, `is_eligible_for_binary_bonus`), since nothing
+previously tracked a distributor's own monthly PV, only PV credited to their legs. 13b —
+`calculate_binary_bonus` + `apply_weekly_binary_bonus_cap` (pure calculation, rolling 7-day window,
+`WalletTransaction.TransactionType.BINARY_BONUS` added). 13c — the carry-forward/expiry design went
+through 3 rounds of `doubt-driven-development` (2026-07-15): round 1 caught a fatally flawed
+"re-stamp on merge" proposal before any code was written (would have silently defeated the 180-day
+expiry rule for any actively-trading leg); round 2 caught a raw-SQL, per-ancestor-loop, and
+silent-failure design; round 3 (on the actual ORM-only bulk approach) caught a real transaction-
+savepoint bug. **13d (model + hook, done):** `PvDailyBucket` (dated, per-leg PV buckets — the unit
+carry-forward will consume FIFO and expire) plus `apps.pv_ledger.services._credit_daily_buckets`,
+hooked into `record_purchase_pv`. Bulk-safe (2 statements per leg, not per-ancestor), with its own
+bounded IntegrityError retry for the "two purchases both create today's first bucket" race,
+deferring all lock-contention `OperationalError`s to the existing outer `retry_on_lock_contention`
+wrapper rather than duplicating it. **A second real bug was found only by a genuine 10-thread
+concurrency test** (not by review): an `OperationalError` mid-attempt could roll back an already-
+"successful" bulk UPDATE while the retry logic kept it out of the next attempt's retry set —
+silently losing PV with zero exceptions raised. Fixed by making the whole attempt (update + read +
+create) one atomic block, and by never narrowing the retry set to just the missing ids (the whole
+attempt rolls back together, so the whole attempt must retry together). Verified via a 30-trial
+reproduction script (0/30 mismatches after the fix) plus 20+ repeated real-thread pytest runs.
+**Still open:** Task 35 (weekly-cap PV-consumption gap), Task 36 (remaining doubt-review fixes:
+`Coalesce`, atomicity across the whole payout+decrement cycle, expiry-boundary test), Task 38 (the
+actual carry-forward consumption logic + Celery task wiring) — Task 13's acceptance criteria below
+aren't met yet; only the write-time PV-bucketing foundation is done and tested.
+
 **Acceptance criteria:**
 - [ ] Weak leg correctly identified and reset to 0 after calculation; carry-forward applied to the strong leg
 - [ ] Weekly GHS 50,000 cap enforced per distributor

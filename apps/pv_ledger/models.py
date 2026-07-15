@@ -1,5 +1,7 @@
 from django.db import models
 
+from apps.binary_tree.models import BinaryTreeEdge
+
 
 class PvLedger(models.Model):
     """Event-driven per-leg PV aggregate for one distributor (see SPEC.md
@@ -49,3 +51,55 @@ class MonthlyPersonalPv(models.Model):
 
     def __str__(self):
         return f"MonthlyPersonalPv<{self.distributor_id} {self.period} pv={self.pv}>"
+
+
+class PvDailyBucket(models.Model):
+    """One dated, per-leg PV bucket for one ancestor -- the unit the
+    Binary Bonus carry-forward/expiry mechanism (Task 13c/13d) consumes
+    from FIFO and expires after PV_CARRY_FORWARD_EXPIRY_DAYS, instead of
+    PvLedger's undated running total which can't express "this PV is
+    180 days old, expire it" on its own.
+
+    `leg` reuses BinaryTreeEdge.Leg rather than redefining an equivalent
+    enum, since a bucket's leg has the same meaning (which of the
+    ancestor's two legs this PV falls under) and must never drift out of
+    sync with it.
+
+    Rows are created lazily on first credit for a given
+    (distributor, leg, date) -- unlike PvLedger, which always pre-exists
+    once a distributor is placed, a bucket for "today" doesn't exist
+    until the first purchase credits it. See
+    apps.pv_ledger.services._credit_daily_buckets for the bulk-safe
+    create-or-increment mechanism this requires."""
+
+    distributor = models.ForeignKey(
+        "distributors.Distributor",
+        on_delete=models.CASCADE,
+        related_name="pv_daily_buckets",
+    )
+    leg = models.CharField(max_length=1, choices=BinaryTreeEdge.Leg.choices)
+    date = models.DateField()
+    pv = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["distributor", "leg", "date"],
+                name="unique_distributor_leg_date_pv_bucket",
+            )
+        ]
+        indexes = [
+            # The carry-forward cycle's expiry step queries "this
+            # distributor's buckets older than N days" -- covered by the
+            # unique constraint's own index for single-distributor
+            # lookups, but an explicit (distributor, date) index also
+            # serves a plain date-range scan without the leg column
+            # forcing extra index entries to be read.
+            models.Index(fields=["distributor", "date"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"PvDailyBucket<{self.distributor_id} {self.leg} {self.date} "
+            f"pv={self.pv}>"
+        )
