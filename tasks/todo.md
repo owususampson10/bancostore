@@ -1209,21 +1209,58 @@ silently losing PV with zero exceptions raised. Fixed by making the whole attemp
 create) one atomic block, and by never narrowing the retry set to just the missing ids (the whole
 attempt rolls back together, so the whole attempt must retry together). Verified via a 30-trial
 reproduction script (0/30 mismatches after the fix) plus 20+ repeated real-thread pytest runs.
-**Still open:** Task 35 (weekly-cap PV-consumption gap), Task 36 (remaining doubt-review fixes:
-`Coalesce`, atomicity across the whole payout+decrement cycle, expiry-boundary test), Task 38 (the
-actual carry-forward consumption logic + Celery task wiring) — Task 13's acceptance criteria below
-aren't met yet; only the write-time PV-bucketing foundation is done and tested.
+
+**13e (Tasks 35/36/38, done 2026-07-15) — the actual per-distributor consumption cycle:**
+`apps.commissions.services.process_binary_bonus_for_distributor(distributor, run_at)`, plus new
+`apps.pv_ledger.services` helpers (`sum_leg_pv`, `expire_old_pv`, `consume_leg_pv_fifo`). Went
+through its own `doubt-driven-development` cycle before implementation (found: a TOCTOU race in an
+unlocked idempotency check, `is_eligible_for_binary_bonus`/`apply_weekly_binary_bonus_cap` reading
+wall-clock time instead of the cycle's fixed `run_at`, an unverified `select_for_update`+`aggregate`
+combination, a per-bucket-loop scale anti-pattern, and missing audit logging) — all reconciled
+before writing code: the `Distributor` row is locked FIRST inside the atomic block (serializing
+concurrent/retried runs so `credit()`'s unique-constraint `IntegrityError` becomes unreachable in
+practice), `is_eligible_for_binary_bonus`/`apply_weekly_binary_bonus_cap` now take an explicit `now`
+param the cycle always passes as `run_at`, `select_for_update` on `PvDailyBucket` was dropped
+entirely in favor of the Distributor-row lock plus a documented, tested invariant (PV is only ever
+incremented by the write-time path and only ever decremented by this function), and PV consumption
+uses one bulk `Case`/`When` `F()`-relative `UPDATE` per leg (not a per-bucket loop, not raw SQL).
+A follow-up code review then caught and fixed four more real issues: `expire_old_pv` was moved
+*before* the eligibility check (a chronically-ineligible distributor's buckets weren't aging out
+otherwise); a `CheckConstraint(pv__gte=0)` was added to `PvDailyBucket` (`PositiveIntegerField`
+alone doesn't protect against a bulk `F()`-relative update going negative, and SQLite — what the
+whole test suite runs against — has no MySQL-`UNSIGNED` equivalent); the "owed a nonzero bonus that
+floors to 0 PV under the cap" case is now logged instead of silently deferred with no trace; and
+the reviewer *proved* (by temporarily reintroducing each bug) that the test suite's fixed `run_at`
+constant had accidentally been chosen to equal the sandbox's real current date, meaning a
+regression back to reading real `timezone.now()` instead of `run_at` would have silently passed
+every test — fixed by decoupling the constant from real "now" and adding two tests that mock real
+`timezone.now()` to a different value and assert eligibility/cap behavior still follows `run_at`.
+A real threaded test (`test_a_concurrent_purchase_write_mid_cycle_never_loses_pv`) proves a
+purchase crediting this same distributor's leg *during* the cycle's computation never gets lost —
+precisely synchronized past SQLite's whole-database lock limitation (documented in the test) rather
+than trusted from the "PV only increases outside, only decreases inside" invariant's math alone.
+46 new/updated tests, full 347-test suite green.
+
+**Still open:** the actual Celery Beat task iterating every distributor and calling
+`process_binary_bonus_for_distributor` once each per scheduled run — not yet a tracked task. Its
+own design must explicitly decide: how `run_at` is generated once and held fixed for the whole
+batch (never regenerated per-distributor or on task retry — a documented, enforced contract of the
+function above, not yet enforced by any caller), which distributors to iterate (likely: only those
+with existing `PvDailyBucket` rows, not the full distributor table, to avoid an O(all distributors)
+scan every 10 minutes), and per-distributor exception isolation (one distributor's `RuntimeError`
+or exhausted `OperationalError` retries must not abort the whole cycle for everyone else).
 
 **Acceptance criteria:**
-- [ ] Weak leg correctly identified and reset to 0 after calculation; carry-forward applied to the strong leg
-- [ ] Weekly GHS 50,000 cap enforced per distributor
-- [ ] Distributors below 100 PV monthly personal activity are skipped
-- [ ] Carried PV older than the expiry setting is dropped, not counted
+- [x] Weak leg correctly identified and reset to 0 after calculation; carry-forward applied to the strong leg
+- [x] Weekly GHS 50,000 cap enforced per distributor
+- [x] Distributors below 100 PV monthly personal activity are skipped
+- [x] Carried PV older than the expiry setting is dropped, not counted
+- [ ] The above are proven per-distributor via `process_binary_bonus_for_distributor`; the Celery Beat task itself (schedule + batch driver) is not yet built
 
 **Verification:**
-- [ ] pytest test reproducing the doc example exactly: left 1,500 / right 600 → weak leg 600 → GHS 45.00 bonus, 900 PV carried forward
-- [ ] pytest test: weekly cap enforcement, zero/tie-leg case, expired carry-forward exclusion
-- [ ] Scale test: seed 10k+ node tree, assert the task's DB query count does not grow with tree depth/width (reads aggregates only)
+- [x] pytest test reproducing the doc example exactly: left 1,500 / right 600 → weak leg 600 → GHS 45.00 bonus, 900 PV carried forward
+- [x] pytest test: weekly cap enforcement, zero/tie-leg case, expired carry-forward exclusion
+- [ ] Scale test: seed 10k+ node tree, assert the task's DB query count does not grow with tree depth/width (reads aggregates only) -- applies to the not-yet-built batch driver, not the per-distributor function (which is already O(1) per leg)
 
 **Dependencies:** Task 9c, Task 10d, Task 3
 

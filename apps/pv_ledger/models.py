@@ -86,7 +86,18 @@ class PvDailyBucket(models.Model):
             models.UniqueConstraint(
                 fields=["distributor", "leg", "date"],
                 name="unique_distributor_leg_date_pv_bucket",
-            )
+            ),
+            # PositiveIntegerField alone isn't a real DB-level guarantee
+            # against this specific class of bug: bulk F()-relative
+            # UPDATEs (as apps.pv_ledger.services.consume_leg_pv_fifo
+            # uses) bypass Django's model-level field validation
+            # entirely, and MySQL's UNSIGNED enforcement has no SQLite
+            # equivalent -- meaning the whole test suite, which runs
+            # against SQLite, would never catch a consumption bug that
+            # drove pv negative. This constraint is the actual guardrail.
+            models.CheckConstraint(
+                check=models.Q(pv__gte=0), name="pv_daily_bucket_pv_gte_0"
+            ),
         ]
         indexes = [
             # The carry-forward cycle's expiry step queries "this

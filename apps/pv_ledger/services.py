@@ -2,7 +2,8 @@ import logging
 import time
 
 from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db.models import Case, F, PositiveIntegerField, Sum, When
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from constance import config
@@ -213,14 +214,114 @@ def record_personal_pv(distributor, pv_amount) -> None:
     MonthlyPersonalPv.objects.filter(pk=row.pk).update(pv=F("pv") + pv_amount)
 
 
-def is_eligible_for_binary_bonus(distributor) -> bool:
+def is_eligible_for_binary_bonus(distributor, now=None) -> bool:
     """Has `distributor` personally generated at least
     config.MIN_MONTHLY_PERSONAL_PV in the current calendar month? Reads
     the pre-aggregated MonthlyPersonalPv row only -- never recomputes
-    from raw purchase history."""
-    period = timezone.now().date().replace(day=1)
+    from raw purchase history.
+
+    `now` defaults to `timezone.now()` but the Binary Bonus cycle passes
+    its own fixed `run_at` explicitly, so eligibility can't flip between
+    the original attempt and a retry of what's logically the same run
+    (e.g. one straddling a calendar-month boundary)."""
+    period = (now or timezone.now()).date().replace(day=1)
     try:
         row = MonthlyPersonalPv.objects.get(distributor=distributor, period=period)
     except MonthlyPersonalPv.DoesNotExist:
         return False
     return row.pv >= config.MIN_MONTHLY_PERSONAL_PV
+
+
+def sum_leg_pv(distributor, leg, cutoff_date):
+    """The non-expired PV currently sitting in `distributor`'s `leg`
+    buckets -- the authoritative "spendable" total the Binary Bonus
+    cycle reads, distinct from PvLedger's immutable all-time total
+    (which this module never touches for bonus payout purposes).
+    `Coalesce` guards the empty-leg case, where `Sum` would otherwise
+    return NULL rather than 0."""
+    return PvDailyBucket.objects.filter(
+        distributor=distributor, leg=leg, date__gte=cutoff_date, pv__gt=0
+    ).aggregate(total=Coalesce(Sum("pv"), 0))["total"]
+
+
+def expire_old_pv(distributor, cutoff_date):
+    """Hard-deletes any of `distributor`'s buckets older than
+    `cutoff_date`, logging each one first since deletion leaves no other
+    trace. A bucket dated exactly `cutoff_date` is NOT expired -- PV
+    survives the full PV_CARRY_FORWARD_EXPIRY_DAYS days, so `date <
+    cutoff_date` (strictly before) is the expiry condition, not `<=`."""
+    expired = list(
+        PvDailyBucket.objects.filter(distributor=distributor, date__lt=cutoff_date)
+    )
+    if not expired:
+        return
+    for bucket in expired:
+        logger.info(
+            "PV expired: distributor=%s leg=%s date=%s pv=%s",
+            distributor.pk,
+            bucket.leg,
+            bucket.date,
+            bucket.pv,
+        )
+    PvDailyBucket.objects.filter(pk__in=[b.pk for b in expired]).delete()
+
+
+def consume_leg_pv_fifo(distributor, leg, cutoff_date, amount, reference):
+    """Decrements `amount` PV total from `distributor`'s `leg` buckets,
+    oldest date first, in one bulk statement regardless of how many
+    dated buckets are touched -- a `Case`/`When` F()-relative UPDATE
+    (still the Django ORM, not raw SQL), matching this project's
+    established "bulk, not per-row" convention for anything on the
+    purchase/PV path (see record_purchase_pv). Using `F()` per row
+    (rather than a literal computed value) means a concurrent purchase
+    crediting one of these same buckets mid-consumption is never
+    clobbered -- the decrement always applies relative to whatever the
+    row's live value is at UPDATE time.
+
+    Only ever called with `amount` derived from this same module's
+    sum_leg_pv reading, taken under the same lock/transaction (see
+    apps.commissions.services.process_binary_bonus_for_distributor) --
+    so `amount` should never exceed what's actually available. Raises
+    RuntimeError if it somehow does: that means a real bug elsewhere
+    (e.g. leg/cutoff mismatch between the sum and the consume calls),
+    not a normal condition, and money-adjacent code should fail loudly
+    rather than silently under- or over-consume."""
+    remaining = amount
+    decrements = {}
+    for bucket in (
+        PvDailyBucket.objects.filter(
+            distributor=distributor, leg=leg, date__gte=cutoff_date, pv__gt=0
+        )
+        .order_by("date")
+        .only("pk", "pv")
+    ):
+        if remaining <= 0:
+            break
+        take = min(bucket.pv, remaining)
+        decrements[bucket.pk] = take
+        remaining -= take
+
+    if remaining > 0:
+        raise RuntimeError(
+            f"consume_leg_pv_fifo: could not consume all PV for "
+            f"distributor={distributor.pk} leg={leg}: {remaining} left "
+            "over after exhausting all buckets -- needs manual "
+            "investigation."
+        )
+
+    if not decrements:
+        return
+
+    logger.info(
+        "PV consumed: distributor=%s leg=%s reference=%s decrements=%s",
+        distributor.pk,
+        leg,
+        reference,
+        decrements,
+    )
+    case_expr = Case(
+        *[When(pk=pk, then=F("pv") - take) for pk, take in decrements.items()],
+        default=F("pv"),
+        output_field=PositiveIntegerField(),
+    )
+    PvDailyBucket.objects.filter(pk__in=list(decrements.keys())).update(pv=case_expr)
