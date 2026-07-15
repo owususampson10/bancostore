@@ -40,15 +40,30 @@ class WalletTransaction(models.Model):
         constraints = [
             # Defense-in-depth, not the primary guard (the primary guard is
             # the caller's own idempotency check, e.g.
-            # consume_paid_starter_pack's starter_pack_confirmed_at check).
-            # This stops a future call-site bug (a refactor that
+            # consume_paid_starter_pack's starter_pack_confirmed_at check,
+            # or process_binary_bonus_for_distributor's Distributor-row
+            # lock). This stops a future call-site bug (a refactor that
             # accidentally calls credit() twice for the same event) from
-            # silently double-crediting -- a blank reference is common
-            # (e.g. admin-initiated credits) so it's excluded rather than
-            # treated as one shared "no reference" bucket.
+            # silently double-crediting.
+            #
+            # Unconditional, not `condition=~models.Q(reference="")` as
+            # originally shipped -- MySQL's Django backend has no support
+            # for partial/filtered unique indexes and silently SKIPS
+            # creating the constraint entirely rather than erroring, so it
+            # looked enforced on SQLite (every local/dev test) while doing
+            # nothing on real MySQL (production/CI) the whole time this
+            # shipped, exactly the same bug class already documented on
+            # BinaryTreeEdge's own unique constraint. Caught only once CI's
+            # real test suite finally ran again after being silently
+            # skipped for days by an unrelated lint failure (see git log).
+            # Every current caller of credit() already passes a real,
+            # non-blank reference, so this is a behavior-preserving fix,
+            # not a functional change -- a future "admin-initiated credit
+            # with no natural reference" feature should generate its own
+            # synthetic unique reference (e.g. an admin-credit UUID)
+            # rather than relying on blank-reference exclusion.
             models.UniqueConstraint(
                 fields=["wallet", "reference", "transaction_type"],
-                condition=~models.Q(reference=""),
                 name="unique_wallet_reference_transaction_type",
             )
         ]
