@@ -7,6 +7,36 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    # A separate, independent job from `test` -- not just an earlier step
+    # in the same job. Previously lint ran as a step before "Run tests" in
+    # one sequential job, which meant a lint-only failure (e.g. a
+    # formatting slip in .claude/hooks/) silently SKIPPED the real test
+    # step entirely rather than failing it. That went unnoticed for every
+    # commit from 2026-07-12 through 2026-07-15 -- 28 consecutive CI runs
+    # reported "failure" while the actual MySQL-backed test suite (the
+    # whole reason this workflow exists -- see the `test` job below) never
+    # ran even once in that window. Independent jobs mean lint and test
+    # each report their own real status, always.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (black, isort, ruff)
+        run: |
+          black --check .
+          isort --check .
+          ruff check .
+
   test:
     runs-on: ubuntu-latest
 
@@ -80,12 +110,6 @@ jobs:
 
       - name: Django system checks
         run: python manage.py check
-
-      - name: Lint (black, isort, ruff)
-        run: |
-          black --check .
-          isort --check .
-          ruff check .
 
       - name: Run tests
         run: pytest -q
