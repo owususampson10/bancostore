@@ -95,7 +95,10 @@ def main():
         for gated_file in gated_files
         for marker in SENSITIVE_PATH_MARKERS
     )
-    if touches_sensitive and marker_age("security-and-hardening") > MAX_MARKER_AGE_SECONDS:
+    if (
+        touches_sensitive
+        and marker_age("security-and-hardening") > MAX_MARKER_AGE_SECONDS
+    ):
         missing.append("security-and-hardening")
 
     if missing:

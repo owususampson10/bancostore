@@ -43,10 +43,12 @@ def main():
 
     if age > MAX_MARKER_AGE_SECONDS:
         reason = (
-            "No agent-skill invoked in the last 30 minutes. Per CLAUDE.md's Agent Skills "
-            "Workflow, invoke the matching skill (frontend-ui-engineering, "
-            "test-driven-development, debugging-and-error-recovery, code-review-and-quality, "
-            "code-simplification, etc.) before this edit -- no exception for small changes."
+            "No agent-skill invoked in the last 30 minutes. Per CLAUDE.md's "
+            "Agent Skills Workflow, invoke the matching skill "
+            "(frontend-ui-engineering, test-driven-development, "
+            "debugging-and-error-recovery, code-review-and-quality, "
+            "code-simplification, etc.) before this edit -- no exception "
+            "for small changes."
         )
         print(
             json.dumps(
