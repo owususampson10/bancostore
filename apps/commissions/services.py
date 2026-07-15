@@ -162,16 +162,26 @@ def process_binary_bonus_for_distributor(distributor, run_at) -> Decimal:
             # a chronically-ineligible distributor's PvDailyBucket rows
             # must still age out on schedule, not accumulate forever just
             # because they never qualify for a payout.
-            # Expiry runs unconditionally, before the eligibility check --
-            # a chronically-ineligible distributor'''s PvDailyBucket rows
-            # must still age out on schedule, not accumulate forever just
-            # because they never qualify for a payout.
             cutoff_date = run_at.date() - timedelta(
                 days=config.PV_CARRY_FORWARD_EXPIRY_DAYS
             )
             expire_old_pv(distributor, cutoff_date)
 
             if not is_eligible_for_binary_bonus(distributor, now=run_at):
+                # DEBUG, not INFO: this is the routine, expected outcome
+                # for most distributors most cycles (this runs once per
+                # distributor every BINARY_BONUS_INTERVAL_MINUTES), so at
+                # INFO it would flood production logs. Kept so a support
+                # inquiry ("why wasn't I paid?") can raise verbosity for
+                # one distributor and get a real answer instead of
+                # nothing -- the same reasoning as every DEBUG line below.
+                logger.debug(
+                    "process_binary_bonus_for_distributor: distributor=%s "
+                    "skipped this cycle -- not eligible (insufficient "
+                    "monthly personal PV) as of run_at=%s.",
+                    distributor.pk,
+                    run_at,
+                )
                 return Decimal("0.00")
 
             left_pv = sum_leg_pv(distributor, BinaryTreeEdge.Leg.LEFT, cutoff_date)
@@ -179,6 +189,14 @@ def process_binary_bonus_for_distributor(distributor, run_at) -> Decimal:
             weak_leg_pv = min(left_pv, right_pv)
 
             if weak_leg_pv <= 0:
+                logger.debug(
+                    "process_binary_bonus_for_distributor: distributor=%s "
+                    "skipped this cycle -- zero weak-leg PV "
+                    "(left_pv=%s right_pv=%s).",
+                    distributor.pk,
+                    left_pv,
+                    right_pv,
+                )
                 return Decimal("0.00")
 
             raw_bonus = calculate_binary_bonus(weak_leg_pv)
@@ -187,6 +205,14 @@ def process_binary_bonus_for_distributor(distributor, run_at) -> Decimal:
             )
 
             if actual_bonus <= 0:
+                logger.debug(
+                    "process_binary_bonus_for_distributor: distributor=%s "
+                    "skipped this cycle -- weekly cap already exhausted "
+                    "(weak_leg_pv=%s raw_bonus=%s).",
+                    distributor.pk,
+                    weak_leg_pv,
+                    raw_bonus,
+                )
                 return Decimal("0.00")
 
             if actual_bonus >= raw_bonus:

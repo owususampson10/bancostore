@@ -128,6 +128,14 @@ def _credit_daily_buckets(ancestor_ids, leg, pv_amount, today, max_retries=3):
             return
 
         try:
+            # Nested inside the caller's already-open atomic() block, this
+            # creates a real SAVEPOINT (not a no-op) and rolls back only
+            # this attempt's work on exception, leaving the caller's
+            # earlier work in the same transaction intact and still
+            # committable -- documented Django behavior, not assumed:
+            # "creates a savepoint when entering an inner atomic block;
+            # releases or rolls back to the savepoint when exiting an
+            # inner block." https://docs.djangoproject.com/en/5.0/topics/db/transactions/#savepoints
             with transaction.atomic():
                 PvDailyBucket.objects.filter(
                     distributor_id__in=remaining_ids, leg=leg, date=today
@@ -319,9 +327,38 @@ def consume_leg_pv_fifo(distributor, leg, cutoff_date, amount, reference):
         reference,
         decrements,
     )
+    # output_field is required here, not optional: Django only infers it
+    # automatically when every branch resolves to the same field type,
+    # and "complex expressions that mix field types" (each F("pv") - take
+    # here is a plain-int-typed subtraction, ambiguous against the
+    # model's PositiveIntegerField column across multiple When branches)
+    # need it stated explicitly, or Django raises FieldError.
+    # https://docs.djangoproject.com/en/5.0/ref/models/expressions/#output-field
     case_expr = Case(
         *[When(pk=pk, then=F("pv") - take) for pk, take in decrements.items()],
         default=F("pv"),
         output_field=PositiveIntegerField(),
     )
     PvDailyBucket.objects.filter(pk__in=list(decrements.keys())).update(pv=case_expr)
+
+
+def distributor_ids_with_pending_pv():
+    """Distributor ids with at least one non-zero PvDailyBucket row --
+    the set a Binary Bonus batch driver (not yet built) should iterate,
+    instead of every registered Distributor. Most registered users are
+    customers with zero binary-tree activity, and even among
+    distributors, most have no outstanding PV in any given cycle once
+    consumed or expired -- scanning the whole distributor table every
+    BINARY_BONUS_INTERVAL_MINUTES would be exactly the kind of
+    unbounded-with-scale cost SPEC.md's Scale Architecture already
+    eliminated once for the write path (see record_purchase_pv); this is
+    the equivalent guard for the read/payout path.
+
+    Excludes rows left at pv=0 by consume_leg_pv_fifo's partial-
+    consumption boundary case -- those have nothing left to pay out and
+    would just cost the batch driver a wasted evaluation."""
+    return (
+        PvDailyBucket.objects.filter(pv__gt=0)
+        .values_list("distributor_id", flat=True)
+        .distinct()
+    )

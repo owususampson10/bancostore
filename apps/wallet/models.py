@@ -53,7 +53,12 @@ class WalletTransaction(models.Model):
             # looked enforced on SQLite (every local/dev test) while doing
             # nothing on real MySQL (production/CI) the whole time this
             # shipped, exactly the same bug class already documented on
-            # BinaryTreeEdge's own unique constraint. Caught only once CI's
+            # BinaryTreeEdge's own unique constraint -- confirmed as
+            # documented (not just observed) Django behavior: "The
+            # condition argument is ignored with MySQL and MariaDB as
+            # neither supports conditional indexes."
+            # https://docs.djangoproject.com/en/5.0/ref/models/indexes/#condition
+            # Caught only once CI's
             # real test suite finally ran again after being silently
             # skipped for days by an unrelated lint failure (see git log).
             # Every current caller of credit() already passes a real,

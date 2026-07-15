@@ -1241,14 +1241,54 @@ precisely synchronized past SQLite's whole-database lock limitation (documented 
 than trusted from the "PV only increases outside, only decreases inside" invariant's math alone.
 46 new/updated tests, full 347-test suite green.
 
+**13f (2026-07-15) — 6 skills applied retrospectively to the whole of Task 13**, per the project's
+"check the full catalog, don't default to a habitual few" convention:
+- `documentation-and-adrs`: `docs/decisions/0003-binary-bonus-carry-forward-design.md`, capturing
+  the bulk `Case`/`When` consumption choice, the Distributor-row-lock-plus-invariant concurrency
+  strategy (and why `select_for_update()` + `.aggregate()` was rejected), and the floor-not-round
+  proportional-consumption rule -- decisions that went through real review cycles but, unlike
+  Tasks 11/12, had never been written down.
+- `source-driven-development`: cross-checked every Django-internals claim this design rests on
+  against the official Django 5.0 docs rather than trusting the tests alone -- nested `atomic()`
+  savepoint/rollback semantics (confirmed), `Case`/`When` requiring explicit `output_field` on
+  mixed types (confirmed), MySQL silently ignoring conditional unique indexes (confirmed, matches
+  the CI failure exactly), and `select_for_update()` + `.aggregate()` (genuinely undocumented
+  either way, vindicating the decision to avoid it rather than assume it's safe). Citations added
+  as code comments at each site.
+- `ci-cd-and-automation`: **found CI had been silently broken for 3 days / 28 consecutive runs**
+  (a lint failure in a hook script was skipping the actual MySQL-backed "Run tests" step every
+  time, since lint and test were sequential steps in one job) -- meaning every concurrency test in
+  this task, and in Task 12's wallet work, had only ever run against SQLite, never the real MySQL
+  CI was built specifically to catch. Fixed the lint issues, split lint/test into independent
+  parallel jobs so this can't recur silently, and got CI green against MySQL for the first time
+  since 2026-07-12.
+- **That, in turn, surfaced a real bug**: `WalletTransaction`'s duplicate-credit
+  `UniqueConstraint(condition=~models.Q(reference=""))` is a partial/filtered index, which MySQL's
+  Django backend silently refuses to create -- the same bug class already hit once on
+  `BinaryTreeEdge`. The defense-in-depth double-credit guard had been a no-op in production since
+  Task 12 shipped it. Not an active money leak (every real caller already has its own upfront
+  idempotency check), but fixed: the constraint is now unconditional (every current caller already
+  passes a non-blank reference, so this is behavior-preserving).
+- `observability-and-instrumentation`: the three routine "no bonus this cycle" branches (ineligible,
+  zero weak leg, cap exhausted) were silently returning with no trace at all -- now logged at
+  DEBUG (not INFO, since this runs once per distributor per cycle across the whole distributor
+  base) so a support inquiry has a real answer instead of nothing.
+- `performance-optimization`: added `apps.pv_ledger.services.distributor_ids_with_pending_pv()`,
+  a tested query returning only distributor ids with actual outstanding PV -- the set the
+  not-yet-built batch driver should iterate, instead of every registered `Distributor` (most of
+  whom are customers with zero binary-tree activity).
+- `spec-driven-development`: neither `SPEC.md` nor the requirements doc defines tied-legs behavior;
+  added a test confirming the existing design needs no tie-break logic at all (weak-leg PV is a
+  `min()`, consumption is applied to both legs by the same amount regardless of which was smaller).
+
 **Still open:** the actual Celery Beat task iterating every distributor and calling
 `process_binary_bonus_for_distributor` once each per scheduled run — not yet a tracked task. Its
 own design must explicitly decide: how `run_at` is generated once and held fixed for the whole
 batch (never regenerated per-distributor or on task retry — a documented, enforced contract of the
-function above, not yet enforced by any caller), which distributors to iterate (likely: only those
-with existing `PvDailyBucket` rows, not the full distributor table, to avoid an O(all distributors)
-scan every 10 minutes), and per-distributor exception isolation (one distributor's `RuntimeError`
-or exhausted `OperationalError` retries must not abort the whole cycle for everyone else).
+function above, not yet enforced by any caller), iterate `distributor_ids_with_pending_pv()` rather
+than the full distributor table, and per-distributor exception isolation (one distributor's
+`RuntimeError` or exhausted `OperationalError` retries must not abort the whole cycle for everyone
+else).
 
 **Acceptance criteria:**
 - [x] Weak leg correctly identified and reset to 0 after calculation; carry-forward applied to the strong leg

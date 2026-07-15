@@ -78,6 +78,28 @@ def test_reproduces_the_doc_example_1500_left_600_right():
 
 
 @pytest.mark.django_db
+def test_tied_legs_need_no_tie_break_both_sides_empty_equally():
+    """Neither SPEC.md nor the requirements doc defines tie behavior when
+    both legs have exactly equal PV. No tie-break decision is actually
+    needed: weak_leg_pv = min(left, right) doesn't care WHICH leg was
+    smaller, and consume_leg_pv_fifo is called for both legs with the
+    same amount regardless -- a tie just means both legs empty by the
+    same amount, which is correct under either interpretation."""
+    d = _make_distributor()
+    _make_eligible(d)
+    _bucket(d, BinaryTreeEdge.Leg.LEFT, RUN_AT.date(), 800)
+    _bucket(d, BinaryTreeEdge.Leg.RIGHT, RUN_AT.date(), 800)
+
+    amount = process_binary_bonus_for_distributor(d, RUN_AT)
+
+    assert amount == Decimal("60.00")  # 800 * 7.5%
+    assert PvDailyBucket.objects.get(distributor=d, leg=BinaryTreeEdge.Leg.LEFT).pv == 0
+    assert (
+        PvDailyBucket.objects.get(distributor=d, leg=BinaryTreeEdge.Leg.RIGHT).pv == 0
+    )
+
+
+@pytest.mark.django_db
 def test_ineligible_distributor_gets_no_bonus_and_no_consumption():
     d = _make_distributor()
     # No MonthlyPersonalPv row created -- not eligible.
@@ -107,6 +129,50 @@ def test_an_ineligible_distributors_expired_pv_still_gets_cleaned_up():
 
     assert amount == Decimal("0.00")
     assert not PvDailyBucket.objects.filter(distributor=d).exists()
+
+
+@pytest.mark.django_db
+def test_each_no_bonus_reason_is_traceable_at_debug_level(caplog):
+    """A support inquiry ("why wasn't distributor X paid this cycle?")
+    needs a real answer, not silence -- but since this runs once per
+    distributor every cycle across the whole distributor base, these
+    must be DEBUG (off by default in production), not INFO, or they'd
+    flood the logs. Checks all three routine skip reasons in one test
+    since they're the same concern, not three different behaviors."""
+    import logging
+
+    ineligible = _make_distributor()
+    zero_weak_leg = _make_distributor()
+    _make_eligible(zero_weak_leg)
+    _bucket(zero_weak_leg, BinaryTreeEdge.Leg.LEFT, RUN_AT.date(), 1500)
+    cap_exhausted = _make_distributor()
+    _make_eligible(cap_exhausted)
+    _bucket(cap_exhausted, BinaryTreeEdge.Leg.LEFT, RUN_AT.date(), 1500)
+    _bucket(cap_exhausted, BinaryTreeEdge.Leg.RIGHT, RUN_AT.date(), 600)
+    wallet = Wallet.objects.create(
+        distributor=cap_exhausted, balance=config.WEEKLY_BINARY_BONUS_CAP
+    )
+    WalletTransaction.objects.create(
+        wallet=wallet,
+        amount=config.WEEKLY_BINARY_BONUS_CAP,
+        transaction_type=WalletTransaction.TransactionType.BINARY_BONUS,
+        reference="prior-cycle",
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        assert process_binary_bonus_for_distributor(ineligible, RUN_AT) == Decimal(
+            "0.00"
+        )
+        assert process_binary_bonus_for_distributor(zero_weak_leg, RUN_AT) == Decimal(
+            "0.00"
+        )
+        assert process_binary_bonus_for_distributor(cap_exhausted, RUN_AT) == Decimal(
+            "0.00"
+        )
+
+    assert "not eligible" in caplog.text
+    assert "zero weak-leg PV" in caplog.text
+    assert "weekly cap already exhausted" in caplog.text
 
 
 @pytest.mark.django_db

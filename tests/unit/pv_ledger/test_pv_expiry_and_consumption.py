@@ -8,7 +8,12 @@ import pytest
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.distributors.models import Distributor
 from apps.pv_ledger.models import PvDailyBucket
-from apps.pv_ledger.services import consume_leg_pv_fifo, expire_old_pv, sum_leg_pv
+from apps.pv_ledger.services import (
+    consume_leg_pv_fifo,
+    distributor_ids_with_pending_pv,
+    expire_old_pv,
+    sum_leg_pv,
+)
 
 User = get_user_model()
 _phone_seq = count(1)
@@ -155,3 +160,40 @@ def test_consume_leg_pv_fifo_does_not_touch_the_other_leg():
     right.refresh_from_db()
     assert left.pv == 0
     assert right.pv == 30
+
+
+@pytest.mark.django_db
+def test_distributor_ids_with_pending_pv_excludes_distributors_with_no_buckets():
+    has_pv = _make_distributor()
+    no_activity_at_all = _make_distributor()
+    _bucket(has_pv, BinaryTreeEdge.Leg.LEFT, date(2026, 7, 1), 50)
+
+    ids = distributor_ids_with_pending_pv()
+
+    assert has_pv.pk in ids
+    assert no_activity_at_all.pk not in ids
+
+
+@pytest.mark.django_db
+def test_distributor_ids_with_pending_pv_excludes_fully_consumed_buckets():
+    """A bucket left at pv=0 by consume_leg_pv_fifo's partial-consumption
+    boundary case still exists as a row -- but it has nothing left to
+    pay out, so it shouldn't cost the batch driver a real evaluation."""
+    d = _make_distributor()
+    _bucket(d, BinaryTreeEdge.Leg.LEFT, date(2026, 7, 1), 0)
+
+    ids = distributor_ids_with_pending_pv()
+
+    assert d.pk not in ids
+
+
+@pytest.mark.django_db
+def test_distributor_ids_with_pending_pv_does_not_double_count_multiple_buckets():
+    d = _make_distributor()
+    _bucket(d, BinaryTreeEdge.Leg.LEFT, date(2026, 6, 1), 10)
+    _bucket(d, BinaryTreeEdge.Leg.LEFT, date(2026, 7, 1), 20)
+    _bucket(d, BinaryTreeEdge.Leg.RIGHT, date(2026, 7, 1), 5)
+
+    ids = list(distributor_ids_with_pending_pv())
+
+    assert ids.count(d.pk) == 1
