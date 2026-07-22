@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}Bancostore{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="{% static 'bancostore-brand/favicon/favicon.svg' %}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
@@ -35,8 +36,18 @@
       'translate-x-0': mobileOpen,
     }"
 >
-<div class="px-6 mb-8 flex items-center justify-between">
-<h1 class="font-headline-md text-headline-md text-primary uppercase tracking-tighter" x-show="!collapsed" x-cloak>Bancostore</h1>
+{# Collapsed sidebar is only 80px wide (w-20) -- px-6's 48px of padding, #}
+{# meant for the 256px expanded state, leaves too little room for the #}
+{# logo and toggle button side by side (flexbox then shrinks the logo to #}
+{# 0 to fit the button). Stack them vertically with tighter padding #}
+{# instead of squeezing both into one row when collapsed. #}
+<div class="mb-8 flex items-center" :class="collapsed ? 'flex-col justify-center gap-3 px-2' : 'flex-row justify-between px-6'">
+<a href="{% url 'distributors:dashboard' %}" x-show="!collapsed" x-cloak>
+<img src="{% static 'bancostore-brand/logo/bancostore-logo-light.svg' %}" alt="Bancostore" class="h-7 w-auto">
+</a>
+<a href="{% url 'distributors:dashboard' %}" x-show="collapsed" x-cloak>
+<img src="{% static 'bancostore-brand/logo/bancostore-icon-only.svg' %}" alt="Bancostore" class="w-7 h-7 block">
+</a>
 <button type="button" class="hidden md:flex p-2 rounded-full hover:bg-surface-container-low text-gray-muted" x-on:click="collapsed = !collapsed" aria-label="Toggle sidebar">
 <span class="material-symbols-outlined text-[20px]" x-text="collapsed ? 'chevron_right' : 'chevron_left'"></span>
 </button>
@@ -51,7 +62,7 @@
 {% if request.user.distributor.full_name %}
 {{ request.user.distributor.full_name|slice:":1"|upper }}
 {% else %}
-<span class="material-symbols-outlined text-[20px]">person</span>
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">person</span>
 {% endif %}
 </div>
 <div class="overflow-hidden" x-show="!collapsed" x-cloak>
@@ -61,43 +72,43 @@
 </div>
 </div>
 
-<nav class="flex-1 space-y-1 px-3 overflow-y-auto">
-{% with active=active_nav|default:"" %}
-<a href="{% url 'distributors:dashboard' %}" class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md transition-colors {% if active == 'dashboard' %}text-primary font-bold bg-primary-fixed{% else %}text-gray-muted hover:bg-surface-container-low{% endif %}">
-<span class="material-symbols-outlined text-[22px]">dashboard</span>
-<span x-show="!collapsed" x-cloak>Dashboard</span>
-</a>
-<a href="{% url 'distributors:earnings_history' %}" class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md transition-colors {% if active == 'earnings_history' %}text-primary font-bold bg-primary-fixed{% else %}text-gray-muted hover:bg-surface-container-low{% endif %}">
-<span class="material-symbols-outlined text-[22px]">history</span>
-<span x-show="!collapsed" x-cloak>Earnings History</span>
-</a>
-{# Team / Binary Tree / Withdraw are future tasks (Task 16/20-ish) -- shown #}
-{# as disabled entries rather than dead links, matching the honesty #}
-{# convention already used by templates/distributors/dashboard.html. #}
-<div class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-gray-muted/50 cursor-not-allowed" title="Coming soon">
-<span class="material-symbols-outlined text-[22px]">group</span>
-<span x-show="!collapsed" x-cloak>Team</span>
-</div>
-<div class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-gray-muted/50 cursor-not-allowed" title="Coming soon">
-<span class="material-symbols-outlined text-[22px]">account_tree</span>
-<span x-show="!collapsed" x-cloak>Binary Tree</span>
-</div>
-<div class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-gray-muted/50 cursor-not-allowed" title="Coming soon">
-<span class="material-symbols-outlined text-[22px]">payments</span>
-<span x-show="!collapsed" x-cloak>Withdraw</span>
-</div>
+{# No overflow-y-auto here on purpose: CSS forces overflow-x to also #}
+{# clip once overflow-y is anything but visible, which would cut off #}
+{# every collapsed-sidebar hover popover below (they intentionally #}
+{# render outside this element's own box via left-full). At 7 nav items #}
+{# the sidebar's total content height fits comfortably without scrolling #}
+{# on realistic viewport heights -- revisit if the nav list grows a lot. #}
+<nav class="flex-1 space-y-1 px-3">
+{% url 'distributors:dashboard' as dashboard_url %}
+{% url 'distributors:earnings_history' as earnings_history_url %}
+{% url 'distributors:logout' as logout_url %}
+{% include "distributors/_sidebar_nav_item.html" with href=dashboard_url icon="dashboard" label="Dashboard" nav_key="dashboard" active_nav=active_nav %}
+{% include "distributors/_sidebar_nav_item.html" with href=earnings_history_url icon="history" label="Earnings History" nav_key="earnings_history" active_nav=active_nav %}
+{# Team / Binary Tree / Withdraw (nav row) are future tasks (Task 16/ #}
+{# 20/21-ish) -- shown as disabled entries (href omitted) rather than #}
+{# dead links, matching the honesty convention already used by #}
+{# templates/distributors/dashboard.html. #}
+{% include "distributors/_sidebar_nav_item.html" with icon="group" label="Team" %}
+{% include "distributors/_sidebar_nav_item.html" with icon="account_tree" label="Binary Tree" %}
+{% include "distributors/_sidebar_nav_item.html" with icon="payments" label="Withdraw" %}
 <div class="pt-4 mt-4 border-t border-outline-variant/50">
-<div class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-gray-muted/50 cursor-not-allowed" title="Coming soon">
-<span class="material-symbols-outlined text-[22px]">settings</span>
-<span x-show="!collapsed" x-cloak>Settings</span>
+{% include "distributors/_sidebar_nav_item.html" with icon="settings" label="Settings" %}
+{% include "distributors/_sidebar_nav_item.html" with href=logout_url icon="logout" label="Log Out" danger=True %}
 </div>
-<a href="{% url 'distributors:logout' %}" class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-error hover:bg-error-container transition-colors mt-1">
-<span class="material-symbols-outlined text-[22px]">logout</span>
-<span x-show="!collapsed" x-cloak>Log Out</span>
-</a>
-</div>
-{% endwith %}
 </nav>
+
+{# Withdraw Now: a quick-access CTA distinct from the "Withdraw" nav row #}
+{# above (that one is the future withdrawal-history/management page; this #}
+{# is the Stitch design's pinned action button) -- Task 16 hasn't shipped #}
+{# the withdrawal request flow yet, so it's disabled rather than a dead #}
+{# link, same convention as the nav placeholders. #}
+<div class="px-4 mt-4 group relative">
+<button type="button" disabled class="w-full bg-primary/40 text-on-primary py-3 px-4 rounded-xl font-button flex items-center justify-center gap-2 cursor-not-allowed" :class="collapsed && 'px-0'">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">account_balance_wallet</span>
+<span x-show="!collapsed" x-cloak>Withdraw Now</span>
+</button>
+<span class="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 whitespace-nowrap rounded-md bg-inverse-surface text-inverse-on-surface text-xs font-medium px-2.5 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-[60] shadow-lg" x-show="collapsed" x-cloak>Withdraw Now — coming soon</span>
+</div>
 </aside>
 
 <!-- Main content -->
@@ -106,7 +117,12 @@
 <button type="button" class="p-2 hover:bg-surface-container-low rounded-full md:hidden" x-on:click="mobileOpen = !mobileOpen" aria-label="Open menu">
 <span class="material-symbols-outlined">menu</span>
 </button>
-<p class="font-label-lg text-label-lg text-gray-muted">{{ request.user.distributor.phone_number }}</p>
+<p class="font-label-lg text-label-lg text-gray-muted">Bancostore Distributor Portal</p>
+<div class="flex-1"></div>
+<button type="button" class="p-2 hover:bg-surface-container-low rounded-full text-gray-muted relative cursor-not-allowed" title="Notifications — coming soon">
+<span class="material-symbols-outlined" aria-hidden="true">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full" aria-hidden="true"></span>
+</button>
 </header>
 <main class="flex-1 p-margin-mobile md:p-margin-desktop max-w-[1200px] w-full mx-auto">
 {% block content %}{% endblock %}
