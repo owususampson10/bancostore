@@ -1,0 +1,127 @@
+{% extends "distributors/base_dashboard.html" %}
+{% block title %}Bancostore | Payout Settings{% endblock %}
+{% block content %}
+<div class="max-w-[650px]">
+<div class="mb-8">
+<h2 class="font-headline-lg text-headline-lg text-on-surface mb-1">Payout Settings</h2>
+<p class="font-body-md text-body-md text-gray-muted">Choose where your withdrawal payouts are sent.</p>
+</div>
+
+{% if saved %}
+<div class="flex items-center gap-3 bg-success/10 text-success border border-success/30 px-6 py-4 rounded-xl mb-6" role="status">
+<span class="material-symbols-outlined" aria-hidden="true" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span class="font-body-md text-body-md font-semibold">Payout details saved</span>
+</div>
+{% elif not distributor.has_payout_destination %}
+<div class="flex items-center gap-3 bg-surface-container-low text-gray-muted border border-outline-variant px-6 py-4 rounded-xl mb-6">
+<span class="material-symbols-outlined" aria-hidden="true">info</span>
+<span class="font-body-md text-body-md">No payout destination set — add one below before you can request a withdrawal.</span>
+</div>
+{% endif %}
+
+<div class="bg-white rounded-xl border border-outline-variant p-6">
+<h3 class="font-headline-md text-headline-md text-on-surface mb-6">Payout Destination</h3>
+<form method="post" class="space-y-stack-md">
+{% csrf_token %}
+{% if form.non_field_errors %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">
+{{ form.non_field_errors.0 }}
+</div>
+{% endif %}
+
+<div class="space-y-stack-xs">
+<label class="font-label-lg text-label-lg text-on-surface" for="{{ form.mobile_money_number.id_for_label }}">Mobile money number</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary" aria-hidden="true">smartphone</span>
+{{ form.mobile_money_number }}
+</div>
+{% if form.mobile_money_number.errors %}<p class="text-error text-body-sm mt-1">{{ form.mobile_money_number.errors.0 }}</p>{% endif %}
+</div>
+
+{# Custom listbox, not a native select -- a native select's open options #}
+{# list can't be themed via CSS in any browser, which was the whole point #}
+{# of this control. Backed by a plain hidden input #}
+{# (name="mobile_money_network") so Django's form processing doesn't need #}
+{# to know this isn't a real select. Proportionate to a 3-option, #}
+{# non-searchable choice -- full combobox/autocomplete machinery would be #}
+{# over-engineering here. #}
+{# security-and-hardening: selected/options are read via JSON.parse from #}
+{# json_script blocks below, never interpolated directly into this #}
+{# x-data JS expression -- see the long comment in views.py::payout_settings #}
+{# for why a raw interpolation here was a real XSS bug (HTML-attribute #}
+{# escaping doesn't protect a value Alpine then evaluates as JS). #}
+{{ selected_network|json_script:"momo-network-selected" }}
+{{ network_choices|json_script:"momo-network-choices" }}
+<div class="space-y-stack-xs"
+     x-data="{
+       open: false,
+       selected: JSON.parse(document.getElementById('momo-network-selected').textContent),
+       highlighted: -1,
+       options: JSON.parse(document.getElementById('momo-network-choices').textContent),
+       get selectedLabel() {
+         const found = this.options.find(o => o.value === this.selected);
+         return found ? found.label : 'Select network';
+       },
+       openList() {
+         this.open = true;
+         this.highlighted = Math.max(this.options.findIndex(o => o.value === this.selected), 0);
+       },
+       choose(index) {
+         this.selected = this.options[index].value;
+         this.open = false;
+       },
+     }"
+     @click.outside="open = false">
+<label class="font-label-lg text-label-lg text-on-surface" id="momo-network-label">Mobile money network</label>
+<div class="relative">
+<button type="button"
+        class="w-full pl-4 pr-4 py-3 bg-surface border border-outline-variant rounded-lg font-body-md text-body-md text-left flex items-center justify-between focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary transition-all"
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-labelledby="momo-network-label"
+        :aria-expanded="open.toString()"
+        :aria-activedescendant="highlighted >= 0 ? 'momo-network-option-' + highlighted : null"
+        @click="open ? (open = false) : openList()"
+        @keydown.down.prevent="open ? highlighted = Math.min(highlighted + 1, options.length - 1) : openList()"
+        @keydown.up.prevent="open ? highlighted = Math.max(highlighted - 1, 0) : openList()"
+        @keydown.enter.prevent="if (open && highlighted >= 0) choose(highlighted)"
+        @keydown.escape="open = false">
+<span :class="selected ? 'text-on-surface' : 'text-gray-muted'" x-text="selectedLabel">{{ network_display|default:"Select network" }}</span>
+<span class="material-symbols-outlined text-secondary transition-transform" :class="open && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<ul x-show="open"
+    x-cloak
+    role="listbox"
+    aria-labelledby="momo-network-label"
+    class="absolute z-10 mt-1 w-full bg-white border border-outline-variant rounded-lg shadow-lg overflow-hidden py-1">
+<template x-for="(option, index) in options" :key="option.value">
+<li :id="'momo-network-option-' + index"
+    role="option"
+    :aria-selected="(selected === option.value).toString()"
+    class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors"
+    :class="(highlighted === index) ? 'bg-primary-fixed text-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    @click="choose(index)"
+    @mouseenter="highlighted = index"
+    x-text="option.label">
+</li>
+</template>
+</ul>
+</div>
+<input type="hidden" name="mobile_money_network" value="{{ selected_network }}" :value="selected">
+</div>
+{% if form.mobile_money_network.errors %}<p class="text-error text-body-sm">{{ form.mobile_money_network.errors.0 }}</p>{% endif %}
+
+<div class="flex gap-2 pt-2">
+<span class="material-symbols-outlined text-gray-muted text-[18px]" aria-hidden="true">warning</span>
+<p class="font-body-md text-body-sm text-gray-muted leading-tight">
+Make sure this is correct — payouts are sent automatically and Bancostore cannot recover a payment sent to the wrong number.
+</p>
+</div>
+
+<button type="submit" class="w-full bg-primary text-on-primary py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">
+Save Payout Details
+</button>
+</form>
+</div>
+</div>
+{% endblock %}

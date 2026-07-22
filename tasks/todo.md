@@ -1578,20 +1578,468 @@ bounded 7-day choice, not a string an admin could mistype). All three remain ful
 at runtime -- this is only the starting seed value, not a permanent code decision. Task 16 is now
 unblocked.
 
-**Acceptance criteria:**
-- [ ] Withdrawal blocked if KYC is not approved, amount is below minimum, or one was already made this week
+**2026-07-22 -- design gaps closed via `spec-driven-development` + `planning-and-task-breakdown`
+before any code.** Four questions had no answer anywhere in `SPEC.md` and each had a real
+money-safety consequence if guessed wrong, so they were put to the user directly rather than
+assumed (`SPEC.md`'s Boundaries already require asking first on both schema changes and Paystack
+integration code -- Task 16 is both at once): where a distributor's payout destination
+(mobile money number + network) is captured and stored, what `WITHDRAWAL_DAY` actually gates
+(submission window vs. payout batch), when the wallet is actually debited relative to admin
+approval and Paystack confirmation, and what to do with the pre-seeded but never-wired
+`AUTO_APPROVE_WITHDRAWALS_ENABLED`/`_THRESHOLD` settings given `SPEC.md`'s hard Boundary against
+ever auto-approving a withdrawal. All four resolved and recorded in
+`docs/decisions/0004-withdrawal-payout-design.md`: payout destination is a new `Distributor`
+profile field set once (gates request submission the same way `kyc_status` already does);
+`WITHDRAWAL_DAY` gates a Friday Celery payout batch, not submission (distributors can request any
+day, capped once per `WITHDRAWAL_FREQUENCY`); the wallet is debited at admin approval (not at
+request, not at confirmed payout), with a `credit()`-based reversal if the subsequent Paystack
+Transfer fails; the auto-approve settings stay permanently unwired, documented in code so a future
+contributor doesn't "helpfully" wire them in without re-reading the ADR. Broken into 8 vertically-
+sliced sub-tasks below (16a-16h), ordered so the money-safety-critical core (state machine, tax
+calc, debit/reversal) ships and is fully tested before the UI/admin polish and batch-payout layers.
+
+**Acceptance criteria (whole-task, verified by Checkpoint F below):**
+- [ ] Withdrawal blocked if KYC is not approved, payout destination isn't set, amount is below
+      minimum/above maximum, or one was already made this `WITHDRAWAL_FREQUENCY` window
 - [ ] Tax is deducted using the `WITHHOLDING_TAX_RATE` setting and shown to the distributor before confirming
-- [ ] Admin can approve individually or in bulk; approved requests trigger a Paystack sandbox payout
+- [ ] Admin can approve individually or in bulk; approving debits the wallet immediately
+- [ ] The Friday batch job pays out every approved-but-unpaid request via Paystack Transfer (sandbox)
+- [ ] A failed/reversed Paystack transfer reverses the wallet debit exactly once (idempotent against webhook/poll retries)
+
+**Verification (whole-task):**
+- [ ] pytest test reproducing the doc example exactly: GHS 500 requested → GHS 5 tax → GHS 495 paid
+- [ ] pytest test: second withdrawal request in the same `WITHDRAWAL_FREQUENCY` window is rejected
+- [ ] pytest test: a reversed Paystack transfer credits the wallet back exactly once, even if the webhook fires twice
+
+**Dependencies:** Task 11 (KYC), Task 15 (wallet `debit()`), withdrawal min/max/day decision (resolved),
+ADR-0004 design decisions (resolved), Paystack sandbox access, **explicit user sign-off before 16e/16f
+specifically** (writing/modifying Paystack integration code is a standing `SPEC.md` Boundary "ask
+first" item, independent of this breakdown having already been reviewed)
+
+**Estimated scope:** XL as a whole -- hence the 16a-16h split; no individual sub-task should exceed ~5 files
+
+---
+
+#### Task 16a: Payout settings -- distributor payout-destination field + profile UI
+
+**Description:** New `mobile_money_number` + `mobile_money_network` fields (MTN/Vodafone/AirtelTigo
+choices) so a distributor has somewhere for Paystack to actually send money. Set once via a
+"Payout Settings" page on the existing `templates/distributors/base_dashboard.html` shell, not
+re-entered per withdrawal request (ADR-0004 decision 1 -- ruled out re-entry per request because a
+typo would have no stored history to catch it on the next request).
+
+**Acceptance criteria:**
+- [ ] `Distributor` (or a new one-to-one `PayoutAccount`) gains the two fields, migrated
+- [ ] A distributor can set/update payout details from their dashboard; scoped unconditionally to
+      `request.user.distributor` (no id/param IDOR surface, same pattern `earnings_history` set in Task 15)
+- [ ] Withdrawal request submission (16c) is blocked with a clear message until this is set
 
 **Verification:**
-- [ ] pytest test reproducing the doc example exactly: GHS 500 requested → GHS 5 tax → GHS 495 paid
-- [ ] pytest test: second withdrawal request in the same week is rejected
+- [ ] pytest: unauthenticated / non-distributor / wrong-distributor access all rejected
+- [ ] pytest: invalid network choice / malformed mobile money number rejected
+- [ ] Verified live in a real browser: set payout details, confirm they persist and render back correctly
 
-**Dependencies:** Task 11 (KYC), Task 15, withdrawal min/max/day decision, Paystack sandbox access
+**Dependencies:** None (first slice, no withdrawal logic depends on this beyond the gate check)
 
-**Files likely touched:** `apps/withdrawal/services.py` (`WithdrawalService`), `apps/withdrawal/admin.py`, `apps/withdrawal/views.py` (withdrawal request), `tests/feature/withdrawal/test_withdrawal.py`
+**Files likely touched:** `apps/distributors/models.py`, a new migration, `apps/distributors/views.py`,
+`apps/distributors/forms.py`, `templates/distributors/payout_settings.html`, `tests/`
 
-**Estimated scope:** L (if it grows past ~5 files, split the tax-calculation service from the Paystack payout integration)
+**Estimated scope:** M (3-5 files)
+
+**Skills:**
+- *Before:* `doubt-driven-development` -- is a new field on `Distributor` the right call vs. a
+  separate `PayoutAccount` model (future-proofs a distributor having multiple payout methods, but
+  is that real scope or speculative)? Settle this before the migration, not after.
+- *During:* `incremental-implementation`, `test-driven-development`, `frontend-ui-engineering`
+  (this is a Stitch-designed screen like Task 15's Earnings History -- fetch/verify the design
+  before building), `security-and-hardening` (IDOR scoping, input validation on the phone-number-
+  shaped field)
+- *After:* `code-review-and-quality`, `code-simplification`
+
+---
+
+#### Task 16b: `apps/withdrawal` app scaffold + `WithdrawalRequest` model + state machine
+
+**Description:** New Django app from scratch. `WithdrawalRequest` model: distributor FK, requested
+amount, tax amount, net payout amount (all three locked in at submission time, per ADR-0004 point
+10 -- authoritative through approval/payout regardless of later constance changes), status
+(`submitted` / `approved_debited` / `queued_for_payout` / `paid` / `payout_failed_reversed` /
+`rejected`), `reviewed_by`/`reviewed_at`, a **snapshotted** payout destination
+(`mobile_money_number`/`network`, copied from the distributor's 16a profile at approval time, per
+ADR-0004 point 7 -- never read live off `Distributor` later), `paystack_recipient_code`/
+`paystack_transfer_reference` (nullable until 16e/16f populate them). No business logic yet -- this
+slice is schema + admin registration only.
+
+**Acceptance criteria:**
+- [ ] Model + migration exist; status is a bounded `TextChoices`, not a free-text field
+- [ ] `WithdrawalRequestAdmin` hard-locks `has_add/change/delete_permission` to `False`
+      unconditionally, matching `CommissionCycleRunAdmin`/`WalletAdmin` exactly -- **corrected
+      2026-07-22 (ADR-0004 point 9), superseding an earlier "fix" that was itself wrong.** That
+      earlier fix assumed a non-superuser admin scenario based on `seed_roles.py` (a DEBUG-only dev
+      stub), but `tests/conftest.py`'s `staff_client` fixture confirms every real admin account in
+      this project is a superuser by design. Checked against Django's actual docs:
+      `has_view_permission()`'s default independently resolves `True` for a superuser regardless of
+      any `has_change_permission` override, so the hard lock doesn't break changelist visibility.
+      What it does break is 16d's bulk actions (which default to requiring
+      `self.has_change_permission()` -- my own override, not a raw superuser bypass) -- so each
+      action in 16d must explicitly declare `permissions=["view"]`.
+- [ ] `django-simple-history` tracks status transitions (mirrors the KYC/IR ID audit trail requirement)
+
+**Verification:**
+- [ ] pytest: a superuser admin (`tests/conftest.py::staff_client`, this project's only real admin
+      shape) can view the changelist; add/change/delete are all denied even for this account
+- [ ] `manage.py check` clean, migration applies cleanly against real MySQL in CI
+
+**Dependencies:** None
+
+**Files likely touched:** `apps/withdrawal/__init__.py`, `apps/withdrawal/models.py`,
+`apps/withdrawal/admin.py`, `apps/withdrawal/migrations/0001_initial.py`, `bancostore/settings.py`
+(`INSTALLED_APPS`), `tests/`
+
+**Estimated scope:** S-M (this is schema only, no service logic)
+
+**Skills:**
+- *Before:* `doubt-driven-development` -- already run once at the whole-task-plan level (see
+  ADR-0004's "Doubt-Driven Review" section, which resolved the admin-permission bug and the state
+  machine gaps reflected in this slice's acceptance criteria above). Re-run only if implementation
+  surfaces something the plan-level review didn't cover.
+- *During:* `incremental-implementation`, `test-driven-development`
+- *After:* `code-review-and-quality`
+
+---
+
+#### Task 16c: Withdrawal request submission -- service + distributor-facing view
+
+**Description:** `apps/withdrawal/services.py::submit_withdrawal_request` -- validates KYC approved,
+payout destination set (16a), amount within `MIN_WITHDRAWAL_AMOUNT`/`MAX_WITHDRAWAL_AMOUNT` **and
+within the distributor's current `Wallet.balance`** (ADR-0004 point 5 -- the amount bounds are
+independent of any individual balance, so this needs its own explicit check), and no existing
+non-terminal request within the current `WITHDRAWAL_FREQUENCY` window (see below for exactly which
+statuses count). Computes tax via `WITHHOLDING_TAX_RATE` and locks that value in on the row (ADR-0004
+point 10 -- authoritative through approval even if the live setting later changes); creates the
+`WithdrawalRequest` row at `status=submitted`. Does **not** touch the wallet yet (ADR-0004 decision
+3 -- debit happens at admin approval, in 16d). Distributor-facing form shows the tax deduction
+preview before the distributor confirms.
+
+`WITHDRAWAL_FREQUENCY`'s window check needs a `{"weekly": timedelta(days=7)}`-shaped mapping in
+this service (ADR-0004 point 12) -- the constance setting is a bare string, not a duration, so
+`T + WITHDRAWAL_FREQUENCY` isn't a valid operation without this translation. An unmapped value must
+raise, never silently mean "no restriction." The window check itself only counts requests still
+`submitted`/`approved_debited`/`queued_for_payout`/`paid` -- **`rejected` and
+`payout_failed_reversed` requests do not consume the window** (ADR-0004 point 11, user-confirmed:
+an outcome outside the distributor's control shouldn't cost them their whole week).
+
+**Acceptance criteria:**
+- [ ] Every rejection path from `SPEC.md`'s acceptance criteria produces a clear, distinct message
+      (not KYC-approved / below minimum / above maximum / exceeds current wallet balance / already
+      requested this window / no payout destination set)
+- [ ] Tax preview shown matches what actually gets stored on confirm (no drift between preview and commit)
+- [ ] `submit_withdrawal_request` is the sole entry point -- no view-layer shortcut bypasses it
+- [ ] A rejected or payout-failed-reversed prior request does not block a new submission in the same window
+
+**Verification:**
+- [ ] pytest reproducing the doc example exactly: GHS 500 requested → GHS 5 tax shown and stored → GHS 495 net
+- [ ] pytest: second request within the same `WITHDRAWAL_FREQUENCY` window is rejected -- specifically
+      test the window boundary (request at T, second attempt at T + `WITHDRAWAL_FREQUENCY` minus one
+      second still rejected, at T + `WITHDRAWAL_FREQUENCY` exactly allowed), mirroring the off-by-one
+      lesson already learned once in this codebase's PV carry-forward/expiry logic
+- [ ] pytest: a rejected request followed by a fresh submission in the same window succeeds
+- [ ] pytest: request amount exceeding current wallet balance is rejected even when within
+      `MIN`/`MAX_WITHDRAWAL_AMOUNT`
+- [ ] Verified live in a real browser: full submission flow, tax preview renders correctly
+
+**Dependencies:** 16a (payout destination gate), 16b (model)
+
+**Files likely touched:** `apps/withdrawal/services.py`, `apps/withdrawal/views.py`,
+`apps/withdrawal/forms.py`, `templates/distributors/withdrawal_request.html`, `tests/feature/withdrawal/`
+
+**Estimated scope:** M (3-5 files)
+
+**Skills:**
+- *Before:* `doubt-driven-development` on the window-boundary check specifically (the exact hazard
+  called out in the verification step above -- easy to get off by one, expensive to ship wrong on a
+  real financial gate)
+- *During:* `incremental-implementation`, `test-driven-development` (write the window-boundary and
+  tax-calc tests before the implementation, not alongside it -- this codebase's own
+  `feedback_vertical_slice_build_process` memory exists precisely because Task 8 skipped this once),
+  `frontend-ui-engineering`, `security-and-hardening` (scoping to `request.user.distributor`, CSRF
+  on the confirm step)
+- *After:* `code-review-and-quality`, `code-simplification`
+
+---
+
+#### Task 16d: Admin approval/rejection -- wallet debit + reversal-capable transition
+
+**Description:** `apps/withdrawal/services.py::approve_withdrawal_request` -- locks the
+**`Distributor` row first** (`select_for_update_nowait_if_supported`, matching
+`process_binary_bonus_for_distributor`/`process_matching_bonus_for_distributor`'s existing order
+exactly -- ADR-0004 point 8, resolved via `doubt-driven-development` before implementation rather
+than deferred: locking `Wallet` directly here instead would risk acquiring rows in the opposite
+order from Binary/Matching Bonus and deadlocking against them under concurrent load). Inside that
+same locked transaction, in order: (1) re-check `kyc_status` is still approved (ADR-0004 point 7 --
+a distributor's KYC can be revoked in the days between submission and approval; if no longer
+approved, fail with a clear reason and leave the request at `submitted`), (2) snapshot the
+distributor's current payout destination onto the `WithdrawalRequest` row (ADR-0004 point 7 -- so a
+later profile edit can't redirect an already-debited payout), (3) call
+`apps/wallet/services.py::debit()` for the net amount. If `debit()` raises
+`InsufficientBalanceError` (balance can move between submission and approval), the whole
+transaction rolls back, the request stays `submitted`, and the admin sees a clear error -- **no new
+terminal state is needed for this** (ADR-0004 point 5). On success, transition to
+`approved_debited`. `reject_withdrawal_request` requires a reason and never touches the wallet,
+mirroring the KYC reject flow's intermediate-confirmation-page pattern (Task 11). Django Admin bulk
+actions for both -- each declared with `@admin.action(..., permissions=["view"])` (ADR-0004 point 9,
+corrected 2026-07-22), since 16b hard-locks `has_change_permission` to `False` and Django's actions
+default to requiring it otherwise, which would silently block even a real (superuser) admin from
+running them. **This is the first real caller of `debit()`** -- it's existed since Task 15 but
+nothing has used it yet.
+
+**Acceptance criteria:**
+- [ ] Approving a request debits the wallet exactly once, even under concurrent double-approval
+      attempts (two admins clicking approve on the same request at once)
+- [ ] Approval re-checks KYC and current balance inside the lock; either failing leaves the request
+      at `submitted` with a clear admin-facing reason, not a silent no-op or a crash
+- [ ] The payout destination is copied onto the request row at the moment of approval, not read
+      live from `Distributor` at any later stage
+- [ ] Rejecting a request never debits the wallet and requires a reason, recorded via `django-simple-history`
+- [ ] Bulk approve/reject both work and both go through the same single-request functions underneath
+      (no separate bulk-only code path that could drift from the individual-request logic)
+
+**Verification:**
+- [ ] pytest: concurrent double-approval test (mirrors the 5-thread test that proved `credit()`
+      concurrency-safe in Task 12) proves exactly one debit occurs
+- [ ] pytest: approving a request whose distributor's KYC was revoked after submission fails cleanly,
+      wallet untouched
+- [ ] pytest: approving a request that now exceeds the distributor's current balance fails cleanly
+      with `InsufficientBalanceError` surfaced as an admin-facing message, wallet untouched, request
+      still `submitted`
+- [ ] pytest: the snapshotted payout destination on an approved request differs from the
+      distributor's live profile after the distributor edits their profile post-approval -- proves
+      the snapshot, not a live read, is what a later slice (16e/16f) would use
+- [ ] pytest: rejected request's wallet balance is unchanged
+- [ ] pytest: rejecting without a reason is rejected by the form/action itself
+
+**Dependencies:** 16b (model), 16c (submitted requests to act on), Task 15 (`debit()`)
+
+**Files likely touched:** `apps/withdrawal/services.py`, `apps/withdrawal/admin.py`, `tests/feature/withdrawal/`
+
+**Estimated scope:** M (3-4 files, but do not let it grow -- if concurrency edge cases balloon the
+test file, that's a sign this slice is right-sized, not a sign to fold in more)
+
+**Skills:**
+- *Before:* `doubt-driven-development` -- already run once at the whole-task-plan level and resolved
+  the lock-ordering question explicitly (ADR-0004 point 8: lock `Distributor` first, matching
+  Binary/Matching Bonus, not a separate `Wallet` lock). A second, narrower pass at implementation
+  time is still worth running specifically on the three-step ordering inside the lock (KYC check →
+  snapshot → debit) -- the same discipline that caught Task 14's unsaved-stub `.rank` bug before it
+  shipped -- since getting that internal order wrong (e.g. debiting before confirming KYC is still
+  valid) would reopen the exact gap this design just closed.
+- *During:* `incremental-implementation`, `test-driven-development`
+- *After:* `code-review-and-quality` (elevated scrutiny -- this is `debit()`'s first real caller,
+  the exact kind of change `SPEC.md`'s Testing Strategy singles out for "every code path" coverage)
+
+---
+
+#### Task 16e: Paystack Transfer API wrapper (recipient, initiate, verify)
+
+**Description:** Extends `apps/distributors/paystack.py` with the Transfer side of Paystack's API
+(currently only the Transaction/charge side exists): create a Transfer Recipient from a
+distributor's 16a payout details, initiate a Transfer, verify a Transfer's status server-side
+(never trust a webhook body alone -- same rule `verify_transaction` and the Didit integration
+already established). **`SPEC.md`'s Boundary requires asking first before writing or modifying any
+Paystack integration code, in sandbox mode or not -- this applies to this slice specifically,
+independent of the whole-task plan already being reviewed. Confirm before starting 16e.**
+
+**Acceptance criteria:**
+- [ ] `create_transfer_recipient`/`initiate_transfer`/`verify_transfer` match Paystack's actual
+      documented request/response shapes (checked against real docs, not assumed from the existing
+      Transaction API's shape)
+- [ ] Every function follows the existing `PaystackError` exception pattern already used by
+      `initialize_transaction`/`verify_transaction`
+- [ ] No live Paystack call happens in tests -- sandbox/test-mode keys only, mocked in pytest
+
+**Verification:**
+- [ ] pytest covering success and failure responses for all three functions, mocked
+- [ ] Manually verified once against real Paystack sandbox (not just mocks) before merge, mirroring
+      how Task 11's Didit integration was verified against a real live session, not just its test suite
+
+**Dependencies:** 16a (payout details to build a recipient from), explicit user sign-off (Boundary)
+
+**Files likely touched:** `apps/distributors/paystack.py`, `tests/unit/test_paystack.py`
+
+**Estimated scope:** S-M (2-3 files, but do not merge without the real-sandbox manual check)
+
+**Skills:**
+- *Before:* **user sign-off (Boundary, not a skill)**, then `source-driven-development` --
+  ground every request/response shape in Paystack's actual Transfer API docs, the same discipline
+  `paystack.py`'s existing docstrings already model ("Source: https://paystack.com/docs/..." on
+  every function) and that caught a real bug in Task 11 (Didit's image-field names differed from
+  what was originally assumed)
+- *During:* `incremental-implementation`, `test-driven-development`
+- *After:* `security-and-hardening` (new outbound HTTP surface handling money-movement credentials),
+  `code-review-and-quality`
+
+---
+
+#### Task 16f: Transfer webhook + Friday payout batch (Celery)
+
+**Description:** New HMAC-verified webhook endpoint for `transfer.success`/`transfer.failed`/
+`transfer.reversed` events, Celery-deferred processing (mirrors the Didit webhook's 5-second-timeout
+pattern from Task 11 -- Paystack's webhook delivery has its own tight response-time expectation).
+A Celery Beat task, structurally mirroring `apps/commissions/tasks.py`'s existing
+`_run_commission_cycle`/`_sync_periodic_task_interval`/`_persist_cycle_audit_record` shared helpers,
+runs on `WITHDRAWAL_DAY`. For each `approved_debited` request, it does **not** call `initiate_transfer`
+directly -- it first generates and persists a pinned transfer reference and moves the row to
+`queued_for_payout` (ADR-0004 point 6, the fix for a real double-payout gap a `doubt-driven-development`
+pass caught in the original draft: nothing previously stopped a Celery retry, or a crash between
+"Paystack accepted the transfer" and "local status updated," from calling `initiate_transfer` a
+second time for the same row). Only after that claim commits does it call `initiate_transfer` with
+the pinned reference. A retry that finds a row already `queued_for_payout` with a reference does
+**not** re-claim or re-initiate -- it resumes via `verify_transfer` against the existing reference
+instead, mirroring `consume_paid_starter_pack`/`PendingRegistration`'s established pinned-reference
+pattern for the inbound registration payment. On `transfer.failed`/`transfer.reversed`, reverses the
+debit via `credit()` and sets `payout_failed_reversed` -- idempotently, so a duplicate webhook
+delivery can't double-credit.
+
+**Acceptance criteria:**
+- [ ] Webhook signature verified before any processing; CSRF-exempt only for this endpoint, same as
+      the existing Paystack charge webhook
+- [ ] A duplicate webhook delivery (same event, fired twice) never double-credits a reversal or
+      double-transitions a status
+- [ ] A batch-task retry (simulating a crash after Paystack accepted the transfer but before the
+      local status updated) never calls `initiate_transfer` twice for the same request -- it finds
+      the row already `queued_for_payout` and calls `verify_transfer` instead
+- [ ] The batch task reuses `_run_commission_cycle`'s shared audit-trail/lock/per-item-isolation
+      machinery rather than duplicating it (same "generalize, don't duplicate" call Task 14 made for
+      `CommissionCycleRun`/`Failure`) -- or documents explicitly why withdrawal's shape doesn't fit
+      and a new audit model is genuinely warranted
+- [ ] A systemic-failure guard: if every request in a batch run fails, raise rather than silently
+      report an all-zero summary (mirrors Task 13's own hardening)
+
+**Verification:**
+- [ ] pytest: duplicate webhook delivery test proves exactly one reversal-credit
+- [ ] pytest: a request already `queued_for_payout` with a pinned reference, re-processed by a
+      second batch run, results in exactly one `initiate_transfer` call (proven via a mock call-count
+      assertion, not just the end state)
+- [ ] pytest: batch task's query count stays flat regardless of pending-request count (this codebase
+      flagged the equivalent check as "reasoning, not measurement" for Task 13's driver -- don't repeat
+      that gap here if it's cheap to just measure)
+- [ ] Verified against real MySQL in CI, not SQLite (concurrency-sensitive, same reasoning as the
+      commission/wallet suite generally)
+
+**Dependencies:** 16d (approved requests to pay out), 16e (Transfer API wrapper), explicit user sign-off (Boundary)
+
+**Files likely touched:** `apps/withdrawal/tasks.py`, `apps/withdrawal/views.py` (webhook),
+`apps/withdrawal/urls.py`, a new migration if a `WithdrawalCycleRun`/`Failure` audit model is needed,
+`bancostore/settings.py` (Celery Beat schedule), `tests/feature/withdrawal/`
+
+**Estimated scope:** L -- the largest single slice in this task; split the webhook handler from the
+batch driver into two commits/reviews if it grows past ~5 files, same guidance Task 16's own
+top-level entry gives
+
+**Skills:**
+- *Before:* **user sign-off (Boundary)**, `doubt-driven-development` -- this is the exact shape of
+  slice (a batch driver moving real money on a schedule) that has caught real, ship-blocking bugs
+  in this codebase twice already (Task 13's overlapping-cycle lock renewal, Task 14's unsaved-stub
+  `.rank` read) before implementation started; do not skip this step because "it's just like the
+  other two batch drivers", `source-driven-development` for the webhook payload/event-name shapes
+- *During:* `incremental-implementation`, `test-driven-development`, `observability-and-instrumentation`
+  (a reversal is a real financial event -- it needs to be as visible in logs/audit trail as a payout
+  success, not just the happy path)
+- *After:* `security-and-hardening` (new webhook endpoint = new unauthenticated-by-default attack
+  surface until signature verification is confirmed correct), `code-review-and-quality`,
+  `code-simplification`, `documentation-and-adrs` if the audit-trail model decision (generalize vs.
+  new model) needs recording
+
+---
+
+#### Task 16g: Distributor-facing status + notifications
+
+**Description:** Withdrawal request status/history visible to the distributor (own page or folded
+into Earnings History), with SMS/email notification on approval, payout, and rejection --
+wrapped so a notification failure can never roll back an already-committed state change, mirroring
+the Direct Referral Bonus SMS pattern from Task 12. The UI must say plainly that "approved" does not
+mean "paid yet" (ADR-0004 consequence: a request can sit approved-but-unpaid for up to a week).
+
+**Acceptance criteria:**
+- [ ] Distributor can see every past request and its current status, scoped to their own requests only
+- [ ] Status copy is honest about the approved-but-not-yet-paid window (no implication that approval == payment)
+- [ ] SMS/email failure is logged but never reverts the underlying status transition
+
+**Verification:**
+- [ ] pytest: notification-provider exception doesn't roll back the transaction that triggered it
+- [ ] Verified live in a real browser
+
+**Dependencies:** 16c, 16d, 16f (all three states need to be visible)
+
+**Files likely touched:** `templates/distributors/withdrawal_history.html` (or an extension of
+`templates/distributors/earnings_history.html`), `apps/withdrawal/views.py`,
+`apps/notifications/` (existing app -- extend, don't duplicate), `tests/`
+
+**Estimated scope:** S-M (2-4 files)
+
+**Skills:**
+- *Before:* none beyond the standing `security-and-hardening` awareness carried from earlier slices
+  (this is UI/notification polish, not a new money-movement decision)
+- *During:* `frontend-ui-engineering`, `incremental-implementation`, `security-and-hardening` (mNotify/
+  email are also Boundary "ask first" integrations -- confirm before modifying `apps/notifications/`
+  if the change is more than calling an existing send function), `browser-testing-with-devtools` if a
+  real browser check surfaces something a screenshot alone wouldn't (console errors, network failures)
+- *After:* `code-review-and-quality`, `code-simplification`
+
+---
+
+#### Task 16h: Full-suite verification, CI, PR, Checkpoint F
+
+**Description:** The Section-14-style full journey test (purchase → commission credit → withdrawal
+request → tax deducted → admin approves → simulated Paystack payout succeeds), taken through the
+same branch → PR → CI (real MySQL) → CodeRabbit → merge workflow every prior task has used.
+
+**Acceptance criteria:**
+- [ ] Full pytest suite green, including every new withdrawal test from 16a-16g
+- [ ] `black`/`ruff` clean, `manage.py check` clean
+- [ ] CI green against real MySQL, not just local SQLite
+- [ ] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning
+
+**Verification:**
+- [ ] Checkpoint F (below) passes end-to-end in a real browser session, not just pytest
+
+**Dependencies:** 16a-16g all merged
+
+**Files likely touched:** none new -- this is verification, not implementation
+
+**Estimated scope:** XS (process, not code)
+
+**Skills:**
+- *Before:* none
+- *During:* none
+- *After:* `ci-cd-and-automation` (confirm the pipeline actually ran the withdrawal suite against
+  MySQL, not just that CI was green for unrelated reasons), `git-workflow-and-versioning`
+  (branch/PR hygiene consistent with Tasks 13-15's pattern), `debugging-and-error-recovery` if
+  anything breaks in CI that didn't break locally (a real risk given SQLite-vs-MySQL locking
+  differences are this codebase's most-repeated gotcha)
+
+---
+
+**Skills deliberately not called out per-slice above, and why:**
+- `api-and-interface-design` -- applies lightly throughout (the `submit_withdrawal_request`/
+  `approve_withdrawal_request` service signatures, and the Transfer webhook's payload contract) but
+  isn't a dedicated pass; keep new service function signatures consistent with `credit()`/`debit()`'s
+  existing shape rather than inventing a new convention.
+- `ci-cd-and-automation` -- only relevant at 16h; nothing about withdrawal changes the pipeline
+  itself before then.
+- `context-engineering` -- applies to how each slice above should be worked (load only that slice's
+  section of this breakdown plus the relevant source files, not the whole task at once), not to the
+  product being built.
+- `deprecation-and-migration` -- not applicable; nothing existing is being removed or migrated off.
+- `idea-refine` / `interview-me` -- already done for this task, via the `AskUserQuestion` round that
+  produced ADR-0004, before this breakdown was written.
+- `performance-optimization` -- the 16f batch driver should stay flat-query-count by construction
+  (same pattern as Binary/Matching Bonus), but this is inherited discipline, not a dedicated
+  optimization pass; only invoke for real if 16f's own measurement (see its Verification) shows
+  a problem.
+- `shipping-and-launch` -- this is a task within an ongoing build, not a production launch; N/A here,
+  not skipped by oversight.
+- `using-agent-skills` -- the meta-skill governing this whole breakdown's own construction; already applied.
 
 ---
 

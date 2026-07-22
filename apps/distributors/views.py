@@ -34,6 +34,7 @@ from .forms import (
     DistributorRegistrationForm,
     DistributorSetNewPasswordForm,
     OTPVerificationForm,
+    PayoutSettingsForm,
 )
 from .models import DiditVerification, Distributor, PendingRegistration
 from .paystack import PaystackError, initialize_transaction, verify_webhook_signature
@@ -592,5 +593,103 @@ def earnings_history(request):
             "total_withdrawn": total_withdrawn,
             "last_withdrawal_at": last_withdrawal_at,
             "active_nav": "earnings_history",
+        },
+    )
+
+
+@login_required(login_url="distributors:login")
+@ratelimit(key="user", rate="20/h", method="POST")
+def payout_settings(request):
+    """Task 16a: where a distributor sets the mobile money number/network
+    Paystack Transfer pays out to (Task 16). Always scoped to
+    request.user.distributor -- same is_distributor() + no id/param IDOR
+    surface as earnings_history (Task 15d). Rate-limited on POST, matching
+    every other state-changing endpoint in this file (register, login,
+    select_starter_pack) -- this one changes where real money gets sent.
+
+    Uses a ?saved=1 redirect param for the success banner rather than
+    django.contrib.messages -- messages is installed project-wide but has
+    no consumer yet, and wiring it into the shared base_dashboard.html
+    shell for one page is more than this task needs."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+
+    distributor = request.user.distributor
+
+    if request.method == "POST":
+        form = PayoutSettingsForm(request.POST)
+        if form.is_valid():
+            distributor.mobile_money_number = str(
+                form.cleaned_data["mobile_money_number"]
+            )
+            distributor.mobile_money_network = form.cleaned_data["mobile_money_network"]
+            distributor.save()
+            return redirect(f"{reverse('distributors:payout_settings')}?saved=1")
+    else:
+        initial = {}
+        if distributor.has_payout_destination:
+            initial = {
+                "mobile_money_number": distributor.mobile_money_number,
+                "mobile_money_network": distributor.mobile_money_network,
+            }
+        form = PayoutSettingsForm(initial=initial)
+
+    # The mobile money network field is a custom Alpine-driven listbox, not
+    # a rendered <select> -- both its initial label AND its initial
+    # selected value must be server-rendered too (not left to Alpine's
+    # x-text/x-data alone), or a no-JS request / the Django test client
+    # (which never executes JS) would see the placeholder text even when a
+    # network is already saved.
+    #
+    # security-and-hardening (2026-07-22, code-review-and-quality pass):
+    # the first version of this interpolated form.mobile_money_network.value
+    # -- the raw, unvalidated client-submitted string -- directly into the
+    # Alpine x-data JS expression. Django's HTML autoescaping does NOT
+    # protect that: the browser HTML-decodes the attribute value (turning
+    # &#x27; back into ') BEFORE Alpine evaluates it as JS, so a crafted
+    # mobile_money_network POST value could break out of the JS string
+    # literal and execute arbitrary script in the distributor's own
+    # authenticated session -- on the exact page that controls where their
+    # withdrawal money gets sent. Fixed two ways at once: (1) the value is
+    # constrained to the known-good MobileMoneyNetwork choices right here,
+    # server-side, before it ever reaches the template -- an invalid/
+    # injected value simply becomes "" (never selected), so there is no
+    # channel left to smuggle arbitrary content through; (2) both the
+    # constrained value and the full choices list are passed to the
+    # template via `json_script` (templates/distributors/payout_settings
+    # .html), which safely serializes into a <script type="application/
+    # json"> block for Alpine to JSON.parse -- never interpolated into a
+    # JS-evaluated attribute string. This also fixes a separate, lower-
+    # severity issue the same review caught: the network choices were
+    # hardcoded a second and third time (once in the Alpine options array,
+    # once in this view's old dict-lookup) -- now there is exactly one
+    # source, Distributor.MobileMoneyNetwork.choices, read once below.
+    valid_networks = dict(Distributor.MobileMoneyNetwork.choices)
+    submitted_network = form.data.get("mobile_money_network") if form.is_bound else ""
+    if form.is_bound:
+        selected_network = (
+            submitted_network if submitted_network in valid_networks else ""
+        )
+    elif distributor.has_payout_destination:
+        selected_network = distributor.mobile_money_network
+    else:
+        selected_network = ""
+    network_display = valid_networks.get(selected_network, "")
+    network_choices = [
+        {"value": value, "label": label}
+        for value, label in Distributor.MobileMoneyNetwork.choices
+    ]
+
+    return render(
+        request,
+        "distributors/payout_settings.html",
+        {
+            "form": form,
+            "distributor": distributor,
+            "network_display": network_display,
+            "selected_network": selected_network,
+            "network_choices": network_choices,
+            "saved": request.GET.get("saved") == "1",
+            "active_nav": "payout_settings",
         },
     )

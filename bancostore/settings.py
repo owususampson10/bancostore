@@ -109,6 +109,7 @@ INSTALLED_APPS = [
     "apps.pv_ledger",
     "apps.wallet",
     "apps.commissions",
+    "apps.withdrawal",
 ]
 
 MIDDLEWARE = [
