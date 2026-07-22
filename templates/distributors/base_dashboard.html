@@ -119,9 +119,12 @@
 </button>
 <p class="font-label-lg text-label-lg text-gray-muted">Bancostore Distributor Portal</p>
 <div class="flex-1"></div>
-<button type="button" class="p-2 hover:bg-surface-container-low rounded-full text-gray-muted relative cursor-not-allowed" title="Notifications — coming soon">
+{# disabled, not just styled to look disabled -- Task 21 is what wires up #}
+{# real notifications via Channels; a permanent unread dot here would be #}
+{# misleading for a feature that doesn't exist yet, matching CodeRabbit's #}
+{# finding that this button claimed to be inert but wasn't. #}
+<button type="button" disabled class="p-2 rounded-full text-gray-muted relative cursor-not-allowed" title="Notifications — coming soon">
 <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
-<span class="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full" aria-hidden="true"></span>
 </button>
 </header>
 <main class="flex-1 p-margin-mobile md:p-margin-desktop max-w-[1200px] w-full mx-auto">
