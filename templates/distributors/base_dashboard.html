@@ -1,0 +1,97 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Bancostore{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'assets/main.css' %}">
+</head>
+{# Shared collapsible-sidebar app shell for the distributor dashboard family #}
+{# (Task 15d). Same pattern (collapsed/mobileOpen state, nav list, main #}
+{# content slot) should be reused for the admin dashboard once that's #}
+{# built -- not extracted into a shared partial yet since there's only one #}
+{# consumer so far. #}
+<body class="bg-surface text-on-surface font-body-md min-h-screen"
+      x-data="{
+        collapsed: localStorage.getItem('bancostore-sidebar-collapsed') === 'true',
+        mobileOpen: false,
+      }"
+      x-init="$watch('collapsed', (v) => localStorage.setItem('bancostore-sidebar-collapsed', v))">
+<div class="flex min-h-screen">
+<!-- Mobile overlay -->
+<div class="fixed inset-0 bg-black/40 z-40 md:hidden" x-show="mobileOpen" x-on:click="mobileOpen = false" x-cloak></div>
+
+<!-- Sidebar -->
+<aside
+    class="fixed md:sticky top-0 h-screen bg-white border-r border-outline-variant z-50 flex flex-col py-stack-lg transition-all duration-200"
+    :class="{
+      'w-64': !collapsed,
+      'w-20': collapsed,
+      '-translate-x-full md:translate-x-0': !mobileOpen,
+      'translate-x-0': mobileOpen,
+    }"
+>
+<div class="px-6 mb-8 flex items-center justify-between">
+<h1 class="font-headline-md text-headline-md text-primary uppercase tracking-tighter" x-show="!collapsed" x-cloak>Bancostore</h1>
+<button type="button" class="hidden md:flex p-2 rounded-full hover:bg-surface-container-low text-gray-muted" x-on:click="collapsed = !collapsed" aria-label="Toggle sidebar">
+<span class="material-symbols-outlined text-[20px]" x-text="collapsed ? 'chevron_right' : 'chevron_left'"></span>
+</button>
+</div>
+
+<nav class="flex-1 space-y-1 px-3 overflow-y-auto">
+{% with active=active_nav|default:"" %}
+<a href="{% url 'distributors:dashboard' %}" class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md transition-colors {% if active == 'dashboard' %}text-primary font-bold bg-primary-fixed{% else %}text-gray-muted hover:bg-surface-container-low{% endif %}">
+<span class="material-symbols-outlined text-[22px]">dashboard</span>
+<span x-show="!collapsed" x-cloak>Dashboard</span>
+</a>
+<a href="{% url 'distributors:earnings_history' %}" class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md transition-colors {% if active == 'earnings_history' %}text-primary font-bold bg-primary-fixed{% else %}text-gray-muted hover:bg-surface-container-low{% endif %}">
+<span class="material-symbols-outlined text-[22px]">history</span>
+<span x-show="!collapsed" x-cloak>Earnings History</span>
+</a>
+{# Team / Binary Tree / Withdraw are future tasks (Task 16/20-ish) -- shown #}
+{# as disabled entries rather than dead links, matching the honesty #}
+{# convention already used by templates/distributors/dashboard.html. #}
+<div class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-gray-muted/50 cursor-not-allowed" title="Coming soon">
+<span class="material-symbols-outlined text-[22px]">group</span>
+<span x-show="!collapsed" x-cloak>Team</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-gray-muted/50 cursor-not-allowed" title="Coming soon">
+<span class="material-symbols-outlined text-[22px]">account_tree</span>
+<span x-show="!collapsed" x-cloak>Binary Tree</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-gray-muted/50 cursor-not-allowed" title="Coming soon">
+<span class="material-symbols-outlined text-[22px]">payments</span>
+<span x-show="!collapsed" x-cloak>Withdraw</span>
+</div>
+<div class="pt-4 mt-4 border-t border-outline-variant/50">
+<div class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-gray-muted/50 cursor-not-allowed" title="Coming soon">
+<span class="material-symbols-outlined text-[22px]">settings</span>
+<span x-show="!collapsed" x-cloak>Settings</span>
+</div>
+<a href="{% url 'distributors:logout' %}" class="flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-error hover:bg-error-container transition-colors mt-1">
+<span class="material-symbols-outlined text-[22px]">logout</span>
+<span x-show="!collapsed" x-cloak>Log Out</span>
+</a>
+</div>
+{% endwith %}
+</nav>
+</aside>
+
+<!-- Main content -->
+<div class="flex-1 min-w-0 flex flex-col">
+<header class="sticky top-0 z-30 bg-surface/90 backdrop-blur-sm flex items-center gap-4 h-16 px-margin-mobile md:px-margin-desktop border-b border-outline-variant/50">
+<button type="button" class="p-2 hover:bg-surface-container-low rounded-full md:hidden" x-on:click="mobileOpen = !mobileOpen" aria-label="Open menu">
+<span class="material-symbols-outlined">menu</span>
+</button>
+<p class="font-label-lg text-label-lg text-gray-muted">{{ request.user.distributor.phone_number }}</p>
+</header>
+<main class="flex-1 p-margin-mobile md:p-margin-desktop max-w-[1200px] w-full mx-auto">
+{% block content %}{% endblock %}
+</main>
+</div>
+</div>
+</body>
+</html>

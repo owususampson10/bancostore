@@ -1,4 +1,4 @@
-{% extends "base_auth.html" %}
+{% extends "distributors/base_dashboard.html" %}
 {% block title %}Bancostore | Dashboard{% endblock %}
 {% block content %}
 <div class="w-full max-w-md mx-auto bg-white rounded-xl auth-card p-stack-xl text-center">
@@ -13,11 +13,12 @@ check_circle
 You're logged in
 </h1>
 <p class="font-body-md text-body-md text-gray-muted mb-stack-xl">
-Welcome, {{ request.user.distributor.phone_number }}. Your full distributor dashboard
-(earnings, team, binary tree) is coming in a later build.
+Welcome, {{ request.user.distributor.phone_number }}. Your earnings history is
+available now — the full dashboard overview (team, binary tree) is coming in a
+later build.
 </p>
-<a class="inline-block w-full py-4 px-8 bg-primary hover:opacity-90 text-white font-label-lg text-label-lg rounded-lg transition-all active:scale-95 shadow-sm" href="{% url 'distributors:logout' %}">
-Log Out
+<a class="inline-block w-full py-4 px-8 bg-primary hover:opacity-90 text-white font-label-lg text-label-lg rounded-lg transition-all active:scale-95 shadow-sm" href="{% url 'distributors:earnings_history' %}">
+View Earnings History
 </a>
 </div>
 {% endblock %}

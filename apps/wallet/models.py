@@ -16,6 +16,23 @@ class Wallet(models.Model):
     )
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
 
+    class Meta:
+        constraints = [
+            # Task 15: debit()'s own atomic conditional UPDATE
+            # (balance__gte=amount) is the primary guard against this and
+            # can never violate it by construction -- this is a separate,
+            # structural defense-in-depth layer, mirroring apps.pv_ledger
+            # .models.PvDailyBucket's own CheckConstraint(pv__gte=0)
+            # reasoning exactly: "bulk F()-relative UPDATEs bypass
+            # Django's model-level field validation entirely... this
+            # constraint is the actual guardrail" against some future
+            # code path touching balance without going through debit()'s
+            # own discipline.
+            models.CheckConstraint(
+                check=models.Q(balance__gte=0), name="wallet_balance_gte_0"
+            ),
+        ]
+
     def __str__(self):
         return f"Wallet<{self.distributor_id} balance={self.balance}>"
 
@@ -28,6 +45,14 @@ class WalletTransaction(models.Model):
         DIRECT_REFERRAL_BONUS = "direct_referral_bonus", "Direct Referral Bonus"
         BINARY_BONUS = "binary_bonus", "Binary Bonus"
         MATCHING_BONUS = "matching_bonus", "Matching Bonus"
+        # Task 15: named directly from this ledger's own spec description
+        # ("credit/debit entries... withdrawal debit, refund reversal")
+        # even though Tasks 16/19 haven't built the code that produces
+        # them yet -- apps.wallet.services.debit() needs a real type to
+        # exercise, and these are the two this ledger is documented to
+        # need.
+        WITHDRAWAL_DEBIT = "withdrawal_debit", "Withdrawal Debit"
+        REFUND_REVERSAL = "refund_reversal", "Refund Reversal"
 
     wallet = models.ForeignKey(
         Wallet, on_delete=models.CASCADE, related_name="transactions"

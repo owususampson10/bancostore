@@ -1428,19 +1428,136 @@ binary, matching, withdrawal debit, refund reversal). Balance is derived from th
 mutable counter. Earnings history view on the distributor dashboard.
 
 **Acceptance criteria:**
-- [ ] Every credit from Tasks 12–14 writes a ledger entry with type, amount, and timestamp
-- [ ] Wallet balance is always the sum of ledger entries, never edited directly
-- [ ] Earnings history view lists entries with type and amount
+- [x] Every credit from Tasks 12–14 writes a ledger entry with type, amount, and timestamp
+- [x] Wallet balance is always the sum of ledger entries, never edited directly
+- [x] Earnings history view lists entries with type and amount
 
 **Verification:**
-- [ ] pytest test: balance after a mixed sequence of credits/debits matches the sum exactly
-- [ ] pytest test: no code path outside `WalletService` writes to the ledger table directly
+- [x] pytest test: balance after a mixed sequence of credits/debits matches the sum exactly
+- [x] pytest test: no code path outside `WalletService` writes to the ledger table directly
 
 **Dependencies:** Task 12, Task 13, Task 14
 
 **Files likely touched:** `apps/wallet/services.py` (`WalletService`), `apps/wallet/models.py` (`WalletLedgerEntry`), `apps/wallet/views.py` (earnings history), `tests/unit/wallet/test_wallet_service.py`
 
 **Estimated scope:** M
+
+**15-spec (2026-07-22) — resolved before implementation, via `spec-driven-development`.** An audit
+first: `apps/wallet/models.py`'s `Wallet`/`WalletTransaction` (not `WalletLedgerEntry` -- that name
+in "Files likely touched" above is stale, predating Tasks 12-14 actually building this out) already
+satisfy most of this task's framing -- `WalletTransaction` is already the append-only ledger, and
+`credit()` (a plain function, not a `WalletService` class, matching this codebase's established
+"function over class" convention from Task 12) is already the *only* production code path that
+writes it (confirmed via `grep -rn "WalletTransaction.objects.create"` across `apps/`). What's
+actually missing: a `debit()` function (nothing debits yet -- withdrawal/refund are Tasks 16/19),
+enforcement of "no other code path writes the ledger" beyond the soft `readonly_fields` Django Admin
+already has, and the earnings history view (`apps/distributors/views.py::dashboard` is an explicit
+placeholder stating "the real dashboard is Task 20" -- this is its own minimal page, not an
+expansion of that placeholder).
+
+**Resolved design decisions:**
+1. **`WalletTransaction.amount` becomes signed** (positive for credits, already `credit()`'s
+   behavior; negative for debits) so `SUM(amount)` trivially reconstructs `Wallet.balance` --
+   literal reading of "balance is always the sum of ledger entries." `credit()`'s existing public
+   API is unchanged (still takes a positive amount); a new `debit()` takes a positive amount as
+   input and stores it negated. Checked: nothing currently reads `WalletTransaction.amount` assuming
+   it's always positive (`sum_downline_binary_bonus_earnings` only sums `BINARY_BONUS`-type rows,
+   which are never debits).
+2. **`Wallet.balance >= 0` gets a DB-level `CheckConstraint`**, mirroring `PvDailyBucket`'s own
+   established reasoning verbatim ("bulk F()-relative UPDATEs bypass Django's model-level field
+   validation entirely... this constraint is the actual guardrail") -- defense in depth against the
+   wallet going negative, not just caller discipline. Safe to add: every existing `Wallet.balance`
+   value is guaranteed non-negative today, since `debit()` has never existed.
+3. **New `TransactionType` values `WITHDRAWAL_DEBIT`/`REFUND_REVERSAL`**, named directly from this
+   task's own description, added now even though Tasks 16/19 haven't built their calling code yet --
+   needed to write a real "mixed credit/debit sequence" test, and the task description itself
+   pre-names them (matching the precedent of `MATCHING_BONUS_DEPTH_BRONZE`/`_SILVER` existing in
+   constance config before Task 14 used them).
+4. **"No code path outside the wallet layer writes the ledger" enforced with a hard lockdown**,
+   mirroring Task 13's `CommissionCycleRunAdmin` exactly (`has_add_permission`/
+   `has_change_permission`/`has_delete_permission` all `False`), not just `readonly_fields` -- plus a
+   real test proving it end-to-end against the actual admin view, mirroring
+   `test_commission_cycle_run_admin.py`'s pattern.
+5. **Earnings history is its own minimal page** (`distributors:earnings_history`, extending
+   `base_auth.html` like `dashboard.html` does) -- listing a distributor's own `WalletTransaction`
+   rows (type, amount, date), **with pagination from the start** (revised during spec review: not
+   speculative -- a long-lived, successful distributor can plausibly accumulate thousands of rows at
+   this platform's stated scale, since Binary Bonus can fire every 10 minutes and Matching Bonus
+   weekly; an unpaginated list is a near-certain problem for exactly the users this feature serves,
+   not a hypothetical one).
+
+**Task breakdown** (via `planning-and-task-breakdown`; implemented as 15a-15f):
+- **15a (S, models.py + migration, TDD):** signed `amount`, the new `TransactionType` values, and
+  `Wallet`'s `CheckConstraint(balance__gte=0)`.
+- **15b (S, services.py, TDD):** `debit()`, symmetric to `credit()` (same validation shape, same
+  no-self-retry docstring contract), storing `-amount`; relies on the new `CheckConstraint` to reject
+  an over-debit rather than a pre-check race.
+- **Checkpoint 15a-15b:** the balance-invariant test (mixed credit/debit sequence, `Wallet.balance ==
+  sum(WalletTransaction.amount)`) is green before touching admin/views.
+- **15c (S, admin.py, TDD):** hard lockdown on `WalletTransactionInline` + a standalone-registration
+  guard if needed; test proves add/change/delete all rejected even for a superuser, mirroring
+  `test_commission_cycle_run_admin.py`.
+- **15d (M, views.py/urls.py/template, TDD + `frontend-ui-engineering`):** `earnings_history` view,
+  paginated, own-wallet-only. **Done 2026-07-22.** Design source: a Stitch screen ("Earnings History
+  - Bancostore Distributor", project `14456046746368120137`) was fetched and verified against the
+  original prompt before building, per a standing instruction that all future frontend work pause
+  for this fetch-verify-build sequence. Verification caught two real gaps in the generated screen
+  versus the prompt: (1) no true desktop icon-only collapsed sidebar state, only a mobile show/hide
+  drawer -- built for real in `templates/distributors/base_dashboard.html` (Alpine.js, state
+  persisted to `localStorage`); (2) no empty-state design -- designed and built directly (icon +
+  "No earnings yet"). `base_dashboard.html` is a new shared sidebar app-shell (nav: Dashboard,
+  Earnings History, Team*, Binary Tree*, Withdraw*, Settings*, Log Out -- `*` = disabled/inert,
+  matching the honesty convention `dashboard.html` already established for unbuilt pages), intended
+  to be reused for the admin dashboard once that's built (not extracted into a shared partial yet --
+  only one consumer so far). `templates/distributors/dashboard.html` (Task 20's placeholder) was
+  migrated onto this same shell rather than left on `base_auth.html`, since leaving it behind made
+  the sidebar disappear/reappear when navigating between Dashboard and Earnings History -- caught by
+  `code-review-and-quality`, not planned upfront.
+- **15e:** `security-and-hardening` pass specifically on the view (access control: a distributor must
+  never see another distributor's transactions via id/param manipulation). **Done 2026-07-22** via a
+  dedicated `security-auditor` review. No IDOR (the view is unconditionally scoped to
+  `request.user.distributor`, never an id/param, backed by a real cross-distributor regression test).
+  One High finding, fixed: `WalletAdmin` had no `has_delete_permission` override -- a staff/superuser
+  could delete a `Wallet` row outright via Django Admin's default delete action, which cascades
+  (`WalletTransaction.wallet` is `on_delete=CASCADE`) into silently destroying that distributor's
+  entire ledger, bypassing `WalletTransactionInline`'s own lockdown entirely since it's never reached.
+  Fixed by locking down `WalletAdmin` itself (`has_add/change/delete_permission` all `False`),
+  mirroring `CommissionCycleRunAdmin` completely rather than just the inline half, with HTTP-level
+  regression tests. One Medium finding, fixed: `@login_required` alone doesn't distinguish this
+  platform's three account types sharing one `User` model (customer/distributor/admin) --
+  an authenticated customer with no `Distributor` row hit an unhandled 500 via
+  `request.user.distributor` instead of a clean 403. Fixed by wiring in
+  `apps/accounts/permissions.py::is_distributor` (which already existed but was dead code, unused
+  anywhere in the codebase) as an explicit guard in `earnings_history`. **Not fixed, deferred:** the
+  same unguarded-`request.user.distributor` pattern exists in `select_starter_pack`,
+  `start_kyc_verification`, and `dashboard` (all pre-existing, untouched by this task) -- flagged by
+  both review passes as worth a shared `@distributor_required` decorator applied codebase-wide, but
+  out of Task 15's scope; tracked here as a fast-follow, not silently skipped.
+- **15f:** `code-review-and-quality`, `code-simplification`, full suite, browser check of the view.
+  **Done 2026-07-22.** `code-reviewer` pass found two Important issues, both fixed: (1) pagination
+  used `order_by("-created_at")` with no tie-breaker -- two `WalletTransaction` rows landing on the
+  same timestamp (realistic: Binary Bonus can fire every 10 minutes) could be ordered differently
+  between the page-1 and page-2 queries, silently dropping or duplicating a row across the page
+  boundary; fixed by adding `"-pk"` as a stable secondary sort key. (2) the dashboard-shell migration
+  described under 15d above. A Low/Suggestion finding was also fixed: `total_withdrawn` originally
+  summed *any* negative ledger row, which would have silently folded future `REFUND_REVERSAL` debits
+  (Task 19, a refund clawback, conceptually distinct from a withdrawal) into a tile literally labeled
+  "Total Withdrawn" -- narrowed to `transaction_type=WITHDRAWAL_DEBIT` specifically. No browser
+  automation tool (Chrome DevTools MCP, Playwright, Puppeteer) was available in this environment --
+  verified instead via real server-rendered HTML over authenticated `curl` sessions against the live
+  dev server (login, own-vs-other-distributor isolation, empty state, pagination, signed/colored
+  amounts, nav items, static asset serving), which exercises the same Django/template code path a
+  browser would but does not confirm actual visual rendering (CSS layout, responsive breakpoints,
+  Alpine.js collapse/mobile-drawer interactivity) the way a real browser check would -- flagged
+  explicitly rather than claimed as done. Full suite: 455 passed (up from 451 pre-Task-15), 0
+  regressions. `black`/`ruff`/`isort` clean; `makemigrations --check --dry-run` confirms no missing
+  migration.
+
+**Task 15 complete (2026-07-22).** All of 15a-15f shipped, reviewed (`code-review-and-quality` +
+`security-and-hardening`, both via dedicated fresh-context subagents, not just self-review), and
+verified. Not yet done: committing/pushing this work and taking it through the established
+branch → PR → CI (real MySQL) → CodeRabbit → merge workflow used for Tasks 13/14/Checkpoint E --
+still sitting on `main` locally as of this writing.
 
 ---
 

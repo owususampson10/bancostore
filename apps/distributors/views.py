@@ -1,12 +1,16 @@
 import json
 import logging
 import math
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.hashers import make_password
+from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
+from django.db.models import Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -17,7 +21,9 @@ from django.views.decorators.http import require_POST
 from constance import config
 from django_ratelimit.decorators import ratelimit
 
+from apps.accounts.permissions import is_distributor
 from apps.notifications.otp import generate_otp, verify_otp
+from apps.wallet.models import WalletTransaction
 
 from .didit import DiditError
 from .didit import create_verification_session as create_didit_session
@@ -516,5 +522,67 @@ def dashboard(request):
     """Placeholder landing page after a successful login/registration — the
     real dashboard is Task 20. Exists so login has somewhere honest to send
     a distributor, instead of back to the login page itself (which looked
-    exactly like the login had silently failed)."""
-    return render(request, "distributors/dashboard.html")
+    exactly like the login had silently failed). Extends the same sidebar
+    shell as earnings_history (Task 15d) so navigating between them doesn't
+    drop the sidebar."""
+    return render(request, "distributors/dashboard.html", {"active_nav": "dashboard"})
+
+
+@login_required(login_url="distributors:login")
+def earnings_history(request):
+    """Task 15d: a distributor's own wallet ledger. Always scoped to
+    request.user.distributor -- no distributor id is ever accepted from the
+    URL or query params, so there is no IDOR surface here to guard against.
+
+    Security review (2026-07-22) caught that this platform has three
+    account types sharing one User model (customer/distributor/admin) and
+    @login_required alone doesn't distinguish them -- an authenticated
+    customer has no Distributor row, so request.user.distributor would
+    raise an unhandled 500 instead of a clean 403. is_distributor() guards
+    that explicitly here.
+
+    Wallet.balance is a cached aggregate, not re-derived from the ledger on
+    every request (apps/wallet/models.py already treats it as the source of
+    truth for "current balance"); total_earned/total_withdrawn below are
+    ledger sums shown alongside it purely for the summary strip."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+
+    distributor = request.user.distributor
+    transactions = WalletTransaction.objects.filter(
+        wallet__distributor=distributor
+    ).order_by("-created_at", "-pk")
+
+    totals = transactions.aggregate(
+        total_earned=Sum("amount", filter=Q(amount__gt=0)),
+        total_withdrawn=Sum(
+            "amount",
+            filter=Q(
+                transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT
+            ),
+        ),
+    )
+    total_earned = totals["total_earned"] or Decimal("0")
+    total_withdrawn = -(totals["total_withdrawn"] or Decimal("0"))
+
+    # OneToOneField's reverse accessor raises Wallet.DoesNotExist (an
+    # AttributeError subclass) until the wallet is lazily created by a
+    # first credit() -- getattr's default handles a distributor with no
+    # earnings yet.
+    wallet = getattr(distributor, "wallet", None)
+    balance = wallet.balance if wallet else Decimal("0")
+
+    paginator = Paginator(transactions, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    return render(
+        request,
+        "distributors/earnings_history.html",
+        {
+            "page_obj": page_obj,
+            "balance": balance,
+            "total_earned": total_earned,
+            "total_withdrawn": total_withdrawn,
+            "active_nav": "earnings_history",
+        },
+    )

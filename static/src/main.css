@@ -124,6 +124,13 @@
   --text-body-lg--font-weight: 400;
 }
 
+/* Alpine.js hides [x-cloak] elements once it initializes -- but the CSS
+   rule itself isn't built in, so without this, collapsed/mobile-only nav
+   labels flash visible for a frame on every page load. */
+[x-cloak] {
+  display: none !important;
+}
+
 /* Material Symbols icon font (used throughout the Stitch screens) */
 .material-symbols-outlined {
   font-variation-settings:
