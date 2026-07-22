@@ -188,19 +188,30 @@ WITHDRAWAL_AND_PAYOUT_SETTINGS = {
         "How often distributors can request a withdrawal",
     ),
     "WITHDRAWAL_DAY": (
-        "",
-        "Which day of the week withdrawals are processed — set by admin "
-        "(SPEC.md Open Question #5)",
+        "friday",
+        # SPEC.md Open Question #5, resolved 2026-07-22 by the user: Friday --
+        # a common payday convention, and it lands the same week Matching
+        # Bonus already pays out on (also weekly).
+        "Which day of the week withdrawals are processed",
+        "day_of_week_field",
     ),
     "MIN_WITHDRAWAL_AMOUNT": (
-        Decimal("0"),
-        "Minimum balance required before a withdrawal can be requested (GHS) — "
-        "placeholder, needs an admin decision (SPEC.md Open Question #5)",
+        Decimal("100"),
+        # Resolved 2026-07-22 (SPEC.md Open Question #5): a round minimum
+        # that avoids tiny payout requests without being a high bar for
+        # newer distributors.
+        "Minimum balance required before a withdrawal can be requested (GHS)",
+        "non_negative_money_field",
     ),
     "MAX_WITHDRAWAL_AMOUNT": (
-        Decimal("0"),
-        "Cap on how much can be withdrawn in a single request (GHS) — "
-        "placeholder, needs an admin decision (SPEC.md Open Question #5)",
+        Decimal("10000"),
+        # Resolved 2026-07-22 (SPEC.md Open Question #5): generous enough
+        # for a high-performing distributor's weekly earnings, while still
+        # bounding the blast radius of a single erroneous/fraudulent
+        # request -- same reasoning WEEKLY_BINARY_BONUS_CAP already applies
+        # one layer up, at the whole-week rather than single-request level.
+        "Cap on how much can be withdrawn in a single request (GHS)",
+        "non_negative_money_field",
     ),
     "WITHHOLDING_TAX_RATE": (
         Decimal("1"),
@@ -414,6 +425,25 @@ CONSTANCE_ADDITIONAL_FIELDS = {
             # instead of silently and confusingly zeroing out an admin's
             # intended depth.
             "min_value": 0,
+        },
+    ],
+    "day_of_week_field": [
+        "django.forms.fields.ChoiceField",
+        {
+            "widget": "django.forms.Select",
+            # A bounded choice, not a free-text field -- WITHDRAWAL_DAY was a
+            # plain string before this (SPEC.md Open Question #5, resolved
+            # 2026-07-22), which would have let an admin type "friday" or
+            # "Frday" with no validation at all.
+            "choices": [
+                ("monday", "Monday"),
+                ("tuesday", "Tuesday"),
+                ("wednesday", "Wednesday"),
+                ("thursday", "Thursday"),
+                ("friday", "Friday"),
+                ("saturday", "Saturday"),
+                ("sunday", "Sunday"),
+            ],
         },
     ],
 }

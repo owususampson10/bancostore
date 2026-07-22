@@ -106,6 +106,62 @@ def test_shows_own_wallet_balance_and_summary_totals(client):
     assert "GHS 1,150.00" in body  # current balance: 450 + 1200 - 500
     assert "GHS 1,650.00" in body  # total earned: 450 + 1200
     assert "GHS 500.00" in body  # total withdrawn
+    assert "Aggregated bonuses" in body
+
+
+@pytest.mark.django_db
+def test_shows_the_date_of_the_most_recent_withdrawal(client):
+    distributor = _make_distributor()
+    credit(
+        distributor,
+        Decimal("1000.00"),
+        transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+        reference="ref-1",
+    )
+    debit(
+        distributor,
+        Decimal("100.00"),
+        transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT,
+        reference="ref-2",
+    )
+    debit(
+        distributor,
+        Decimal("50.00"),
+        transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT,
+        reference="ref-3",
+    )
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:earnings_history"))
+
+    body = response.content.decode()
+    last_withdrawal = (
+        WalletTransaction.objects.filter(
+            wallet__distributor=distributor,
+            transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    assert f"Last withdrawal: {last_withdrawal.created_at:%b %d, %Y}" in body
+
+
+@pytest.mark.django_db
+def test_shows_no_withdrawal_yet_when_distributor_has_never_withdrawn(client):
+    distributor = _make_distributor()
+    credit(
+        distributor,
+        Decimal("450.00"),
+        transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+        reference="ref-1",
+    )
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:earnings_history"))
+
+    body = response.content.decode()
+    assert "No withdrawals yet" in body
+    assert "Last withdrawal:" not in body
 
 
 @pytest.mark.django_db

@@ -1565,8 +1565,18 @@ still sitting on `main` locally as of this writing.
 
 **Description:** Distributor requests a withdrawal (above the configured minimum, once per week,
 KYC-gated). System deducts withholding tax, admin reviews/approves (individually or in bulk), and
-Paystack sends the payout (sandbox). **Needs min/max withdrawal amount + withdrawal day decided
-before starting.**
+Paystack sends the payout (sandbox).
+
+**2026-07-22 — min/max/day decision resolved.** `SPEC.md` Open Question #5 ("set by admin" in the
+source doc, no concrete numbers ever given): minimum GHS 100, maximum GHS 10,000 per request,
+processed Fridays (a common payday convention, and it lands the same week Matching Bonus already
+pays out on). Seeded into `apps/platform_settings/config.py`'s `WITHDRAWAL_AND_PAYOUT_SETTINGS` --
+`MIN_WITHDRAWAL_AMOUNT`/`MAX_WITHDRAWAL_AMOUNT` now use the `non_negative_money_field` constance
+widget (matching `WEEKLY_BINARY_BONUS_CAP`'s own pattern) instead of an unvalidated 2-tuple, and
+`WITHDRAWAL_DAY` moved off a free-text default onto a new `day_of_week_field` constance widget (a
+bounded 7-day choice, not a string an admin could mistype). All three remain fully admin-editable
+at runtime -- this is only the starting seed value, not a permanent code decision. Task 16 is now
+unblocked.
 
 **Acceptance criteria:**
 - [ ] Withdrawal blocked if KYC is not approved, amount is below minimum, or one was already made this week

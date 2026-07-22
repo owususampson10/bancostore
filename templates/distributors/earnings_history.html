@@ -19,13 +19,21 @@
 </div>
 </div>
 <div class="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6">
-<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant">
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant flex flex-col justify-between">
+<div>
 <p class="font-label-md text-label-md text-gray-muted mb-1">Total Earned</p>
 <h4 class="font-headline-md text-headline-md text-on-surface">GHS {{ total_earned|floatformat:2|intcomma }}</h4>
 </div>
-<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant">
+<div class="mt-4 pt-4 border-t border-outline-variant/30 text-sm text-gray-muted">Aggregated bonuses &amp; referrals</div>
+</div>
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant flex flex-col justify-between">
+<div>
 <p class="font-label-md text-label-md text-gray-muted mb-1">Total Withdrawn</p>
 <h4 class="font-headline-md text-headline-md text-on-surface">GHS {{ total_withdrawn|floatformat:2|intcomma }}</h4>
+</div>
+<div class="mt-4 pt-4 border-t border-outline-variant/30 text-sm text-gray-muted">
+{% if last_withdrawal_at %}Last withdrawal: {{ last_withdrawal_at|date:"M d, Y" }}{% else %}No withdrawals yet{% endif %}
+</div>
 </div>
 </div>
 </div>
