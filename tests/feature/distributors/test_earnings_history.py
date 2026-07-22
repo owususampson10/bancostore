@@ -56,6 +56,26 @@ def test_authenticated_non_distributor_gets_403_not_a_crash(client):
 
 
 @pytest.mark.django_db
+def test_page_loads_the_shared_js_bundle_so_the_sidebar_can_actually_collapse(client):
+    """Regression guard: templates/distributors/base_dashboard.html shipped
+    without a <script src=".../main.js"> tag, so Alpine.js (bundled into
+    main.js -- see static/src/main.js) never loaded on this page. Every
+    x-data/x-on:click/:class binding on the collapsible sidebar was
+    therefore inert -- the toggle button rendered but did nothing, caught
+    only by an actual browser check (a curl-based check of the rendered
+    HTML can't catch this, since the markup itself is valid; only the
+    client-side behavior was broken). pytest can't drive a real browser
+    either, but it can assert the one thing that made the bug possible:
+    the script tag must be present."""
+    distributor = _make_distributor()
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:earnings_history"))
+
+    assert 'src="/static/assets/main.js"' in response.content.decode()
+
+
+@pytest.mark.django_db
 def test_shows_own_wallet_balance_and_summary_totals(client):
     distributor = _make_distributor()
     credit(
