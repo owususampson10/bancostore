@@ -83,13 +83,30 @@ with ancestor PV ledgers updated, complete Didit's hosted KYC verification (ID +
 admin review to receive a permanent IR ID — verified end to end through Paystack test mode and
 Didit's API (mocked HTTP), reproducing Section 14 steps 4–9.
 
-### Phase 4: Commission Engine (elevated test rigor)
+### Phase 4: Commission Engine (elevated test rigor) — complete 2026-07-22
 - [x] Task 12: Direct Referral Bonus — instant credit on starter pack purchase
-- [ ] Task 13: Binary Bonus task — every 10 minutes, weak-leg, carry-forward, expiry, weekly cap
-- [ ] Task 14: Matching Bonus task — weekly, 3-level Bronze / unlimited Silver
+- [x] Task 13: Binary Bonus task — every 10 minutes, weak-leg, carry-forward, expiry, weekly cap
+  (core math + Celery Beat batch driver both shipped; batch driver went through a dedicated
+  `security-and-hardening` pass after a real silent-PV-credit-loss bug was caught by real MySQL in
+  CI — see `tasks/todo.md` Task 13's 13g–13i notes and `CLAUDE.md`)
+- [x] Task 14: Matching Bonus task — weekly, 3-level Bronze / unlimited Silver (built via
+  `spec-driven-development` → `planning-and-task-breakdown` → TDD → `doubt-driven-development` →
+  parallel `security-and-hardening`/`code-review-and-quality` → `code-simplification`, then a
+  CodeRabbit-reviewed PR before merge; see `tasks/todo.md` Task 14's notes and `CLAUDE.md`)
 
-**Checkpoint E:** the Section 14 example journey's exact commission numbers (e.g. GHS 200 referral,
-GHS 37.50 binary bonus) reproduce in a feature test.
+**Checkpoint E — closed 2026-07-22.** `tests/feature/commissions/test_full_commission_journey.py`
+chains registration → referral bonus (twice — Efua earns from GrandRoot's purchase, GrandRoot earns
+from Kofi's and Ama's) → real binary tree placement + write-time PV credit → `calculate_binary_bonus()`
+→ `calculate_matching_bonus()`, through the real service/task functions (not the HTTP/webhook layer,
+already covered by `tests/feature/distributors/`), asserting the exact resulting commission numbers
+at every step. Not a literal reproduction of Section 14's own narrative figures — its Direct Referral
+Bonus numbers (GHS 200 / GHS 75) are documented, confirmed contradictions in the source doc (see
+`CLAUDE.md`); uses this project's already-resolved formula (rate × PV) instead, same as every other
+test in this codebase. Also proves `sum_downline_binary_bonus_earnings`'s transaction-type filter
+holds under a real, mixed-transaction-type wallet history (Efua's matching bonus correctly excludes
+GrandRoot's GHS 150 of direct-referral earnings, counting only her GHS 37.50 binary bonus) and that
+matching bonus requires actual downline binary-bonus earnings, not just a qualifying rank
+(GrandRoot herself earns no matching bonus — her downline never earned a binary bonus).
 
 ### Phase 5: Wallet & Withdrawal
 - [ ] Task 15: Wallet ledger — credit/debit entries, balance, earnings history view
