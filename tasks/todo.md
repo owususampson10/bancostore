@@ -1281,26 +1281,65 @@ than trusted from the "PV only increases outside, only decreases inside" invaria
   added a test confirming the existing design needs no tie-break logic at all (weak-leg PV is a
   `min()`, consumption is applied to both legs by the same amount regardless of which was smaller).
 
-**Still open:** the actual Celery Beat task iterating every distributor and calling
-`process_binary_bonus_for_distributor` once each per scheduled run — not yet a tracked task. Its
-own design must explicitly decide: how `run_at` is generated once and held fixed for the whole
-batch (never regenerated per-distributor or on task retry — a documented, enforced contract of the
-function above, not yet enforced by any caller), iterate `distributor_ids_with_pending_pv()` rather
-than the full distributor table, and per-distributor exception isolation (one distributor's
-`RuntimeError` or exhausted `OperationalError` retries must not abort the whole cycle for everyone
-else).
+**13g (2026-07-21) — the batch driver, closing the "Still open" gap above.** New
+`apps/commissions/tasks.py::calculate_binary_bonus`, a `@shared_task` iterating
+`distributor_ids_with_pending_pv()` and calling `process_binary_bonus_for_distributor` once per id,
+plus `apps/commissions/migrations/0001_seed_binary_bonus_periodic_task.py` wiring it into
+`django_celery_beat` at a 10-minute interval (mirrors `apps/distributors/migrations/0004`'s
+pattern). Went through a full `doubt-driven-development` cycle before implementation (a fresh
+adversarial reviewer, not just self-checking) followed by a `code-review-and-quality` pass after —
+both real, both changed the design:
+- **`run_at` generated exactly once per cycle** (`timezone.now()` at the top of the task) and held
+  fixed across every distributor, upholding `process_binary_bonus_for_distributor`'s idempotency
+  contract; proven by a test asserting two distributors processed in the same cycle share the
+  identical `run_at` in their `WalletTransaction.reference`.
+- **Per-distributor exception isolation**, including the id-fetch itself: constructs an unsaved
+  `Distributor(pk=id)` (verified safe -- grepped the whole call chain and confirmed nothing but
+  `.pk` is ever read off it) inside the same try/except as the payout call, so a row deleted
+  between the id list being fetched and being processed can't abort the rest of the batch.
+- **Overlap protection**: a Redis `cache.add()` mutex (confirmed atomic on this project's
+  `django-redis` backend specifically, by reading `django_redis/client/default.py`'s source --
+  Django's own docs don't guarantee `add()` is atomic on every backend) stops two live cycles
+  running at once, which would otherwise mint two different `run_at` values for what's meant to be
+  one logical cycle. The doubt cycle's first pass caught that a lock set once at acquisition isn't
+  enough at this platform's stated scale; the review pass caught that the fix still needed
+  per-iteration TTL renewal, not just a longer initial timeout -- both are in and covered by a test
+  that proves the lock survives cumulative processing time past its raw TTL.
+- **Systemic-failure guard**: raises if every evaluated distributor failed this cycle, rather than
+  returning a quiet all-zero summary that would look identical to "nothing owed" on Flower, since
+  this job has no human review per cycle.
+- **`BINARY_BONUS_INTERVAL_MINUTES` self-sync**: the constance setting is admin-editable and sits
+  in the same fieldset as rates that already take effect live, so leaving the actual Beat schedule
+  (a separate `django_celery_beat` DB row) permanently out of sync would be a real incident-response
+  footgun, not just cosmetic -- the task syncs `IntervalSchedule.every` from the live constance
+  value on every run (`django_celery_beat`'s `DatabaseScheduler` polls for DB changes every ~5s per
+  its source, no beat restart needed). Explicitly does *not* touch a `PeriodicTask` an admin has
+  repointed at a crontab/solar/clocked schedule via `django_celery_beat`'s own admin -- that's a
+  deliberate choice made through a different, equally legitimate screen.
 
 **Acceptance criteria:**
 - [x] Weak leg correctly identified and reset to 0 after calculation; carry-forward applied to the strong leg
 - [x] Weekly GHS 50,000 cap enforced per distributor
 - [x] Distributors below 100 PV monthly personal activity are skipped
 - [x] Carried PV older than the expiry setting is dropped, not counted
-- [ ] The above are proven per-distributor via `process_binary_bonus_for_distributor`; the Celery Beat task itself (schedule + batch driver) is not yet built
+- [x] The above are proven per-distributor via `process_binary_bonus_for_distributor`; the Celery Beat task itself (schedule + batch driver) is built (`apps/commissions/tasks.py`, `apps/commissions/migrations/0001_seed_binary_bonus_periodic_task.py`)
 
 **Verification:**
 - [x] pytest test reproducing the doc example exactly: left 1,500 / right 600 → weak leg 600 → GHS 45.00 bonus, 900 PV carried forward
 - [x] pytest test: weekly cap enforcement, zero/tie-leg case, expired carry-forward exclusion
-- [ ] Scale test: seed 10k+ node tree, assert the task's DB query count does not grow with tree depth/width (reads aggregates only) -- applies to the not-yet-built batch driver, not the per-distributor function (which is already O(1) per leg)
+- [x] 14 tests in `tests/unit/commissions/test_binary_bonus_task.py` for the batch driver itself: fixed `run_at`, pending-PV-only iteration, per-distributor isolation, deleted-row survival, overlap lock (acquire/release/release-on-raise/renewal-under-load), interval self-sync (including the crontab-preservation and non-positive-value guards), and the all-failed guard. Full suite green (366 passed) after landing.
+- [ ] **Not done**: the specific 10k+-distributor scale test asserting the batch driver's own DB query count doesn't grow with distributor count/tree depth. The per-distributor function was already proven O(1)/O(log n) via a 16k+-node synthetic tree (Task 9/10), and the driver's own query shape is flat by construction (one `.iterator()`-based id query, then N already-O(1) calls) -- but that's reasoning, not a measurement, and this specific criterion from the original plan hasn't been exercised at scale. Revisit before go-live if a dedicated scale test is wanted.
+
+**13h (2026-07-22) — dedicated `security-and-hardening` pass on 13g**, run separately from the doubt-driven/code-review passes above at the user's request, since neither of those is a security specialist and this is explicitly a "financial platform" per `SPEC.md`. Two findings fixed directly (in-scope, cheap): `BINARY_BONUS_INTERVAL_MINUTES` now enforces a 5-minute floor, not just `> 0` (it has no `CONSTANCE_ADDITIONAL_FIELDS` bounds, so an admin typo could otherwise sync a near-zero interval straight into the live Celery Beat schedule and spam the shared worker pool -- no `CELERY_TASK_ROUTES` exists in this project, so every task competes for the same pool); and the lock-renewal comments in `tasks.py` were corrected to state the *actual* guarantee (renewal covers cumulative time across iterations, not one iteration itself running longer than `LOCK_TIMEOUT_SECONDS` -- a real but non-fund-loss gap, since the per-distributor row lock + weekly-cap re-read + PV depletion still bound the damage even if two cycles' `run_at` values ever did overlap). Four findings surfaced but **deliberately not implemented** without a scope decision:
+- No durable, queryable audit trail of what a cycle did (only ephemeral logs + Celery's 1-day-TTL Redis result backend; no `LOGGING` config, no `django_celery_results`, no `apps/commissions` model exists to persist a cycle-run record) -- OWASP A09, would need a new model + migration
+- No cycle-level anomaly detection / circuit breaker before payouts commit (a logic bug in the already-reviewed math would produce a "healthy-looking" summary and pay real money undetected) -- a genuinely new capability, not in Task 13's original scope
+- No dedicated Celery queue or `task_time_limit`/`soft_time_limit` for this (or any) task -- an infra-level change affecting every task in the project, not just this one
+- `BINARY_BONUS_RATE`/`WEEKLY_BINARY_BONUS_CAP` (and other money-affecting constance settings) have no server-side bounds and no maker-checker step -- touches `apps/platform_settings/config.py` broadly, beyond this task
+
+**13i (2026-07-22) — the two purely-additive 13h findings, implemented** (user confirmed: low-risk, go ahead; the other two -- circuit breaker, dedicated Celery queue -- remain deliberately unbuilt, see 13h).
+- **Durable audit trail**: `apps/commissions/models.py` (new) adds `BinaryBonusCycleRun` (one row per completed cycle: `run_at`, `evaluated`, `paid`, `failed`, `total_amount`) and `BinaryBonusCycleFailure` (one row per distributor whose call actually raised -- deliberately *not* one row per routine zero-payout skip, which stays at DEBUG per the existing convention in `services.py`, or this table would bloat at this platform's stated scale). `distributor_id` is a plain integer, not a `ForeignKey` -- proven necessary, not just asserted, by the "ghost" test (a distributor deleted mid-cycle still gets a failure row referencing an id that never existed as a live FK target). Persisted in `calculate_binary_bonus` *before* the systemic-failure raise, in its own best-effort try/except, so the one cycle most worth auditing (everyone failed) doesn't lose its record along with the exception. Read-only in Django Admin (`apps/commissions/admin.py`): `has_add/change/delete_permission` all hardcoded `False`, verified to actually hold even for superusers (every real admin account in this project is one) by reading Django's `_changeform_view`/`_delete_view` source directly -- `has_change_permission`/`has_delete_permission` are checked as direct method calls on POST, not through `request.user.has_perm(...)`, so they aren't subject to the superuser bypass the way `has_view_permission`'s default is. Migration: `apps/commissions/migrations/0002_initial.py`.
+- **Constance bounds**: `apps/platform_settings/config.py` adds `CONSTANCE_ADDITIONAL_FIELDS` (three custom-bounded form fields: `percentage_field` 0-100, `non_negative_money_field` floor-only, `interval_minutes_field` floor 5) and points `BINARY_BONUS_RATE`/`WEEKLY_BINARY_BONUS_CAP`/`BINARY_BONUS_INTERVAL_MINUTES` at them via constance's 3-tuple form -- defense in depth on top of 13h's runtime floor (stops a bad value at the admin form, not just before it reaches the live schedule). Zero is deliberately allowed for the rate and cap fields (not just `> 0`) since both already degrade to "pay nothing, no crash" at zero -- a legitimate incident-response pause lever -- proven end-to-end through the real payout path, not just at the form-field level, per a code-review finding that the original test only checked form acceptance.
+- **Review**: a fresh `code-review-and-quality` pass on this diff (separate from 13g's) found and fixed four real gaps before landing: the "ghost" test didn't actually assert the failure row it was meant to prove; no test existed for the admin's read-only-even-for-superusers claim (added `tests/feature/commissions/test_binary_bonus_cycle_run_admin.py`); the zero-rate/zero-cap safety claim rested on a manual trace, not a test (added both end-to-end); and `test_lock_survives_cumulative_processing_time_past_the_raw_ttl` (from 13g) was reproducibly flaky under isolation (3/5 failures) at its original 1s/0.6s margins -- widened to 3s/1.8s, confirmed stable across 4 isolated reruns after the fix.
 
 **Dependencies:** Task 9c, Task 10d, Task 3
 

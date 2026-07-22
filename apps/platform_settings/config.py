@@ -88,14 +88,17 @@ COMMISSION_AND_BONUS_SETTINGS = {
     "BINARY_BONUS_RATE": (
         Decimal("7.5"),
         "Percentage applied to the weak leg PV for every binary bonus calculation",
+        "percentage_field",
     ),
     "WEEKLY_BINARY_BONUS_CAP": (
         Decimal("50000"),
         "Maximum a distributor can earn per week from binary bonus (GHS)",
+        "non_negative_money_field",
     ),
     "BINARY_BONUS_INTERVAL_MINUTES": (
         10,
         "How often the background job calculates binary bonuses",
+        "interval_minutes_field",
     ),
     "DIRECT_REFERRAL_BONUS_RATE": (
         Decimal("10"),
@@ -324,6 +327,57 @@ GENERAL_PLATFORM_SETTINGS = {
         "",
         "Editable refund policy — no developer needed to update",
     ),
+}
+
+# Custom-bounded form fields for the small set of constance keys where an
+# unbounded admin form submission is a real risk, not just a typo the admin
+# would immediately notice -- added 2026-07-22 after a dedicated
+# security-and-hardening review of the Binary Bonus batch driver found
+# BINARY_BONUS_RATE/WEEKLY_BINARY_BONUS_CAP/BINARY_BONUS_INTERVAL_MINUTES
+# had no server-side bounds, so a single fat-fingered admin form submission
+# (e.g. 750 instead of 7.5) took effect immediately across the whole
+# distributor base with no review step. Scoped to exactly those three keys
+# -- other rate/cap settings in this file are a separate decision.
+# Field/widget classes are string paths, not direct imports, per
+# django-constance's own documented convention (avoids import-order issues
+# since this module is imported very early, from bancostore/settings.py).
+CONSTANCE_ADDITIONAL_FIELDS = {
+    "percentage_field": [
+        "django.forms.fields.DecimalField",
+        {
+            "widget": "django.forms.NumberInput",
+            "min_value": 0,
+            "max_value": 100,
+            "decimal_places": 2,
+        },
+    ],
+    "non_negative_money_field": [
+        "django.forms.fields.DecimalField",
+        {
+            "widget": "django.forms.NumberInput",
+            # No max: unlike a percentage, a GHS cap has no natural upper
+            # bound this codebase is positioned to guess at. 0 is allowed
+            # deliberately (see WEEKLY_BINARY_BONUS_CAP's fieldset entry) --
+            # apply_weekly_binary_bonus_cap already treats a 0 cap as "no
+            # room, pay nothing" with no crash, making it a legitimate
+            # incident-response lever to pause binary bonus payouts without
+            # touching the rate or disabling the whole job.
+            "min_value": 0,
+            "decimal_places": 2,
+        },
+    ],
+    "interval_minutes_field": [
+        "django.forms.fields.IntegerField",
+        {
+            "widget": "django.forms.NumberInput",
+            # Matches the runtime floor _sync_periodic_task_interval already
+            # enforces in apps/commissions/tasks.py -- this is defense in
+            # depth (stop the bad value at the form) on top of that (stop
+            # a bad value already in the DB, e.g. set via the ORM directly,
+            # from ever reaching the live Celery Beat schedule).
+            "min_value": 5,
+        },
+    ],
 }
 
 CONSTANCE_CONFIG = {

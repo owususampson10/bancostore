@@ -1,9 +1,37 @@
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.utils.module_loading import import_string
 
 import pytest
 from constance import config
+
+
+def _build_additional_field(name):
+    """Mirrors how constance.admin.ConstanceForm resolves a
+    CONSTANCE_ADDITIONAL_FIELDS entry -- builds the real form field
+    directly, in isolation from the admin form's version-hash/CSRF-style
+    machinery, so these tests exercise exactly the min/max validation this
+    project added and nothing else.
+
+    constance.admin resolves this project's string paths (config.py's
+    documented, import-order-safe convention) into real classes/instances
+    the first time it's imported, mutating settings.CONSTANCE_ADDITIONAL_
+    FIELDS in place -- confirmed via a real shell session, not assumed.
+    Handles both forms since which one this sees depends on whether
+    constance.admin has already been imported by the time a given test
+    runs (Django admin autodiscovery order), not on anything these tests
+    control."""
+    field_path, kwargs = settings.CONSTANCE_ADDITIONAL_FIELDS[name]
+    field_class = (
+        import_string(field_path) if isinstance(field_path, str) else field_path
+    )
+    kwargs = dict(kwargs)
+    widget = kwargs.get("widget")
+    if isinstance(widget, str):
+        kwargs["widget"] = import_string(widget)
+    return field_class(**kwargs)
 
 
 @pytest.mark.django_db
@@ -56,3 +84,76 @@ def test_section_15_key_rules_summary_defaults():
     assert config.KYC_REQUIRED is True
     assert config.COOLING_OFF_PERIOD_DAYS == 7
     assert config.COOLING_OFF_REFUND_DEDUCTION_RATE == Decimal("10")
+
+
+def test_the_three_money_affecting_keys_reference_their_bounded_fields():
+    """2026-07-22 security-and-hardening review: BINARY_BONUS_RATE,
+    WEEKLY_BINARY_BONUS_CAP, and BINARY_BONUS_INTERVAL_MINUTES had no
+    admin-form bounds -- a single fat-fingered value (e.g. 750 instead of
+    7.5) took effect immediately with no review step. Scoped to exactly
+    these three keys (the ones named in that review's findings for the
+    Binary Bonus batch driver) -- other rate/cap settings elsewhere in this
+    config are a separate decision, not made here."""
+    assert settings.CONSTANCE_CONFIG["BINARY_BONUS_RATE"][2] == "percentage_field"
+    assert (
+        settings.CONSTANCE_CONFIG["WEEKLY_BINARY_BONUS_CAP"][2]
+        == "non_negative_money_field"
+    )
+    assert (
+        settings.CONSTANCE_CONFIG["BINARY_BONUS_INTERVAL_MINUTES"][2]
+        == "interval_minutes_field"
+    )
+
+
+def test_binary_bonus_rate_field_rejects_a_fat_fingered_750():
+    field = _build_additional_field("percentage_field")
+    with pytest.raises(ValidationError):
+        field.clean("750")
+
+
+def test_binary_bonus_rate_field_accepts_the_seeded_default():
+    field = _build_additional_field("percentage_field")
+    assert field.clean("7.5") == Decimal("7.5")
+
+
+def test_binary_bonus_rate_field_rejects_negative():
+    field = _build_additional_field("percentage_field")
+    with pytest.raises(ValidationError):
+        field.clean("-1")
+
+
+def test_binary_bonus_rate_field_accepts_zero_as_a_deliberate_pause_lever():
+    """Same reasoning as WEEKLY_BINARY_BONUS_CAP's zero-acceptance test
+    below: a rate of 0 already pays nothing with no crash (see
+    tests/unit/commissions/test_binary_bonus_task.py's
+    test_a_zero_rate_pauses_bonus_accrual_without_erroring for the
+    end-to-end proof), so this is a legitimate lever, not an oversight."""
+    field = _build_additional_field("percentage_field")
+    assert field.clean("0") == Decimal("0")
+
+
+def test_weekly_binary_bonus_cap_field_rejects_negative():
+    field = _build_additional_field("non_negative_money_field")
+    with pytest.raises(ValidationError):
+        field.clean("-100")
+
+
+def test_weekly_binary_bonus_cap_field_accepts_zero_as_a_deliberate_pause_lever():
+    """apply_weekly_binary_bonus_cap already treats a cap of 0 as 'no room,
+    pay nothing' with no crash (services.py's remaining_room <= 0 branch) --
+    that's a legitimate incident-response lever (pause binary bonus payouts
+    without touching the rate or disabling the whole job), so the floor is
+    0, not 0.01."""
+    field = _build_additional_field("non_negative_money_field")
+    assert field.clean("0") == Decimal("0")
+
+
+def test_binary_bonus_interval_field_rejects_below_the_enforced_floor():
+    field = _build_additional_field("interval_minutes_field")
+    with pytest.raises(ValidationError):
+        field.clean("1")
+
+
+def test_binary_bonus_interval_field_accepts_the_seeded_default():
+    field = _build_additional_field("interval_minutes_field")
+    assert field.clean("10") == 10

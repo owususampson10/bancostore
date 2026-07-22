@@ -14,6 +14,7 @@ import dj_database_url
 # These become Django settings by being module-level names here, not by being
 # referenced below — the normal pattern for settings.py, not a real unused import.
 from apps.platform_settings.config import (  # noqa: F401
+    CONSTANCE_ADDITIONAL_FIELDS,
     CONSTANCE_CONFIG,
     CONSTANCE_CONFIG_FIELDSETS,
 )

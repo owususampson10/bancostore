@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–12 are done (Phases 0–3 complete, Phase 4's Commission Engine started); Task 13 (Binary
-Bonus task) is next.** What exists and is verified working:
+**Tasks 1–13 are done (Phases 0–3 complete, Phase 4's Commission Engine underway); Task 14
+(Matching Bonus) is next.** What exists and is verified working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -80,6 +80,25 @@ Bonus task) is next.** What exists and is verified working:
   `project_direct_referral_bonus_formula` memory. Sponsor gets an SMS notification (amount +
   referred distributor's name), wrapped so a notification failure can never roll back the
   already-committed credit.
+- **Binary Bonus (Task 13):** the per-distributor money math (weak-leg detection, weekly cap,
+  180-day carry-forward, 100-PV eligibility) shipped and was verified against real MySQL CI first;
+  the remaining piece — `apps/commissions/tasks.py::calculate_binary_bonus`, the Celery Beat batch
+  driver that actually runs it every `BINARY_BONUS_INTERVAL_MINUTES` for every distributor with
+  pending PV — landed 2026-07-21 after a `doubt-driven-development` cycle (fresh adversarial
+  review before implementation) and a `code-review-and-quality` pass after, both of which changed
+  the design: a per-iteration-renewed Redis lock (not just a one-shot timeout) preventing
+  overlapping cycles from minting two different `run_at` values, per-distributor exception
+  isolation covering the id-to-row lookup itself (not just the payout call), a systemic-failure
+  guard that raises instead of silently returning an all-zero summary if every distributor failed,
+  and a self-healing sync of the live `BINARY_BONUS_INTERVAL_MINUTES` constance setting into
+  `django_celery_beat`'s schedule (that setting would otherwise be purely decorative, unlike its
+  neighbors in the same admin fieldset) that explicitly leaves a crontab/solar/clocked-scheduled
+  task alone if an admin has repointed it via `django_celery_beat`'s own admin. Migration:
+  `apps/commissions/migrations/0001_seed_binary_bonus_periodic_task.py`. **Not done:** a dedicated
+  scale test asserting the batch driver's own query count stays flat at 10k+ distributors (see
+  `tasks/todo.md` Task 13's Verification section) — the per-distributor function was already proven
+  O(1)/O(log n) at 16k+ tree nodes in Task 9/10, and the driver's query shape is flat by
+  construction, but that's reasoning, not a measurement.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
