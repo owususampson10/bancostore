@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.hashers import make_password
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db.models import Q, Sum
+from django.db.models import Max, Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -561,9 +561,16 @@ def earnings_history(request):
                 transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT
             ),
         ),
+        last_withdrawal_at=Max(
+            "created_at",
+            filter=Q(
+                transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT
+            ),
+        ),
     )
     total_earned = totals["total_earned"] or Decimal("0")
     total_withdrawn = -(totals["total_withdrawn"] or Decimal("0"))
+    last_withdrawal_at = totals["last_withdrawal_at"]
 
     # OneToOneField's reverse accessor raises Wallet.DoesNotExist (an
     # AttributeError subclass) until the wallet is lazily created by a
@@ -583,6 +590,7 @@ def earnings_history(request):
             "balance": balance,
             "total_earned": total_earned,
             "total_withdrawn": total_withdrawn,
+            "last_withdrawal_at": last_withdrawal_at,
             "active_nav": "earnings_history",
         },
     )

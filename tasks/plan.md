@@ -109,9 +109,25 @@ matching bonus requires actual downline binary-bonus earnings, not just a qualif
 (GrandRoot herself earns no matching bonus — her downline never earned a binary bonus).
 
 ### Phase 5: Wallet & Withdrawal
-- [ ] Task 15: Wallet ledger — credit/debit entries, balance, earnings history view
-- [ ] Task 16: Withdrawal request flow — tax deduction, Paystack payout, admin approval —
-  **needs min/max withdrawal amount + withdrawal day decision**
+- [x] Task 15: Wallet ledger — credit/debit entries, balance, earnings history view. Built via
+  `spec-driven-development` (resolved a stale "Files likely touched" pointer and the empty-vs-
+  signed-amount design) → `planning-and-task-breakdown` (15a–15f) → TDD per slice, then dedicated
+  `security-and-hardening` and `code-review-and-quality` passes before the PR: the security pass
+  caught a `WalletAdmin` gap where a staff account could cascade-delete a distributor's entire
+  ledger via Django Admin's default delete action (fixed, mirroring `CommissionCycleRunAdmin`'s
+  full lockdown) and a missing role guard that crashed non-distributor accounts with a 500 instead
+  of a 403 (fixed); the review pass caught an unstable pagination sort with no tie-breaker (fixed).
+  Two follow-up rounds after merge, both caught by the user reviewing the live page rather than by
+  any test: a missing `<script src=".../main.js">` tag silently broke the sidebar's collapse
+  toggle (Alpine.js never loaded — found and fixed via a real headed-browser Playwright check, not
+  guessed at); and several elements from the approved Stitch design had been silently simplified
+  away on first build (the real brand logo, header notification icon + page label, a "Withdraw
+  Now" CTA, a last-withdrawal-date caption) — restored, plus keyboard-accessible hover popovers
+  added for the collapsed sidebar's icon-only nav. PDF/CSV export was raised and confirmed
+  out of scope per `SPEC.md`'s MVP scope section, not silently skipped. See `tasks/todo.md` Task
+  15's full notes and `CLAUDE.md`.
+- [ ] Task 16: Withdrawal request flow — tax deduction, Paystack payout, admin approval — **next
+  up; unblocked as of 2026-07-22 (Open Question #5 below resolved)**
 
 **Checkpoint F:** a distributor requests a withdrawal, tax is deducted correctly, admin approves,
 and a simulated Paystack payout succeeds.
@@ -169,9 +185,12 @@ and surviving a server reboot.
 3. ~~Email provider, Mailgun or Gmail SMTP~~ — resolved 2026-07-10: **Gmail SMTP**, verified with
    a real send (Task 4); revisit for Mailgun before real production volume
 4. Delivery zone fee table + free-delivery threshold — **needed before Task 17**
-5. Min/max withdrawal amount + withdrawal day — **needed before Task 16**
-6. Existing Paystack/mNotify accounts, or need to create them — **needed before Tasks 5, 10, 16,
-   17**. mNotify: confirmed. Paystack: still open.
+5. ~~Min/max withdrawal amount + withdrawal day~~ — resolved 2026-07-22: GHS 100 minimum, GHS
+   10,000 maximum per request, processed Fridays. Seeded in `apps/platform_settings/config.py`;
+   admin-editable, not a permanent code decision. Task 16 is now unblocked.
+6. ~~Existing Paystack/mNotify accounts, or need to create them~~ — resolved: mNotify confirmed
+   2026-07-11 (API key in hand); Paystack confirmed 2026-07-13 (test and live API keys in hand,
+   already used successfully in Tasks 10b/10c's registration-fee and starter-pack payments)
 7. ~~Confirm `pyenv` Python + Homebrew `mysql`/`redis` actually install cleanly on this Mac~~ —
    resolved: Python (already present, no `pyenv` needed) and Redis installed cleanly; MySQL did
    not, so local dev uses SQLite instead (see `SPEC.md` Local dev environment)

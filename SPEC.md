@@ -331,8 +331,10 @@ class BinaryBonusCalculator:
    sending cap (500/day) and deliverability aren't built for that.
 4. Exact delivery zone fee table and free-delivery threshold values (docs say "set by admin" —
    need real starting numbers to seed)
-5. Minimum/maximum withdrawal amount and withdrawal day (also "set by admin" in docs — need
-   concrete seed values)
+5. ~~Minimum/maximum withdrawal amount and withdrawal day~~ (also "set by admin" in docs) —
+   resolved 2026-07-22: minimum GHS 100, maximum GHS 10,000 per request, processed Fridays.
+   Seeded in `apps/platform_settings/config.py`'s `WITHDRAWAL_AND_PAYOUT_SETTINGS` — all three
+   are admin-editable constance settings, not hardcoded, so these are just the starting values.
 6. ~~Is there an existing Paystack/mNotify account already, or do these need to be created before
    integration work can start?~~ — resolved: mNotify confirmed, API key in hand (2026-07-11);
    Paystack confirmed, both test and live API keys in hand (2026-07-13).

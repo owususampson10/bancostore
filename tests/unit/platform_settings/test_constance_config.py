@@ -214,3 +214,54 @@ def test_matching_bonus_depth_field_accepts_zero_meaning_unlimited():
     edge case to exclude."""
     field = _build_additional_field("non_negative_depth_field")
     assert field.clean("0") == 0
+
+
+@pytest.mark.django_db
+def test_min_withdrawal_amount_and_max_withdrawal_amount_seeded_values():
+    assert config.MIN_WITHDRAWAL_AMOUNT == Decimal("100")
+    assert config.MAX_WITHDRAWAL_AMOUNT == Decimal("10000")
+
+
+@pytest.mark.django_db
+def test_withdrawal_day_seeded_value():
+    assert config.WITHDRAWAL_DAY == "friday"
+
+
+def test_validate_withdrawal_amount_bounds_rejects_min_above_max():
+    """CodeRabbit review, 2026-07-22: MIN_WITHDRAWAL_AMOUNT and
+    MAX_WITHDRAWAL_AMOUNT were each validated independently (both just
+    >= 0), so nothing stopped an admin from saving an inverted pair that
+    would make every withdrawal request permanently unsatisfiable."""
+    from apps.platform_settings.admin import validate_withdrawal_amount_bounds
+
+    with pytest.raises(ValidationError):
+        validate_withdrawal_amount_bounds(
+            {
+                "MIN_WITHDRAWAL_AMOUNT": Decimal("20000"),
+                "MAX_WITHDRAWAL_AMOUNT": Decimal("10000"),
+            }
+        )
+
+
+def test_validate_withdrawal_amount_bounds_accepts_min_below_max():
+    from apps.platform_settings.admin import validate_withdrawal_amount_bounds
+
+    validate_withdrawal_amount_bounds(
+        {
+            "MIN_WITHDRAWAL_AMOUNT": Decimal("100"),
+            "MAX_WITHDRAWAL_AMOUNT": Decimal("10000"),
+        }
+    )
+
+
+def test_validate_withdrawal_amount_bounds_accepts_equal_min_and_max():
+    """A single fixed withdrawal amount (min == max) is a legitimate
+    admin configuration, not an edge case to reject."""
+    from apps.platform_settings.admin import validate_withdrawal_amount_bounds
+
+    validate_withdrawal_amount_bounds(
+        {
+            "MIN_WITHDRAWAL_AMOUNT": Decimal("500"),
+            "MAX_WITHDRAWAL_AMOUNT": Decimal("500"),
+        }
+    )
