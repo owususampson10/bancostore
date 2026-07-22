@@ -6,13 +6,14 @@ from django.urls import reverse
 
 import pytest
 
-from apps.commissions.models import BinaryBonusCycleRun
+from apps.commissions.models import CommissionCycleRun
 
 RUN_AT = datetime(2020, 3, 10, 10, 0, tzinfo=dt_timezone.utc)
 
 
-def _make_cycle_run():
-    return BinaryBonusCycleRun.objects.create(
+def _make_cycle_run(job_name="calculate-binary-bonus"):
+    return CommissionCycleRun.objects.create(
+        job_name=job_name,
         run_at=RUN_AT,
         evaluated=5,
         paid=3,
@@ -30,7 +31,7 @@ def test_staff_can_view_a_cycle_run(staff_client):
     run = _make_cycle_run()
 
     response = staff_client.get(
-        reverse("admin:commissions_binarybonuscyclerun_change", args=[run.pk])
+        reverse("admin:commissions_commissioncyclerun_change", args=[run.pk])
     )
 
     assert response.status_code == 200
@@ -39,7 +40,7 @@ def test_staff_can_view_a_cycle_run(staff_client):
 
 @pytest.mark.django_db
 def test_staff_cannot_edit_a_cycle_run_even_as_superuser(staff_client):
-    """BinaryBonusCycleRunAdmin.has_change_permission returns a hardcoded
+    """CommissionCycleRunAdmin.has_change_permission returns a hardcoded
     False, which Django's admin checks directly on POST rather than
     through request.user.has_perm(...) -- unlike has_view_permission's
     default, this is NOT subject to the superuser has_perm bypass, even
@@ -49,7 +50,7 @@ def test_staff_cannot_edit_a_cycle_run_even_as_superuser(staff_client):
     run = _make_cycle_run()
 
     response = staff_client.post(
-        reverse("admin:commissions_binarybonuscyclerun_change", args=[run.pk]),
+        reverse("admin:commissions_commissioncyclerun_change", args=[run.pk]),
         {"evaluated": 999, "paid": 999, "failed": 999, "total_amount": "1.00"},
     )
 
@@ -62,12 +63,12 @@ def test_staff_cannot_edit_a_cycle_run_even_as_superuser(staff_client):
 @pytest.mark.django_db
 def test_staff_cannot_add_a_cycle_run_by_hand(staff_client):
     """This model is exclusively written by apps/commissions/tasks.py::
-    calculate_binary_bonus -- an admin-created row would be a fake audit
-    entry, defeating the entire point of the audit trail."""
-    response = staff_client.get(reverse("admin:commissions_binarybonuscyclerun_add"))
+    _persist_cycle_audit_record -- an admin-created row would be a fake
+    audit entry, defeating the entire point of the audit trail."""
+    response = staff_client.get(reverse("admin:commissions_commissioncyclerun_add"))
 
     assert response.status_code == 403
-    assert not BinaryBonusCycleRun.objects.exists()
+    assert not CommissionCycleRun.objects.exists()
 
 
 @pytest.mark.django_db
@@ -75,8 +76,26 @@ def test_staff_cannot_delete_a_cycle_run_even_as_superuser(staff_client):
     run = _make_cycle_run()
 
     response = staff_client.post(
-        reverse("admin:commissions_binarybonuscyclerun_delete", args=[run.pk])
+        reverse("admin:commissions_commissioncyclerun_delete", args=[run.pk])
     )
 
     assert response.status_code == 403
-    assert BinaryBonusCycleRun.objects.filter(pk=run.pk).exists()
+    assert CommissionCycleRun.objects.filter(pk=run.pk).exists()
+
+
+@pytest.mark.django_db
+def test_list_view_shows_which_job_produced_each_row(staff_client):
+    """job_name is what makes this table useful across bonus types instead
+    of one copy-pasted admin per job -- it must actually be visible/
+    filterable in the changelist, not just stored."""
+    _make_cycle_run(job_name="calculate-binary-bonus")
+    _make_cycle_run(job_name="calculate-matching-bonus")
+
+    response = staff_client.get(
+        reverse("admin:commissions_commissioncyclerun_changelist")
+    )
+
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert "calculate-binary-bonus" in body
+    assert "calculate-matching-bonus" in body

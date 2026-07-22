@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–13 are done (Phases 0–3 complete, Phase 4's Commission Engine underway); Task 14
-(Matching Bonus) is next.** What exists and is verified working:
+**Tasks 1–14 are done — Phase 4's Commission Engine (Direct Referral, Binary, Matching bonuses)
+is now complete; Phase 5 (Wallet & Withdrawal, Task 15) is next.** What exists and is verified
+working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -99,6 +100,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `tasks/todo.md` Task 13's Verification section) — the per-distributor function was already proven
   O(1)/O(log n) at 16k+ tree nodes in Task 9/10, and the driver's query shape is flat by
   construction, but that's reasoning, not a measurement.
+- **Matching Bonus (Task 14), completing the Commission Engine — sums each distributor's downline
+  binary-bonus earnings over the SPONSOR chain** (`Distributor.sponsor`, the recruitment lineage —
+  deliberately not `apps.binary_tree`'s placement tree, which diverges from it under spillover),
+  3 levels deep for Bronze / unlimited for Silver (hard-capped at `MAX_MATCHING_BONUS_WALK_DEPTH`
+  regardless), over a rolling 7-day window, crediting `MATCHING_BONUS_RATE`%. Built 2026-07-22 via
+  the full skills workflow up front (`spec-driven-development` to resolve the original task
+  description's real architectural gaps, `planning-and-task-breakdown`, TDD per slice,
+  `doubt-driven-development` before the batch driver, parallel `security-and-hardening` +
+  `code-review-and-quality`, `code-simplification`) rather than reactively after a CI incident, the
+  way Task 13's hardening was. A fresh-context `doubt-driven-development` review caught a bug before
+  any code shipped: the planned batch driver would have called
+  `process_matching_bonus_for_distributor` with an unsaved `Distributor(pk=id)` stub (mirroring
+  Binary Bonus's own convention) — but unlike Binary Bonus's function, this one needs `.rank`, and
+  the draft discarded its own locked-row fetch and read `.rank` off the stub instead, which always
+  resolves to `""` — silently paying nobody, ever, with zero exceptions. Fixed before implementation
+  (`apps/commissions/services.py::process_matching_bonus_for_distributor` uses `locked_distributor`
+  throughout), with a regression test proving it. The audit-trail model from Task 13
+  (`BinaryBonusCycleRun`/`Failure`) was generalized rather than duplicated — renamed to
+  `CommissionCycleRun`/`Failure` with a `job_name` discriminator — and `apps/commissions/tasks.py`
+  now shares `_run_commission_cycle`/`_sync_periodic_task_interval`/`_persist_cycle_audit_record`
+  between both bonus tasks (confirmed a pure, behavior-preserving refactor for
+  `calculate_binary_bonus` — its test suite needed only mechanical renames). The parallel review
+  pass found one real Medium-severity gap: Silver's unlimited depth combined with the lock only
+  renewing between distributors (never mid-walk) meant a pathologically deep sponsor chain could
+  theoretically outlast the lock, and unlike Binary Bonus, Matching Bonus has no weekly cap to bound
+  the resulting risk — fixed via the walk-depth ceiling, a `db_index` on `Distributor.rank`, and an
+  `Exists()`-based pre-filter query. **Deferred, not decided silently:** a per-distributor-per-cycle
+  cap (mirroring `WEEKLY_BINARY_BONUS_CAP`) would bound the blast radius of any future double-payment
+  bug — flagged as new scope, same as Task 13h's deferred circuit-breaker item, not built without a
+  decision. Migrations: `apps/commissions/migrations/0003_generalize_cycle_audit_models.py`,
+  `0004_seed_matching_bonus_periodic_task.py`. 425 tests passed locally; not yet pushed/verified
+  against real MySQL in CI as of this note.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,

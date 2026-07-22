@@ -157,3 +157,55 @@ def test_binary_bonus_interval_field_rejects_below_the_enforced_floor():
 def test_binary_bonus_interval_field_accepts_the_seeded_default():
     field = _build_additional_field("interval_minutes_field")
     assert field.clean("10") == 10
+
+
+def test_matching_bonus_rate_and_interval_keys_reference_their_bounded_fields():
+    """Task 14: same reasoning as the Binary Bonus fields above, applied
+    from the start this time instead of as a reactive follow-up."""
+    assert settings.CONSTANCE_CONFIG["MATCHING_BONUS_RATE"][2] == "percentage_field"
+    assert (
+        settings.CONSTANCE_CONFIG["MATCHING_BONUS_INTERVAL_DAYS"][2]
+        == "interval_days_field"
+    )
+
+
+def test_matching_bonus_interval_field_rejects_below_the_enforced_floor():
+    field = _build_additional_field("interval_days_field")
+    with pytest.raises(ValidationError):
+        field.clean("0")
+
+
+def test_matching_bonus_interval_field_accepts_the_seeded_default():
+    field = _build_additional_field("interval_days_field")
+    assert field.clean("7") == 7
+
+
+def test_matching_bonus_interval_field_accepts_a_daily_cadence():
+    """Unlike Binary Bonus's 5-minute floor, once-a-day (1) is a sane
+    matching-bonus cadence, not a DoS-risk value to guard against."""
+    field = _build_additional_field("interval_days_field")
+    assert field.clean("1") == 1
+
+
+def test_matching_bonus_depth_keys_reference_a_bounded_field():
+    assert (
+        settings.CONSTANCE_CONFIG["MATCHING_BONUS_DEPTH_BRONZE"][2]
+        == "non_negative_depth_field"
+    )
+    assert (
+        settings.CONSTANCE_CONFIG["MATCHING_BONUS_DEPTH_SILVER"][2]
+        == "non_negative_depth_field"
+    )
+
+
+def test_matching_bonus_depth_field_rejects_negative():
+    field = _build_additional_field("non_negative_depth_field")
+    with pytest.raises(ValidationError):
+        field.clean("-1")
+
+
+def test_matching_bonus_depth_field_accepts_zero_meaning_unlimited():
+    """0 is Silver's documented 'unlimited depth' sentinel, not an
+    edge case to exclude."""
+    field = _build_additional_field("non_negative_depth_field")
+    assert field.clean("0") == 0

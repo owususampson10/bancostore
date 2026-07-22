@@ -25,7 +25,12 @@ class Distributor(models.Model):
         blank=True,
         related_name="referrals",
     )
-    rank = models.CharField(max_length=50, blank=True, default="")
+    # db_index: apps.commissions.services.distributor_ids_eligible_for_
+    # matching_bonus filters on this every Matching Bonus cycle (Task 14,
+    # 2026-07-22 code-review finding) -- unindexed at this platform's
+    # stated "hundreds of thousands of users" scale would be a full-table
+    # scan on every cycle.
+    rank = models.CharField(max_length=50, blank=True, default="", db_index=True)
     kyc_status = models.CharField(
         max_length=20, choices=KycStatus.choices, default=KycStatus.PENDING
     )
