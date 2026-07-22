@@ -27,6 +27,7 @@ class WalletTransaction(models.Model):
     class TransactionType(models.TextChoices):
         DIRECT_REFERRAL_BONUS = "direct_referral_bonus", "Direct Referral Bonus"
         BINARY_BONUS = "binary_bonus", "Binary Bonus"
+        MATCHING_BONUS = "matching_bonus", "Matching Bonus"
 
     wallet = models.ForeignKey(
         Wallet, on_delete=models.CASCADE, related_name="transactions"

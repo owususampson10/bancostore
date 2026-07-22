@@ -14,9 +14,13 @@ from django_celery_beat.models import CrontabSchedule, IntervalSchedule, Periodi
 
 import apps.commissions.tasks as tasks_module
 from apps.binary_tree.models import BinaryTreeEdge
-from apps.commissions.models import BinaryBonusCycleFailure, BinaryBonusCycleRun
+from apps.commissions.models import CommissionCycleFailure, CommissionCycleRun
 from apps.commissions.services import process_binary_bonus_for_distributor
-from apps.commissions.tasks import LOCK_KEY, TASK_NAME, calculate_binary_bonus
+from apps.commissions.tasks import (
+    BINARY_BONUS_LOCK_KEY,
+    BINARY_BONUS_TASK_NAME,
+    calculate_binary_bonus,
+)
 from apps.distributors.models import Distributor
 from apps.pv_ledger.models import MonthlyPersonalPv, PvDailyBucket
 from apps.wallet.models import Wallet, WalletTransaction
@@ -133,7 +137,7 @@ def test_a_distributor_deleted_mid_batch_does_not_abort_the_batch(mock_now):
     raised deep inside process_binary_bonus_for_distributor without aborting
     the rest of the cycle. Also proves the failure gets a durable audit
     record keyed on the bare id -- this is exactly the scenario
-    BinaryBonusCycleFailure.distributor_id being a plain int rather than a
+    CommissionCycleFailure.distributor_id being a plain int rather than a
     ForeignKey exists for: a real Distributor FK would raise its own
     IntegrityError writing this row, since the referenced id never
     existed."""
@@ -151,8 +155,8 @@ def test_a_distributor_deleted_mid_batch_does_not_abort_the_batch(mock_now):
         summary = calculate_binary_bonus()
 
     assert WalletTransaction.objects.filter(wallet__distributor=survivor).exists()
-    run = BinaryBonusCycleRun.objects.get(run_at=RUN_AT)
-    ghost_failure = BinaryBonusCycleFailure.objects.get(
+    run = CommissionCycleRun.objects.get(run_at=RUN_AT)
+    ghost_failure = CommissionCycleFailure.objects.get(
         cycle_run=run, distributor_id=ghost_id
     )
     assert "matching query" in ghost_failure.error
@@ -165,14 +169,16 @@ def test_a_distributor_deleted_mid_batch_does_not_abort_the_batch(mock_now):
 def test_overlap_protection_a_concurrent_invocation_is_a_no_op():
     d = _make_distributor()
     _make_pending(d)
-    assert cache.add(LOCK_KEY, "1", 60)  # simulates a cycle already in flight
+    assert cache.add(
+        BINARY_BONUS_LOCK_KEY, "1", 60
+    )  # simulates a cycle already in flight
 
     summary = calculate_binary_bonus()
 
     assert summary == {"skipped": True, "reason": "previous cycle still in progress"}
     assert not Wallet.objects.filter(distributor=d).exists()
 
-    cache.delete(LOCK_KEY)
+    cache.delete(BINARY_BONUS_LOCK_KEY)
 
 
 @pytest.mark.django_db
@@ -186,7 +192,7 @@ def test_lock_is_released_after_a_successful_run_so_the_next_cycle_can_proceed(
 
     calculate_binary_bonus()
 
-    assert cache.get(LOCK_KEY) is None
+    assert cache.get(BINARY_BONUS_LOCK_KEY) is None
 
 
 @pytest.mark.django_db
@@ -204,7 +210,7 @@ def test_lock_is_released_even_if_the_batch_raises(mock_now):
         with pytest.raises(RuntimeError):
             calculate_binary_bonus()
 
-    assert cache.get(LOCK_KEY) is None
+    assert cache.get(BINARY_BONUS_LOCK_KEY) is None
 
 
 @pytest.mark.django_db
@@ -215,14 +221,14 @@ def test_interval_self_syncs_from_the_constance_setting():
     stale_schedule = IntervalSchedule.objects.create(
         every=15, period=IntervalSchedule.MINUTES
     )
-    task = PeriodicTask.objects.get(name=TASK_NAME)
+    task = PeriodicTask.objects.get(name=BINARY_BONUS_TASK_NAME)
     task.interval = stale_schedule
     task.save(update_fields=["interval"])
     config.BINARY_BONUS_INTERVAL_MINUTES = 20
 
     calculate_binary_bonus()
 
-    task = PeriodicTask.objects.get(name=TASK_NAME)
+    task = PeriodicTask.objects.get(name=BINARY_BONUS_TASK_NAME)
     assert task.interval.every == 20
     assert task.interval.period == IntervalSchedule.MINUTES
 
@@ -232,7 +238,7 @@ def test_missing_periodic_task_row_does_not_break_the_cycle():
     """No PeriodicTask row exists (e.g. it was deleted, or this environment
     never ran the seeding migration) -- the interval-sync step must degrade
     gracefully rather than blowing up the whole cycle."""
-    PeriodicTask.objects.filter(name=TASK_NAME).delete()
+    PeriodicTask.objects.filter(name=BINARY_BONUS_TASK_NAME).delete()
     d = _make_distributor()
     _make_pending(d)
 
@@ -279,7 +285,7 @@ def test_no_pending_distributors_is_not_treated_as_total_failure():
 def test_lock_survives_cumulative_processing_time_past_the_raw_ttl(mock_now):
     """Without per-iteration renewal, a batch whose CUMULATIVE processing
     time (across many fast distributors, not necessarily one slow one)
-    exceeds LOCK_TIMEOUT_SECONDS would lose the lock mid-cycle, letting a
+    exceeds BINARY_BONUS_LOCK_TIMEOUT_SECONDS would lose the lock mid-cycle, letting a
     second Beat trigger start a genuinely concurrent cycle with a different
     run_at. Patches the timeout down to 3 seconds, processes two
     distributors with a 1.8s pause after each (neither pause alone exceeds
@@ -311,11 +317,13 @@ def test_lock_survives_cumulative_processing_time_past_the_raw_ttl(mock_now):
         calls["n"] += 1
         time.sleep(1.8)
         if calls["n"] == 2:
-            observed["lock_still_held"] = not cache.add(LOCK_KEY, "intruder", 60)
+            observed["lock_still_held"] = not cache.add(
+                BINARY_BONUS_LOCK_KEY, "intruder", 60
+            )
         return result
 
     with (
-        patch.object(tasks_module, "LOCK_TIMEOUT_SECONDS", 3),
+        patch.object(tasks_module, "BINARY_BONUS_LOCK_TIMEOUT_SECONDS", 3),
         patch.object(
             tasks_module,
             "process_binary_bonus_for_distributor",
@@ -335,7 +343,7 @@ def test_sync_leaves_a_crontab_scheduled_task_alone():
     silently fight that by reverting it to an IntervalSchedule every
     cycle."""
     crontab = CrontabSchedule.objects.create(minute="0", hour="6-22")
-    task = PeriodicTask.objects.get(name=TASK_NAME)
+    task = PeriodicTask.objects.get(name=BINARY_BONUS_TASK_NAME)
     task.interval = None
     task.crontab = crontab
     task.save(update_fields=["interval", "crontab"])
@@ -350,7 +358,7 @@ def test_sync_leaves_a_crontab_scheduled_task_alone():
 
 @pytest.mark.django_db
 def test_sync_ignores_a_non_positive_interval_setting():
-    task = PeriodicTask.objects.get(name=TASK_NAME)
+    task = PeriodicTask.objects.get(name=BINARY_BONUS_TASK_NAME)
     original_every = task.interval.every
     config.BINARY_BONUS_INTERVAL_MINUTES = 0
 
@@ -368,7 +376,7 @@ def test_sync_ignores_a_positive_interval_below_the_enforced_floor():
     into the real Celery Beat schedule and spam the shared worker pool
     (2026-07-22 security-and-hardening review). 1 is positive, so this
     specifically exercises the floor check, not the <= 0 guard above."""
-    task = PeriodicTask.objects.get(name=TASK_NAME)
+    task = PeriodicTask.objects.get(name=BINARY_BONUS_TASK_NAME)
     original_every = task.interval.every
     config.BINARY_BONUS_INTERVAL_MINUTES = 1
 
@@ -392,7 +400,7 @@ def test_a_completed_cycle_persists_a_durable_audit_record(mock_now):
 
     calculate_binary_bonus()
 
-    run = BinaryBonusCycleRun.objects.get(run_at=RUN_AT)
+    run = CommissionCycleRun.objects.get(run_at=RUN_AT)
     assert run.evaluated == 1
     assert run.paid == 1
     assert run.failed == 0
@@ -411,7 +419,7 @@ def test_a_cycle_with_no_pending_distributors_still_persists_a_heartbeat_record(
 
     calculate_binary_bonus()
 
-    run = BinaryBonusCycleRun.objects.get(run_at=RUN_AT)
+    run = CommissionCycleRun.objects.get(run_at=RUN_AT)
     assert run.evaluated == 0
     assert run.paid == 0
     assert run.failed == 0
@@ -444,8 +452,8 @@ def test_a_per_distributor_failure_is_recorded_with_its_error(mock_now):
     ):
         calculate_binary_bonus()
 
-    run = BinaryBonusCycleRun.objects.get(run_at=RUN_AT)
-    failure = BinaryBonusCycleFailure.objects.get(cycle_run=run)
+    run = CommissionCycleRun.objects.get(run_at=RUN_AT)
+    failure = CommissionCycleFailure.objects.get(cycle_run=run)
     assert failure.distributor_id == failing.pk
     assert "simulated database blip" in failure.error
 
@@ -478,10 +486,10 @@ def test_routine_skips_are_not_persisted_as_failures(mock_now):
 
     calculate_binary_bonus()
 
-    run = BinaryBonusCycleRun.objects.get(run_at=RUN_AT)
+    run = CommissionCycleRun.objects.get(run_at=RUN_AT)
     assert run.evaluated == 1
     assert run.failed == 0
-    assert not BinaryBonusCycleFailure.objects.filter(cycle_run=run).exists()
+    assert not CommissionCycleFailure.objects.filter(cycle_run=run).exists()
 
 
 @pytest.mark.django_db
@@ -503,10 +511,10 @@ def test_audit_record_survives_even_when_the_cycle_raises(mock_now):
         with pytest.raises(RuntimeError):
             calculate_binary_bonus()
 
-    run = BinaryBonusCycleRun.objects.get(run_at=RUN_AT)
+    run = CommissionCycleRun.objects.get(run_at=RUN_AT)
     assert run.evaluated == 1
     assert run.failed == 1
-    failure = BinaryBonusCycleFailure.objects.get(cycle_run=run)
+    failure = CommissionCycleFailure.objects.get(cycle_run=run)
     assert "systemic bug" in failure.error
 
 

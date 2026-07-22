@@ -1,18 +1,28 @@
 from django.db import models
 
 
-class BinaryBonusCycleRun(models.Model):
-    """One durable row per apps/commissions/tasks.py::calculate_binary_bonus
-    invocation that actually ran a cycle (not a skipped/overlap no-op --
-    that path returns before run_at is even generated). Added 2026-07-22
-    after a dedicated security-and-hardening review: this is a financial
-    job with no human review per cycle, and its only prior record of what
-    a given run did was ephemeral Python logging (no LOGGING config exists
-    in this project) plus Celery's Redis result backend (1-day TTL, not
-    queryable). This is the record a support inquiry or incident review
-    can still find weeks later."""
+class CommissionCycleRun(models.Model):
+    """One durable row per commission batch-driver cycle that actually ran
+    (not a skipped/overlap no-op -- that path returns before run_at is
+    even generated). Originally `BinaryBonusCycleRun`, Binary-Bonus-only
+    (Task 13, 2026-07-22) after a dedicated security-and-hardening
+    review: these are financial jobs with no human review per cycle, and
+    the only prior record of what a given run did was ephemeral Python
+    logging (no LOGGING config exists in this project) plus Celery's
+    Redis result backend (1-day TTL, not queryable). Generalized across
+    bonus types the same day, once Task 14's Matching Bonus needed the
+    identical guarantee -- a `job_name` discriminator instead of a second
+    copy-pasted model pair, since Direct Referral Bonus is a plausible
+    third consumer later and this pattern shouldn't be re-invented per
+    bonus type. `job_name` is each task's own TASK_NAME constant (see
+    apps/commissions/tasks.py), not a separate naming scheme.
 
-    run_at = models.DateTimeField(unique=True)
+    Uniqueness is scoped to (job_name, run_at), not run_at alone --
+    two different jobs' independently-generated timezone.now() values
+    are not guaranteed distinct just because collision is improbable."""
+
+    job_name = models.CharField(max_length=50)
+    run_at = models.DateTimeField()
     evaluated = models.PositiveIntegerField()
     paid = models.PositiveIntegerField()
     failed = models.PositiveIntegerField()
@@ -21,19 +31,24 @@ class BinaryBonusCycleRun(models.Model):
 
     class Meta:
         ordering = ["-run_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["job_name", "run_at"], name="unique_job_name_run_at"
+            )
+        ]
 
     def __str__(self):
-        return f"Binary Bonus cycle {self.run_at.isoformat()}"
+        return f"{self.job_name} cycle {self.run_at.isoformat()}"
 
 
-class BinaryBonusCycleFailure(models.Model):
-    """One row per distributor whose process_binary_bonus_for_distributor
-    call raised during a cycle -- NOT one row per routine zero-payout skip
-    (ineligible / zero-weak-leg / cap-exhausted are expected, high-volume
-    outcomes already covered by DEBUG logging in apps/commissions/
-    services.py; persisting every one of those here would defeat the point
-    of that existing design and bloat this table at this platform's stated
-    scale).
+class CommissionCycleFailure(models.Model):
+    """One row per distributor whose per-distributor processing call
+    raised during a cycle -- NOT one row per routine zero-payout skip
+    (ineligible / zero-weak-leg / cap-exhausted / no-downline-earnings
+    are expected, high-volume outcomes already covered by DEBUG logging
+    in apps/commissions/services.py; persisting every one of those here
+    would defeat the point of that existing design and bloat this table
+    at this platform's stated scale).
 
     Deliberately not a ForeignKey to Distributor -- one of the failure
     modes this table exists to record is a distributor row deleted
@@ -42,7 +57,7 @@ class BinaryBonusCycleFailure(models.Model):
     rather than being unrepresentable or cascading away with it."""
 
     cycle_run = models.ForeignKey(
-        BinaryBonusCycleRun, on_delete=models.CASCADE, related_name="failures"
+        CommissionCycleRun, on_delete=models.CASCADE, related_name="failures"
     )
     distributor_id = models.PositiveIntegerField()
     error = models.TextField()

@@ -107,15 +107,23 @@ COMMISSION_AND_BONUS_SETTINGS = {
     "MATCHING_BONUS_RATE": (
         Decimal("5"),
         "Percentage earned on downline binary earnings",
+        "percentage_field",
     ),
     "MATCHING_BONUS_DEPTH_BRONZE": (
         3,
         "How many levels deep matching bonus goes for Bronze rank distributors",
+        "non_negative_depth_field",
     ),
     "MATCHING_BONUS_DEPTH_SILVER": (
         0,
         "How many levels deep matching bonus goes for Silver rank distributors "
         "(0 = unlimited)",
+        "non_negative_depth_field",
+    ),
+    "MATCHING_BONUS_INTERVAL_DAYS": (
+        7,
+        "How often the background job calculates matching bonuses",
+        "interval_days_field",
     ),
     "MIN_MONTHLY_PERSONAL_PV": (
         100,
@@ -376,6 +384,36 @@ CONSTANCE_ADDITIONAL_FIELDS = {
             # a bad value already in the DB, e.g. set via the ORM directly,
             # from ever reaching the live Celery Beat schedule).
             "min_value": 5,
+        },
+    ],
+    "interval_days_field": [
+        "django.forms.fields.IntegerField",
+        {
+            "widget": "django.forms.NumberInput",
+            # Same reasoning as interval_minutes_field, scaled to a
+            # days-cadence job (Matching Bonus) rather than a
+            # minutes-cadence one (Binary Bonus) -- a floor of 1, not 5,
+            # since "once a day" is still a perfectly sane matching-bonus
+            # cadence, unlike "every 5 minutes" being the practical floor
+            # for a job with real per-distributor DB work.
+            "min_value": 1,
+        },
+    ],
+    "non_negative_depth_field": [
+        "django.forms.fields.IntegerField",
+        {
+            "widget": "django.forms.NumberInput",
+            # A negative depth already degrades safely (sum_downline_
+            # binary_bonus_earnings's depth >= max_depth check trips on
+            # the very first iteration, returning 0 rather than paying
+            # anything -- confirmed 2026-07-22 security-and-hardening
+            # review), so this bound isn't closing a real exploit. Added
+            # for consistency with this file's own stated policy of
+            # bounding admin-editable numeric fields, and so a
+            # fat-fingered negative value fails loudly on the form
+            # instead of silently and confusingly zeroing out an admin's
+            # intended depth.
+            "min_value": 0,
         },
     ],
 }
