@@ -82,9 +82,11 @@ def record_purchase_pv(distributor, pv_amount):
 def _credit_daily_buckets(ancestor_ids, leg, pv_amount, today, max_retries=3):
     """Credits `pv_amount` to today's PvDailyBucket row for every id in
     `ancestor_ids` on `leg` -- creating the row on first credit of the
-    day, incrementing it otherwise. Two bulk statements per attempt (a
-    locking existence-check read, then either a bulk UPDATE or a
-    bulk_create depending what that same read found), matching
+    day, incrementing it otherwise. Up to three statements per attempt (a
+    locking existence-check read, then a bulk UPDATE for whichever ids
+    that read found already have a row today, and/or a bulk_create for
+    whichever it found missing -- both can run in the same attempt for a
+    mixed batch, they aren't mutually exclusive), matching
     record_purchase_pv's own PvLedger pattern -- never one query per
     ancestor, however deep the tree.
 
