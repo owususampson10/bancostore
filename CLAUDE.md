@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–14 are done — Phase 4's Commission Engine (Direct Referral, Binary, Matching bonuses)
-is now complete; Phase 5 (Wallet & Withdrawal, Task 15) is next.** What exists and is verified
-working:
+**Tasks 1–15 are done — Phase 4's Commission Engine (Direct Referral, Binary, Matching bonuses) and
+Task 15 (Wallet ledger, the first slice of Phase 5) are complete; Task 16 (Withdrawal request flow)
+is next.** What exists and is verified working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -140,6 +140,36 @@ working:
   raising it would have silently skipped earnings past the stale window) plus a docstring that
   overclaimed matching bonus's overlap-safety (it has *less* double-pay protection than Binary
   Bonus, not more — the cache lock is its sole defense, not a backstop). Both fixed pre-merge.
+- **Wallet ledger (Task 15):** `apps/wallet/services.py::debit()`, symmetric to the pre-existing
+  `credit()` (same validation shape, same race-free atomic conditional `.update()`, same no-self-retry
+  docstring contract), storing a *negative* `WalletTransaction.amount` so `Wallet.balance` always
+  literally equals `SUM(WalletTransaction.amount)` for that wallet -- no caller of `debit()` exists
+  yet (Tasks 16/19 will be the first). `Wallet` gained a `CheckConstraint(balance__gte=0)`, mirroring
+  `PvDailyBucket`'s established defense-in-depth reasoning. `WalletTransactionInline` and `WalletAdmin`
+  itself both now hard-lock `has_add/change/delete_permission` to `False` (not just `readonly_fields`),
+  mirroring `CommissionCycleRunAdmin` from Task 13 completely -- a `security-and-hardening` pass
+  caught that only the inline had been locked down initially, leaving `WalletAdmin`'s own default
+  delete action able to cascade-delete an entire distributor's ledger. Also built: `earnings_history`
+  (`apps/distributors/views.py`), a distributor's own paginated wallet ledger page, unconditionally
+  scoped to `request.user.distributor` (no id/param IDOR surface), guarded by
+  `apps.accounts.permissions.is_distributor` (previously dead code, now wired in) so an authenticated
+  non-distributor gets a clean 403 instead of a 500. Its UI came from a Stitch screen ("Earnings
+  History - Bancostore Distributor", project `14456046746368120137`) that was fetched and verified
+  against the original design prompt before building -- verification caught two real gaps (no true
+  desktop icon-only sidebar collapse, only a mobile drawer; no empty-state design), both built by
+  hand. `templates/distributors/base_dashboard.html` is the first shared, collapsible sidebar app
+  shell in this codebase (Alpine.js, collapse state persisted to `localStorage`), and
+  `templates/distributors/dashboard.html` (Task 20's placeholder) was migrated onto it so the sidebar
+  doesn't disappear when navigating between Dashboard and Earnings History. See `tasks/todo.md`
+  Task 15's 15a-15f breakdown for the full build/review history, including the pagination
+  stable-ordering bug (`order_by("-created_at")` with no tie-breaker could skip/duplicate a row
+  across a page boundary on a timestamp collision, fixed by adding `"-pk"`) caught by
+  `code-review-and-quality`. **Not yet done:** taken through the branch → PR → CI (real MySQL) →
+  CodeRabbit → merge workflow used for Tasks 13/14 -- still on `main` locally. **Deferred, not
+  silently skipped:** the same unguarded `request.user.distributor` pattern this task fixed in
+  `earnings_history` still exists in `select_starter_pack`, `start_kyc_verification`, and `dashboard`
+  (pre-existing, untouched here) -- both review passes suggested a shared `@distributor_required`
+  decorator applied codebase-wide as a fast-follow.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
