@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'assets/main.css' %}">
+<script src="{% static 'assets/main.js' %}" defer></script>
 </head>
 {# Shared collapsible-sidebar app shell for the distributor dashboard family #}
 {# (Task 15d). Same pattern (collapsed/mobileOpen state, nav list, main #}
@@ -39,6 +40,25 @@
 <button type="button" class="hidden md:flex p-2 rounded-full hover:bg-surface-container-low text-gray-muted" x-on:click="collapsed = !collapsed" aria-label="Toggle sidebar">
 <span class="material-symbols-outlined text-[20px]" x-text="collapsed ? 'chevron_right' : 'chevron_left'"></span>
 </button>
+</div>
+
+{# Icon-initial avatar, not a KYC selfie image -- DiditVerification.selfie_image #}
+{# is collected for identity-verification compliance, not for reuse as a casual #}
+{# UI avatar, so this deliberately doesn't wire that up. #}
+<div class="px-4 mb-6">
+<div class="flex items-center gap-3 p-3 rounded-xl bg-surface-container-low" :class="collapsed && 'justify-center px-0'">
+<div class="w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-sm flex-shrink-0">
+{% if request.user.distributor.full_name %}
+{{ request.user.distributor.full_name|slice:":1"|upper }}
+{% else %}
+<span class="material-symbols-outlined text-[20px]">person</span>
+{% endif %}
+</div>
+<div class="overflow-hidden" x-show="!collapsed" x-cloak>
+<p class="font-label-md text-label-md text-on-surface truncate">{{ request.user.distributor.full_name|default:"Distributor" }}</p>
+<p class="text-[10px] text-gray-muted truncate">ID: {{ request.user.distributor.ir_id|default:"Pending" }}</p>
+</div>
+</div>
 </div>
 
 <nav class="flex-1 space-y-1 px-3 overflow-y-auto">
