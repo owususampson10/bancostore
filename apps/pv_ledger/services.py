@@ -9,7 +9,10 @@ from django.utils import timezone
 from constance import config
 
 from apps.binary_tree.models import BinaryTreeEdge
-from bancostore.concurrency import RETRY_BACKOFF_SECONDS
+from bancostore.concurrency import (
+    RETRY_BACKOFF_SECONDS,
+    select_for_update_nowait_if_supported,
+)
 
 from .models import MonthlyPersonalPv, PvDailyBucket, PvLedger
 
@@ -79,10 +82,13 @@ def record_purchase_pv(distributor, pv_amount):
 def _credit_daily_buckets(ancestor_ids, leg, pv_amount, today, max_retries=3):
     """Credits `pv_amount` to today's PvDailyBucket row for every id in
     `ancestor_ids` on `leg` -- creating the row on first credit of the
-    day, incrementing it otherwise. Two bulk statements per attempt (a
-    bulk UPDATE, then a bulk_create for whoever didn't already have a row
-    today), matching record_purchase_pv's own PvLedger pattern -- never
-    one query per ancestor, however deep the tree.
+    day, incrementing it otherwise. Up to three statements per attempt (a
+    locking existence-check read, then a bulk UPDATE for whichever ids
+    that read found already have a row today, and/or a bulk_create for
+    whichever it found missing -- both can run in the same attempt for a
+    mixed batch, they aren't mutually exclusive), matching
+    record_purchase_pv's own PvLedger pattern -- never one query per
+    ancestor, however deep the tree.
 
     `ancestor_ids` is expected to already be deduplicated and to exclude
     the purchasing distributor -- it's the exact left_ids/right_ids list
@@ -90,6 +96,43 @@ def _credit_daily_buckets(ancestor_ids, leg, pv_amount, today, max_retries=3):
     DB constraint banning ancestor == descendant and a unique constraint
     on (ancestor, descendant), so both properties already hold), reused
     here rather than recomputed.
+
+    **2026-07-22: fixed a real silent-credit-loss bug caught by real MySQL
+    in CI** (a 10-way concurrent-thread test reported zero exceptions but
+    landed 90 PV instead of 100 -- see tests/unit/pv_ledger/
+    test_daily_buckets.py::
+    test_concurrent_first_of_day_credits_to_the_same_ancestor_never_lose_pv).
+    The PREVIOUS version ran a blind bulk UPDATE first (matching 0 rows
+    when nothing exists yet for today), THEN a separate plain SELECT to
+    decide what's still missing. Confirmed against MySQL 8.0's own InnoDB
+    consistent-read docs: under REPEATABLE READ, an UPDATE does NOT
+    establish the transaction's snapshot for later plain SELECTs -- "the
+    snapshot of the database state applies to SELECT statements... not
+    necessarily to DML statements" -- so that later SELECT establishes its
+    OWN fresh snapshot, independent of what the UPDATE saw. If another
+    transaction committed an INSERT for this exact row in the gap between
+    this transaction's UPDATE and its own later SELECT, that SELECT would
+    see the row as "already existing" and skip both the UPDATE (already
+    ran, before the row existed, so never touched it) and the bulk_create
+    (skipped, since the row is no longer "missing") -- silently dropping
+    this attempt's whole pv_amount with no exception anywhere. Only
+    possible under MySQL's per-statement snapshot semantics; SQLite
+    serializes all writes at the whole-database level, so this specific
+    interleaving can't occur there, which is exactly why it only ever
+    surfaced in CI.
+
+    Fixed by using ONE locking read (select_for_update_nowait_if_
+    supported, this project's own established helper) to determine BOTH
+    which ids already have a row (-> UPDATE) and which don't (-> INSERT),
+    instead of independently re-deriving that answer via a second, later,
+    freshly-snapshotted read. There's no longer a window where the
+    UPDATE-set and the INSERT-set can disagree with each other, because
+    they're now derived from the exact same read. (This is not primarily
+    about lock acquisition on the missing rows -- confirmed against
+    MySQL's own locking-reads docs that a unique-index equality lookup
+    matching zero rows takes no gap lock at all, so two transactions can
+    still race to be the first to create the row; that race was already
+    handled correctly by the IntegrityError retry below, and still is.)
 
     Unlike PvLedger rows (which always pre-exist once a distributor is
     placed), a PvDailyBucket row doesn't exist until the first credit of
@@ -102,15 +145,13 @@ def _credit_daily_buckets(ancestor_ids, leg, pv_amount, today, max_retries=3):
     trying to CREATE the same new row, so it needs this function's own
     bounded retry in addition to, not instead of, that helper. Any
     genuine lock-contention OperationalError raised along the way (e.g.
-    a MySQL deadlock during the bulk_create) is NOT caught here -- it
-    propagates to the outer retry_on_lock_contention wrapper that
-    already surrounds the whole purchase attempt in
-    consume_paid_starter_pack, exactly like this same function's bulk
-    UPDATE call above already relies on for its own OperationalErrors.
-    Catching it here too would nest a second retry loop on the same
-    error class the outer wrapper already retries -- the exact
-    amplification bug this project already found and fixed once in
-    apps/wallet/services.py::credit().
+    from the NOWAIT existence-check read itself, or a MySQL deadlock
+    during the bulk_create) is NOT caught here -- it propagates to the
+    outer retry_on_lock_contention wrapper that already surrounds the
+    whole purchase attempt in consume_paid_starter_pack. Catching it here
+    too would nest a second retry loop on the same error class the outer
+    wrapper already retries -- the exact amplification bug this project
+    already found and fixed once in apps/wallet/services.py::credit().
 
     Raises RuntimeError (does not silently drop the credit) if retries
     are exhausted -- this aborts the caller's whole purchase transaction
@@ -137,16 +178,20 @@ def _credit_daily_buckets(ancestor_ids, leg, pv_amount, today, max_retries=3):
             # releases or rolls back to the savepoint when exiting an
             # inner block." https://docs.djangoproject.com/en/5.0/topics/db/transactions/#savepoints
             with transaction.atomic():
-                PvDailyBucket.objects.filter(
-                    distributor_id__in=remaining_ids, leg=leg, date=today
-                ).update(pv=F("pv") + pv_amount)
-
                 existing_ids = set(
-                    PvDailyBucket.objects.filter(
-                        distributor_id__in=remaining_ids, leg=leg, date=today
+                    select_for_update_nowait_if_supported(
+                        PvDailyBucket.objects.filter(
+                            distributor_id__in=remaining_ids, leg=leg, date=today
+                        )
                     ).values_list("distributor_id", flat=True)
                 )
                 missing_ids = [d for d in remaining_ids if d not in existing_ids]
+
+                if existing_ids:
+                    PvDailyBucket.objects.filter(
+                        distributor_id__in=existing_ids, leg=leg, date=today
+                    ).update(pv=F("pv") + pv_amount)
+
                 if missing_ids:
                     PvDailyBucket.objects.bulk_create(
                         [
@@ -158,19 +203,21 @@ def _credit_daily_buckets(ancestor_ids, leg, pv_amount, today, max_retries=3):
                     )
             return
         except IntegrityError:
-            # A concurrent transaction created one of these rows between
-            # our existence check and our own insert. The whole attempt
-            # rolled back together, INCLUDING the bulk UPDATE above --
-            # so anyone in `remaining_ids` who already had a row (and
-            # got incremented by that update) needs to be retried too,
-            # not just the ones that were missing. Do NOT narrow
-            # remaining_ids to missing_ids here: that was correct back
-            # when only the create step was wrapped in a savepoint (the
-            # update had already durably committed by then), but once
-            # the whole attempt became one atomic block, narrowing
-            # silently drops the rolled-back update for anyone not in
-            # missing_ids -- found via a real threaded test that lost
-            # exactly this PV with zero exceptions raised.
+            # Two transactions' existence-check reads both matched zero
+            # rows for the same id (expected and unavoidable: a unique-
+            # index lookup that matches nothing takes no lock in InnoDB,
+            # confirmed against MySQL's own locking-reads docs -- so this
+            # isn't preventable by the select_for_update above, only
+            # detectable after the fact), and both tried to bulk_create
+            # it; one loses. The whole attempt rolled back together,
+            # INCLUDING the bulk UPDATE for anyone else in `remaining_ids`
+            # who DID already have a row -- so they need to be retried
+            # too, not just the id that collided. Do NOT narrow
+            # remaining_ids here: a prior version of this function
+            # narrowed to just the missing ids at this point, which
+            # silently dropped the rolled-back update for anyone not in
+            # that set -- found via a real threaded test that lost
+            # exactly that PV with zero exceptions raised.
             logger.warning(
                 "_credit_daily_buckets: attempt=%s hit a concurrent insert "
                 "for leg=%s date=%s -- retrying ancestor_ids=%s.",
