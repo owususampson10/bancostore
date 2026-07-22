@@ -13,6 +13,11 @@ class Distributor(models.Model):
         APPROVED = "approved", "Approved"
         REJECTED = "rejected", "Rejected"
 
+    class MobileMoneyNetwork(models.TextChoices):
+        MTN = "mtn", "MTN MoMo"
+        TELECEL = "telecel", "Telecel Cash"
+        AIRTELTIGO = "airteltigo", "AirtelTigo Money"
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -77,6 +82,25 @@ class Distributor(models.Model):
     )
     starter_pack_confirmed_at = models.DateTimeField(null=True, blank=True)
 
+    # Task 16a (ADR-0004): where Paystack Transfer sends a withdrawal
+    # payout. Flat fields, not a separate model -- these are a core,
+    # directly-owned identity attribute like phone_number, not an
+    # externally-sourced structured response like DiditVerification.
+    # blank=True/default="" on both (never null=True) to match every other
+    # optional field on this model. Deliberately no per-distributor
+    # uniqueness constraint -- shared household mobile money wallets are a
+    # real, legitimate pattern in Ghana; sponsor/downline collusion via a
+    # shared destination is an admin-monitoring concern, not a schema-level
+    # block that would also reject genuine distributors. Deliberately no
+    # verification flag (unlike phone_number/phone_verified) -- building a
+    # second OTP-adjacent flow now would be new scope; Paystack's Transfer
+    # Recipient creation (Task 16e) is where an invalid number first
+    # actually gets caught.
+    mobile_money_number = PhoneNumberField(blank=True, default="")
+    mobile_money_network = models.CharField(
+        max_length=20, choices=MobileMoneyNetwork.choices, blank=True, default=""
+    )
+
     # Task 11 (observability-and-instrumentation retrospective, 2026-07-14):
     # audit trail for kyc_status/ir_id changes -- who approved/rejected a
     # distributor's KYC, and when. CLAUDE.md already called for this ("log
@@ -84,11 +108,41 @@ class Distributor(models.Model):
     # no model anywhere in the codebase had HistoricalRecords() attached
     # until this retrospective. Captures the acting user automatically via
     # HistoryRequestMiddleware (bancostore/settings.py), which covers both
-    # Django Admin actions and any other future save() path.
+    # Django Admin actions and any other future save() path. Also now
+    # covers mobile_money_number/mobile_money_network (Task 16a) --
+    # deliberately useful here too: a payout-destination change shortly
+    # before a withdrawal is a real fraud signal worth having in the trail.
     history = HistoricalRecords()
+
+    class Meta:
+        constraints = [
+            # Task 16a (ADR-0004): a partial save (Django Admin edit, a
+            # future form bug) must not silently leave a payout number set
+            # with no network, or vice versa. Mirrors Wallet.balance__gte=0
+            # (Task 15) -- the same "cheap invariant, real defense in
+            # depth" reasoning, not speculative.
+            models.CheckConstraint(
+                check=(
+                    models.Q(mobile_money_number="", mobile_money_network="")
+                    | (
+                        ~models.Q(mobile_money_number="")
+                        & ~models.Q(mobile_money_network="")
+                    )
+                ),
+                name="distributor_payout_destination_both_or_neither",
+            ),
+        ]
 
     def __str__(self):
         return f"Distributor<{self.user}>"
+
+    @property
+    def has_payout_destination(self):
+        """Task 16c will gate withdrawal submission on this, the same way
+        kyc_status already gates it -- exposed here so that check has a
+        single source of truth rather than each caller re-deriving it from
+        the two raw fields."""
+        return bool(self.mobile_money_number and self.mobile_money_network)
 
 
 class PendingRegistration(models.Model):

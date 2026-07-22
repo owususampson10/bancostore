@@ -81,6 +81,7 @@
 <nav class="flex-1 space-y-1 px-3">
 {% url 'distributors:dashboard' as dashboard_url %}
 {% url 'distributors:earnings_history' as earnings_history_url %}
+{% url 'distributors:payout_settings' as payout_settings_url %}
 {% url 'distributors:logout' as logout_url %}
 {% include "distributors/_sidebar_nav_item.html" with href=dashboard_url icon="dashboard" label="Dashboard" nav_key="dashboard" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=earnings_history_url icon="history" label="Earnings History" nav_key="earnings_history" active_nav=active_nav %}
@@ -92,7 +93,10 @@
 {% include "distributors/_sidebar_nav_item.html" with icon="account_tree" label="Binary Tree" %}
 {% include "distributors/_sidebar_nav_item.html" with icon="payments" label="Withdraw" %}
 <div class="pt-4 mt-4 border-t border-outline-variant/50">
-{% include "distributors/_sidebar_nav_item.html" with icon="settings" label="Settings" %}
+{# Task 16a: "Settings" now points at Payout Settings -- the first, and #}
+{# so far only, settings-scoped page this platform has. Not a broader #}
+{# settings hub (no other settings page is scoped anywhere yet). #}
+{% include "distributors/_sidebar_nav_item.html" with href=payout_settings_url icon="settings" label="Settings" nav_key="payout_settings" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=logout_url icon="logout" label="Log Out" danger=True %}
 </div>
 </nav>

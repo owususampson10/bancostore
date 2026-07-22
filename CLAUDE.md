@@ -164,12 +164,16 @@ is next.** What exists and is verified working:
   Task 15's 15a-15f breakdown for the full build/review history, including the pagination
   stable-ordering bug (`order_by("-created_at")` with no tie-breaker could skip/duplicate a row
   across a page boundary on a timestamp collision, fixed by adding `"-pk"`) caught by
-  `code-review-and-quality`. **Not yet done:** taken through the branch → PR → CI (real MySQL) →
-  CodeRabbit → merge workflow used for Tasks 13/14 -- still on `main` locally. **Deferred, not
-  silently skipped:** the same unguarded `request.user.distributor` pattern this task fixed in
-  `earnings_history` still exists in `select_starter_pack`, `start_kyc_verification`, and `dashboard`
-  (pre-existing, untouched here) -- both review passes suggested a shared `@distributor_required`
-  decorator applied codebase-wide as a fast-follow.
+  `code-review-and-quality`. Taken through the branch → PR → CI (real MySQL) → CodeRabbit → merge
+  workflow via PR #4, merged 2026-07-22. Three follow-up PRs merged same day: #5 (sidebar collapse
+  fix + Stitch-parity visual polish), #6 (favicon/logo/header fixes + Withdraw Now CTA + collapsed-
+  icon popovers), and #7 (restored the "Last withdrawal" caption, and resolved `SPEC.md`'s Open
+  Question #5 -- `MIN_WITHDRAWAL_AMOUNT`/`MAX_WITHDRAWAL_AMOUNT`/`WITHDRAWAL_DAY` seeded as GHS
+  100/GHS 10,000/Friday, all still admin-editable constance settings -- unblocking Task 16).
+  **Deferred, not silently skipped:** the same unguarded `request.user.distributor` pattern this
+  task fixed in `earnings_history` still exists in `select_starter_pack`, `start_kyc_verification`,
+  and `dashboard` (pre-existing, untouched here) -- both review passes suggested a shared
+  `@distributor_required` decorator applied codebase-wide as a fast-follow.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,

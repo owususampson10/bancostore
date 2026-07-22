@@ -167,6 +167,26 @@ class DistributorForgotPasswordForm(forms.Form):
     )
 
 
+class PayoutSettingsForm(forms.Form):
+    """Task 16a. Both fields required together -- the model's blank=True
+    accommodates "not set yet" for a distributor who's never saved anything,
+    but a save from this form always sets a complete destination, never a
+    partial one (the model's own CheckConstraint is the defense-in-depth
+    backstop for any other write path, e.g. Django Admin)."""
+
+    mobile_money_number = PhoneNumberField(
+        label="Mobile money number",
+        widget=forms.TextInput(
+            attrs={"class": INPUT_CLASSES, "placeholder": "e.g. 024 123 4567"}
+        ),
+    )
+    mobile_money_network = forms.ChoiceField(
+        label="Mobile money network",
+        choices=Distributor.MobileMoneyNetwork.choices,
+        widget=forms.Select(attrs={"class": INPUT_CLASSES}),
+    )
+
+
 class DistributorSetNewPasswordForm(forms.Form):
     password1 = forms.CharField(
         widget=forms.PasswordInput(attrs={"class": INPUT_CLASSES}),

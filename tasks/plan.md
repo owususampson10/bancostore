@@ -127,7 +127,14 @@ matching bonus requires actual downline binary-bonus earnings, not just a qualif
   out of scope per `SPEC.md`'s MVP scope section, not silently skipped. See `tasks/todo.md` Task
   15's full notes and `CLAUDE.md`.
 - [ ] Task 16: Withdrawal request flow — tax deduction, Paystack payout, admin approval — **next
-  up; unblocked as of 2026-07-22 (Open Question #5 below resolved)**
+  up; unblocked as of 2026-07-22 (Open Question #5 below resolved)**. Scoped 2026-07-22 via
+  `spec-driven-development` (four money-safety design questions with no answer in `SPEC.md` — payout-
+  destination capture, `WITHDRAWAL_DAY` semantics, wallet debit timing, the `AUTO_APPROVE_*`
+  settings' fate against a hard Boundary — put to the user directly rather than assumed, resolved
+  in `docs/decisions/0004-withdrawal-payout-design.md`) → `planning-and-task-breakdown` (16a–16h,
+  see `tasks/todo.md`). **16e/16f (Paystack Transfer API wrapper + webhook) each need explicit
+  user sign-off before starting**, independent of this breakdown already being reviewed — `SPEC.md`'s
+  Boundary on Paystack integration code applies per change, not once per task.
 
 **Checkpoint F:** a distributor requests a withdrawal, tax is deducted correctly, admin approves,
 and a simulated Paystack payout succeeds.
