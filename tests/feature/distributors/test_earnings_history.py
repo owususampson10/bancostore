@@ -1,3 +1,5 @@
+from datetime import datetime
+from datetime import timezone as dt_timezone
 from decimal import Decimal
 from itertools import count
 
@@ -106,11 +108,23 @@ def test_shows_own_wallet_balance_and_summary_totals(client):
     assert "GHS 1,150.00" in body  # current balance: 450 + 1200 - 500
     assert "GHS 1,650.00" in body  # total earned: 450 + 1200
     assert "GHS 500.00" in body  # total withdrawn
-    assert "Aggregated bonuses" in body
+    assert "Aggregated bonuses &amp; referrals" in body
 
 
 @pytest.mark.django_db
 def test_shows_the_date_of_the_most_recent_withdrawal(client):
+    """CodeRabbit review, 2026-07-22: the original version of this test
+    re-queried the same WalletTransaction table with the same ordering
+    the view itself uses and compared the two -- self-referential, so it
+    would pass even if the view picked the wrong row, as long as it picked
+    it *consistently* wrong. auto_now_add also means both debits would
+    land within the same second in a fast test run, meaning "order by
+    -created_at" ties would be broken arbitrarily by the database, not
+    deterministically. This version gives each transaction an explicit,
+    widely-separated date (including a newer *non*-withdrawal transaction,
+    proving the view filters by type and doesn't just grab the single most
+    recent transaction of any kind) and asserts the literal expected date
+    -- a hardcoded value, not a re-derived one."""
     distributor = _make_distributor()
     credit(
         distributor,
@@ -130,20 +144,34 @@ def test_shows_the_date_of_the_most_recent_withdrawal(client):
         transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT,
         reference="ref-3",
     )
+    credit(
+        distributor,
+        Decimal("20.00"),
+        transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+        reference="ref-4",
+    )
+    # auto_now_add ignores any created_at passed at creation time -- update
+    # each row explicitly afterward instead.
+    older_txn = WalletTransaction.objects.get(reference="ref-2")
+    newer_txn = WalletTransaction.objects.get(reference="ref-3")
+    newest_txn = WalletTransaction.objects.get(reference="ref-4")
+    WalletTransaction.objects.filter(pk=older_txn.pk).update(
+        created_at=datetime(2026, 1, 1, tzinfo=dt_timezone.utc)
+    )
+    WalletTransaction.objects.filter(pk=newer_txn.pk).update(
+        created_at=datetime(2026, 3, 15, tzinfo=dt_timezone.utc)
+    )
+    WalletTransaction.objects.filter(pk=newest_txn.pk).update(
+        created_at=datetime(2026, 6, 1, tzinfo=dt_timezone.utc)
+    )
     _login(client, distributor)
 
     response = client.get(reverse("distributors:earnings_history"))
 
     body = response.content.decode()
-    last_withdrawal = (
-        WalletTransaction.objects.filter(
-            wallet__distributor=distributor,
-            transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT,
-        )
-        .order_by("-created_at")
-        .first()
-    )
-    assert f"Last withdrawal: {last_withdrawal.created_at:%b %d, %Y}" in body
+    assert "Last withdrawal: Mar 15, 2026" in body
+    assert "Last withdrawal: Jan 01, 2026" not in body
+    assert "Last withdrawal: Jun 01, 2026" not in body
 
 
 @pytest.mark.django_db
