@@ -1,0 +1,18 @@
+{# Single sidebar nav row -- real link (href set) or an inert disabled #}
+{# placeholder for a not-yet-built page (href omitted). Both variants #}
+{# carry the same collapsed-sidebar hover popover, driven by Alpine's #}
+{# `collapsed` state from the parent body (see base_dashboard.html) plus #}
+{# Tailwind's group-hover -- no per-item Alpine state needed. #}
+{% if href %}
+<a href="{{ href }}" class="group relative flex items-center gap-3 px-3 py-3 rounded-lg font-body-md transition-colors {% if nav_key == active_nav %}text-primary font-bold bg-primary-fixed{% elif danger %}text-error hover:bg-error-container{% else %}text-gray-muted hover:bg-surface-container-low{% endif %}">
+<span class="material-symbols-outlined text-[22px]" aria-hidden="true">{{ icon }}</span>
+<span x-show="!collapsed" x-cloak>{{ label }}</span>
+<span class="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 whitespace-nowrap rounded-md bg-inverse-surface text-inverse-on-surface text-xs font-medium px-2.5 py-1.5 opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity z-[60] shadow-lg" x-show="collapsed" x-cloak>{{ label }}</span>
+</a>
+{% else %}
+<div class="group relative flex items-center gap-3 px-3 py-3 rounded-lg font-body-md text-gray-muted/50 cursor-not-allowed" title="Coming soon">
+<span class="material-symbols-outlined text-[22px]" aria-hidden="true">{{ icon }}</span>
+<span x-show="!collapsed" x-cloak>{{ label }}</span>
+<span class="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 whitespace-nowrap rounded-md bg-inverse-surface text-inverse-on-surface text-xs font-medium px-2.5 py-1.5 opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity z-[60] shadow-lg" x-show="collapsed" x-cloak>{{ label }} — coming soon</span>
+</div>
+{% endif %}
