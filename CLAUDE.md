@@ -104,7 +104,9 @@ working:
   binary-bonus earnings over the SPONSOR chain** (`Distributor.sponsor`, the recruitment lineage —
   deliberately not `apps.binary_tree`'s placement tree, which diverges from it under spillover),
   3 levels deep for Bronze / unlimited for Silver (hard-capped at `MAX_MATCHING_BONUS_WALK_DEPTH`
-  regardless), over a rolling 7-day window, crediting `MATCHING_BONUS_RATE`%. Built 2026-07-22 via
+  regardless), over a rolling window set by `MATCHING_BONUS_INTERVAL_DAYS` (7 days by default,
+  admin-editable — the window tracks this live, not a hardcoded 7), crediting `MATCHING_BONUS_RATE`%.
+  Built 2026-07-22 via
   the full skills workflow up front (`spec-driven-development` to resolve the original task
   description's real architectural gaps, `planning-and-task-breakdown`, TDD per slice,
   `doubt-driven-development` before the batch driver, parallel `security-and-hardening` +
