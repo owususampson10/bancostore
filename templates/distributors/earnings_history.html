@@ -11,7 +11,7 @@
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
 <div class="md:col-span-1 bg-primary-container p-8 rounded-xl text-on-primary-container shadow-sm relative overflow-hidden">
 <div class="absolute -bottom-6 -right-6 opacity-10">
-<span class="material-symbols-outlined text-[96px]">account_balance_wallet</span>
+<span class="material-symbols-outlined text-[96px]" aria-hidden="true">account_balance_wallet</span>
 </div>
 <div class="relative z-10">
 <p class="font-label-md text-label-md opacity-80 mb-2">Current Wallet Balance</p>
@@ -54,23 +54,31 @@
 <div class="flex items-center gap-3">
 {% if txn.transaction_type == "direct_referral_bonus" %}
 <div class="w-8 h-8 rounded-lg bg-green-100 text-green-700 flex items-center justify-center flex-shrink-0">
-<span class="material-symbols-outlined text-[18px]">person_add</span>
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">person_add</span>
 </div>
 {% elif txn.transaction_type == "binary_bonus" %}
 <div class="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0">
-<span class="material-symbols-outlined text-[18px]">account_tree</span>
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">account_tree</span>
 </div>
 {% elif txn.transaction_type == "matching_bonus" %}
 <div class="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
-<span class="material-symbols-outlined text-[18px]">star</span>
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">star</span>
 </div>
 {% elif txn.transaction_type == "withdrawal_debit" %}
 <div class="w-8 h-8 rounded-lg bg-primary-fixed text-primary flex items-center justify-center flex-shrink-0">
-<span class="material-symbols-outlined text-[18px]">payments</span>
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">payments</span>
+</div>
+{% elif txn.transaction_type == "refund_reversal" %}
+{# A real, known debit type -- red/undo is correct here, unlike a #}
+{# genuinely unrecognized future type below. #}
+<div class="w-8 h-8 rounded-lg bg-error-container text-error flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">undo</span>
 </div>
 {% else %}
-<div class="w-8 h-8 rounded-lg bg-error-container text-error flex items-center justify-center flex-shrink-0">
-<span class="material-symbols-outlined text-[18px]">undo</span>
+{# Defensive fallback for a transaction_type this template doesn't know #}
+{# about yet -- neutral styling, since we can't assume it's a debit. #}
+<div class="w-8 h-8 rounded-lg bg-surface-container-low text-gray-muted flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">receipt_long</span>
 </div>
 {% endif %}
 <span class="font-body-md font-semibold">{{ txn.get_transaction_type_display }}</span>

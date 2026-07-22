@@ -3,6 +3,7 @@ from itertools import count
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.templatetags.static import static
 from django.urls import reverse
 
 import pytest
@@ -72,7 +73,7 @@ def test_page_loads_the_shared_js_bundle_so_the_sidebar_can_actually_collapse(cl
 
     response = client.get(reverse("distributors:earnings_history"))
 
-    assert 'src="/static/assets/main.js"' in response.content.decode()
+    assert f'src="{static("assets/main.js")}"' in response.content.decode()
 
 
 @pytest.mark.django_db
