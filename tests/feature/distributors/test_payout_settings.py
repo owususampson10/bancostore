@@ -209,6 +209,48 @@ def test_rejects_number_without_network(client):
 
 
 @pytest.mark.django_db
+def test_saving_payout_details_does_not_clobber_a_concurrent_unrelated_field_change(
+    client, monkeypatch
+):
+    """CodeRabbit review (2026-07-22): the view loads `distributor` once at
+    request start, then saves the whole row at the end -- a full-row save()
+    would silently overwrite any other field changed by a concurrent
+    process (e.g. an admin KYC action) between that load and this save.
+
+    A plain sequential test can't reproduce this race directly (nothing
+    can run "between" two lines of a single-threaded view call without
+    intervening at that exact point) -- so this wraps Distributor.save()
+    itself to inject the concurrent write at precisely the moment a real
+    race would land: after the view's own in-memory `distributor` object
+    was loaded, but immediately before it persists."""
+    distributor = _make_distributor()
+    _login(client, distributor)
+    assert distributor.kyc_status == Distributor.KycStatus.PENDING
+
+    original_save = Distributor.save
+
+    def save_after_concurrent_kyc_approval(self, *args, **kwargs):
+        Distributor.objects.filter(pk=self.pk).update(
+            kyc_status=Distributor.KycStatus.APPROVED
+        )
+        return original_save(self, *args, **kwargs)
+
+    monkeypatch.setattr(Distributor, "save", save_after_concurrent_kyc_approval)
+
+    client.post(
+        reverse("distributors:payout_settings"),
+        {
+            "mobile_money_number": "+233247111222",
+            "mobile_money_network": "mtn",
+        },
+    )
+
+    distributor.refresh_from_db()
+    assert distributor.mobile_money_number == "+233247111222"
+    assert distributor.kyc_status == Distributor.KycStatus.APPROVED
+
+
+@pytest.mark.django_db
 def test_rejects_network_without_number(client):
     distributor = _make_distributor()
     _login(client, distributor)

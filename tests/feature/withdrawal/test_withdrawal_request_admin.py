@@ -78,11 +78,12 @@ def test_staff_cannot_edit_a_withdrawal_request_even_as_superuser(staff_client):
     distributor = _make_distributor()
     request = _make_request(distributor)
 
-    staff_client.post(
+    response = staff_client.post(
         reverse("admin:withdrawal_withdrawalrequest_change", args=[request.pk]),
         {"amount": "999999.00", "status": "paid"},
     )
 
+    assert response.status_code == 403
     request.refresh_from_db()
     assert request.amount == Decimal("500.00")
     assert request.status == "submitted"

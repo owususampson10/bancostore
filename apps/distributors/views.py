@@ -623,7 +623,9 @@ def payout_settings(request):
                 form.cleaned_data["mobile_money_number"]
             )
             distributor.mobile_money_network = form.cleaned_data["mobile_money_network"]
-            distributor.save()
+            distributor.save(
+                update_fields=["mobile_money_number", "mobile_money_network"]
+            )
             return redirect(f"{reverse('distributors:payout_settings')}?saved=1")
     else:
         initial = {}

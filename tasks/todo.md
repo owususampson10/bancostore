@@ -1622,8 +1622,10 @@ first" item, independent of this breakdown having already been reviewed)
 
 #### Task 16a: Payout settings -- distributor payout-destination field + profile UI
 
-**Description:** New `mobile_money_number` + `mobile_money_network` fields (MTN/Vodafone/AirtelTigo
-choices) so a distributor has somewhere for Paystack to actually send money. Set once via a
+**Description:** New `mobile_money_number` + `mobile_money_network` fields (MTN/Telecel/AirtelTigo
+choices -- Telecel, not Vodafone; Vodafone Ghana rebranded and Paystack's own docs confirm "Telecel
+Cash" as the current network name, verified before implementation, see ADR-0004) so a distributor
+has somewhere for Paystack to actually send money. Set once via a
 "Payout Settings" page on the existing `templates/distributors/base_dashboard.html` shell, not
 re-entered per withdrawal request (ADR-0004 decision 1 -- ruled out re-entry per request because a
 typo would have no stored history to catch it on the next request).

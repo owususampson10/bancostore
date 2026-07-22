@@ -82,15 +82,37 @@ class WithdrawalRequest(models.Model):
             # and PvDailyBucket.pv__gte=0 established this project's own
             # "bulk/future writes can bypass model-level validation, so the
             # constraint is the actual guardrail" reasoning -- the same
-            # applies here before any writer exists, not after.
+            # applies here before any writer exists, not after. A second
+            # CodeRabbit pass (same date) caught that the original version
+            # only bounded net_amount <= amount, never the actual arithmetic
+            # identity -- amount=500/tax=5/net=100 would have passed
+            # silently. Equality plus both non-negative fully subsumes the
+            # old <= bound, so it's replaced rather than kept alongside.
             models.CheckConstraint(
                 check=(
                     models.Q(amount__gte=0)
                     & models.Q(tax_amount__gte=0)
                     & models.Q(net_amount__gte=0)
-                    & models.Q(net_amount__lte=models.F("amount"))
+                    & models.Q(amount=models.F("tax_amount") + models.F("net_amount"))
                 ),
                 name="withdrawal_request_amounts_sane",
+            ),
+            # Same review: the snapshotted payout destination (set at
+            # approval, 16d) had no both-or-neither guard, unlike
+            # Distributor's own identical two fields (Task 16a) -- a
+            # partial snapshot here is just as real a bug as a partial
+            # profile save.
+            models.CheckConstraint(
+                check=(
+                    models.Q(
+                        payout_mobile_money_number="", payout_mobile_money_network=""
+                    )
+                    | (
+                        ~models.Q(payout_mobile_money_number="")
+                        & ~models.Q(payout_mobile_money_network="")
+                    )
+                ),
+                name="withdrawal_request_payout_snapshot_both_or_neither",
             ),
         ]
 

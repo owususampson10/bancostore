@@ -79,6 +79,7 @@
         role="combobox"
         aria-haspopup="listbox"
         aria-labelledby="momo-network-label"
+        aria-controls="momo-network-listbox"
         :aria-expanded="open.toString()"
         :aria-activedescendant="highlighted >= 0 ? 'momo-network-option-' + highlighted : null"
         @click="open ? (open = false) : openList()"
@@ -92,6 +93,7 @@
 <ul x-show="open"
     x-cloak
     role="listbox"
+    id="momo-network-listbox"
     aria-labelledby="momo-network-label"
     class="absolute z-10 mt-1 w-full bg-white border border-outline-variant rounded-lg shadow-lg overflow-hidden py-1">
 <template x-for="(option, index) in options" :key="option.value">

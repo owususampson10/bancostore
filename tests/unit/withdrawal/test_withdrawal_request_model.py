@@ -202,3 +202,78 @@ def test_history_tracks_status_transitions():
     assert history.count() == 2
     assert history.first().status == WithdrawalRequest.Status.SUBMITTED
     assert history.last().status == WithdrawalRequest.Status.REJECTED
+
+
+@pytest.mark.django_db
+def test_rejects_amount_that_does_not_equal_tax_plus_net_at_db_level():
+    """CodeRabbit review (2026-07-22): the original constraint only bounded
+    net_amount <= amount, never enforced the actual arithmetic identity --
+    a row with amount=500, tax_amount=5, net_amount=100 (wrong, should be
+    495) would have passed the original constraint silently."""
+    from apps.withdrawal.models import WithdrawalRequest
+
+    distributor = _make_distributor()
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            WithdrawalRequest.objects.create(
+                distributor=distributor,
+                amount=Decimal("500.00"),
+                tax_amount=Decimal("5.00"),
+                net_amount=Decimal("100.00"),
+            )
+
+
+@pytest.mark.django_db
+def test_both_payout_snapshot_fields_can_be_set_together():
+    from apps.withdrawal.models import WithdrawalRequest
+
+    distributor = _make_distributor()
+
+    request = WithdrawalRequest.objects.create(
+        distributor=distributor,
+        amount=Decimal("500.00"),
+        tax_amount=Decimal("5.00"),
+        net_amount=Decimal("495.00"),
+        payout_mobile_money_number="+233247111222",
+        payout_mobile_money_network=Distributor.MobileMoneyNetwork.MTN,
+    )
+
+    assert request.payout_mobile_money_number == "+233247111222"
+
+
+@pytest.mark.django_db
+def test_rejects_payout_snapshot_number_set_without_network_at_db_level():
+    """Mirrors Distributor's own both-or-neither constraint on the same two
+    fields (Task 16a) -- a partial snapshot at approval time (16d) would be
+    just as real a bug as a partial save on the profile form."""
+    from apps.withdrawal.models import WithdrawalRequest
+
+    distributor = _make_distributor()
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            WithdrawalRequest.objects.create(
+                distributor=distributor,
+                amount=Decimal("500.00"),
+                tax_amount=Decimal("5.00"),
+                net_amount=Decimal("495.00"),
+                payout_mobile_money_number="+233247111222",
+            )
+
+
+@pytest.mark.django_db
+def test_rejects_payout_snapshot_network_set_without_number_at_db_level():
+    from apps.withdrawal.models import WithdrawalRequest
+
+    distributor = _make_distributor()
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            WithdrawalRequest.objects.create(
+                distributor=distributor,
+                amount=Decimal("500.00"),
+                tax_amount=Decimal("5.00"),
+                net_amount=Decimal("495.00"),
+                payout_mobile_money_network=Distributor.MobileMoneyNetwork.MTN,
+            )
