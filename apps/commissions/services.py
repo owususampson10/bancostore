@@ -305,10 +305,22 @@ def sum_downline_binary_bonus_earnings(distributor, max_depth, run_at) -> Decima
     deliberately NOT apps.binary_tree's placement tree, which can diverge
     from who-recruited-whom under spillover), summing every downline
     member's own BINARY_BONUS-type WalletTransaction credits from the
-    rolling 7 days before `run_at` (not a calendar week -- same
-    "undefined calendar-week boundary" reasoning
-    apply_weekly_binary_bonus_cap already documents for the identical
-    ambiguity).
+    rolling `config.MATCHING_BONUS_INTERVAL_DAYS` days before `run_at`
+    (not a calendar week -- same "undefined calendar-week boundary"
+    reasoning apply_weekly_binary_bonus_cap already documents for the
+    identical ambiguity).
+
+    The window tracks the live cadence setting, not a hardcoded 7 --
+    CodeRabbit review, 2026-07-22: an earlier version hardcoded
+    timedelta(days=7) while MATCHING_BONUS_INTERVAL_DAYS (the admin-
+    editable cycle cadence this same window is meant to cover) could
+    already be changed independently. If an admin lowers the interval
+    below the window, consecutive cycles would both count the same
+    downline earnings (over-payment, with no cap to absorb it, per this
+    module's own "no weekly cap ... not omitted by oversight" note); if
+    they raise it, earnings older than the window would never get
+    matched (silent under-payment). Reading the live setting here keeps
+    the window and the cadence structurally unable to diverge.
 
     `max_depth` is levels deep to walk: None means unlimited (Silver
     rank), 0 means don't walk at all (any distributor whose rank isn't
@@ -377,7 +389,7 @@ def sum_downline_binary_bonus_earnings(distributor, max_depth, run_at) -> Decima
     if not all_downline_ids:
         return Decimal("0.00")
 
-    cutoff = run_at - timedelta(days=7)
+    cutoff = run_at - timedelta(days=config.MATCHING_BONUS_INTERVAL_DAYS)
     return WalletTransaction.objects.filter(
         wallet__distributor_id__in=all_downline_ids,
         transaction_type=WalletTransaction.TransactionType.BINARY_BONUS,

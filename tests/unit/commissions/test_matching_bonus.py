@@ -145,6 +145,29 @@ def test_earnings_outside_the_rolling_7_day_window_are_excluded():
 
 
 @pytest.mark.django_db
+def test_the_window_tracks_a_changed_interval_setting_not_a_hardcoded_7():
+    """CodeRabbit review, 2026-07-22: an earlier version hardcoded
+    timedelta(days=7) independent of MATCHING_BONUS_INTERVAL_DAYS -- if an
+    admin raised the cadence (e.g. to run every 14 days instead of 7),
+    earnings between 7 and 14 days old would silently never get matched
+    under the old hardcoded version. This proves the window follows the
+    live setting: at days_ago=10, a 7-day window would exclude this
+    transaction, but a 14-day one (set below) must include it."""
+    original_interval = config.MATCHING_BONUS_INTERVAL_DAYS
+    config.MATCHING_BONUS_INTERVAL_DAYS = 14
+    try:
+        root = _make_distributor()
+        level1 = _make_distributor(sponsor=root)
+        _make_binary_bonus_transaction(level1, Decimal("50"), days_ago=10)
+
+        total = sum_downline_binary_bonus_earnings(root, max_depth=3, run_at=RUN_AT)
+
+        assert total == Decimal("50")
+    finally:
+        config.MATCHING_BONUS_INTERVAL_DAYS = original_interval
+
+
+@pytest.mark.django_db
 def test_only_binary_bonus_transactions_count_not_other_transaction_types():
     root = _make_distributor()
     level1 = _make_distributor(sponsor=root)

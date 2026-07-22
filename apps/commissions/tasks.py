@@ -364,10 +364,21 @@ def calculate_matching_bonus():
 
     Unlike Binary Bonus, this never mutates another distributor's data --
     it only reads downline members' already-committed WalletTransaction
-    rows -- so overlapping cycles (were the lock ever bypassed) couldn't
-    even partially double-pay by touching shared mutable state; the lock
-    still matters for the same "one run_at = one logical cycle" reason
-    Binary Bonus's does."""
+    rows. That does NOT make overlapping cycles double-pay-safe, though
+    (CodeRabbit review, 2026-07-22, correcting an earlier version of this
+    docstring that conflated the two): the idempotency `reference` is
+    `matching-bonus-{pk}-{run_at}`, so two overlapping cycles mint two
+    distinct `run_at` values, two distinct references, and both pass the
+    `existing is None` check -- crediting the same distributor twice for
+    what's mostly the same underlying downline earnings. Binary Bonus
+    survives a bypassed lock because apply_weekly_binary_bonus_cap
+    re-reads committed WalletTransaction rows before crediting, a real
+    second line of defense; process_matching_bonus_for_distributor has no
+    such cap (this module's docstring: "no weekly cap ... not omitted by
+    oversight"). This lock is therefore the SOLE protection against a
+    double-pay here, not a belt-and-suspenders backstop the way it is for
+    Binary Bonus -- do not relax it on the assumption this task is
+    inherently safer."""
     return _run_commission_cycle(
         job_name=MATCHING_BONUS_TASK_NAME,
         lock_key=MATCHING_BONUS_LOCK_KEY,

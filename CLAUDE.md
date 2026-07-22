@@ -130,8 +130,14 @@ working:
   cap (mirroring `WEEKLY_BINARY_BONUS_CAP`) would bound the blast radius of any future double-payment
   bug — flagged as new scope, same as Task 13h's deferred circuit-breaker item, not built without a
   decision. Migrations: `apps/commissions/migrations/0003_generalize_cycle_audit_models.py`,
-  `0004_seed_matching_bonus_periodic_task.py`. 425 tests passed locally; not yet pushed/verified
-  against real MySQL in CI as of this note.
+  `0004_seed_matching_bonus_periodic_task.py`. Verified against real MySQL in CI via PR #2, which
+  also went through a CodeRabbit review — that pass caught a genuine correctness bug (the downline
+  earnings window was hardcoded to 7 days independent of the admin-editable
+  `MATCHING_BONUS_INTERVAL_DAYS` cadence it's meant to track; an admin lowering the interval below 7
+  would have caused consecutive cycles to double-count the same earnings with no cap to absorb it,
+  raising it would have silently skipped earnings past the stale window) plus a docstring that
+  overclaimed matching bonus's overlap-safety (it has *less* double-pay protection than Binary
+  Bonus, not more — the cache lock is its sole defense, not a backstop). Both fixed pre-merge.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,

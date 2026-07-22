@@ -176,6 +176,11 @@ def test_matching_bonus_interval_field_rejects_below_the_enforced_floor():
 
 
 def test_matching_bonus_interval_field_accepts_the_seeded_default():
+    """CodeRabbit review, 2026-07-22: asserts the actual seeded default
+    too, not just that the field accepts the literal "7" -- a changed
+    default would otherwise leave this test green while no longer
+    testing what its name claims."""
+    assert settings.CONSTANCE_CONFIG["MATCHING_BONUS_INTERVAL_DAYS"][0] == 7
     field = _build_additional_field("interval_days_field")
     assert field.clean("7") == 7
 
