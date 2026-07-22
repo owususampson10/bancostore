@@ -1410,8 +1410,12 @@ both real, both changed the design:
 
 ---
 
-**Checkpoint E:** the Section 14 example journey's exact commission numbers reproduce in a single
-feature test that runs registration → referral bonus → binary bonus → matching bonus.
+**Checkpoint E — closed 2026-07-22:** `tests/feature/commissions/test_full_commission_journey.py`.
+See `tasks/plan.md`'s Phase 4 entry for the full writeup — not a literal reproduction of Section
+14's own narrative figures (its direct-referral numbers are a documented contradiction in the source
+doc), but a real chain through registration → referral bonus → binary tree placement/PV credit →
+`calculate_binary_bonus()` → `calculate_matching_bonus()` using this project's already-resolved
+formula, asserting the exact resulting numbers at every step.
 
 ---
 
