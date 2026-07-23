@@ -102,16 +102,15 @@
 </nav>
 
 {# Withdraw Now: a quick-access CTA distinct from the "Withdraw" nav row #}
-{# above (that one is the future withdrawal-history/management page; this #}
-{# is the Stitch design's pinned action button) -- Task 16 hasn't shipped #}
-{# the withdrawal request flow yet, so it's disabled rather than a dead #}
-{# link, same convention as the nav placeholders. #}
+{# above (that one is the future withdrawal-history/management page, #}
+{# Task 16g, still disabled) -- this is the Stitch design's pinned action #}
+{# button, now wired to Task 16c's real withdrawal request flow. #}
 <div class="px-4 mt-4 group relative">
-<button type="button" disabled class="w-full bg-primary/40 text-on-primary py-3 px-4 rounded-xl font-button flex items-center justify-center gap-2 cursor-not-allowed" :class="collapsed && 'px-0'">
+<a href="{% url 'distributors:withdrawal_request' %}" class="w-full bg-primary text-on-primary py-3 px-4 rounded-xl font-button flex items-center justify-center gap-2 hover:opacity-90 transition-all" :class="collapsed && 'px-0'">
 <span class="material-symbols-outlined text-[20px]" aria-hidden="true">account_balance_wallet</span>
 <span x-show="!collapsed" x-cloak>Withdraw Now</span>
-</button>
-<span class="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 whitespace-nowrap rounded-md bg-inverse-surface text-inverse-on-surface text-xs font-medium px-2.5 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-[60] shadow-lg" x-show="collapsed" x-cloak>Withdraw Now — coming soon</span>
+</a>
+<span class="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 whitespace-nowrap rounded-md bg-inverse-surface text-inverse-on-surface text-xs font-medium px-2.5 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-[60] shadow-lg" x-show="collapsed" x-cloak>Withdraw Now</span>
 </div>
 </aside>
 

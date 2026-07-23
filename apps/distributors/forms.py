@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django import forms
 from django.contrib.auth.password_validation import validate_password
 
@@ -184,6 +186,39 @@ class PayoutSettingsForm(forms.Form):
         label="Mobile money network",
         choices=Distributor.MobileMoneyNetwork.choices,
         widget=forms.Select(attrs={"class": INPUT_CLASSES}),
+    )
+
+
+class WithdrawalRequestForm(forms.Form):
+    """Task 16c. Deliberately thin -- only checks the amount is a positive,
+    2-decimal-place number. MIN_WITHDRAWAL_AMOUNT/MAX_WITHDRAWAL_AMOUNT/
+    wallet-balance/KYC/payout-destination/window checks all live in
+    apps.withdrawal.services.submit_withdrawal_request, the single source
+    of truth for those business rules -- duplicating them here as form
+    validators would risk the two drifting apart as MIN/MAX_WITHDRAWAL_
+    AMOUNT change live via constance."""
+
+    amount = forms.DecimalField(
+        label="Amount to withdraw",
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+        widget=forms.NumberInput(
+            attrs={
+                "class": (
+                    "w-full pl-16 pr-5 py-5 bg-surface-container-low rounded-xl "
+                    "border-none focus:outline-none focus:ring-2 "
+                    "focus:ring-primary font-headline-md text-on-surface "
+                    "transition-all"
+                ),
+                "placeholder": "0.00",
+                "step": "0.01",
+                # x-model.number, not a separate hidden input, so the tax/net
+                # preview stays live off the exact field Django submits --
+                # two inputs both named "amount" would silently double-post.
+                "x-model.number": "amount",
+            }
+        ),
     )
 
 
