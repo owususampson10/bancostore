@@ -24,6 +24,17 @@ from django_ratelimit.decorators import ratelimit
 from apps.accounts.permissions import is_distributor
 from apps.notifications.otp import generate_otp, verify_otp
 from apps.wallet.models import WalletTransaction
+from apps.withdrawal.services import (
+    AboveMaximumAmount,
+    BelowMinimumAmount,
+    InsufficientWalletBalance,
+    KycNotApproved,
+    PayoutDestinationNotSet,
+    WithdrawalFrequencyMisconfigured,
+    WithdrawalWindowActive,
+    WithholdingTaxMisconfigured,
+    submit_withdrawal_request,
+)
 
 from .didit import DiditError
 from .didit import create_verification_session as create_didit_session
@@ -35,6 +46,7 @@ from .forms import (
     DistributorSetNewPasswordForm,
     OTPVerificationForm,
     PayoutSettingsForm,
+    WithdrawalRequestForm,
 )
 from .models import DiditVerification, Distributor, PendingRegistration
 from .paystack import PaystackError, initialize_transaction, verify_webhook_signature
@@ -693,5 +705,82 @@ def payout_settings(request):
             "network_choices": network_choices,
             "saved": request.GET.get("saved") == "1",
             "active_nav": "payout_settings",
+        },
+    )
+
+
+# Maps each apps.withdrawal.services rejection exception to a distinct,
+# distributor-facing message (Task 16c acceptance criterion) -- kept as
+# one lookup table rather than a chain of except blocks with repeated
+# render() calls, so adding a new rejection reason later is a one-line
+# addition here, not a new branch shaped like all the others.
+_WITHDRAWAL_ERROR_MESSAGES = {
+    KycNotApproved: "Your KYC must be approved before you can request a withdrawal.",
+    PayoutDestinationNotSet: (
+        "Please set your payout destination in Settings before requesting "
+        "a withdrawal."
+    ),
+    BelowMinimumAmount: "The amount is below the minimum withdrawal amount.",
+    AboveMaximumAmount: "The amount is above the maximum withdrawal amount.",
+    InsufficientWalletBalance: "Your wallet balance is not enough for this withdrawal.",
+    WithdrawalWindowActive: (
+        "You've already requested a withdrawal recently. Please try again later."
+    ),
+    # code-review-and-quality (2026-07-23): these two are admin
+    # misconfiguration, not something the distributor caused or can fix
+    # -- same generic message for both, logged with the real cause
+    # server-side by submit_withdrawal_request itself before it raises.
+    WithdrawalFrequencyMisconfigured: (
+        "Withdrawals are temporarily unavailable. Please try again later."
+    ),
+    WithholdingTaxMisconfigured: (
+        "Withdrawals are temporarily unavailable. Please try again later."
+    ),
+}
+
+
+@login_required(login_url="distributors:login")
+@ratelimit(key="user", rate="20/h", method="POST")
+def withdrawal_request(request):
+    """Task 16c. Always scoped to request.user.distributor -- same
+    is_distributor() + no id/param IDOR surface as earnings_history/
+    payout_settings. submit_withdrawal_request (apps.withdrawal.services)
+    is the sole authority on every rejection reason; this view only maps
+    its exceptions to distributor-facing text, never re-implements any of
+    the checks itself."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+
+    distributor = request.user.distributor
+    wallet = getattr(distributor, "wallet", None)
+    balance = wallet.balance if wallet else Decimal("0")
+    error = None
+
+    if request.method == "POST":
+        form = WithdrawalRequestForm(request.POST)
+        if form.is_valid():
+            try:
+                submit_withdrawal_request(distributor, form.cleaned_data["amount"])
+            except tuple(_WITHDRAWAL_ERROR_MESSAGES) as exc:
+                error = _WITHDRAWAL_ERROR_MESSAGES[type(exc)]
+            else:
+                return redirect(
+                    f"{reverse('distributors:withdrawal_request')}?submitted=1"
+                )
+    else:
+        form = WithdrawalRequestForm()
+
+    return render(
+        request,
+        "distributors/withdrawal_request.html",
+        {
+            "form": form,
+            "balance": balance,
+            "error": error,
+            "submitted": request.GET.get("submitted") == "1",
+            "min_amount": config.MIN_WITHDRAWAL_AMOUNT,
+            "max_amount": config.MAX_WITHDRAWAL_AMOUNT,
+            "tax_rate": config.WITHHOLDING_TAX_RATE,
+            "active_nav": "withdrawal_request",
         },
     )

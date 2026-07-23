@@ -115,6 +115,15 @@ class WithdrawalRequest(models.Model):
                 name="withdrawal_request_payout_snapshot_both_or_neither",
             ),
         ]
+        indexes = [
+            # Task 16c (doubt-driven-development, pre-implementation review):
+            # submit_withdrawal_request's once-per-WITHDRAWAL_FREQUENCY check
+            # filters on exactly these three columns together -- an
+            # unindexed composite scan would grow with this distributor's
+            # full withdrawal history at this platform's stated
+            # "hundreds of thousands of users" scale.
+            models.Index(fields=["distributor", "status", "created_at"]),
+        ]
 
     def __str__(self):
         return f"WithdrawalRequest<{self.distributor} {self.amount} {self.status}>"

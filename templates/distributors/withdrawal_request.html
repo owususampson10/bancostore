@@ -1,0 +1,73 @@
+{% extends "distributors/base_dashboard.html" %}
+{% load humanize %}
+{% block title %}Bancostore | Withdraw{% endblock %}
+{% block content %}
+<div class="max-w-[600px]">
+<div class="mb-8">
+<h2 class="font-headline-lg text-headline-lg text-on-surface mb-1">Withdraw</h2>
+<p class="font-body-md text-body-md text-gray-muted">Request a withdrawal from your commission balance.</p>
+</div>
+
+{% if submitted %}
+<div class="flex items-center gap-3 bg-success/10 text-success border border-success/30 px-6 py-4 rounded-xl mb-6" role="status">
+<span class="material-symbols-outlined" aria-hidden="true" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<div>
+<p class="font-body-md text-body-md font-semibold">Withdrawal request submitted</p>
+<p class="font-body-md text-body-sm text-gray-muted">Your request is pending review. Approved requests are paid out every Friday.</p>
+</div>
+</div>
+{% else %}
+
+<div class="bg-surface-container-low rounded-xl px-6 py-4 mb-6 border border-outline-variant flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary" aria-hidden="true" style="font-variation-settings: 'FILL' 1;">account_balance_wallet</span>
+<span class="font-body-md text-body-md text-on-surface">Available Balance</span>
+</div>
+<span class="font-headline-md text-headline-md text-on-surface">GHS {{ balance|floatformat:2|intcomma }}</span>
+</div>
+
+{% if error %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm mb-6">
+{{ error }}
+</div>
+{% endif %}
+
+<div class="bg-white rounded-xl border border-outline-variant p-6"
+     x-data="{
+       amount: 0,
+       taxRate: {{ tax_rate|default:'0'|floatformat:2 }},
+       get tax() { return this.amount > 0 ? this.amount * this.taxRate / 100 : 0; },
+       get net() { return this.amount > 0 ? this.amount - this.tax : 0; },
+     }">
+<form method="post">
+{% csrf_token %}
+
+<div class="mb-6">
+<label class="block font-label-md text-label-md text-gray-muted uppercase tracking-wider mb-2" for="{{ form.amount.id_for_label }}">Amount (GHS)</label>
+<div class="relative">
+<span class="absolute left-5 top-1/2 -translate-y-1/2 font-headline-md text-gray-muted">GHS</span>
+{{ form.amount }}
+</div>
+{% if form.amount.errors %}<p class="text-error text-body-sm mt-1">{{ form.amount.errors.0 }}</p>{% endif %}
+<p class="mt-2 font-label-md text-[11px] text-gray-muted text-right">Minimum GHS {{ min_amount|floatformat:0|intcomma }} · Maximum GHS {{ max_amount|floatformat:0|intcomma }}</p>
+</div>
+
+<div class="space-y-4 mb-6 pt-6 border-t border-dashed border-outline-variant">
+<div class="flex justify-between items-center">
+<span class="font-body-md text-body-md text-gray-muted">Tax ({{ tax_rate|default:'0' }}%)</span>
+<span class="font-body-md text-body-md text-on-surface" x-text="'GHS ' + tax.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+</div>
+<div class="flex justify-between items-center py-4 px-5 bg-surface-container-low rounded-lg border border-outline-variant">
+<span class="font-button text-body-md text-on-surface">You'll receive</span>
+<span class="font-headline-md text-headline-md text-primary" x-text="'GHS ' + net.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+</div>
+</div>
+
+<button type="submit" class="w-full bg-primary text-on-primary py-4 rounded-xl font-button hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed" x-bind:disabled="!(amount > 0)">
+Submit Withdrawal Request
+</button>
+</form>
+</div>
+{% endif %}
+</div>
+{% endblock %}

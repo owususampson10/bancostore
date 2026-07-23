@@ -185,7 +185,18 @@ REGISTRATION_AND_MEMBERSHIP_SETTINGS = {
 WITHDRAWAL_AND_PAYOUT_SETTINGS = {
     "WITHDRAWAL_FREQUENCY": (
         "weekly",
+        # Task 16c (doubt-driven-development, pre-implementation review):
+        # this was a plain string with no widget until this pass -- exactly
+        # the same "admin can type anything" gap WITHDRAWAL_DAY had before
+        # its own day_of_week_field fix, except worse here: a mistyped
+        # value doesn't just misconfigure one setting, it raises on every
+        # single withdrawal submission platform-wide (apps/withdrawal/
+        # services.py::WITHDRAWAL_FREQUENCY_DURATIONS has no entry for
+        # anything but "weekly"). Only one choice exists today -- the
+        # widget still matters, since a bounded ChoiceField can't be
+        # fat-fingered the way a free-text field can.
         "How often distributors can request a withdrawal",
+        "withdrawal_frequency_field",
     ),
     "WITHDRAWAL_DAY": (
         "friday",
@@ -215,7 +226,17 @@ WITHDRAWAL_AND_PAYOUT_SETTINGS = {
     ),
     "WITHHOLDING_TAX_RATE": (
         Decimal("1"),
+        # Task 16c (code-review-and-quality, 2026-07-23): was a plain
+        # 2-tuple with no bound, unlike its percentage siblings
+        # BINARY_BONUS_RATE/MATCHING_BONUS_RATE, which both already use
+        # percentage_field for exactly this reason. An unbounded rate here
+        # could go negative or above 100, producing a negative tax_amount
+        # or a net_amount that exceeds the requested amount --
+        # apps/withdrawal/services.py::submit_withdrawal_request has its
+        # own defensive check for this, but the bounded widget is the
+        # first line of defense, closing the gap at its actual source.
         "Tax percentage deducted from every withdrawal and sent to GRA",
+        "percentage_field",
     ),
     "ESCROW_RESERVE_RATE": (
         Decimal("5"),
@@ -444,6 +465,20 @@ CONSTANCE_ADDITIONAL_FIELDS = {
                 ("saturday", "Saturday"),
                 ("sunday", "Sunday"),
             ],
+        },
+    ],
+    "withdrawal_frequency_field": [
+        "django.forms.fields.ChoiceField",
+        {
+            "widget": "django.forms.Select",
+            # Task 16c: only "weekly" is meaningful today --
+            # apps/withdrawal/services.py::WITHDRAWAL_FREQUENCY_DURATIONS
+            # has no other entry -- but a bounded single-choice field still
+            # closes the "admin types something not in the mapping and
+            # every withdrawal submission starts raising" failure mode a
+            # free-text field left open. Extend both this list and that
+            # mapping together if a second cadence is ever added.
+            "choices": [("weekly", "Weekly")],
         },
     ],
 }
