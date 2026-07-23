@@ -160,10 +160,13 @@ another session — proves Django Channels real-time wiring works.
 ### Phase 9: Admin Portal — custom Stitch-designed dashboard (redefined 2026-07-23)
 **Scope change from Django Admin to a full custom dashboard, decided 2026-07-23:** the admin user
 is not software-literate — every screen an admin touches routinely needs to feel like part of the
-Bancostore application, not Django's generic admin panel. This supersedes `SPEC.md`'s "Admin panel
-| Django Admin (customized)" tech-stack line (not yet edited there — flagged, pending explicit
-confirmation before that file changes) and folds the original Task 22/23 scope into this initiative
-rather than building them as raw Django Admin.
+Bancostore application, not Django's generic admin panel. This plan reflects that decision, but
+`SPEC.md`'s "Admin panel | Django Admin (customized)" tech-stack line is **still the authoritative
+record and has not been updated to match** — that edit is intentionally held pending explicit
+confirmation (per this project's own convention of asking before editing `SPEC.md`/`CLAUDE.md`),
+not silently assumed. Treat this phase's scope as tentative, not adopted, until that update lands.
+Folds the original Task 22/23 scope into this initiative rather than building them as raw Django
+Admin.
 
 **Design principle:** Django Admin's `ModelAdmin` classes (KYC review — Task 11, wallet/commission
 audit — Tasks 13-15, withdrawal approval — Task 16d) stay exactly as-is underneath — same

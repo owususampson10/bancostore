@@ -106,7 +106,14 @@
 <p class="font-body-md text-body-md text-gray-muted mb-6">You'll need to log in and verify with your authenticator again to access the Admin Portal.</p>
 <div class="flex gap-3">
 <button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="logoutConfirmOpen = false">Cancel</button>
-<a href="{% url 'admin:logout' %}" class="flex-1 bg-admin-error text-on-error py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all text-center">Log Out</a>
+{# Django 5 removed GET support from LogoutView (http_method_names = #}
+{# ["post", "options"], confirmed in the installed venv's django.contrib #}
+{# .auth.views) -- admin:logout delegates straight to it, so a plain <a> #}
+{# here would 405 for every real admin trying to log out. #}
+<form method="post" action="{% url 'admin:logout' %}" class="flex-1">
+{% csrf_token %}
+<button type="submit" class="w-full bg-admin-error text-on-error py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Log Out</button>
+</form>
 </div>
 </div>
 </div>

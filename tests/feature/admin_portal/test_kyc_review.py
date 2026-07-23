@@ -102,6 +102,25 @@ def test_queue_excludes_a_pending_distributor_with_no_verification_submitted_yet
 
 
 @pytest.mark.django_db
+def test_detail_404s_for_a_distributor_with_no_verification_submitted_yet(
+    staff_client,
+):
+    """code-review finding (2026-07-23): the queue filters out distributors
+    with no DiditVerification, but the detail route is reachable directly
+    by pk regardless of that filter -- without the same constraint there,
+    a staff user could POST approve straight to this URL and get an IR ID
+    assigned with nothing actually submitted to review."""
+    distributor = _make_distributor(full_name="No Submission Yet")
+
+    response = staff_client.post(_detail_url(distributor), {"action": "approve"})
+
+    assert response.status_code == 404
+    distributor.refresh_from_db()
+    assert distributor.kyc_status == Distributor.KycStatus.PENDING
+    assert distributor.ir_id is None
+
+
+@pytest.mark.django_db
 def test_queue_excludes_an_already_approved_distributor(staff_client):
     distributor = _make_distributor(
         kyc_status=Distributor.KycStatus.APPROVED, full_name="Already Approved"

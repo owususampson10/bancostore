@@ -56,12 +56,21 @@ def kyc_review_detail(request, pk):
     """Task 22. GET shows one distributor's verification detail; POST
     approves or rejects via the exact same apps.distributors.services
     functions the Django-Admin bulk actions already call -- no new
-    approval/rejection logic here, only a branded front end for it."""
+    approval/rejection logic here, only a branded front end for it.
+
+    code-review finding (2026-07-23): the queue already filters to
+    distributors with a submitted DiditVerification, but this detail
+    route is reachable directly by pk regardless -- without the same
+    filter here, a staff user could POST approve against a distributor
+    with no submission at all, and approve_kyc would happily assign an
+    IR ID with nothing to actually review."""
     if not is_admin_portal_staff(request.user):
         raise PermissionDenied
 
     distributor = get_object_or_404(
-        Distributor.objects.select_related("user", "didit_verification"), pk=pk
+        Distributor.objects.select_related("user", "didit_verification"),
+        pk=pk,
+        didit_verification__isnull=False,
     )
 
     if request.method == "POST":
