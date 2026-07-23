@@ -145,6 +145,24 @@ def test_profile_shows_distributor_details(staff_client):
 
 
 @pytest.mark.django_db
+def test_profile_falls_back_to_the_sponsors_phone_when_their_name_is_blank(
+    staff_client,
+):
+    """CodeRabbit finding on PR #15: a sponsor with a blank full_name fell
+    back to Distributor.__str__'s "Distributor<+233...>" debug repr, the
+    exact bug already fixed for the primary distributor's own display_name
+    in this same PR -- just missed for the sponsor field."""
+    sponsor = _make_distributor(full_name="")
+    distributor = _make_distributor(full_name="Kwame Asante", sponsor=sponsor)
+
+    response = staff_client.get(_profile_url(distributor))
+
+    body = response.content.decode()
+    assert str(sponsor.phone_number) in body
+    assert "Distributor<" not in body
+
+
+@pytest.mark.django_db
 def test_profile_shows_no_sponsor_for_a_root_distributor(staff_client):
     distributor = _make_distributor(full_name="Root Distributor", sponsor=None)
 

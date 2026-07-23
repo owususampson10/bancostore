@@ -63,7 +63,7 @@ Reactivate Account
 <div>
 <p class="font-label-md text-label-md text-secondary uppercase">Sponsor</p>
 {% if distributor.sponsor %}
-<p class="font-body-lg text-body-lg font-semibold text-on-surface mt-1">{{ distributor.sponsor.full_name|default:distributor.sponsor }}</p>
+<p class="font-body-lg text-body-lg font-semibold text-on-surface mt-1">{{ distributor.sponsor.full_name|default:distributor.sponsor.phone_number }}</p>
 {% if distributor.sponsor.ir_id %}<p class="text-secondary text-body-sm font-body-sm">{{ distributor.sponsor.ir_id }}</p>{% endif %}
 {% else %}
 <p class="font-body-lg text-body-lg text-on-surface-variant mt-1">No sponsor</p>
