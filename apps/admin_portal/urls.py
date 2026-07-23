@@ -16,6 +16,11 @@ urlpatterns = [
     ),
     path("distributors/", views.distributor_directory, name="distributor_directory"),
     path(
+        "distributors/export/",
+        views.distributor_directory_export,
+        name="distributor_directory_export",
+    ),
+    path(
         "distributors/<int:pk>/",
         views.distributor_profile,
         name="distributor_profile",

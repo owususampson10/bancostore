@@ -1,3 +1,5 @@
+import csv
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib import messages
@@ -5,7 +7,9 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from constance import config
 
@@ -295,18 +299,12 @@ def withdrawal_review_detail(request, pk):
     )
 
 
-@login_required(login_url="two_factor:login")
-def distributor_directory(request):
-    """Task 23. Branded replacement for DistributorAdmin's Django-Admin
-    changelist search -- presentation only, no service-layer changes.
-    Unlike the KYC/Withdrawal queues (small, naturally bounded to
-    pending items), this directory can hold every distributor on the
-    platform, so it gets real search and real pagination rather than
-    showing everything on one page."""
-    if not is_admin_portal_staff(request.user):
-        raise PermissionDenied
-
+def _filtered_distributors(request):
+    """Shared by the directory page and the CSV export, so both search the
+    same way and an exported file always matches what's on screen."""
     query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
+
     # "pk" is a tie-breaker: full_name isn't unique (including two blank
     # names), and without one, Paginator can skip or duplicate a row across
     # a page boundary -- the exact bug class already caught in Task 15's
@@ -315,21 +313,143 @@ def distributor_directory(request):
         "full_name", "pk"
     )
     if query:
+        # Distributors are stored E.164 (+233...), but an admin naturally
+        # types the local "0..." format -- rewrite so both find the same
+        # result. A bare local number with no prefix already matches via
+        # the icontains substring check below without any rewriting.
+        phone_query = query
+        if phone_query.startswith("0") and phone_query[1:].isdigit():
+            phone_query = "+233" + phone_query[1:]
         distributors = distributors.filter(
             Q(full_name__icontains=query)
             | Q(ir_id__icontains=query)
-            | Q(phone_number__icontains=query)
+            | Q(phone_number__icontains=phone_query)
         )
+    if status == "active":
+        distributors = distributors.filter(user__is_active=True)
+    elif status == "suspended":
+        distributors = distributors.filter(user__is_active=False)
+
+    return distributors, query, status
+
+
+@login_required(login_url="two_factor:login")
+def distributor_directory(request):
+    """Task 23. Branded replacement for DistributorAdmin's Django-Admin
+    changelist search -- presentation only, no service-layer changes.
+    Unlike the KYC/Withdrawal queues (small, naturally bounded to
+    pending items), this directory can hold every distributor on the
+    platform, so it gets real search, an account-status filter, and real
+    pagination rather than showing everything on one page.
+
+    Search and filter are real-time (Task 23 follow-up): mirrors
+    apps.catalog.views.product_list's own hx-trigger pattern exactly --
+    an htmx GET on keyup/change, no Apply button, swapping only the
+    results partial so the rest of the page (including the performance
+    insights footer) doesn't re-render on every keystroke."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    distributors, query, status = _filtered_distributors(request)
 
     paginator = Paginator(distributors, 20)
     page_number = request.GET.get("page")
     page_obj = paginator.get_page(page_number)
 
-    return render(
-        request,
-        "admin_portal/distributor_directory.html",
-        {"page_obj": page_obj, "query": query, "active_nav": "distributors"},
+    params = request.GET.copy()
+    params.pop("page", None)
+    querystring_no_page = params.urlencode()
+
+    context = {
+        "page_obj": page_obj,
+        "query": query,
+        "status": status,
+        "querystring_no_page": querystring_no_page,
+        "active_nav": "distributors",
+    }
+
+    if request.htmx:
+        return render(request, "admin_portal/partials/directory_results.html", context)
+
+    # These are platform-wide totals, not scoped to the current search/
+    # filter (the Stitch design's own "1,248 / 42 / 92%" numbers read as
+    # global stats, not filtered ones) -- computed once on full-page load
+    # only, not on every htmx keystroke request.
+    total_distributors = Distributor.objects.count()
+    new_this_week = Distributor.objects.filter(
+        user__date_joined__gte=timezone.now() - timedelta(days=7)
+    ).count()
+    # "Approval rate" is of decisions actually made (approved or rejected),
+    # not diluted by distributors who haven't reached KYC review yet --
+    # otherwise the rate would look artificially low and wouldn't answer
+    # the question "of the ones we've reviewed, how many do we approve."
+    decided = Distributor.objects.filter(
+        kyc_status__in=[
+            Distributor.KycStatus.APPROVED,
+            Distributor.KycStatus.REJECTED,
+        ]
     )
+    decided_count = decided.count()
+    kyc_approval_rate = (
+        round(
+            decided.filter(kyc_status=Distributor.KycStatus.APPROVED).count()
+            / decided_count
+            * 100
+        )
+        if decided_count
+        else None
+    )
+    context.update(
+        {
+            "total_distributors": total_distributors,
+            "new_this_week": new_this_week,
+            "kyc_approval_rate": kyc_approval_rate,
+        }
+    )
+    return render(request, "admin_portal/distributor_directory.html", context)
+
+
+def _csv_safe(value):
+    """Neutralizes CSV formula injection (OWASP): full_name is free text a
+    distributor sets themselves at registration, and this file is one a
+    staff admin will realistically open in Excel/Sheets -- a name starting
+    with =/+/-/@ would otherwise execute as a formula on open. Prefixing
+    with a single quote makes spreadsheet apps treat it as literal text."""
+    text = str(value)
+    if text.startswith(("=", "+", "-", "@")):
+        return "'" + text
+    return text
+
+
+@login_required(login_url="two_factor:login")
+def distributor_directory_export(request):
+    """Task 23 follow-up. Exports exactly what the current search/filter
+    shows (via the same _filtered_distributors as the page itself), not
+    the whole table unconditionally -- an admin who searched down to one
+    distributor and clicks Export should get that one row, not all 1,248."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    distributors, _query, _status = _filtered_distributors(request)
+
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="distributors.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        ["Full Name", "IR ID", "Phone Number", "Rank", "KYC Status", "Account Status"]
+    )
+    for distributor in distributors:
+        writer.writerow(
+            [
+                _csv_safe(distributor.full_name),
+                distributor.ir_id or "",
+                distributor.phone_number,
+                distributor.rank,
+                distributor.get_kyc_status_display(),
+                "Active" if distributor.user.is_active else "Suspended",
+            ]
+        )
+    return response
 
 
 @login_required(login_url="two_factor:login")

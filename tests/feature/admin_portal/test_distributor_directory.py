@@ -38,6 +38,10 @@ def _directory_url():
     return reverse("admin_portal:distributor_directory")
 
 
+def _export_url():
+    return reverse("admin_portal:distributor_directory_export")
+
+
 def _profile_url(distributor):
     return reverse("admin_portal:distributor_profile", args=[distributor.pk])
 
@@ -121,6 +125,132 @@ def test_directory_shows_account_status_pills(staff_client):
     body = response.content.decode()
     assert "Active" in body
     assert "Suspended" in body
+
+
+@pytest.mark.django_db
+def test_htmx_search_request_returns_only_the_results_partial(staff_client):
+    """Real-time search (no Apply button): a keyup-triggered htmx request
+    must get back just the results fragment, not the full page shell --
+    otherwise the sidebar/header would get swapped into the results div
+    on every keystroke."""
+    _make_distributor(full_name="Ama Mensah")
+
+    response = staff_client.get(
+        _directory_url(), {"q": "Ama"}, headers={"HX-Request": "true"}
+    )
+
+    body = response.content.decode()
+    assert "Ama Mensah" in body
+    assert "Bancostore Admin Portal" not in body
+
+
+@pytest.mark.django_db
+def test_status_filter_shows_only_active_distributors(staff_client):
+    _make_distributor(full_name="Active One", is_active=True)
+    _make_distributor(full_name="Suspended One", is_active=False)
+
+    response = staff_client.get(_directory_url(), {"status": "active"})
+
+    body = response.content.decode()
+    assert "Active One" in body
+    assert "Suspended One" not in body
+
+
+@pytest.mark.django_db
+def test_status_filter_shows_only_suspended_distributors(staff_client):
+    _make_distributor(full_name="Active One", is_active=True)
+    _make_distributor(full_name="Suspended One", is_active=False)
+
+    response = staff_client.get(_directory_url(), {"status": "suspended"})
+
+    body = response.content.decode()
+    assert "Active One" not in body
+    assert "Suspended One" in body
+
+
+@pytest.mark.django_db
+def test_search_matches_a_local_format_phone_number(staff_client):
+    """Distributors are stored E.164 (+233...), but an admin naturally
+    types the local "0..." format they'd dial -- both must find the same
+    distributor."""
+    distributor = _make_distributor(full_name="Ama Mensah")
+    local_format = "0" + str(distributor.phone_number)[4:]
+
+    response = staff_client.get(_directory_url(), {"q": local_format})
+
+    assert b"Ama Mensah" in response.content
+
+
+@pytest.mark.django_db
+def test_directory_shows_real_performance_insight_totals(staff_client):
+    _make_distributor(
+        full_name="Approved One", kyc_status=Distributor.KycStatus.APPROVED
+    )
+    _make_distributor(
+        full_name="Rejected One", kyc_status=Distributor.KycStatus.REJECTED
+    )
+    _make_distributor(full_name="Pending One", kyc_status=Distributor.KycStatus.PENDING)
+
+    response = staff_client.get(_directory_url())
+
+    body = response.content.decode()
+    assert "3" in body  # Total Distributors
+    # 1 approved of 2 decided (pending isn't a decision) = 50%
+    assert "50%" in body
+
+
+@pytest.mark.django_db
+def test_performance_insights_show_a_dash_when_no_kyc_decisions_exist_yet(
+    staff_client,
+):
+    _make_distributor(full_name="Pending One", kyc_status=Distributor.KycStatus.PENDING)
+
+    response = staff_client.get(_directory_url())
+
+    assert b"\xe2\x80\x94" in response.content  # em dash, not a ZeroDivisionError 500
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_export_csv_contains_the_filtered_distributors(staff_client):
+    _make_distributor(full_name="Ama Mensah", ir_id="IR00042", rank="Bronze")
+    _make_distributor(full_name="Kojo Antwi")
+
+    response = staff_client.get(_export_url(), {"q": "Ama"})
+
+    assert response.status_code == 200
+    assert response["Content-Type"] == "text/csv"
+    body = response.content.decode()
+    assert "Ama Mensah" in body
+    assert "IR00042" in body
+    assert "Kojo Antwi" not in body
+
+
+@pytest.mark.django_db
+def test_export_csv_neutralizes_formula_injection_in_full_name(staff_client):
+    """OWASP CSV injection: full_name is free text a distributor sets
+    themselves at registration, and this file is one a staff admin will
+    realistically open in Excel/Sheets -- a name starting with "=" must
+    not reach the file as a live formula."""
+    _make_distributor(full_name='=HYPERLINK("https://evil.example")')
+
+    response = staff_client.get(_export_url())
+
+    body = response.content.decode()
+    assert "'=HYPERLINK" in body
+
+
+@pytest.mark.django_db
+def test_export_csv_requires_staff(client, db):
+    phone = f"+233248{next(_phone_seq):06d}"
+    user = User.objects.create_user(
+        username=phone, password="Passw0rd!", is_staff=False
+    )
+    client.force_login(user)
+
+    response = client.get(_export_url())
+
+    assert response.status_code == 403
 
 
 @pytest.mark.django_db
