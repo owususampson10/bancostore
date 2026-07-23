@@ -106,7 +106,7 @@
 {# Task 16g, still disabled) -- this is the Stitch design's pinned action #}
 {# button, now wired to Task 16c's real withdrawal request flow. #}
 <div class="px-4 mt-4 group relative">
-<a href="{% url 'distributors:withdrawal_request' %}" class="w-full bg-primary text-on-primary py-3 px-4 rounded-xl font-button flex items-center justify-center gap-2 hover:opacity-90 transition-all" :class="collapsed && 'px-0'">
+<a href="{% url 'distributors:withdrawal_request' %}" aria-label="Withdraw Now" class="w-full bg-primary text-on-primary py-3 px-4 rounded-xl font-button flex items-center justify-center gap-2 hover:opacity-90 transition-all" :class="collapsed && 'px-0'">
 <span class="material-symbols-outlined text-[20px]" aria-hidden="true">account_balance_wallet</span>
 <span x-show="!collapsed" x-cloak>Withdraw Now</span>
 </a>
