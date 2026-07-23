@@ -20,6 +20,7 @@
       x-data="{
         collapsed: localStorage.getItem('bancostore-sidebar-collapsed') === 'true',
         mobileOpen: false,
+        logoutConfirmOpen: false,
       }"
       x-init="$watch('collapsed', (v) => localStorage.setItem('bancostore-sidebar-collapsed', v))">
 <div class="flex min-h-screen">
@@ -97,7 +98,7 @@
 {# so far only, settings-scoped page this platform has. Not a broader #}
 {# settings hub (no other settings page is scoped anywhere yet). #}
 {% include "distributors/_sidebar_nav_item.html" with href=payout_settings_url icon="settings" label="Settings" nav_key="payout_settings" active_nav=active_nav %}
-{% include "distributors/_sidebar_nav_item.html" with href=logout_url icon="logout" label="Log Out" danger=True %}
+{% include "distributors/_sidebar_nav_item.html" with href=logout_url icon="logout" label="Log Out" danger=True confirm="logoutConfirmOpen = true" %}
 </div>
 </nav>
 
@@ -133,6 +134,27 @@
 <main class="flex-1 p-margin-mobile md:p-margin-desktop max-w-[1200px] w-full mx-auto">
 {% block content %}{% endblock %}
 </main>
+</div>
+</div>
+
+{# Log-out confirmation modal -- state lives on this file's body-level #}
+{# x-data (logoutConfirmOpen) so the sidebar's single "Log Out" nav item, #}
+{# nested several includes deep, can reach it without prop-drilling. #}
+<div x-show="logoutConfirmOpen"
+     x-cloak
+     class="fixed inset-0 z-[70] flex items-center justify-center p-4"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="logout-confirm-title"
+     @keydown.escape.window="logoutConfirmOpen = false">
+<div class="fixed inset-0 bg-black/40" @click="logoutConfirmOpen = false"></div>
+<div class="relative bg-white rounded-xl border border-outline-variant p-6 max-w-sm w-full shadow-lg">
+<h3 id="logout-confirm-title" class="font-headline-md text-headline-md text-on-surface mb-2">Log out?</h3>
+<p class="font-body-md text-body-md text-gray-muted mb-6">You'll need to log in again to access your dashboard.</p>
+<div class="flex gap-3">
+<button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="logoutConfirmOpen = false">Cancel</button>
+<a href="{% url 'distributors:logout' %}" class="flex-1 bg-error text-on-error py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all text-center">Log Out</a>
+</div>
 </div>
 </div>
 </body>

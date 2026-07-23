@@ -1,0 +1,30 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }}{% endblock %}
+
+{% block content %}
+<p>You are about to reject the following withdrawal request(s). This requires a reason.</p>
+<ul>
+{% for withdrawal_request in withdrawal_requests %}
+<li>{{ withdrawal_request }}</li>
+{% endfor %}
+</ul>
+
+<form method="post">{% csrf_token %}
+<div>
+{% for withdrawal_request in withdrawal_requests %}
+<input type="hidden" name="{{ action_checkbox_name }}" value="{{ withdrawal_request.pk }}">
+{% endfor %}
+<input type="hidden" name="action" value="{{ action }}">
+
+<p>
+<label for="id_reason">Reason (required):</label><br>
+<textarea id="id_reason" name="reason" rows="3" cols="60" required></textarea>
+</p>
+
+<input type="submit" value="Reject">
+<a href="#" onclick="window.history.back(); return false;" class="button">Cancel</a>
+</div>
+</form>
+{% endblock %}
