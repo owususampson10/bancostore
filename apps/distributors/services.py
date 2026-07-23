@@ -598,15 +598,23 @@ def _apply_decision_to_verification(verification, decision, session_id) -> bool:
                 session_id,
             )
 
-    # front_image/back_image/portrait_image field names confirmed 2026-07-14
-    # against a real live Didit verification session; a missing key just
-    # means no image gets stored, it doesn't crash.
-    for field_name, url_key in (
-        ("id_front_image", "front_image"),
-        ("id_back_image", "back_image"),
-        ("selfie_image", "portrait_image"),
+    # front_image/back_image field names confirmed 2026-07-14 against a real
+    # live Didit verification session; a missing key just means no image
+    # gets stored, it doesn't crash.
+    #
+    # selfie_image bug (found 2026-07-23 via a real live session): this
+    # used to read id_verification["portrait_image"] -- that's the ID
+    # document's own embedded photo crop, not the live selfie the
+    # distributor actually captured. liveness_check["reference_image"] is
+    # the real live capture. Getting this wrong defeats manual KYC review
+    # entirely: an admin comparing "the selfie" against the ID photo was
+    # actually comparing the ID photo against itself.
+    for source, field_name, url_key in (
+        (id_verification, "id_front_image", "front_image"),
+        (id_verification, "id_back_image", "back_image"),
+        (liveness_check, "selfie_image", "reference_image"),
     ):
-        url = id_verification.get(url_key)
+        url = source.get(url_key)
         if not url:
             continue
         try:

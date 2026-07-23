@@ -45,7 +45,13 @@ def _approved_decision(**overrides):
             }
         ],
         "face_matches": [{"status": "Approved", "score": 0.97}],
-        "liveness_checks": [{"status": "Approved", "score": 0.99}],
+        "liveness_checks": [
+            {
+                "status": "Approved",
+                "score": 0.99,
+                "reference_image": "https://cdn.didit.me/liveness-selfie.jpg",
+            }
+        ],
         "warnings": [],
     }
     decision.update(overrides)
@@ -101,6 +107,32 @@ def test_images_are_downloaded_and_converted_to_webp(mock_decision, mock_get, mo
     assert verification.id_front_image.name.endswith(".webp")
     assert verification.id_back_image.name.endswith(".webp")
     assert verification.selfie_image.name.endswith(".webp")
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.socket.gethostbyname", return_value="8.8.8.8")
+@patch("apps.distributors.services.requests.get")
+@patch("apps.distributors.services.get_session_decision")
+def test_selfie_image_is_downloaded_from_the_liveness_check_not_the_id_document(
+    mock_decision, mock_get, mock_dns
+):
+    """Bug found via a live Didit session (2026-07-23): id_verifications[0]
+    .portrait_image is the ID document's own embedded photo crop, not the
+    live selfie the distributor actually captured during the liveness
+    check -- confirmed by opening both downloaded files and seeing the
+    same ID-card background pattern behind the "selfie". The real live
+    capture is liveness_checks[0].reference_image. Showing an admin the
+    ID's own photo under "Selfie (Liveness)" defeats manual KYC review
+    entirely -- there's nothing left to visually compare against the ID."""
+    _make_verification()
+    mock_decision.return_value = _approved_decision()
+    mock_get.return_value = _fake_image_http_response()
+
+    consume_didit_result("sess-1")
+
+    requested_urls = [call.args[0] for call in mock_get.call_args_list]
+    assert "https://cdn.didit.me/liveness-selfie.jpg" in requested_urls
+    assert "https://cdn.didit.me/selfie.jpg" not in requested_urls
 
 
 @pytest.mark.django_db
