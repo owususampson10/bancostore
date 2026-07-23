@@ -411,12 +411,14 @@ def distributor_directory(request):
 
 def _csv_safe(value):
     """Neutralizes CSV formula injection (OWASP): full_name is free text a
-    distributor sets themselves at registration, and this file is one a
-    staff admin will realistically open in Excel/Sheets -- a name starting
-    with =/+/-/@ would otherwise execute as a formula on open. Prefixing
-    with a single quote makes spreadsheet apps treat it as literal text."""
+    distributor sets themselves at registration, and phone_number is
+    E.164 (always starts with "+") -- this file is one a staff admin will
+    realistically open in Excel/Sheets, and either would otherwise execute
+    or misparse as a formula on open. Checked after stripping leading
+    whitespace (a formula can be padded to dodge a naive startswith check)
+    but the quote is prefixed to the original value so nothing is lost."""
     text = str(value)
-    if text.startswith(("=", "+", "-", "@")):
+    if text.lstrip().startswith(("=", "+", "-", "@")):
         return "'" + text
     return text
 
@@ -443,7 +445,7 @@ def distributor_directory_export(request):
             [
                 _csv_safe(distributor.full_name),
                 distributor.ir_id or "",
-                distributor.phone_number,
+                _csv_safe(distributor.phone_number),
                 distributor.rank,
                 distributor.get_kyc_status_display(),
                 "Active" if distributor.user.is_active else "Suspended",

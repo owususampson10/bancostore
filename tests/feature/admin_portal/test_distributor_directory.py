@@ -194,7 +194,13 @@ def test_directory_shows_real_performance_insight_totals(staff_client):
     response = staff_client.get(_directory_url())
 
     body = response.content.decode()
-    assert "3" in body  # Total Distributors
+    # Anchored to the exact rendered span, not a bare "3" -- distributor
+    # phone numbers themselves contain the digit "3" (+233...), so a loose
+    # substring check would pass even if the real count were wrong.
+    assert (
+        '<span class="font-headline-md text-headline-md text-on-surface">3</span>'
+        in body
+    )
     # 1 approved of 2 decided (pending isn't a decision) = 50%
     assert "50%" in body
 
@@ -238,6 +244,37 @@ def test_export_csv_neutralizes_formula_injection_in_full_name(staff_client):
 
     body = response.content.decode()
     assert "'=HYPERLINK" in body
+
+
+@pytest.mark.django_db
+def test_export_csv_neutralizes_a_leading_plus_in_phone_number(staff_client):
+    """CodeRabbit finding: phone numbers are stored E.164 and always start
+    with "+", one of the same formula-trigger characters as full_name --
+    every single distributor's phone number would otherwise misparse as a
+    formula the moment the export is opened in Excel/Sheets."""
+    distributor = _make_distributor(full_name="Ama Mensah")
+
+    response = staff_client.get(_export_url())
+
+    body = response.content.decode()
+    assert f"'{distributor.phone_number}" in body
+
+
+@pytest.mark.django_db
+def test_export_csv_link_reflects_the_active_search_filter(staff_client):
+    """CodeRabbit finding: the Export CSV link must live inside the
+    htmx-swapped results fragment, not the static page header -- otherwise
+    its href keeps the querystring from the initial full-page load and an
+    admin who searches, then clicks Export, silently downloads the whole
+    unfiltered table instead of the filtered set."""
+    _make_distributor(full_name="Ama Mensah")
+
+    response = staff_client.get(
+        _directory_url(), {"q": "Ama"}, headers={"HX-Request": "true"}
+    )
+
+    body = response.content.decode()
+    assert "q=Ama" in body
 
 
 @pytest.mark.django_db

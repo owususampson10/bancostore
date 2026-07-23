@@ -1,5 +1,16 @@
 <div id="directory-results">
 {% if page_obj.object_list %}
+<div class="flex justify-end mb-4">
+{# Lives inside this swapped fragment (not the page header) so its href #}
+{# always reflects the active search/status filter -- CodeRabbit caught #}
+{# that a header-level link never gets its querystring refreshed by an #}
+{# htmx swap of just #directory-results, so it would silently export the #}
+{# wrong (unfiltered) set after a search. #}
+<a href="{% url 'admin_portal:distributor_directory_export' %}?{{ querystring_no_page }}" class="px-6 py-2.5 bg-white border border-outline-variant rounded-xl text-secondary font-label-md text-label-md hover:bg-surface-container transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>
+Export CSV
+</a>
+</div>
 <div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
 <div class="overflow-x-auto">
 <table class="w-full text-left border-collapse">
