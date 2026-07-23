@@ -224,6 +224,19 @@ WITHDRAWAL_AND_PAYOUT_SETTINGS = {
         "Cap on how much can be withdrawn in a single request (GHS)",
         "non_negative_money_field",
     ),
+    "HIGH_PRIORITY_WITHDRAWAL_THRESHOLD": (
+        Decimal("5000"),
+        # Task 23 (Admin Portal): the Withdrawal Review queue flags a
+        # pending request as "high priority" -- worth a closer look, not
+        # a different approval path -- once it's requested above this
+        # amount. Deliberately does NOT gate approval itself (no
+        # multi-tier admin permission system exists in this codebase;
+        # any staff admin can approve any amount) -- it's a display-only
+        # nudge. Defaulted to half of MAX_WITHDRAWAL_AMOUNT as a starting
+        # point, fully admin-editable like its siblings above.
+        "Withdrawal requests above this amount are flagged for extra scrutiny (GHS)",
+        "non_negative_money_field",
+    ),
     "WITHHOLDING_TAX_RATE": (
         Decimal("1"),
         # Task 16c (code-review-and-quality, 2026-07-23): was a plain
