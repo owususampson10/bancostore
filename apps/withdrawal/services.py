@@ -4,10 +4,13 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
 from django.db.models.functions import Now
+from django.utils import timezone
 
 from constance import config
 
 from apps.distributors.models import Distributor
+from apps.wallet.models import WalletTransaction
+from apps.wallet.services import InsufficientBalanceError, debit
 from bancostore.concurrency import (
     retry_on_lock_contention,
     select_for_update_nowait_if_supported,
@@ -68,6 +71,28 @@ class WithdrawalFrequencyMisconfigured(Exception):
 
 class WithholdingTaxMisconfigured(Exception):
     pass
+
+
+class WithdrawalRequestNotFound(Exception):
+    pass
+
+
+class WithdrawalRequestNotPending(Exception):
+    """Raised when approve/reject is attempted on a request that's no
+    longer submitted -- another admin already approved/rejected it, or
+    (approve only) it's already further along (queued_for_payout/paid).
+
+    Deliberately NOT idempotent-silent like apps.distributors.services
+    .approve_kyc's precedent (which returns early on an already-approved
+    KYC): this is money-moving, and a bulk admin action's results summary
+    should be able to show "already handled by someone else" explicitly
+    rather than silently treating a stale action as a success. `status`
+    carries the request's actual current status so a caller can build
+    that distinction without parsing the message string."""
+
+    def __init__(self, message, *, status):
+        super().__init__(message)
+        self.status = status
 
 
 def submit_withdrawal_request(distributor, amount: Decimal) -> WithdrawalRequest:
@@ -216,5 +241,168 @@ def submit_withdrawal_request(distributor, amount: Decimal) -> WithdrawalRequest
                 net_amount,
             )
             return request
+
+    return retry_on_lock_contention(_attempt)
+
+
+def approve_withdrawal_request(withdrawal_request, *, reviewed_by) -> WithdrawalRequest:
+    """Task 16d. Admin approves a WithdrawalRequest at status=submitted,
+    transitioning it to approved_debited and debiting the distributor's
+    wallet for net_amount -- the first real caller of
+    apps.wallet.services.debit(). Takes a WithdrawalRequest instance (not
+    an id), matching this codebase's own established service-function
+    convention (debit(distributor, ...), submit_withdrawal_request
+    (distributor, ...)) -- the instance is re-fetched and locked
+    internally regardless, so this only affects the calling convention,
+    not correctness.
+
+    Locks the Distributor row first (matching process_binary_bonus_for_
+    distributor/process_matching_bonus_for_distributor's existing order
+    exactly, so this can never deadlock against those batch drivers for
+    the same distributor), then locks the WithdrawalRequest row itself
+    before checking status (doubt-driven-development, pre-implementation
+    review: an earlier draft checked status against a stale, unlocked
+    snapshot taken before any locking happened -- two concurrent
+    approvals could both pass that check, with the actual double-debit
+    protection then falling entirely to apps.wallet.models.
+    WalletTransaction's own unique constraint in a different app,
+    surfacing as an undocumented raw IntegrityError instead of a clean,
+    catchable exception here). Re-checks kyc_status AND
+    has_payout_destination inside the lock -- both can change between
+    submission and approval -- before snapshotting the payout destination
+    onto the request (ADR-0004 point 7: never read live off Distributor
+    again after this point) and calling debit().
+
+    apps.wallet.services.InsufficientBalanceError is caught and re-raised
+    as this module's own InsufficientWalletBalance (the same exception
+    submit_withdrawal_request already uses for the equivalent submission-
+    time check) so a caller only ever needs to catch withdrawal-module
+    exceptions, never reach into the wallet module's own error types too.
+
+    Raises WithdrawalRequestNotPending (see its own docstring for why
+    this isn't idempotent-silent), WithdrawalRequestNotFound,
+    KycNotApproved, PayoutDestinationNotSet, or InsufficientWalletBalance."""
+    if reviewed_by is None:
+        raise TypeError("approve_withdrawal_request() reviewed_by must not be None")
+
+    def _attempt():
+        with transaction.atomic():
+            distributor_id = (
+                WithdrawalRequest.objects.filter(pk=withdrawal_request.pk)
+                .values_list("distributor_id", flat=True)
+                .first()
+            )
+            if distributor_id is None:
+                raise WithdrawalRequestNotFound(
+                    f"WithdrawalRequest {withdrawal_request.pk} does not exist"
+                )
+
+            locked_distributor = select_for_update_nowait_if_supported(
+                Distributor.objects.filter(pk=distributor_id)
+            ).get()
+            locked_request = select_for_update_nowait_if_supported(
+                WithdrawalRequest.objects.filter(pk=withdrawal_request.pk)
+            ).get()
+
+            if locked_request.status != WithdrawalRequest.Status.SUBMITTED:
+                raise WithdrawalRequestNotPending(
+                    f"WithdrawalRequest {locked_request.pk} is not pending "
+                    f"(status={locked_request.status})",
+                    status=locked_request.status,
+                )
+            if locked_distributor.kyc_status != Distributor.KycStatus.APPROVED:
+                raise KycNotApproved(
+                    f"distributor {locked_distributor.pk} KYC is no longer approved"
+                )
+            if not locked_distributor.has_payout_destination:
+                raise PayoutDestinationNotSet(
+                    f"distributor {locked_distributor.pk} has no payout "
+                    f"destination set"
+                )
+
+            locked_request.payout_mobile_money_number = (
+                locked_distributor.mobile_money_number
+            )
+            locked_request.payout_mobile_money_network = (
+                locked_distributor.mobile_money_network
+            )
+
+            try:
+                debit(
+                    locked_distributor,
+                    locked_request.net_amount,
+                    transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT,
+                    reference=f"withdrawal-{locked_request.pk}",
+                )
+            except InsufficientBalanceError as exc:
+                raise InsufficientWalletBalance(
+                    f"distributor {locked_distributor.pk} balance is insufficient "
+                    f"to approve withdrawal request {locked_request.pk}"
+                ) from exc
+
+            locked_request.status = WithdrawalRequest.Status.APPROVED_DEBITED
+            locked_request.reviewed_by = reviewed_by
+            locked_request.reviewed_at = timezone.now()
+            locked_request.save()
+            logger.info(
+                "approve_withdrawal_request: withdrawal_request_id=%s "
+                "distributor_id=%s net_amount=%s reviewed_by_id=%s",
+                locked_request.pk,
+                locked_distributor.pk,
+                locked_request.net_amount,
+                reviewed_by.pk,
+            )
+            return locked_request
+
+    return retry_on_lock_contention(_attempt)
+
+
+def reject_withdrawal_request(
+    withdrawal_request, *, reviewed_by, reason
+) -> WithdrawalRequest:
+    """Task 16d. Requires a non-empty reason (mirrors the KYC reject
+    flow's own requirement, apps.distributors.services::reject_kyc) and
+    never touches the wallet under any code path. Locks only the
+    WithdrawalRequest row (never Distributor -- there's nothing here that
+    needs it), inside transaction.atomic(), so a concurrent
+    approve_withdrawal_request on the same request can't have its
+    committed fields (status, reviewed_by, reviewed_at, the payout
+    snapshot) silently clobbered by a stale blind overwrite here."""
+    if reviewed_by is None:
+        raise TypeError("reject_withdrawal_request() reviewed_by must not be None")
+    if not reason or not reason.strip():
+        raise ValueError("reject_withdrawal_request() reason must not be empty")
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                locked_request = select_for_update_nowait_if_supported(
+                    WithdrawalRequest.objects.filter(pk=withdrawal_request.pk)
+                ).get()
+            except WithdrawalRequest.DoesNotExist:
+                raise WithdrawalRequestNotFound(
+                    f"WithdrawalRequest {withdrawal_request.pk} does not exist"
+                ) from None
+
+            if locked_request.status != WithdrawalRequest.Status.SUBMITTED:
+                raise WithdrawalRequestNotPending(
+                    f"WithdrawalRequest {locked_request.pk} is not pending "
+                    f"(status={locked_request.status})",
+                    status=locked_request.status,
+                )
+
+            locked_request.status = WithdrawalRequest.Status.REJECTED
+            locked_request.reviewed_by = reviewed_by
+            locked_request.reviewed_at = timezone.now()
+            locked_request.rejection_reason = reason
+            locked_request.save()
+            logger.info(
+                "reject_withdrawal_request: withdrawal_request_id=%s "
+                "reviewed_by_id=%s reason=%s",
+                locked_request.pk,
+                reviewed_by.pk,
+                reason,
+            )
+            return locked_request
 
     return retry_on_lock_contention(_attempt)

@@ -344,3 +344,74 @@ it. Real verification happens naturally in 16e: Paystack's Transfer Recipient cr
 the account and would surface an invalid number at that point. If that turns out to be too late in
 practice (e.g. a distributor only discovers a typo after admin approval, not before), revisit —
 flagged here rather than silently assumed sufficient.
+
+## Task 16d Design Review (2026-07-23) — lock ordering, idempotency, and a real double-debit gap closed before implementation
+
+A `doubt-driven-development` pass against `approve_withdrawal_request`/`reject_withdrawal_request`'s
+design (before either existed in code) found two serious gaps and one deliberate divergence from
+existing precedent, all resolved before implementation.
+
+**The status check must read a locked, fresh row — not a snapshot taken before any lock was held.**
+The original draft checked `WithdrawalRequest.status` against a plain, unlocked `.get()` performed
+*before* `Distributor` was locked. Two admins approving the same request in quick succession (a
+realistic scenario — two staff members both working the same filtered changelist, not just a
+same-instant double-click) could both pass that stale check: the second admin's `Distributor` lock
+acquisition would only contend with the first if their transactions genuinely overlapped, which
+isn't guaranteed. The actual double-debit protection would then fall entirely to
+`apps.wallet.models.WalletTransaction`'s own unique `(wallet, reference, transaction_type)`
+constraint, several call-frames away in a different app — surfacing as an undocumented raw
+`IntegrityError` (or, depending on incidental balance state, `InsufficientBalanceError`) instead of
+a clean, catchable exception here. Fixed: `approve_withdrawal_request` now locks `Distributor` first
+(preserving point 8's existing order below, unchanged), then locks the `WithdrawalRequest` row
+itself *before* checking status — so the check reads committed, visible data, not a pre-transaction
+memory of it.
+
+**`reject_withdrawal_request` had zero locking at all — the one outlier in this codebase's write-
+path convention.** Every other mutating function in this project (`submit_withdrawal_request`,
+`credit`/`debit`, `approve_kyc`/`reject_kyc`, the binary/matching bonus batch drivers) wraps its
+check-then-write in `transaction.atomic()` with a locked row. The original `reject_withdrawal_
+request` draft was a bare `.get()` → status check → four field assignments → full-row `.save()`,
+with nothing serializing it against a concurrent `approve_withdrawal_request` on the same row. Under
+the same "two admins, same changelist" scenario: if admin A approves (debits the wallet, sets
+`status`/`payout_mobile_money_number`/`payout_mobile_money_network`/`reviewed_by`/`reviewed_at`,
+commits) while admin B's stale in-memory `reject_withdrawal_request` call is still in flight, B's
+blind `.save()` would silently revert every field A just committed back to B's stale values —
+`status=REJECTED` while the wallet had already been debited, a real accounting inconsistency, not
+just a display glitch. Fixed: `reject_withdrawal_request` now locks the `WithdrawalRequest` row
+inside `transaction.atomic()` before reading or writing anything, the same discipline as everywhere
+else in this codebase. It never locks `Distributor` — there's nothing here that touches the wallet
+or the distributor row, so no new lock-ordering question is introduced.
+
+**`WithdrawalRequestNotPending` raises rather than silently no-oping — a deliberate divergence from
+`approve_kyc`'s existing idempotent-no-op precedent, not an oversight.** `apps.distributors.services
+.approve_kyc` treats "already approved" as a silent early-return. For a money-moving action, that
+precedent was rejected: a bulk admin action's results summary should be able to tell an admin
+"already approved by someone else" apart from "approved just now," not silently treat a stale action
+as a success. The exception carries a structured `status` attribute (the request's actual current
+status) specifically so `apps/withdrawal/admin.py`'s bulk-action loop can build that distinction
+without parsing a message string.
+
+**Both re-checks happen inside the lock, not just `kyc_status`.** The original draft only
+re-checked `kyc_status` (matching what this ADR's earlier section already called for) but not
+`has_payout_destination` — a distributor could clear their payout profile between submission and
+approval, and the model's own both-or-neither `CheckConstraint` explicitly *permits* both snapshot
+fields landing as empty strings, so nothing would have caught it. `approve_withdrawal_request` now
+re-checks both.
+
+**Follow-up `code-review-and-quality` pass (2026-07-23) after implementation** found one real gap
+in the admin bulk-action loop: `WithdrawalRequestNotFound` was documented on both service functions
+but never actually caught in `apps/withdrawal/admin.py` — an uncaught exception mid-loop would 500
+the *entire* bulk action, losing the results summary for every row already processed in the same
+request (even though each row's own approval/rejection is independently atomic and stays
+committed). Fixed in both `approve_selected` and `reject_selected`, with a test simulating the
+"row vanished mid-batch" case via monkeypatch (isolating the admin loop's own error-handling from
+the deeper service-layer locking already proven by the concurrency test).
+
+**Deferred, not silently skipped:** the same review flagged that a very large bulk selection
+(hundreds+ of requests) processes synchronously within one HTTP request, with no selection-size cap
+and no background-job offload — each row's own atomic lock+check+debit is necessary and can't be
+batched into fewer queries, so this isn't a fixable N+1, just an unbounded-request-duration risk.
+This mirrors the existing KYC bulk-action's own scale ceiling exactly, so it isn't a regression, but
+it's worth a deliberate decision (a selection-size cap, or moving to Celery) before withdrawal
+review volume ever gets large enough to matter for a money-moving action specifically -- flagged
+here rather than silently inherited.

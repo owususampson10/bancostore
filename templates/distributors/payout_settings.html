@@ -19,9 +19,12 @@
 </div>
 {% endif %}
 
-<div class="bg-white rounded-xl border border-outline-variant p-6">
+{# confirmOpen is local to this page (unlike the sidebar's logout modal, #}
+{# nothing else on the page needs it) -- form submission is intercepted #}
+{# and only actually POSTs once the user confirms in the modal below. #}
+<div class="bg-white rounded-xl border border-outline-variant p-6" x-data="{ confirmOpen: false }">
 <h3 class="font-headline-md text-headline-md text-on-surface mb-6">Payout Destination</h3>
-<form method="post" class="space-y-stack-md">
+<form method="post" class="space-y-stack-md" x-ref="payoutForm" @submit.prevent="confirmOpen = true">
 {% csrf_token %}
 {% if form.non_field_errors %}
 <div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">
@@ -124,6 +127,24 @@ Make sure this is correct — payouts are sent automatically and Bancostore cann
 Save Payout Details
 </button>
 </form>
+
+<div x-show="confirmOpen"
+     x-cloak
+     class="fixed inset-0 z-[70] flex items-center justify-center p-4"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="payout-confirm-title"
+     @keydown.escape.window="confirmOpen = false">
+<div class="fixed inset-0 bg-black/40" @click="confirmOpen = false"></div>
+<div class="relative bg-white rounded-xl border border-outline-variant p-6 max-w-sm w-full shadow-lg">
+<h3 id="payout-confirm-title" class="font-headline-md text-headline-md text-on-surface mb-2">Save payout details?</h3>
+<p class="font-body-md text-body-md text-gray-muted mb-6">Payouts are sent automatically to this mobile money number and network. Bancostore cannot recover a payment sent to the wrong number — make sure it's correct.</p>
+<div class="flex gap-3">
+<button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="confirmOpen = false">Cancel</button>
+<button type="button" class="flex-1 bg-primary text-on-primary py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all" @click="confirmOpen = false; $refs.payoutForm.submit()">Yes, Save</button>
+</div>
+</div>
+</div>
 </div>
 </div>
 {% endblock %}
