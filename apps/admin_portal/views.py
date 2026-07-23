@@ -3,7 +3,8 @@ from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count, Sum
+from django.core.paginator import Paginator
+from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 
 from constance import config
@@ -290,5 +291,100 @@ def withdrawal_review_detail(request, pk):
             # admin-editable setting (ADR-0004), so this must track it.
             "withdrawal_day": config.WITHDRAWAL_DAY.capitalize(),
             "active_nav": "withdrawals",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def distributor_directory(request):
+    """Task 23. Branded replacement for DistributorAdmin's Django-Admin
+    changelist search -- presentation only, no service-layer changes.
+    Unlike the KYC/Withdrawal queues (small, naturally bounded to
+    pending items), this directory can hold every distributor on the
+    platform, so it gets real search and real pagination rather than
+    showing everything on one page."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    query = request.GET.get("q", "").strip()
+    # "pk" is a tie-breaker: full_name isn't unique (including two blank
+    # names), and without one, Paginator can skip or duplicate a row across
+    # a page boundary -- the exact bug class already caught in Task 15's
+    # earnings-history pagination.
+    distributors = Distributor.objects.select_related("user").order_by(
+        "full_name", "pk"
+    )
+    if query:
+        distributors = distributors.filter(
+            Q(full_name__icontains=query)
+            | Q(ir_id__icontains=query)
+            | Q(phone_number__icontains=query)
+        )
+
+    paginator = Paginator(distributors, 20)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    return render(
+        request,
+        "admin_portal/distributor_directory.html",
+        {"page_obj": page_obj, "query": query, "active_nav": "distributors"},
+    )
+
+
+@login_required(login_url="two_factor:login")
+def distributor_profile(request, pk):
+    """Task 23. GET shows one distributor's read-only profile; POST
+    toggles User.is_active -- confirmed via reading apps.distributors.
+    backends.PhoneNumberBackend that this genuinely blocks login through
+    Django's own ModelBackend.user_can_authenticate(), not a cosmetic
+    flag. No other field is editable from this screen (per the design
+    brief: a read-only profile plus this one action, not a general edit
+    form)."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    distributor = get_object_or_404(
+        Distributor.objects.select_related("user", "sponsor", "didit_verification"),
+        pk=pk,
+    )
+    # Same fallback as kyc_review_detail/withdrawal_review_detail: a
+    # distributor with a blank full_name still has a name Didit extracted
+    # from their ID, if they've gone through KYC. Computed once and reused
+    # by the template and the flash message so neither ever falls back to
+    # Distributor.__str__'s "Distributor<+233...>" debug repr.
+    verification = getattr(distributor, "didit_verification", None)
+    display_name = distributor.full_name or (
+        verification.extracted_full_name if verification else ""
+    )
+    distributor_label = display_name or distributor
+
+    if request.method == "POST" and request.POST.get("action") == "toggle_active":
+        distributor.user.is_active = not distributor.user.is_active
+        distributor.user.save(update_fields=["is_active"])
+        verb = "Reactivated" if distributor.user.is_active else "Suspended"
+        messages.success(request, f"{verb} {distributor_label}'s account.")
+        return redirect("admin_portal:distributor_profile", pk=distributor.pk)
+
+    wallet = getattr(distributor, "wallet", None)
+    wallet_balance = wallet.balance if wallet else Decimal("0")
+    # starter_pack_choice is a raw "A"/"B" code -- apps.platform_settings
+    # .config only defines STARTER_PACK_A/B_PRICE/PV/RANK, no display
+    # name, so "Pack A"/"Pack B" is the honest label, not a fabricated
+    # marketing name like Stitch's own mockup used.
+    starter_pack_label = (
+        f"Pack {distributor.starter_pack_choice}"
+        if distributor.starter_pack_choice
+        else ""
+    )
+    return render(
+        request,
+        "admin_portal/distributor_profile.html",
+        {
+            "distributor": distributor,
+            "display_name": display_name,
+            "wallet_balance": wallet_balance,
+            "starter_pack_label": starter_pack_label,
+            "active_nav": "distributors",
         },
     )

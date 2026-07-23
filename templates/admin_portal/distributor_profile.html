@@ -1,0 +1,138 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}{{ display_name|default:"(No name on file)" }} — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div x-data="{ toggleOpen: false }">
+<a href="{% url 'admin_portal:distributor_directory' %}" class="inline-flex items-center gap-1 text-secondary hover:text-admin-primary transition-colors mb-4">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
+<span class="font-label-md text-label-md">Back to Directory</span>
+</a>
+
+<header class="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
+<div>
+<div class="flex items-center gap-3">
+<h2 class="font-headline-md text-headline-md text-on-surface">{{ display_name|default:"(No name on file)" }}</h2>
+{% if distributor.user.is_active %}
+<span class="px-3 py-1 rounded-full text-xs font-bold bg-primary-fixed text-admin-primary">Active</span>
+{% else %}
+<span class="px-3 py-1 rounded-full text-xs font-bold bg-error-container text-on-error-container">Suspended</span>
+{% endif %}
+</div>
+<div class="flex flex-wrap items-center gap-x-6 gap-y-2 mt-2">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary text-[20px]" aria-hidden="true">call</span>
+<span class="font-body-md text-body-md">{{ distributor.phone_number }}</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary text-[20px]" aria-hidden="true">fingerprint</span>
+<span class="font-mono text-xs bg-surface-container px-2 py-0.5 rounded">{{ distributor.ir_id|default:"Not yet assigned" }}</span>
+</div>
+</div>
+</div>
+{% if distributor.user.is_active %}
+<button type="button" @click="toggleOpen = true" class="px-6 py-2.5 rounded-xl border border-admin-error text-admin-error font-label-md text-label-md hover:bg-error-container transition-colors flex items-center gap-2 self-start">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">block</span>
+Suspend Account
+</button>
+{% else %}
+<button type="button" @click="toggleOpen = true" class="px-6 py-2.5 rounded-xl bg-admin-primary text-on-primary font-label-md text-label-md shadow-md hover:opacity-90 transition-all flex items-center gap-2 self-start">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">check_circle</span>
+Reactivate Account
+</button>
+{% endif %}
+</header>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter mb-6">
+<!-- Profile Details -->
+<div class="lg:col-span-2 bg-surface-container-lowest rounded-xl p-6 border border-outline-variant">
+<h3 class="font-headline-md text-headline-md text-on-surface mb-6">Distributor Details</h3>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Rank</p>
+<p class="font-headline-md text-headline-md text-on-surface mt-1">{{ distributor.rank|default:"—" }}</p>
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">KYC Status</p>
+{% if distributor.kyc_status == "approved" %}
+<p class="mt-1"><span class="px-3 py-1 rounded-full text-xs font-bold bg-green-50 text-green-700">Approved</span></p>
+{% elif distributor.kyc_status == "rejected" %}
+<p class="mt-1"><span class="px-3 py-1 rounded-full text-xs font-bold bg-error-container text-on-error-container">Rejected</span></p>
+{% else %}
+<p class="mt-1"><span class="px-3 py-1 rounded-full text-xs font-bold bg-surface-container-high text-on-surface-variant">Pending</span></p>
+{% endif %}
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Sponsor</p>
+{% if distributor.sponsor %}
+<p class="font-body-lg text-body-lg font-semibold text-on-surface mt-1">{{ distributor.sponsor.full_name|default:distributor.sponsor.phone_number }}</p>
+{% if distributor.sponsor.ir_id %}<p class="text-secondary text-body-sm font-body-sm">{{ distributor.sponsor.ir_id }}</p>{% endif %}
+{% else %}
+<p class="font-body-lg text-body-lg text-on-surface-variant mt-1">No sponsor</p>
+{% endif %}
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Starter Pack</p>
+{% if starter_pack_label %}
+<p class="font-body-lg text-body-lg font-semibold text-on-surface mt-1">{{ starter_pack_label }}</p>
+{% if distributor.starter_pack_confirmed_at %}<p class="text-secondary text-body-sm font-body-sm">Confirmed: {{ distributor.starter_pack_confirmed_at|date:"M j, Y" }}</p>{% endif %}
+{% else %}
+<p class="font-body-lg text-body-lg text-on-surface-variant mt-1">Not yet purchased</p>
+{% endif %}
+</div>
+</div>
+</div>
+
+<!-- Wallet -->
+<div class="bg-admin-primary rounded-xl p-6 text-on-primary flex flex-col justify-between">
+<div>
+<p class="font-label-md text-label-md text-primary-fixed uppercase">Wallet Balance</p>
+<p class="font-headline-md text-headline-md mt-1">GHS {{ wallet_balance|floatformat:2 }}</p>
+</div>
+</div>
+</div>
+
+<!-- Payout Destination -->
+<div class="bg-surface-container-lowest rounded-xl p-6 border border-outline-variant">
+<h3 class="font-headline-md text-headline-md text-on-surface mb-6">Payout Destination</h3>
+{% if distributor.has_payout_destination %}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Mobile Money Number</p>
+<p class="font-headline-md text-headline-md text-on-surface mt-1">{{ distributor.mobile_money_number }}</p>
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Network</p>
+<p class="font-body-lg text-body-lg font-semibold text-on-surface mt-1">{{ distributor.get_mobile_money_network_display }}</p>
+</div>
+</div>
+{% else %}
+<p class="font-body-md text-body-md text-on-surface-variant">Not yet set.</p>
+{% endif %}
+</div>
+
+<!-- Suspend/Reactivate confirmation -->
+<div x-show="toggleOpen" x-cloak class="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="toggle-confirm-title" @keydown.escape.window="toggleOpen = false">
+<div class="fixed inset-0 bg-black/40" @click="toggleOpen = false"></div>
+<div class="relative bg-white rounded-xl border border-outline-variant p-6 max-w-sm w-full shadow-lg">
+{% if distributor.user.is_active %}
+<h3 id="toggle-confirm-title" class="font-headline-md text-headline-md text-on-surface mb-2">Suspend this account?</h3>
+<p class="font-body-md text-body-md text-gray-muted mb-6">{{ display_name|default:"(No name on file)" }} will not be able to log in until reactivated.</p>
+{% else %}
+<h3 id="toggle-confirm-title" class="font-headline-md text-headline-md text-on-surface mb-2">Reactivate this account?</h3>
+<p class="font-body-md text-body-md text-gray-muted mb-6">{{ display_name|default:"(No name on file)" }} will be able to log in again immediately.</p>
+{% endif %}
+<form method="post">
+{% csrf_token %}
+<input type="hidden" name="action" value="toggle_active">
+<div class="flex gap-3">
+<button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="toggleOpen = false">Cancel</button>
+{% if distributor.user.is_active %}
+<button type="submit" class="flex-1 bg-admin-error text-on-error py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Yes, Suspend</button>
+{% else %}
+<button type="submit" class="flex-1 bg-admin-primary text-on-primary py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Yes, Reactivate</button>
+{% endif %}
+</div>
+</form>
+</div>
+</div>
+</div>
+{% endblock %}
