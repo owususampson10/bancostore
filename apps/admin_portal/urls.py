@@ -25,4 +25,10 @@ urlpatterns = [
         views.distributor_profile,
         name="distributor_profile",
     ),
+    path("commissions/", views.commission_oversight, name="commission_oversight"),
+    path(
+        "commissions/<int:pk>/",
+        views.commission_cycle_detail,
+        name="commission_cycle_detail",
+    ),
 ]

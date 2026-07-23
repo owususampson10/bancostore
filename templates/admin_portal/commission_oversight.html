@@ -1,0 +1,95 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Commission Oversight — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">Commission Oversight</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Monitor automated bonus payout cycles.</p>
+</div>
+
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-gutter mb-8">
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant">
+<p class="font-label-md text-label-md text-secondary uppercase tracking-wider mb-2">Total Paid — Direct Referral</p>
+<p class="font-headline-md text-headline-md text-on-surface">GHS {{ total_direct_referral|floatformat:2 }}</p>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant">
+<p class="font-label-md text-label-md text-secondary uppercase tracking-wider mb-2">Total Paid — Binary Bonus</p>
+<p class="font-headline-md text-headline-md text-on-surface">GHS {{ total_binary_bonus|floatformat:2 }}</p>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant">
+<p class="font-label-md text-label-md text-secondary uppercase tracking-wider mb-2">Total Paid — Matching Bonus</p>
+<p class="font-headline-md text-headline-md text-on-surface">GHS {{ total_matching_bonus|floatformat:2 }}</p>
+</div>
+</div>
+
+{% if page_obj.object_list %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="px-6 py-4 border-b border-outline-variant">
+<h3 class="font-headline-md text-headline-md text-on-surface">Recent Batch Runs</h3>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Job</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Run At</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-center">Evaluated</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-center">Paid</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-center">Failed</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Total Amount</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for run in page_obj.object_list %}
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-4">
+{% if run.job_name == "calculate-binary-bonus" %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary-fixed text-admin-primary">{{ run.job_label }}</span>
+{% elif run.job_name == "calculate-matching-bonus" %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-secondary-container text-secondary">{{ run.job_label }}</span>
+{% else %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-surface-container-high text-on-surface-variant">{{ run.job_label }}</span>
+{% endif %}
+</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface">{{ run.run_at|date:"M j, Y \a\t g:i A" }}</td>
+<td class="px-6 py-4 text-center font-mono text-sm text-on-surface-variant">{{ run.evaluated }}</td>
+<td class="px-6 py-4 text-center font-mono text-sm text-green-700 font-semibold">{{ run.paid }}</td>
+<td class="px-6 py-4 text-center font-mono text-sm {% if run.failed > 0 %}text-admin-error font-bold{% else %}text-on-surface-variant{% endif %}">{{ run.failed }}</td>
+<td class="px-6 py-4 text-right font-mono text-sm font-bold text-on-surface">GHS {{ run.total_amount|floatformat:2 }}</td>
+<td class="px-6 py-4 text-right">
+{% if run.failed > 0 %}
+<a href="{% url 'admin_portal:commission_cycle_detail' run.pk %}" class="text-admin-primary font-label-md text-label-md hover:underline bg-admin-primary/5 px-4 py-2 rounded-lg transition-colors inline-block">View Details</a>
+{% endif %}
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="px-6 py-4 bg-surface-container-low border-t border-outline-variant flex items-center justify-between">
+<span class="font-body-md text-body-md text-on-surface-variant">Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} batch runs</span>
+<div class="flex items-center gap-2">
+{% if page_obj.has_previous %}
+<a href="?page={{ page_obj.previous_page_number }}" aria-label="Previous page" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>
+</a>
+{% endif %}
+<span class="font-label-md text-label-md text-on-surface-variant px-2">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+{% if page_obj.has_next %}
+<a href="?page={{ page_obj.next_page_number }}" aria-label="Next page" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
+</a>
+{% endif %}
+</div>
+</div>
+{% endif %}
+</div>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-12 flex flex-col items-center text-center">
+<span class="material-symbols-outlined text-5xl text-on-surface-variant mb-3" aria-hidden="true">monitoring</span>
+<p class="font-headline-md text-headline-md text-on-surface">No batch runs yet.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">This will populate once the automated bonus jobs have run.</p>
+</div>
+{% endif %}
+{% endblock %}

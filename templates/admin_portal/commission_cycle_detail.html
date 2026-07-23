@@ -1,0 +1,70 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Commission Cycle #{{ cycle_run.pk }} — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<a href="{% url 'admin_portal:commission_oversight' %}" class="inline-flex items-center gap-1 text-secondary hover:text-admin-primary transition-colors mb-4">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
+<span class="font-label-md text-label-md">Back to Commission Oversight</span>
+</a>
+
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">{{ cycle_run.job_label }} — Run at {{ cycle_run.run_at|date:"M j, Y g:i A" }}</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Cycle Run #{{ cycle_run.pk }}</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-4 gap-gutter mb-8">
+<div class="bg-surface-container-lowest p-5 rounded-xl border border-outline-variant">
+<p class="font-label-md text-label-md text-secondary uppercase tracking-wider">Evaluated</p>
+<p class="font-headline-md text-headline-md text-on-surface mt-1">{{ cycle_run.evaluated }}</p>
+</div>
+<div class="bg-surface-container-lowest p-5 rounded-xl border border-outline-variant">
+<p class="font-label-md text-label-md text-secondary uppercase tracking-wider">Paid</p>
+<p class="font-headline-md text-headline-md text-green-700 mt-1">{{ cycle_run.paid }}</p>
+</div>
+<div class="bg-surface-container-lowest p-5 rounded-xl border border-outline-variant">
+<p class="font-label-md text-label-md text-secondary uppercase tracking-wider">Failed</p>
+<p class="font-headline-md text-headline-md {% if cycle_run.failed > 0 %}text-admin-error{% else %}text-on-surface{% endif %} mt-1">{{ cycle_run.failed }}</p>
+</div>
+<div class="bg-surface-container-lowest p-5 rounded-xl border border-outline-variant">
+<p class="font-label-md text-label-md text-secondary uppercase tracking-wider">Total Amount</p>
+<p class="font-headline-md text-headline-md text-on-surface mt-1">GHS {{ cycle_run.total_amount|floatformat:2 }}</p>
+</div>
+</div>
+
+{% if failures %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="px-6 py-4 border-b border-outline-variant">
+<h3 class="font-headline-md text-headline-md text-on-surface">Failed Distributors</h3>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Distributor ID</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Error</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Occurred At</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for failure in failures %}
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-4 font-body-md text-body-md font-semibold text-on-surface align-top">{{ failure.distributor_id }}</td>
+<td class="px-6 py-4 align-top">
+<code class="font-mono text-xs bg-error-container text-on-error-container px-2 py-1 rounded block whitespace-pre-wrap break-words max-w-lg">{{ failure.error }}</code>
+</td>
+<td class="px-6 py-4 align-top">
+<p class="font-mono text-xs text-on-surface">{{ failure.created_at|date:"Y-m-d H:i:s" }}</p>
+<p class="text-[10px] text-secondary uppercase font-semibold mt-1">T+{{ failure.elapsed_seconds|floatformat:0 }}s from start</p>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-12 flex flex-col items-center text-center">
+<span class="material-symbols-outlined text-5xl text-green-600 mb-3" aria-hidden="true">check_circle</span>
+<p class="font-headline-md text-headline-md text-on-surface">No failures in this run.</p>
+</div>
+{% endif %}
+{% endblock %}

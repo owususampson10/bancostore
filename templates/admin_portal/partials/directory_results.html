@@ -74,13 +74,13 @@ Export CSV
 <span class="font-body-md text-body-md text-on-surface-variant">Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} distributors</span>
 <div class="flex items-center gap-2">
 {% if page_obj.has_previous %}
-<a href="?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.previous_page_number }}" hx-get="{% url 'admin_portal:distributor_directory' %}?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.previous_page_number }}" hx-target="#directory-results" hx-swap="outerHTML" hx-push-url="true" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
+<a href="?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.previous_page_number }}" hx-get="{% url 'admin_portal:distributor_directory' %}?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.previous_page_number }}" hx-target="#directory-results" hx-swap="outerHTML" hx-push-url="true" aria-label="Previous page" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>
 </a>
 {% endif %}
 <span class="font-label-md text-label-md text-on-surface-variant px-2">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
 {% if page_obj.has_next %}
-<a href="?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.next_page_number }}" hx-get="{% url 'admin_portal:distributor_directory' %}?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.next_page_number }}" hx-target="#directory-results" hx-swap="outerHTML" hx-push-url="true" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
+<a href="?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.next_page_number }}" hx-get="{% url 'admin_portal:distributor_directory' %}?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.next_page_number }}" hx-target="#directory-results" hx-swap="outerHTML" hx-push-url="true" aria-label="Next page" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
 </a>
 {% endif %}

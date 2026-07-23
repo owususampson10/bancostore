@@ -13,8 +13,10 @@ from django.utils import timezone
 
 from constance import config
 
+from apps.commissions.models import CommissionCycleRun
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
+from apps.wallet.models import WalletTransaction
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
     InsufficientWalletBalance,
@@ -37,6 +39,15 @@ _APPROVE_FAILURE_MESSAGES = {
     InsufficientWalletBalance: "Wallet balance is now insufficient.",
     WithdrawalRequestNotFound: "This request no longer exists.",
     WithdrawalRequestNotPending: "This request has already been handled.",
+}
+
+# code-review finding: was two copy-pasted {% if %}/{% elif %} blocks in
+# commission_oversight.html and commission_cycle_detail.html -- a single
+# source of truth here means a third job type only needs one edit, not a
+# hunt through every template that happens to render a job_name.
+_JOB_NAME_LABELS = {
+    "calculate-binary-bonus": "Binary Bonus",
+    "calculate-matching-bonus": "Matching Bonus",
 }
 
 
@@ -508,5 +519,97 @@ def distributor_profile(request, pk):
             "wallet_balance": wallet_balance,
             "starter_pack_label": starter_pack_label,
             "active_nav": "distributors",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def commission_oversight(request):
+    """Task 23 (final piece). Read-only observability over the two
+    Celery-Beat-automated bonus jobs (Binary Bonus, Matching Bonus) --
+    presentation only, no service-layer changes. No manual-trigger action
+    here: no such service function exists today, and building one is new
+    scope needing its own locking/idempotency review (the same kind Task
+    13's batch driver already went through).
+
+    Direct Referral Bonus is credited instantly at purchase time by
+    apps.commissions.services, not by a batch job, so it has no cycle-run
+    history -- only a lifetime total, same as the other two."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    # code-review finding: was three separate aggregate queries (one
+    # per transaction_type); a single conditional aggregate matches the
+    # one-query convention withdrawal_review_queue already established
+    # for its own summary cards.
+    totals = WalletTransaction.objects.aggregate(
+        direct_referral=Sum(
+            "amount",
+            filter=Q(
+                transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS
+            ),
+        ),
+        binary_bonus=Sum(
+            "amount",
+            filter=Q(transaction_type=WalletTransaction.TransactionType.BINARY_BONUS),
+        ),
+        matching_bonus=Sum(
+            "amount",
+            filter=Q(transaction_type=WalletTransaction.TransactionType.MATCHING_BONUS),
+        ),
+    )
+
+    # "-pk" tie-breaker: Binary Bonus (every 10 min) and Matching Bonus
+    # (every N days) run on independent schedules that could coincide on
+    # the same run_at -- without a tie-breaker, Paginator can skip or
+    # duplicate a row across a page boundary, the same bug class already
+    # fixed twice in the Distributor Directory this session.
+    cycle_runs = CommissionCycleRun.objects.order_by("-run_at", "-pk")
+    paginator = Paginator(cycle_runs, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    for run in page_obj.object_list:
+        run.job_label = _JOB_NAME_LABELS.get(run.job_name, run.job_name)
+
+    return render(
+        request,
+        "admin_portal/commission_oversight.html",
+        {
+            "page_obj": page_obj,
+            "total_direct_referral": totals["direct_referral"] or Decimal("0"),
+            "total_binary_bonus": totals["binary_bonus"] or Decimal("0"),
+            "total_matching_bonus": totals["matching_bonus"] or Decimal("0"),
+            "active_nav": "commissions",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def commission_cycle_detail(request, pk):
+    """Task 23 (final piece). One batch cycle's failure log -- read-only,
+    no retry/resolve action, mirroring CommissionCycleFailure's own design
+    intent (an audit record that must survive even a deleted distributor
+    row, not a workflow item with resolvable state)."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    cycle_run = get_object_or_404(CommissionCycleRun, pk=pk)
+    cycle_run.job_label = _JOB_NAME_LABELS.get(cycle_run.job_name, cycle_run.job_name)
+    failures = [
+        {
+            "distributor_id": failure.distributor_id,
+            "error": failure.error,
+            "created_at": failure.created_at,
+            "elapsed_seconds": (failure.created_at - cycle_run.run_at).total_seconds(),
+        }
+        for failure in cycle_run.failures.all()
+    ]
+
+    return render(
+        request,
+        "admin_portal/commission_cycle_detail.html",
+        {
+            "cycle_run": cycle_run,
+            "failures": failures,
+            "active_nav": "commissions",
         },
     )
