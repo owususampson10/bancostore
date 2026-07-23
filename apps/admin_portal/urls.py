@@ -14,4 +14,10 @@ urlpatterns = [
         views.withdrawal_review_detail,
         name="withdrawal_review_detail",
     ),
+    path("distributors/", views.distributor_directory, name="distributor_directory"),
+    path(
+        "distributors/<int:pk>/",
+        views.distributor_profile,
+        name="distributor_profile",
+    ),
 ]

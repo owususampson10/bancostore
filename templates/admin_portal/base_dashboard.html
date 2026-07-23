@@ -61,11 +61,12 @@
 {% url 'admin_portal:dashboard' as dashboard_url %}
 {% url 'admin_portal:kyc_review_queue' as kyc_review_url %}
 {% url 'admin_portal:withdrawal_review_queue' as withdrawals_url %}
+{% url 'admin_portal:distributor_directory' as distributors_url %}
 {% url 'admin:logout' as logout_url %}
 {% include "distributors/_sidebar_nav_item.html" with href=dashboard_url icon="dashboard" label="Dashboard" nav_key="dashboard" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=kyc_review_url icon="fact_check" label="KYC Review" nav_key="kyc_review" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=withdrawals_url icon="payments" label="Withdrawals" nav_key="withdrawals" active_nav=active_nav %}
-{% include "distributors/_sidebar_nav_item.html" with icon="groups" label="Distributors" %}
+{% include "distributors/_sidebar_nav_item.html" with href=distributors_url icon="groups" label="Distributors" nav_key="distributors" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with icon="monetization_on" label="Commissions" %}
 <div class="pt-4 mt-4 border-t border-outline-variant/50">
 {% include "distributors/_sidebar_nav_item.html" with href=logout_url icon="logout" label="Log Out" danger=True confirm="logoutConfirmOpen = true" %}

@@ -1,0 +1,105 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Distributors — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">Distributors</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Search and manage every distributor on the platform.</p>
+</div>
+
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant mb-8">
+<form method="get" class="relative">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-secondary" aria-hidden="true">search</span>
+<input type="search" name="q" value="{{ query }}" placeholder="Search by name, IR ID, or phone number..." class="w-full pl-12 pr-4 py-3 bg-surface-container-low border border-outline-variant rounded-xl focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none font-body-md text-body-md" aria-label="Search distributors">
+</form>
+</div>
+
+{% if page_obj.object_list %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Distributor</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">IR ID</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Phone</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Rank</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">KYC Status</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Account</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for distributor in page_obj.object_list %}
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-admin-primary text-xs flex-shrink-0">
+{% if distributor.full_name %}{{ distributor.full_name|slice:":1"|upper }}{% else %}?{% endif %}
+</div>
+<span class="font-body-md text-body-md text-on-surface font-semibold">{{ distributor.full_name|default:"(No name on file)" }}</span>
+</div>
+</td>
+<td class="px-6 py-4">
+{% if distributor.ir_id %}
+<span class="bg-surface-container-high px-2 py-1 rounded text-xs font-mono text-tertiary">{{ distributor.ir_id }}</span>
+{% else %}
+<span class="text-secondary italic text-xs font-label-md">Not yet assigned</span>
+{% endif %}
+</td>
+<td class="px-6 py-4 font-mono text-xs text-on-surface-variant">{{ distributor.phone_number }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ distributor.rank|default:"—" }}</td>
+<td class="px-6 py-4">
+{% if distributor.kyc_status == "approved" %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-50 text-green-700">Approved</span>
+{% elif distributor.kyc_status == "rejected" %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-error-container text-on-error-container">Rejected</span>
+{% else %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-surface-container-high text-on-surface-variant">Pending</span>
+{% endif %}
+</td>
+<td class="px-6 py-4">
+{% if distributor.user.is_active %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary-fixed text-admin-primary">Active</span>
+{% else %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-error-container text-on-error-container">Suspended</span>
+{% endif %}
+</td>
+<td class="px-6 py-4 text-right">
+<a href="{% url 'admin_portal:distributor_profile' distributor.pk %}" class="text-admin-primary font-label-md text-label-md hover:underline bg-admin-primary/5 px-4 py-2 rounded-lg transition-colors inline-block">View Profile</a>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="px-6 py-4 bg-surface-container-low border-t border-outline-variant flex items-center justify-between">
+<span class="font-body-md text-body-md text-on-surface-variant">Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} distributors</span>
+<div class="flex items-center gap-2">
+{% if page_obj.has_previous %}
+<a href="?q={{ query|urlencode }}&page={{ page_obj.previous_page_number }}" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>
+</a>
+{% endif %}
+<span class="font-label-md text-label-md text-on-surface-variant px-2">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+{% if page_obj.has_next %}
+<a href="?q={{ query|urlencode }}&page={{ page_obj.next_page_number }}" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
+</a>
+{% endif %}
+</div>
+</div>
+{% endif %}
+</div>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-12 flex flex-col items-center text-center">
+<span class="material-symbols-outlined text-5xl text-on-surface-variant mb-3" aria-hidden="true">person_search</span>
+{% if query %}
+<p class="font-headline-md text-headline-md text-on-surface">No distributors match your search.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Try a different name, IR ID, or phone number.</p>
+{% else %}
+<p class="font-headline-md text-headline-md text-on-surface">No distributors yet.</p>
+{% endif %}
+</div>
+{% endif %}
+{% endblock %}
