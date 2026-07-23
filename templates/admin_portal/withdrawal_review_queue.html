@@ -1,0 +1,106 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Withdrawal Review — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">Withdrawal Review</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Pending payout requests.</p>
+</div>
+
+{% if withdrawal_requests %}
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant flex items-center gap-4">
+<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-admin-primary flex-shrink-0">
+<span class="material-symbols-outlined" aria-hidden="true">pending_actions</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Pending Requests</p>
+<p class="font-headline-md text-headline-md text-on-surface">{{ pending_count }}</p>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant flex items-center gap-4">
+<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-admin-primary flex-shrink-0">
+<span class="material-symbols-outlined" aria-hidden="true">payments</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Total Net Payout</p>
+<p class="font-headline-md text-headline-md text-on-surface">GHS {{ total_net_payout|floatformat:2 }}</p>
+</div>
+</div>
+<!-- Display-only nudge, not an approval gate -- this codebase has no
+     multi-tier admin permission system, so unlike the original Stitch
+     mockup this never claims a "senior admin" has to sign off. -->
+<div class="bg-admin-primary p-6 rounded-xl relative overflow-hidden flex items-center gap-4">
+<span class="material-symbols-outlined absolute right-[-16px] bottom-[-16px] text-[96px] text-white/10 select-none" aria-hidden="true">priority_high</span>
+<div class="w-12 h-12 bg-white/15 rounded-full flex items-center justify-center text-on-primary flex-shrink-0 relative z-10">
+<span class="material-symbols-outlined" aria-hidden="true">priority_high</span>
+</div>
+<div class="relative z-10">
+<p class="font-label-md text-label-md text-primary-fixed uppercase">High Priority</p>
+<p class="font-headline-md text-headline-md text-on-primary">{{ high_priority_count }} <span class="font-body-md text-body-md font-normal">over GHS {{ high_priority_threshold|floatformat:0 }}</span></p>
+</div>
+</div>
+</div>
+
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Distributor</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">IR ID</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Amount (GHS)</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Tax (GHS)</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Net Payout</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Date Submitted</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Status</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for withdrawal_request in withdrawal_requests %}
+{% with distributor=withdrawal_request.distributor %}
+{% firstof distributor.full_name distributor.didit_verification.extracted_full_name as display_name %}
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-admin-primary text-xs flex-shrink-0">
+{% if display_name %}{{ display_name|slice:":1"|upper }}{% else %}?{% endif %}
+</div>
+<span class="font-body-md text-body-md text-on-surface font-semibold">{{ display_name|default:"(No name on file)" }}</span>
+</div>
+</td>
+<td class="px-6 py-4">
+{% if distributor.ir_id %}
+<span class="bg-surface-container-high px-2 py-1 rounded text-xs font-mono text-tertiary">{{ distributor.ir_id }}</span>
+{% else %}
+<span class="text-secondary italic text-xs font-label-md">Not yet assigned</span>
+{% endif %}
+</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant text-right">{{ withdrawal_request.amount|floatformat:2 }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-error text-right">{{ withdrawal_request.tax_amount|floatformat:2 }}</td>
+<td class="px-6 py-4 font-bold text-on-surface text-right">{{ withdrawal_request.net_amount|floatformat:2 }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ withdrawal_request.created_at|date:"M j, Y · g:i A" }}</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-fixed text-admin-primary font-label-md text-label-md">
+<span class="w-1.5 h-1.5 rounded-full bg-admin-primary animate-pulse"></span>
+Submitted
+</span>
+</td>
+<td class="px-6 py-4 text-right">
+<a href="{% url 'admin_portal:withdrawal_review_detail' withdrawal_request.pk %}" class="text-admin-primary font-label-md text-label-md hover:underline bg-admin-primary/5 px-4 py-2 rounded-lg transition-colors inline-block">Review</a>
+</td>
+</tr>
+{% endwith %}
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-12 flex flex-col items-center text-center">
+<span class="material-symbols-outlined text-5xl text-on-surface-variant mb-3" aria-hidden="true">task_alt</span>
+<p class="font-headline-md text-headline-md text-on-surface">No pending withdrawal requests right now.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">New requests will appear here as distributors submit withdrawals.</p>
+</div>
+{% endif %}
+{% endblock %}
