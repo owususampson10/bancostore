@@ -110,6 +110,7 @@ INSTALLED_APPS = [
     "apps.wallet",
     "apps.commissions",
     "apps.withdrawal",
+    "apps.admin_portal",
 ]
 
 MIDDLEWARE = [

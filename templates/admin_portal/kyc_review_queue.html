@@ -1,0 +1,66 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}KYC Review — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">KYC Review</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Pending distributor verifications.</p>
+</div>
+
+{% if distributors %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Full Name</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Phone Number</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">IR ID</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Date Submitted</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Status</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for distributor in distributors %}
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-4">
+{% firstof distributor.full_name distributor.didit_verification.extracted_full_name as display_name %}
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-admin-primary text-xs flex-shrink-0">
+{% if display_name %}{{ display_name|slice:":1"|upper }}{% else %}?{% endif %}
+</div>
+<span class="font-body-md text-body-md text-on-surface font-semibold">{{ display_name|default:"(No name on file)" }}</span>
+</div>
+</td>
+<td class="px-6 py-4 font-mono text-xs text-on-surface-variant">{{ distributor.phone_number }}</td>
+<td class="px-6 py-4">
+{% if distributor.ir_id %}
+<span class="bg-surface-container-high px-2 py-1 rounded text-xs font-mono text-tertiary">{{ distributor.ir_id }}</span>
+{% else %}
+<span class="text-secondary italic text-xs font-label-md">Not yet assigned</span>
+{% endif %}
+</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ distributor.didit_verification.created_at|date:"M j, Y · g:i A" }}</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-fixed text-admin-primary font-label-md text-label-md">
+<span class="w-1.5 h-1.5 rounded-full bg-admin-primary animate-pulse"></span>
+Pending
+</span>
+</td>
+<td class="px-6 py-4 text-right">
+<a href="{% url 'admin_portal:kyc_review_detail' distributor.pk %}" class="text-admin-primary font-label-md text-label-md hover:underline bg-admin-primary/5 px-4 py-2 rounded-lg transition-colors inline-block">Review Application</a>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-12 flex flex-col items-center text-center">
+<span class="material-symbols-outlined text-5xl text-on-surface-variant mb-3" aria-hidden="true">task_alt</span>
+<p class="font-headline-md text-headline-md text-on-surface">No pending KYC reviews right now.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">New submissions will appear here as distributors complete verification.</p>
+</div>
+{% endif %}
+{% endblock %}

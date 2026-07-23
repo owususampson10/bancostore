@@ -1,0 +1,121 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Bancostore Admin Portal{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="{% static 'bancostore-brand/favicon/favicon.svg' %}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'assets/main.css' %}">
+<script src="{% static 'assets/main.js' %}" defer></script>
+</head>
+{# Admin Portal's own collapsible-sidebar shell (Task 22), structurally #}
+{# identical to templates/distributors/base_dashboard.html (same Alpine #}
+{# collapsed/mobileOpen/logout-confirm state, same _sidebar_nav_item.html #}
+{# partial reused as-is -- it's fully generic) but styled with the #}
+{# admin-primary/admin-error tokens (static/src/main.css) instead of the #}
+{# storefront primary/error tokens, matching templates/base_admin_auth.html's #}
+{# existing "deliberate visual distinction for internal/admin tooling". #}
+<body class="bg-background text-on-surface font-body-md min-h-screen"
+      x-data="{
+        collapsed: localStorage.getItem('bancostore-admin-sidebar-collapsed') === 'true',
+        mobileOpen: false,
+        logoutConfirmOpen: false,
+      }"
+      x-init="$watch('collapsed', (v) => localStorage.setItem('bancostore-admin-sidebar-collapsed', v))">
+<div class="flex min-h-screen">
+<!-- Mobile overlay -->
+<div class="fixed inset-0 bg-black/40 z-40 md:hidden" x-show="mobileOpen" x-on:click="mobileOpen = false" x-cloak></div>
+
+<!-- Sidebar -->
+<aside
+    class="fixed md:sticky top-0 h-screen bg-white border-r border-outline-variant z-50 flex flex-col py-stack-lg transition-all duration-200"
+    :class="{
+      'w-64': !collapsed,
+      'w-20': collapsed,
+      '-translate-x-full md:translate-x-0': !mobileOpen,
+      'translate-x-0': mobileOpen,
+    }"
+>
+<div class="mb-8 flex items-center" :class="collapsed ? 'flex-col justify-center gap-3 px-2' : 'flex-row justify-between px-6'">
+<div class="flex items-center gap-3" x-show="!collapsed" x-cloak>
+<div class="w-9 h-9 rounded-lg bg-admin-primary flex items-center justify-center text-on-primary flex-shrink-0">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">storefront</span>
+</div>
+<div class="leading-none">
+<p class="font-headline-md text-admin-primary font-bold text-base">Bancostore</p>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-wider mt-0.5">Admin Portal</p>
+</div>
+</div>
+<div class="w-9 h-9 rounded-lg bg-admin-primary flex items-center justify-center text-on-primary flex-shrink-0" x-show="collapsed" x-cloak>
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">storefront</span>
+</div>
+<button type="button" class="hidden md:flex p-2 rounded-full hover:bg-surface-container-low text-gray-muted" x-on:click="collapsed = !collapsed" aria-label="Toggle sidebar">
+<span class="material-symbols-outlined text-[20px]" x-text="collapsed ? 'chevron_right' : 'chevron_left'"></span>
+</button>
+</div>
+
+<nav class="flex-1 space-y-1 px-3">
+{% url 'admin_portal:dashboard' as dashboard_url %}
+{% url 'admin_portal:kyc_review_queue' as kyc_review_url %}
+{% url 'admin:logout' as logout_url %}
+{% include "distributors/_sidebar_nav_item.html" with href=dashboard_url icon="dashboard" label="Dashboard" nav_key="dashboard" active_nav=active_nav %}
+{% include "distributors/_sidebar_nav_item.html" with href=kyc_review_url icon="fact_check" label="KYC Review" nav_key="kyc_review" active_nav=active_nav %}
+{% include "distributors/_sidebar_nav_item.html" with icon="payments" label="Withdrawals" %}
+{% include "distributors/_sidebar_nav_item.html" with icon="groups" label="Distributors" %}
+{% include "distributors/_sidebar_nav_item.html" with icon="monetization_on" label="Commissions" %}
+<div class="pt-4 mt-4 border-t border-outline-variant/50">
+{% include "distributors/_sidebar_nav_item.html" with href=logout_url icon="logout" label="Log Out" danger=True confirm="logoutConfirmOpen = true" %}
+</div>
+</nav>
+</aside>
+
+<!-- Main content -->
+<div class="flex-1 min-w-0 flex flex-col">
+<header class="sticky top-0 z-30 bg-surface/90 backdrop-blur-sm flex items-center gap-4 h-16 px-margin-mobile md:px-margin-desktop border-b border-outline-variant/50">
+<button type="button" class="p-2 hover:bg-surface-container-low rounded-full md:hidden" x-on:click="mobileOpen = !mobileOpen" aria-label="Open menu">
+<span class="material-symbols-outlined">menu</span>
+</button>
+<p class="font-label-lg text-label-lg text-gray-muted">Bancostore Admin Portal</p>
+</header>
+<main class="flex-1 p-margin-mobile md:p-margin-desktop max-w-[1200px] w-full mx-auto">
+{% if messages %}
+<div class="mb-6 space-y-2">
+{% for message in messages %}
+<div class="px-4 py-3 rounded-lg font-body-sm text-body-sm {% if message.tags == 'error' %}bg-error-container text-on-error-container{% else %}bg-surface-container-low text-on-surface{% endif %}">{{ message }}</div>
+{% endfor %}
+</div>
+{% endif %}
+{% block content %}{% endblock %}
+</main>
+</div>
+</div>
+
+<div x-show="logoutConfirmOpen"
+     x-cloak
+     class="fixed inset-0 z-[70] flex items-center justify-center p-4"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="logout-confirm-title"
+     @keydown.escape.window="logoutConfirmOpen = false">
+<div class="fixed inset-0 bg-black/40" @click="logoutConfirmOpen = false"></div>
+<div class="relative bg-white rounded-xl border border-outline-variant p-6 max-w-sm w-full shadow-lg">
+<h3 id="logout-confirm-title" class="font-headline-md text-headline-md text-on-surface mb-2">Log out?</h3>
+<p class="font-body-md text-body-md text-gray-muted mb-6">You'll need to log in and verify with your authenticator again to access the Admin Portal.</p>
+<div class="flex gap-3">
+<button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="logoutConfirmOpen = false">Cancel</button>
+{# Django 5 removed GET support from LogoutView (http_method_names = #}
+{# ["post", "options"], confirmed in the installed venv's django.contrib #}
+{# .auth.views) -- admin:logout delegates straight to it, so a plain link #}
+{# here would 405 for every real admin trying to log out. #}
+<form method="post" action="{% url 'admin:logout' %}" class="flex-1">
+{% csrf_token %}
+<button type="submit" class="w-full bg-admin-error text-on-error py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Log Out</button>
+</form>
+</div>
+</div>
+</div>
+</body>
+</html>
