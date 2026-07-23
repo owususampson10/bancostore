@@ -243,7 +243,7 @@ def test_initiate_transfer_returns_the_parsed_data(mock_post):
             "status": True,
             "message": "Transfer has been queued",
             "data": {
-                "reference": "withdrawal-42",
+                "reference": "withdrawal-00000042",
                 "transfer_code": "TRF_xyz789",
                 "status": "pending",
                 "amount": 49500,
@@ -254,7 +254,7 @@ def test_initiate_transfer_returns_the_parsed_data(mock_post):
     result = initiate_transfer(
         amount_pesewas=49500,
         recipient_code="RCP_abc123",
-        reference="withdrawal-42",
+        reference="withdrawal-00000042",
         reason="Bancostore withdrawal payout",
     )
 
@@ -264,7 +264,7 @@ def test_initiate_transfer_returns_the_parsed_data(mock_post):
     assert call_kwargs["json"]["source"] == "balance"
     assert call_kwargs["json"]["amount"] == "49500"
     assert call_kwargs["json"]["recipient"] == "RCP_abc123"
-    assert call_kwargs["json"]["reference"] == "withdrawal-42"
+    assert call_kwargs["json"]["reference"] == "withdrawal-00000042"
     assert call_kwargs["json"]["reason"] == "Bancostore withdrawal payout"
     assert call_kwargs["json"]["currency"] == "GHS"
     assert call_kwargs["headers"]["Authorization"] == "Bearer sk_test_fake"
@@ -280,7 +280,7 @@ def test_initiate_transfer_raises_paystack_error_on_http_failure(mock_post):
         initiate_transfer(
             amount_pesewas=49500,
             recipient_code="RCP_abc123",
-            reference="withdrawal-42",
+            reference="withdrawal-00000042",
         )
 
 
@@ -292,7 +292,7 @@ def test_verify_transfer_returns_the_parsed_data(mock_get):
             "status": True,
             "message": "Transfer retrieved",
             "data": {
-                "reference": "withdrawal-42",
+                "reference": "withdrawal-00000042",
                 "transfer_code": "TRF_xyz789",
                 "status": "success",
                 "amount": 49500,
@@ -300,12 +300,12 @@ def test_verify_transfer_returns_the_parsed_data(mock_get):
         }
     )
 
-    result = verify_transfer("withdrawal-42")
+    result = verify_transfer("withdrawal-00000042")
 
     assert result["status"] == "success"
     assert result["transfer_code"] == "TRF_xyz789"
     call_args, call_kwargs = mock_get.call_args
-    assert "withdrawal-42" in call_args[0]
+    assert "withdrawal-00000042" in call_args[0]
     assert call_kwargs["headers"]["Authorization"] == "Bearer sk_test_fake"
     assert call_kwargs["timeout"] is not None
 
@@ -316,7 +316,7 @@ def test_verify_transfer_raises_paystack_error_on_http_failure(mock_get):
     mock_get.return_value = _fake_response({"status": False}, status_code=404)
 
     with pytest.raises(PaystackError):
-        verify_transfer("withdrawal-42")
+        verify_transfer("withdrawal-00000042")
 
 
 @override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
