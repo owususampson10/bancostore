@@ -2180,47 +2180,62 @@ credited in another session.
 
 ---
 
-## Phase 9: Admin — Remaining MVP Pieces
+## Phase 9: Admin Portal — custom Stitch-designed dashboard (redefined 2026-07-23)
 
-### Task 22: Admin user/distributor management
+**Scope change, 2026-07-23:** the admin is not software-literate; every screen they touch routinely
+needs to look and feel like the rest of Bancostore, not Django's generic admin panel. Supersedes
+this phase's original "Django Admin (customized)" scope — see `tasks/plan.md` Phase 9 for the full
+design principle (Django Admin's `ModelAdmin` classes stay underneath as the permissions/audit
+layer; new Stitch-designed screens sit in front and call the same already-tested service
+functions) and architecture (`apps/admin_portal/`, mirrors `templates/distributors/
+base_dashboard.html`'s shell). Build workflow going forward: detailed Stitch prompt →
+user sends it and replies to fetch → fetch via Stitch MCP, build the template, verify against the
+prompt (drop anything Stitch adds out of scope) → test live in browser → next prompt. One screen at
+a time, same discipline as Task 16's UI slices.
 
-**Description:** Django Admin: search distributors/customers by name, IR ID, or phone; view full
-profile (rank, sponsor, pack, join date, KYC status, wallet balance); suspend/deactivate account.
+Sequencing: KYC review (Task 22, this is the first slice — admin already actively uses this
+screen, backend already proven in Task 11) → withdrawal approval, distributor search/management,
+commission oversight (Task 23, sliced further when started).
+
+### Task 22: Admin Portal — KYC review screen
+
+**Description:** Replaces `DistributorAdmin`'s Django-Admin KYC review (list + `DiditVerificationInline`
++ approve/reject bulk actions) with a Stitch-designed queue screen in `apps/admin_portal/`. Calls
+the existing `apps.distributors.services.approve_kyc`/`reject_kyc` directly — no service-layer
+changes, presentation only.
 
 **Acceptance criteria:**
-- [ ] Search works across name, IR ID, and phone
-- [ ] Suspend/deactivate blocks login for that account
+- [ ] Admin sees a queue of pending-KYC distributors with Didit's verification result summary
+      (status, face-match/liveness scores, extracted name/document number, warnings, the three
+      images) — same data `DiditVerificationInline` already shows, restyled
+- [ ] Approve/reject work per-distributor (reject requires a reason, matching the existing
+      Django-Admin confirmation-page pattern's requirement)
+- [ ] Django Admin's own KYC screen keeps working unchanged (not removed, just no longer the
+      admin's primary path)
 
 **Verification:**
-- [ ] pytest test: search returns the correct distributor by IR ID
-- [ ] pytest test: a suspended distributor cannot log in
+- [ ] pytest test: approve/reject from the new screen produce identical `Distributor.kyc_status`/
+      `kyc_rejection_reason` results as the existing Django-Admin action (same service call)
+- [ ] Live browser check: full approve and full reject flow against a real pending KYC record
 
-**Dependencies:** Task 11
+**Dependencies:** Task 11 (KYC backend), admin login/2FA (Task 6)
 
-**Files likely touched:** `apps/distributors/admin.py`, `tests/feature/admin/test_distributor_management.py`
+**Files likely touched:** new `apps/admin_portal/` app (urls, views, templates), `templates/admin_portal/base_dashboard.html`, `templates/admin_portal/kyc_review.html`, `tests/feature/admin_portal/test_kyc_review.py`
 
-**Estimated scope:** S
+**Estimated scope:** M
 
 ---
 
-### Task 23: Admin commission oversight
+### Task 23: Admin Portal — withdrawal approval, distributor management, commission oversight
 
-**Description:** Django Admin view: every commission calculation (who/what/when/which leg), which
-distributors hit the weekly cap, full binary tree view for any distributor, PV batches nearing
-180-day expiry.
+**Description:** Absorbs the original Task 22/23 scope (distributor search/profile/suspend,
+commission oversight) plus a Stitch-designed withdrawal approval screen fronting Task 16d's
+already-built `approve_withdrawal_request`/`reject_withdrawal_request`. To be sliced into
+23a/23b/23c (mirroring Task 16a-16h) when started.
 
-**Acceptance criteria:**
-- [ ] Admin can see a full commission log for any distributor
-- [ ] Weekly-cap-hit distributors are visible in a filtered view
+**Dependencies:** Task 22 (shared `apps/admin_portal/` shell), Task 16d (withdrawal backend), Task 13 (commission data)
 
-**Verification:**
-- [ ] pytest test: a distributor who hit the weekly cap appears in the capped-list query
-
-**Dependencies:** Task 13, Task 22
-
-**Files likely touched:** `apps/commissions/admin.py` (commission log), `tests/feature/admin/test_commission_oversight.py`
-
-**Estimated scope:** S
+**Estimated scope:** L — slice before starting
 
 ---
 

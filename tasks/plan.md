@@ -157,9 +157,39 @@ the distributor purchase; order status updates correctly.
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
 another session — proves Django Channels real-time wiring works.
 
-### Phase 9: Admin — Remaining MVP Pieces
-- [ ] Task 22: Admin user/distributor management (search, profile, suspend/deactivate)
-- [ ] Task 23: Admin commission oversight (per-distributor view, weekly-cap hits, tree view)
+### Phase 9: Admin Portal — custom Stitch-designed dashboard (redefined 2026-07-23)
+**Scope change from Django Admin to a full custom dashboard, decided 2026-07-23:** the admin user
+is not software-literate — every screen an admin touches routinely needs to feel like part of the
+Bancostore application, not Django's generic admin panel. This supersedes `SPEC.md`'s "Admin panel
+| Django Admin (customized)" tech-stack line (not yet edited there — flagged, pending explicit
+confirmation before that file changes) and folds the original Task 22/23 scope into this initiative
+rather than building them as raw Django Admin.
+
+**Design principle:** Django Admin's `ModelAdmin` classes (KYC review — Task 11, wallet/commission
+audit — Tasks 13-15, withdrawal approval — Task 16d) stay exactly as-is underneath — same
+permissions, same `simple_history` audit trails, same hard lockdowns. New Stitch-designed screens
+sit in front and call the same already-tested service functions (`approve_kyc`/`reject_kyc`,
+`approve_withdrawal_request`/`reject_withdrawal_request`, etc.) so none of the money-safety/
+concurrency work already through doubt-driven review gets re-litigated — only the presentation
+layer changes. Django Admin stays reachable underneath as a technical fallback.
+
+**Architecture:** one dedicated `apps/admin_portal/` app with its own branded shell template
+(mirrors `templates/distributors/base_dashboard.html`'s sidebar shell), rather than scattering
+admin-facing views across each domain app. Reuses the existing admin login/2FA flow (Task 6,
+already Stitch-styled) — only changes where login lands and what nav the admin sees.
+
+**Sequencing:** start with the two screens an admin operates routinely — KYC review and withdrawal
+approval (both already have proven backends, only the UI is new) — then broaden to distributor
+search/management and commission oversight (absorbing the original Task 22/23 scope). Purely
+archival views (raw wallet ledger, commission cycle logs) stay on Django Admin unless later
+decided otherwise.
+
+- [ ] Task 22: Admin Portal — KYC review screen (first slice)
+- [ ] Task 23: Admin Portal — withdrawal approval, distributor search/management, commission
+  oversight (absorbs the original Task 22/23 scope; broken into 23a/23b/23c sub-slices when
+  started, same pattern as Task 16a-16h — kept as one task number, not new top-level numbers, so
+  Task 24's existing "deploy pipeline" references elsewhere in `tasks/todo.md`/`CLAUDE.md` don't
+  need renumbering)
 
 **Checkpoint I (final MVP checkpoint):** the full Section 14 distributor journey works end to end
 through the UI. All pytest tests pass, `black`/`ruff` clean. Verify against `SPEC.md` Success

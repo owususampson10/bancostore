@@ -1,0 +1,201 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}KYC Review: {{ display_name|default:distributor }} — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div x-data="{ approveOpen: false, rejectOpen: false, lightboxUrl: null, lightboxLabel: '' }">
+<a href="{% url 'admin_portal:kyc_review_queue' %}" class="inline-flex items-center gap-1 text-secondary hover:text-admin-primary transition-colors mb-4">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
+<span class="font-label-md text-label-md">Back to List</span>
+</a>
+
+<header class="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface">KYC Review: <span class="text-admin-primary">{{ display_name|default:"(No name on file)" }}</span></h2>
+<div class="flex flex-wrap items-center gap-x-6 gap-y-2 mt-2">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary text-[20px]" aria-hidden="true">call</span>
+<span class="font-body-md text-body-md">{{ distributor.phone_number }}</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary text-[20px]" aria-hidden="true">fingerprint</span>
+<span class="font-mono text-xs bg-surface-container px-2 py-0.5 rounded">{{ distributor.ir_id|default:"Not yet assigned" }}</span>
+</div>
+{% if verification %}
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary text-[20px]" aria-hidden="true">calendar_today</span>
+<span class="font-body-md text-body-md">Submitted: {{ verification.created_at|date:"M j, Y · g:i A" }}</span>
+</div>
+{% endif %}
+</div>
+</div>
+<div class="flex gap-3">
+<button type="button" @click="rejectOpen = true" class="px-6 py-2.5 rounded-xl border border-admin-error text-admin-error font-label-md text-label-md hover:bg-error-container transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">cancel</span>
+Reject Application
+</button>
+<button type="button" @click="approveOpen = true" class="px-8 py-2.5 rounded-xl bg-admin-primary text-on-primary font-label-md text-label-md shadow-md hover:opacity-90 transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">check_circle</span>
+Approve KYC
+</button>
+</div>
+</header>
+
+{% if verification %}
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-gutter mb-8">
+<!-- Verification Summary -->
+<div class="xl:col-span-1 bg-surface-container-lowest rounded-xl p-6 border border-outline-variant flex flex-col gap-6">
+<div class="flex justify-between items-start">
+<h3 class="font-headline-md text-headline-md text-on-surface">Verification Summary</h3>
+<span class="px-3 py-1 rounded-full bg-surface-container text-secondary font-label-md text-label-md uppercase tracking-wider">{{ verification.get_status_display }}</span>
+</div>
+<div class="space-y-4">
+<div class="p-3 bg-surface rounded-lg flex items-center justify-between">
+<span class="font-label-md text-label-md">ID Verification</span>
+<span class="font-bold text-admin-primary">{{ verification.id_verification_status|default:"—" }}</span>
+</div>
+<div class="p-3 bg-surface rounded-lg flex items-center justify-between">
+<span class="font-label-md text-label-md">Face Match</span>
+<span class="font-bold text-admin-primary">{{ verification.face_match_status|default:"—" }}{% if verification.face_match_score is not None %} ({{ verification.face_match_score|floatformat:0 }}%){% endif %}</span>
+</div>
+<div class="p-3 bg-surface rounded-lg flex items-center justify-between">
+<span class="font-label-md text-label-md">Liveness</span>
+<span class="font-bold text-admin-primary">{{ verification.liveness_status|default:"—" }}{% if verification.liveness_score is not None %} ({{ verification.liveness_score|floatformat:0 }}%){% endif %}</span>
+</div>
+</div>
+<div class="mt-auto pt-6 border-t border-outline-variant">
+{% if verification.warnings %}
+<div class="flex items-start gap-3 text-error bg-error-container p-4 rounded-xl">
+<span class="material-symbols-outlined" aria-hidden="true">warning</span>
+<ul class="text-body-sm font-body-sm list-disc list-inside">
+{% for warning in verification.warnings %}
+<li>{{ warning }}</li>
+{% endfor %}
+</ul>
+</div>
+{% else %}
+<div class="flex items-center gap-3 text-green-700 bg-green-50 p-4 rounded-xl">
+<span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+<p class="font-bold font-label-md text-label-md">No warnings</p>
+</div>
+{% endif %}
+</div>
+</div>
+
+<!-- Extracted Data -->
+<div class="xl:col-span-2 bg-surface-container-lowest rounded-xl p-6 border border-outline-variant">
+<h3 class="font-headline-md text-headline-md text-on-surface mb-6">Extracted Information</h3>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+<div>
+<label class="font-label-md text-label-md text-secondary uppercase">Full Name (Per ID)</label>
+<p class="font-headline-md text-headline-md text-on-surface border-b border-outline-variant pb-2 mt-1">{{ verification.extracted_full_name|default:"—" }}</p>
+</div>
+<div>
+<label class="font-label-md text-label-md text-secondary uppercase">Document Number</label>
+<p class="font-headline-md text-headline-md text-on-surface border-b border-outline-variant pb-2 mt-1">{{ verification.extracted_document_number|default:"—" }}</p>
+</div>
+<div>
+<label class="font-label-md text-label-md text-secondary uppercase">Date of Birth</label>
+<p class="font-headline-md text-headline-md text-on-surface border-b border-outline-variant pb-2 mt-1">{{ verification.extracted_date_of_birth|date:"F j, Y"|default:"—" }}</p>
+</div>
+</div>
+</div>
+</div>
+
+<!-- Documents -->
+<section>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-4">Verification Documents</h3>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+{% for label, image in doc_images %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="aspect-[16/10] bg-surface flex items-center justify-center">
+{% if image %}
+<button type="button"
+        class="group relative w-full h-full cursor-zoom-in"
+        aria-label="View {{ label }} fullscreen"
+        @click="lightboxUrl = '{{ image.url|escapejs }}'; lightboxLabel = '{{ label|escapejs }}'">
+<img class="w-full h-full object-cover" src="{{ image.url }}" alt="{{ label }}">
+<span class="absolute inset-0 bg-on-background/0 group-hover:bg-on-background/20 transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined text-white opacity-0 group-hover:opacity-100 transition-opacity text-3xl" aria-hidden="true">zoom_in</span>
+</span>
+</button>
+{% else %}
+<span class="text-secondary text-body-sm font-body-sm">No image on file</span>
+{% endif %}
+</div>
+<div class="p-4">
+<span class="font-label-md text-label-md font-bold">{{ label }}</span>
+</div>
+</div>
+{% endfor %}
+</div>
+</section>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-12 text-center">
+<p class="font-body-md text-body-md text-on-surface-variant">This distributor hasn't completed Didit verification yet — nothing to review.</p>
+</div>
+{% endif %}
+
+<!-- Document image lightbox -->
+<div x-show="lightboxUrl"
+     x-cloak
+     class="fixed inset-0 z-[80] flex items-center justify-center p-4 md:p-10"
+     role="dialog"
+     aria-modal="true"
+     aria-label="Document preview"
+     @keydown.escape.window="lightboxUrl = null">
+<div class="fixed inset-0 bg-black/80" @click="lightboxUrl = null"></div>
+<button type="button"
+        class="absolute top-4 right-4 md:top-6 md:right-6 text-white/90 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors z-10"
+        aria-label="Close preview"
+        @click="lightboxUrl = null">
+<span class="material-symbols-outlined text-3xl" aria-hidden="true">close</span>
+</button>
+<div class="relative max-w-4xl max-h-full flex flex-col items-center gap-3">
+<img :src="lightboxUrl" :alt="lightboxLabel" class="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl" @click.stop>
+<span class="font-label-md text-label-md text-white/90" x-text="lightboxLabel"></span>
+</div>
+</div>
+
+<!-- Approve confirmation -->
+<div x-show="approveOpen" x-cloak class="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="approve-confirm-title" @keydown.escape.window="approveOpen = false">
+<div class="fixed inset-0 bg-black/40" @click="approveOpen = false"></div>
+<div class="relative bg-white rounded-xl border border-outline-variant p-6 max-w-sm w-full shadow-lg">
+<h3 id="approve-confirm-title" class="font-headline-md text-headline-md text-on-surface mb-2">Approve this distributor's KYC?</h3>
+<p class="font-body-md text-body-md text-gray-muted mb-6">This assigns a permanent IR ID and cannot be undone from this screen.</p>
+<form method="post">
+{% csrf_token %}
+<input type="hidden" name="action" value="approve">
+<div class="flex gap-3">
+<button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="approveOpen = false">Cancel</button>
+<button type="submit" class="flex-1 bg-admin-primary text-on-primary py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Yes, Approve</button>
+</div>
+</form>
+</div>
+</div>
+
+<!-- Reject confirmation -->
+<div x-show="rejectOpen" x-cloak class="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="reject-confirm-title" @keydown.escape.window="rejectOpen = false">
+<div class="fixed inset-0 bg-black/40" @click="rejectOpen = false"></div>
+<div class="relative bg-white rounded-xl border border-outline-variant p-6 max-w-md w-full shadow-lg" x-data="{ reason: '' }">
+<h3 id="reject-confirm-title" class="font-headline-md text-headline-md text-admin-error mb-2">Reject this KYC submission?</h3>
+<form method="post">
+{% csrf_token %}
+<input type="hidden" name="action" value="reject">
+{% if preset_reasons %}
+<p class="font-label-md text-label-md text-secondary mb-2">Preset reasons (click to fill in):</p>
+<div class="flex flex-wrap gap-2 mb-4">
+{% for preset in preset_reasons %}
+<button type="button" class="text-xs px-3 py-1.5 rounded-full border border-outline-variant hover:bg-surface-container-low transition-colors" @click="reason = '{{ preset|escapejs }}'">{{ preset }}</button>
+{% endfor %}
+</div>
+{% endif %}
+<label for="id_reason" class="font-label-md text-label-md text-secondary block mb-1">Reason (required)</label>
+<textarea id="id_reason" name="reason" x-model="reason" rows="3" required class="w-full rounded-xl border border-outline-variant p-3 font-body-md text-body-md focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none"></textarea>
+<div class="flex gap-3 mt-4">
+<button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="rejectOpen = false">Cancel</button>
+<button type="submit" :disabled="!reason.trim()" :class="!reason.trim() && 'opacity-50 cursor-not-allowed'" class="flex-1 bg-admin-error text-on-error py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Confirm Reject</button>
+</div>
+</form>
+</div>
+</div>
+</div>
+{% endblock %}
