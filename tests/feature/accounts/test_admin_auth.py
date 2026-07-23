@@ -305,6 +305,47 @@ def test_admin_authentication_form_succeeds_for_a_correct_unlocked_login():
 
 
 @pytest.mark.django_db
+def test_completing_the_full_wizard_redirects_to_the_admin_portal_dashboard(client):
+    """Bug found 2026-07-23 verifying Task 22 live in a real browser:
+    BaseLoginView.get_success_url() falls back to settings.
+    LOGIN_REDIRECT_URL when there's no `next` param, and that setting was
+    never set -- every real admin completing the wizard landed on
+    Django's default /accounts/profile/, a 404. First fix landed on
+    /admin/ instead, which was wrong in a different way -- caught live by
+    the user seeing Django's raw unstyled backend for a few seconds
+    before reaching the styled KYC review screen. Drives the actual
+    wizard (auth step then token step) rather than the session-shortcut
+    most other tests here use, since the bug is specifically in what
+    happens at the end of that flow."""
+    user = _create_admin()
+    device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+
+    auth_response = client.post(
+        "/account/login/",
+        {
+            "admin_login_view-current_step": "auth",
+            "auth-username": "admin@example.test",
+            "auth-password": "AdminPassw0rd!",
+        },
+    )
+    assert auth_response.status_code == 200  # re-renders wizard at 'token' step
+
+    from django_otp.oath import totp
+
+    token_response = client.post(
+        "/account/login/",
+        {
+            "admin_login_view-current_step": "token",
+            "token-otp_token": f"{totp(device.bin_key):06d}",
+        },
+        follow=True,
+    )
+
+    assert token_response.status_code == 200
+    assert token_response.redirect_chain[-1][0] == "/admin-portal/"
+
+
+@pytest.mark.django_db
 def test_admin_login_is_rate_limited_per_ip(client):
     """Account-level lockout only protects one email at a time — an
     attacker can spray guesses across many different admin emails from one

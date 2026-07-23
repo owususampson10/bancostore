@@ -1,4 +1,5 @@
 from django.http import HttpResponse
+from django.urls import reverse
 
 from django_ratelimit.core import is_ratelimited
 from two_factor.forms import AuthenticationTokenForm, BackupTokenForm
@@ -52,6 +53,31 @@ class AdminLoginView(BaseLoginView):
                 status=429,
             )
         return super().post(request, *args, **kwargs)
+
+    def get_success_url(self):
+        # Bug found 2026-07-23 verifying Task 22 live: BaseLoginView.
+        # get_success_url() falls back to settings.LOGIN_REDIRECT_URL when
+        # there's no safe `next` param, and that setting was never set --
+        # every real admin login (not just this project's automated
+        # checks) landed on Django's default /accounts/profile/, a 404.
+        # LOGIN_REDIRECT_URL itself stays unset deliberately -- it's a
+        # single global setting shared by all three roles (one User model
+        # per SPEC.md), and distributor login already redirects via its
+        # own explicit redirect("distributors:dashboard") calls, not this
+        # setting; setting it globally would send a customer or
+        # distributor's login flow through whatever value fits admin.
+        # Overriding get_success_url() here instead scopes the fix to
+        # admin login only.
+        #
+        # First fixed this to land on Django Admin's own index (/admin/)
+        # since apps.admin_portal had no dashboard home yet. That was
+        # wrong in its own way -- the user caught it live: they saw the
+        # raw unstyled Django backend for a few seconds after every login
+        # before reaching the styled KYC review screen, which defeats the
+        # entire point of this initiative (the admin should never feel
+        # like they've left the branded application). Now lands on
+        # apps.admin_portal's own dashboard instead.
+        return self.get_redirect_url() or reverse("admin_portal:dashboard")
 
     def get_template_names(self):
         # The 'token'/'backup' steps use their own standalone screen (no
