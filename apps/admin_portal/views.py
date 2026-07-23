@@ -218,6 +218,19 @@ def withdrawal_review_detail(request, pk):
         status=WithdrawalRequest.Status.SUBMITTED,
     )
     distributor = withdrawal_request.distributor
+    # Same fallback as kyc_review_detail: Distributor.full_name is only
+    # ever set from PendingRegistration at registration time, so a
+    # distributor with a blank one still has a name Didit extracted from
+    # their ID -- and every distributor reaching this screen has an
+    # approved DiditVerification by definition (KYC-gated at submission).
+    # Computed up front (code-review finding) so both the flash messages
+    # below and the page itself use the same real name instead of
+    # Distributor.__str__'s "Distributor<+233...>" debug repr.
+    verification = getattr(distributor, "didit_verification", None)
+    display_name = distributor.full_name or (
+        verification.extracted_full_name if verification else ""
+    )
+    distributor_label = display_name or distributor
 
     if request.method == "POST":
         action = request.POST.get("action")
@@ -225,7 +238,7 @@ def withdrawal_review_detail(request, pk):
             try:
                 approve_withdrawal_request(withdrawal_request, reviewed_by=request.user)
                 messages.success(
-                    request, f"Approved withdrawal request for {distributor}."
+                    request, f"Approved withdrawal request for {distributor_label}."
                 )
                 return redirect("admin_portal:withdrawal_review_queue")
             except tuple(_APPROVE_FAILURE_MESSAGES) as exc:
@@ -240,7 +253,8 @@ def withdrawal_review_detail(request, pk):
                         withdrawal_request, reviewed_by=request.user, reason=reason
                     )
                     messages.success(
-                        request, f"Rejected withdrawal request for {distributor}."
+                        request,
+                        f"Rejected withdrawal request for {distributor_label}.",
                     )
                     return redirect("admin_portal:withdrawal_review_queue")
                 except (WithdrawalRequestNotFound, WithdrawalRequestNotPending) as exc:
@@ -252,15 +266,6 @@ def withdrawal_review_detail(request, pk):
     # are what approval will actually snapshot and pay out to.
     wallet = getattr(distributor, "wallet", None)
     wallet_balance = wallet.balance if wallet else Decimal("0")
-    # Same fallback as kyc_review_detail: Distributor.full_name is only
-    # ever set from PendingRegistration at registration time, so a
-    # distributor with a blank one still has a name Didit extracted from
-    # their ID -- and every distributor reaching this screen has an
-    # approved DiditVerification by definition (KYC-gated at submission).
-    verification = getattr(distributor, "didit_verification", None)
-    display_name = distributor.full_name or (
-        verification.extracted_full_name if verification else ""
-    )
     # tax_amount/amount is reconstructed per-request rather than reading
     # the live WITHHOLDING_TAX_RATE constance setting -- amount/tax_amount
     # were locked in at submission (ADR-0004 point 10), so this shows the
@@ -280,6 +285,10 @@ def withdrawal_review_detail(request, pk):
             "wallet_balance": wallet_balance,
             "display_name": display_name,
             "tax_rate_percent": tax_rate_percent,
+            # code-review finding: the approve modal's copy previously
+            # hardcoded "Friday" -- WITHDRAWAL_DAY is a live,
+            # admin-editable setting (ADR-0004), so this must track it.
+            "withdrawal_day": config.WITHDRAWAL_DAY.capitalize(),
             "active_nav": "withdrawals",
         },
     )

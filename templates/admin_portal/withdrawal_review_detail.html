@@ -112,7 +112,7 @@ Approved
 <div class="fixed inset-0 bg-black/40" @click="approveOpen = false"></div>
 <div class="relative bg-white rounded-xl border border-outline-variant p-6 max-w-sm w-full shadow-lg">
 <h3 id="approve-confirm-title" class="font-headline-md text-headline-md text-on-surface mb-2">Approve this withdrawal?</h3>
-<p class="font-body-md text-body-md text-gray-muted mb-6">This immediately debits GHS {{ withdrawal_request.net_amount|floatformat:2 }} from {{ display_name|default:distributor }}'s wallet and cannot be undone from this screen. The actual mobile money payout is processed in the next Friday batch.</p>
+<p class="font-body-md text-body-md text-gray-muted mb-6">This immediately debits GHS {{ withdrawal_request.net_amount|floatformat:2 }} from {{ display_name|default:distributor }}'s wallet and cannot be undone from this screen. The actual mobile money payout is processed in the next {{ withdrawal_day }} batch.</p>
 <form method="post">
 {% csrf_token %}
 <input type="hidden" name="action" value="approve">

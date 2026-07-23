@@ -224,6 +224,46 @@ def test_approving_from_the_detail_screen_debits_the_wallet(staff_client):
 
 
 @pytest.mark.django_db
+def test_approve_flash_message_shows_the_real_name_not_the_debug_repr(staff_client):
+    """code-review finding: f"...for {distributor}." was interpolating
+    Distributor.__str__ ("Distributor<+233...>") instead of the proper
+    fallback display name computed elsewhere in the same view."""
+    distributor = _make_eligible_distributor(
+        full_name="Efua Asante", balance=Decimal("1000.00")
+    )
+    _make_submitted_request(distributor, Decimal("500.00"))
+    request = WithdrawalRequest.objects.get(distributor=distributor)
+
+    response = staff_client.post(
+        _detail_url(request), {"action": "approve"}, follow=True
+    )
+
+    body = response.content.decode()
+    assert "Approved withdrawal request for Efua Asante." in body
+    assert "Distributor<" not in body
+
+
+@pytest.mark.django_db
+def test_detail_uses_the_configured_withdrawal_day_not_a_hardcoded_friday(
+    staff_client,
+):
+    """code-review finding: the approve modal's copy hardcoded "Friday"
+    even though WITHDRAWAL_DAY is a live, admin-editable setting."""
+    from constance import config
+
+    config.WITHDRAWAL_DAY = "wednesday"
+    distributor = _make_eligible_distributor()
+    _make_submitted_request(distributor)
+    request = WithdrawalRequest.objects.get(distributor=distributor)
+
+    response = staff_client.get(_detail_url(request))
+
+    body = response.content.decode()
+    assert "Wednesday batch" in body
+    assert "Friday batch" not in body
+
+
+@pytest.mark.django_db
 def test_rejecting_from_the_detail_screen_requires_a_reason(staff_client):
     distributor = _make_eligible_distributor()
     _make_submitted_request(distributor)
