@@ -3,7 +3,7 @@ from django.shortcuts import render
 
 from simple_history.admin import SimpleHistoryAdmin
 
-from .models import WithdrawalRequest
+from .models import WithdrawalCycleFailure, WithdrawalCycleRun, WithdrawalRequest
 from .services import (
     InsufficientWalletBalance,
     KycNotApproved,
@@ -157,3 +157,46 @@ class WithdrawalRequestAdmin(SimpleHistoryAdmin):
                 "action": "reject_selected",
             },
         )
+
+
+class WithdrawalCycleFailureInline(admin.TabularInline):
+    model = WithdrawalCycleFailure
+    extra = 0
+    readonly_fields = [
+        "withdrawal_request_id",
+        "distributor_id",
+        "net_amount",
+        "error",
+        "created_at",
+    ]
+    can_delete = False
+
+
+@admin.register(WithdrawalCycleRun)
+class WithdrawalCycleRunAdmin(admin.ModelAdmin):
+    """Task 16f PR 2. System-generated audit trail (the Friday payout
+    batch driver writes these) -- never created, edited, or deleted by
+    hand, including by superusers. Mirrors CommissionCycleRunAdmin
+    exactly: has_view_permission is left at its default, which still
+    resolves True for a superuser via Django's own has_perm bypass, so
+    this stays visible without becoming editable."""
+
+    list_display = ["run_at", "evaluated", "paid", "failed", "total_amount"]
+    readonly_fields = [
+        "run_at",
+        "evaluated",
+        "paid",
+        "failed",
+        "total_amount",
+        "created_at",
+    ]
+    inlines = [WithdrawalCycleFailureInline]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
