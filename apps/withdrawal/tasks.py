@@ -40,6 +40,15 @@ WITHDRAWAL_PAYOUT_LOCK_KEY = "withdrawal:payout_cycle_lock"
 # ever grows, rather than silently staying pinned at a value sized for
 # today's timeout.
 #
+# code-review-and-quality (2026-07-24, Task 16g): a row's worst case now
+# also includes one SMS send (apps.withdrawal.services._notify, called
+# from apply_verified_transfer_outcome once a terminal outcome is
+# reached) -- mNotify's own request has a 10s timeout
+# (apps.notifications.sms._send_via_mnotify). Still comfortably inside
+# the 300s floor (worst case ~40s: 3 Paystack calls + 1 SMS call), so the
+# margin holds, but this is a 4th call this budget now needs to account
+# for, not just the 3 Paystack ones described above.
+#
 # This is not the only defense against two overlapping cycles both
 # calling initiate_transfer for the same row if this timeout is ever
 # exceeded anyway: claim_for_payout's own docstring notes that Paystack's

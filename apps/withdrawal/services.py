@@ -16,6 +16,7 @@ from apps.distributors.paystack import (
     initiate_transfer,
     verify_transfer,
 )
+from apps.notifications.sms import send_sms
 from apps.wallet.models import WalletTransaction
 from apps.wallet.services import InsufficientBalanceError, credit, debit
 from bancostore.concurrency import (
@@ -114,6 +115,31 @@ class WithdrawalRequestNotPending(Exception):
     def __init__(self, message, *, status):
         super().__init__(message)
         self.status = status
+
+
+def _notify(phone_number, message, *, context):
+    """Task 16g. Best-effort SMS notification -- mirrors
+    apps.distributors.services._credit_direct_referral_bonus's own
+    established try/except pattern (Task 12): the underlying state
+    change has already committed by the time this is called, so an SMS
+    provider outage must never roll it back, and never propagates.
+
+    Deliberately called by every caller here AFTER retry_on_lock_
+    contention returns, never from inside a caller's own _attempt()
+    closure -- unlike Task 12's precedent (which sends from inside the
+    lock), this project's own Task 16f principle is that no external
+    HTTP call should ever happen while holding a row lock (see
+    claim_for_payout's docstring). A stricter standard than Task 12's
+    own shipped code, not a contradiction of it -- Task 12 isn't touched
+    here, out of scope for this task."""
+    try:
+        send_sms(str(phone_number), message)
+    except Exception:
+        logger.exception(
+            "%s: failed to send withdrawal notification -- state change "
+            "already committed, notification only.",
+            context,
+        )
 
 
 def submit_withdrawal_request(distributor, amount: Decimal) -> WithdrawalRequest:
@@ -390,7 +416,20 @@ def approve_withdrawal_request(withdrawal_request, *, reviewed_by) -> Withdrawal
             )
             return locked_request
 
-    return retry_on_lock_contention(_attempt)
+    approved = retry_on_lock_contention(_attempt)
+    # Task 16g. Every successful return here is a genuine one-time
+    # transition (this function is deliberately not idempotent-silent --
+    # see WithdrawalRequestNotPending's own docstring), so there is no
+    # no-op case to guard against double-notifying, unlike
+    # apply_verified_transfer_outcome below.
+    _notify(
+        approved.distributor.phone_number,
+        f"Your Bancostore withdrawal of GHS {approved.net_amount} has been "
+        f"approved. Payout processes on {config.WITHDRAWAL_DAY.title()} -- "
+        f"we'll notify you once it's paid.",
+        context="approve_withdrawal_request",
+    )
+    return approved
 
 
 def reject_withdrawal_request(
@@ -441,7 +480,16 @@ def reject_withdrawal_request(
             )
             return locked_request
 
-    return retry_on_lock_contention(_attempt)
+    rejected = retry_on_lock_contention(_attempt)
+    # Task 16g. Same "not idempotent-silent, every success is a genuine
+    # one-time transition" reasoning as approve_withdrawal_request above.
+    _notify(
+        rejected.distributor.phone_number,
+        f"Your Bancostore withdrawal request of GHS {rejected.amount} was "
+        f"not approved. Reason: {rejected.rejection_reason}",
+        context="reject_withdrawal_request",
+    )
+    return rejected
 
 
 def _generate_transfer_reference(withdrawal_request_id):
@@ -572,7 +620,17 @@ def apply_verified_transfer_outcome(
     past this function's own lock-based idempotency check) and
     transitions to payout_failed_reversed. Any other status is a no-op.
 
-    Raises WithdrawalRequestNotFound if the row no longer exists."""
+    Raises WithdrawalRequestNotFound if the row no longer exists.
+
+    Task 16g: sends an SMS notification exactly once per real transition
+    (paid or reversed). The no-op case (row already left queued_for_payout
+    -- a duplicate webhook delivery, or the batch driver revisiting a row
+    the webhook already resolved) must NOT re-notify, so _attempt()'s
+    return value carries which transition (if any) actually happened this
+    call, distinct from the row itself -- the row alone can't tell a
+    caller "I just paid this" from "this was already paid," the same
+    ambiguity Task 16f PR 2's own doubt-driven review caught and fixed
+    for paid/total_amount accounting in the batch driver."""
 
     def _attempt():
         with transaction.atomic():
@@ -586,7 +644,7 @@ def apply_verified_transfer_outcome(
                 ) from None
 
             if locked_request.status != WithdrawalRequest.Status.QUEUED_FOR_PAYOUT:
-                return locked_request
+                return locked_request, None
 
             if verified_status == "success":
                 locked_request.status = WithdrawalRequest.Status.PAID
@@ -596,6 +654,7 @@ def apply_verified_transfer_outcome(
                     "verified_status=success -> paid",
                     locked_request.pk,
                 )
+                return locked_request, "paid"
             elif verified_status in _TRANSFER_FAILURE_STATUSES:
                 credit(
                     locked_request.distributor,
@@ -613,6 +672,7 @@ def apply_verified_transfer_outcome(
                     verified_status,
                     locked_request.net_amount,
                 )
+                return locked_request, "reversed"
             else:
                 logger.info(
                     "apply_verified_transfer_outcome: withdrawal_request_id=%s "
@@ -621,10 +681,28 @@ def apply_verified_transfer_outcome(
                     locked_request.pk,
                     verified_status,
                 )
+                return locked_request, None
 
-            return locked_request
+    updated_request, transition = retry_on_lock_contention(_attempt)
 
-    return retry_on_lock_contention(_attempt)
+    if transition == "paid":
+        _notify(
+            updated_request.distributor.phone_number,
+            f"Good news! Your Bancostore withdrawal of GHS "
+            f"{updated_request.net_amount} has been paid to your mobile "
+            f"money account.",
+            context="apply_verified_transfer_outcome:paid",
+        )
+    elif transition == "reversed":
+        _notify(
+            updated_request.distributor.phone_number,
+            f"Your Bancostore withdrawal of GHS {updated_request.net_amount} "
+            f"could not be completed and has been returned to your wallet. "
+            f"You can request a new withdrawal anytime.",
+            context="apply_verified_transfer_outcome:reversed",
+        )
+
+    return updated_request
 
 
 def _local_mobile_money_number(e164_number):
