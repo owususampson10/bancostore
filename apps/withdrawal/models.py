@@ -129,7 +129,104 @@ class WithdrawalRequest(models.Model):
             # full withdrawal history at this platform's stated
             # "hundreds of thousands of users" scale.
             models.Index(fields=["distributor", "status", "created_at"]),
+            # Task 16f PR 2 (code-review-and-quality, 2026-07-24): the
+            # withdrawal-payout batch driver's _withdrawal_payout_ids_query
+            # filters status__in=[...] ordered by created_at, with no
+            # distributor filter -- the composite index above doesn't help
+            # here (it only serves queries that also filter on distributor
+            # first). Same "hundreds of thousands of users" scale reasoning
+            # as the index above, for a genuinely different query shape.
+            models.Index(fields=["status", "created_at"]),
         ]
 
     def __str__(self):
         return f"WithdrawalRequest<{self.distributor} {self.amount} {self.status}>"
+
+
+class WithdrawalCycleRun(models.Model):
+    """Task 16f PR 2. One durable row per Friday payout batch-driver cycle
+    that actually ran -- mirrors apps.commissions.models.CommissionCycleRun's
+    shape and rationale (financial jobs with no human review per cycle need
+    a durable record, not just ephemeral logging), but is a deliberately
+    separate model, not a third job_name value on CommissionCycleRun:
+    CommissionCycleFailure.distributor_id can't hold a withdrawal_request_id
+    without corrupting the field's meaning, and the two audit trails track
+    genuinely different metrics (commission earnings vs. payout outcomes).
+
+    No job_name discriminator -- unlike CommissionCycleRun, exactly one job
+    (the Friday payout batch) ever writes here, so there's nothing to
+    discriminate between yet. Uniqueness is on run_at alone for the same
+    reason."""
+
+    run_at = models.DateTimeField(unique=True)
+    evaluated = models.PositiveIntegerField()
+    paid = models.PositiveIntegerField()
+    failed = models.PositiveIntegerField()
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-run_at"]
+
+    def __str__(self):
+        return f"withdrawal payout cycle {self.run_at.isoformat()}"
+
+
+class WithdrawalCycleFailure(models.Model):
+    """One row per WithdrawalRequest whose per-request processing call
+    raised during a cycle -- not one row per routine already-resolved
+    skip (a row found already paid/rejected/reversed when this cycle
+    reached it is not a failure).
+
+    Deliberately not a ForeignKey to WithdrawalRequest, mirroring
+    CommissionCycleFailure's own reasoning: a WithdrawalRequest can be
+    cascade-deleted if its Distributor is deleted (DistributorAdmin has
+    no delete lock, unlike WalletAdmin/WithdrawalRequestAdmin/
+    CommissionCycleRunAdmin), and the audit record must survive that.
+
+    Unlike CommissionCycleFailure, also captures distributor_id and
+    net_amount at failure time (doubt-driven-development finding,
+    2026-07-24): a failed withdrawal payout, unlike a failed commission
+    calculation, means real money is already debited and stuck -- a bare
+    ID with no amount/distributor leaves no way to reconcile whose money
+    it was or how much, if the underlying rows are later deleted. Both
+    nullable -- the batch driver captures them from a fresh read of the
+    still-live row at failure time, but that read can itself fail (e.g.
+    the row vanished between the id-query snapshot and this row's turn in
+    the loop), and a missing snapshot must not block recording the
+    failure at all."""
+
+    cycle_run = models.ForeignKey(
+        WithdrawalCycleRun, on_delete=models.CASCADE, related_name="failures"
+    )
+    withdrawal_request_id = models.PositiveIntegerField()
+    distributor_id = models.PositiveIntegerField(null=True)
+    net_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True)
+    error = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["withdrawal_request_id"]
+        constraints = [
+            # code-review-and-quality (2026-07-24): the sole current
+            # writer (apps.withdrawal.tasks) always sets distributor_id
+            # and net_amount together, or leaves both null -- but per
+            # this codebase's own established reasoning (WithdrawalRequest
+            # .payout_mobile_money_number/network's identical both-or-
+            # neither constraint), a future writer bypassing that
+            # discipline is exactly what a DB constraint, not just
+            # application code, exists to catch.
+            models.CheckConstraint(
+                check=(
+                    models.Q(distributor_id__isnull=True, net_amount__isnull=True)
+                    | (
+                        models.Q(distributor_id__isnull=False)
+                        & models.Q(net_amount__isnull=False)
+                    )
+                ),
+                name="withdrawal_cycle_failure_snapshot_both_or_neither",
+            ),
+        ]
+
+    def __str__(self):
+        return f"withdrawal_request_id={self.withdrawal_request_id}"

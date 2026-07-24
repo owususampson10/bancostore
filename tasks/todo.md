@@ -1952,6 +1952,177 @@ top-level entry gives
   `code-simplification`, `documentation-and-adrs` if the audit-trail model decision (generalize vs.
   new model) needs recording
 
+##### Task 16f internal sequencing (PR 1 merged 2026-07-24; this covers PR 2 onward)
+
+PR 1 (merged, PR #19) built the pure service layer only: `claim_for_payout`, `process_withdrawal_payout`,
+`apply_verified_transfer_outcome`, `PaystackNotFoundError`, and the `payout_recipient_name` snapshot.
+Nothing calls these yet. Planning pass (2026-07-24) re-read `apps/commissions/tasks.py` in full and
+found one thing this task's original acceptance criteria assumed that isn't true: **a webhook
+endpoint does not need to be built from scratch.** `apps/distributors/views.py::paystack_webhook`
+already exists, already verifies `x-paystack-signature` via `verify_webhook_signature` (Paystack's
+*one* site-wide HMAC-SHA512 scheme, not a per-event scheme -- confirmed by reading
+`apps/distributors/paystack.py` directly, not assumed), and already dispatches by payload shape
+(`event` + reference prefix) for `charge.success`. Adding a `transfer.success`/`failed`/`reversed`
+branch there is a ~15-line addition to an existing, already-hardened endpoint, not a new attack
+surface needing its own signature-scheme research. This refines (but doesn't override) the original
+"new webhook endpoint" framing in ADR-0004's Consequences section -- flagging for a doubt-driven pass
+to confirm, and an ADR-0004 addendum afterward (ask before editing, per standing instruction).
+
+Also found: `process_withdrawal_payout` (PR 1) already calls `apply_verified_transfer_outcome`
+internally when `verify_transfer` returns a resolved status on its resume path (see
+`test_resuming_a_transfer_paystack_already_confirmed_succeeded`/`..._that_actually_failed_reverses_it`
+in `tests/unit/withdrawal/test_process_withdrawal_payout.py`). That means **the batch driver alone,
+with zero webhook, is already correctness-complete** -- a transfer that resolves between Fridays
+just waits for the next cycle's resume-via-poll instead of resolving same-day. The webhook is a
+latency optimization, not a correctness dependency. This justifies splitting into two independent
+PRs, buildable/shippable in either order, rather than one:
+
+**PR 2 -- the Friday payout mechanism (batch driver + audit model), no webhook involved:**
+1. `WithdrawalCycleRun`/`WithdrawalCycleFailure` model + migration (schema only, mirrors
+   `CommissionCycleRun`/`Failure`'s shape field-for-field but is a genuinely separate model --
+   `CommissionCycleFailure.distributor_id` cannot hold a `withdrawal_request_id` without corrupting
+   the field's meaning, per 16f's original doubt-driven RECONCILE). No logic yet, no dedicated test
+   file needed beyond a migration check -- mirrors how `WithdrawalRequest` itself shipped schema-only
+   in 16b.
+2. **Doubt-driven-development pass, before any of steps 3-4's code is written.** Adversarial review
+   target: the planned `apps/withdrawal/tasks.py` batch driver design (not yet written). Specifically
+   must check, line-by-line against the actual PR 1 source: does `claim_for_payout`/
+   `process_withdrawal_payout` read *any* attribute off the passed-in `WithdrawalRequest` object
+   other than `.pk` before re-fetching a locked row internally? If the batch driver is going to pass
+   an unsaved `WithdrawalRequest(pk=id)` stub per iteration (mirroring `_run_commission_cycle`'s own
+   `Distributor(pk=id)` convention), and either function reads a blank field off that stub instead of
+   the locked fetch, that's the exact Task 14 "unsaved stub silently pays/skips nobody" bug class
+   recurring in new code. Also in scope for this pass: confirm the query needs to select **both**
+   `approved_debited` and `queued_for_payout` rows (not just the first), and settle whether
+   `WithdrawalCycleFailure` should carry `withdrawal_request_id` as a plain `PositiveIntegerField`
+   (not a `ForeignKey`), mirroring `CommissionCycleFailure`'s own reasoning about surviving a deleted
+   row. `source-driven-development` sub-check in the same pass: confirm `django_celery_beat`'s
+   installed-version `CrontabSchedule.day_of_week` field accepts `"friday"` directly or needs
+   conversion to crontab's `0-6`/`fri` syntax -- read the installed package, don't assume.
+3. `apps/withdrawal/tasks.py`: the batch driver itself (`process_withdrawal_payouts` or similar),
+   shape-mirroring `_run_commission_cycle` (fixed `run_at`, per-iteration-renewed lock, per-row
+   exception isolation, systemic-failure guard, audit record persisted before that guard's raise) but
+   as its own function in its own module -- not calling into `apps.commissions.tasks`, per the
+   already-resolved "shape-mirror, don't generalize" decision. Iterates
+   `WithdrawalRequest.objects.filter(status__in=[APPROVED_DEBITED, QUEUED_FOR_PAYOUT])`, calls
+   `process_withdrawal_payout` per row. TDD: tests written alongside this file, not after --
+   `tests/unit/withdrawal/test_payout_batch_task.py` covering the two-status query, per-row isolation,
+   systemic-failure guard, and (per the doubt-driven finding above) a stub-vs-locked-row regression
+   test proving a stale/blank field on an unsaved stub can never leak into the actual transfer call.
+4. `_sync_periodic_task_crontab` (new, alongside the driver) + a seed migration for the
+   `WithdrawalRequest` Beat task, using `CrontabSchedule` -- genuinely new infrastructure, no
+   `IntervalSchedule` precedent applies. `WITHDRAWAL_DAY`'s live constance value stays synced the same
+   way `BINARY_BONUS_INTERVAL_MINUTES`/`MATCHING_BONUS_INTERVAL_DAYS` already are.
+5. `observability-and-instrumentation` decision before merge, not after: at minimum, confirm the
+   audit-trail model from step 1 is actually visible somewhere an admin would look (Django Admin
+   list view, mirroring `CommissionCycleRunAdmin`) -- a table nobody queries isn't observability,
+   it's just a second place logs could have gone.
+6. `shipping-and-launch` decision before merge: Paystack Transfers are still blocked on this sandbox
+   account's tier (`project_paystack_transfer_account_tier_blocked` memory) -- `initiate_transfer`/
+   `verify_transfer` are unverified live. Decide explicitly whether the seeded `PeriodicTask` ships
+   `enabled=True` (fires for real, would currently fail every row at the live Paystack call until the
+   account tier is fixed -- but fails safely, since nothing debits twice) or `enabled=False` until
+   Transfers are confirmed live -- don't let this default silently either way.
+
+**Doubt-driven-development, cycle 1 (2026-07-24), against this exact design -- 6 findings, all
+folded in below before any code was written.** Single-model, fresh-context, adversarial (`agent-
+skills:code-reviewer`); cross-model offered and declined by the user as unnecessary for this pass.
+
+1. **Lock-timeout sizing.** The plan as first drafted copied `_run_commission_cycle`'s
+   lock-renewed-once-per-iteration pattern verbatim. That's safe there because `process_one` is a
+   fast, pure-DB call; `process_withdrawal_payout` can make up to 3 sequential Paystack network
+   calls per row. A lock TTL sized like Binary Bonus's (picked for many-fast-items) can expire mid-row,
+   letting a second Beat trigger's cycle also call `initiate_transfer` for the same row. Mitigated,
+   not eliminated, by `claim_for_payout`'s own documented backstop (Paystack's `reference` uniqueness
+   is meant to reject a genuine duplicate `initiate_transfer`) -- but that's an unverified third-party
+   guarantee on this account (Transfers still blocked, per the memory above), so it's a second layer,
+   not a substitute for sizing the lock correctly. **Resolution:** size
+   `WITHDRAWAL_PAYOUT_LOCK_TIMEOUT_SECONDS` explicitly around worst-case per-row Paystack round-trip
+   time (`REQUEST_TIMEOUT_SECONDS` x up to 3 calls, plus headroom), not copy-pasted from Binary Bonus,
+   and document the two-layer defense (lock + Paystack reference dedup) explicitly in the driver's
+   docstring, mirroring Matching Bonus's own honest "here's what actually protects this" framing.
+2. **`paid`/`total_amount` accounting can't trust the per-row return value.** `process_withdrawal_
+   payout` returns only a status string -- it can't distinguish "this call just paid the row" from
+   "the row was already `paid` before this call started" (e.g. resolved by a genuinely concurrent
+   process). Trusting that string for `paid += 1` / `total_amount += net_amount` during the loop risks
+   double-counting the same real payment across two cycle records once PR 3's webhook exists (and, in
+   PR 2 alone, under the lock race in finding 1). Also, `process_withdrawal_payout` doesn't return
+   `net_amount` at all, so there was no clean source for `total_amount` even setting the double-count
+   risk aside. **Resolution (one fix closes both):** don't accumulate `paid`/`total_amount` inside the
+   loop at all -- after the loop finishes, run one aggregate query:
+   `WithdrawalRequest.objects.filter(pk__in=processed_ids, status=Status.PAID).aggregate(paid=Count("pk"), total_amount=Sum("net_amount"))`.
+   One extra query per cycle (not per row), so this doesn't reopen the flat-query-count goal.
+3. **Crontab conversion needs explicit validation, not a bare `get_or_create`.** Confirmed directly
+   against the installed `django_celery_beat` package (not assumed):
+   `validators.day_of_week_validator("friday")` raises (`"Unrecognised Day of Week: 'friday'"`);
+   `"fri"` and `"5"` both pass. `WITHDRAWAL_DAY`'s seeded constance value is the literal string
+   `"friday"`, so a naive `CrontabSchedule.objects.get_or_create(day_of_week=config.WITHDRAWAL_DAY,
+   ...)` would either write an invalid row silently (validators don't run on `.save()`) or blow up
+   confusingly deep in Beat's own scheduling loop -- which is shared with Binary/Matching Bonus's
+   periodic tasks, not isolated to withdrawal's. **Resolution:** an explicit
+   `{"monday": "1", ..., "sunday": "0"}` mapping (not celery's internal name-abbreviation parser --
+   keep the conversion visible and directly testable), and call the validator explicitly before
+   saving, falling back to "leave the existing schedule alone and log a warning" on anything
+   unrecognized -- mirrors `_sync_periodic_task_interval`'s own defensive pattern for bad input.
+4. **Row ordering.** `_withdrawal_payout_ids_query()` had no `.order_by(...)`. Not a correctness bug
+   (this is one `.iterator()` snapshot processed once, not paginated across separate queries the way
+   the earnings-history bug was), but for a real-money weekly batch, oldest-submitted-first is a
+   better default than whatever order MySQL happens to return. **Resolution:** add
+   `.order_by("created_at")` -- trivial cost, worth taking.
+5. **`WithdrawalCycleFailure` needs more than a bare ID.** Traced further than the original finding:
+   unlike a failed *commission calculation* (no money ever moved), a `WithdrawalCycleFailure` row
+   represents a request whose wallet was already debited back at approval time (Task 16d). If that
+   row's `Distributor` is later deleted (`DistributorAdmin` has no delete lock, unlike `WalletAdmin`/
+   `WithdrawalRequestAdmin`/`CommissionCycleRunAdmin`, all of which do) and the `WithdrawalRequest`
+   cascades away with it, a bare `withdrawal_request_id` + error string leaves no way to tell who was
+   owed how much. **Resolution:** add `distributor_id` (plain `PositiveIntegerField`, mirroring
+   `CommissionCycleFailure`'s own precedent) and `net_amount` (`DecimalField`) to
+   `WithdrawalCycleFailure`, both captured at failure time from the still-live row -- matching
+   precedent scope, not adding a full snapshot of every field.
+
+All 5 folded into the PR 2 design above (batch-driver step 3, audit-model step 1, crontab-sync step
+4) before implementation starts. Stopping at 1 cycle -- every finding was either fixed outright or
+(finding 1) mitigated with an explicit, justified sizing decision plus honest documentation of the
+residual risk, not hand-waved away; none of the fixes surface new branching complex enough to warrant
+an immediate second pass. A second doubt cycle can run against the actual implementation once written
+if anything about the fixes above turns out to be harder than expected in code.
+
+**PR 3 -- the transfer webhook (small, independent of PR 2):**
+1. Extend `apps/distributors/views.py::paystack_webhook` with a
+   `transfer.success`/`transfer.failed`/`transfer.reversed` branch, reusing the existing
+   `verify_webhook_signature` call already at the top of that view -- no new signature code.
+   Dispatches by reference prefix (`withdrawal-payout-`, from PR 1's `_generate_transfer_reference`)
+   to a new deferred Celery task, mirroring `consume_didit_result_task`'s shape (fast HTTP response,
+   heavy lifting in the task).
+2. New Celery task (`apps/withdrawal/tasks.py`, alongside the batch driver): re-fetches the
+   authoritative status via `verify_transfer` (never trusts the webhook payload's own status field --
+   same rule already enforced for Didit and `charge.success`), then calls
+   `apply_verified_transfer_outcome`. Idempotent by construction (PR 1's function already is), but
+   needs its own test proving a duplicate webhook delivery for the same reference doesn't
+   double-reverse.
+3. `security-and-hardening` pass specifically on this extension: confirm the new branch can't be
+   reached without the existing signature check (it's added inside the same `if not
+   verify_webhook_signature(...)` guard, not a parallel unguarded path), and that an attacker-supplied
+   reference that doesn't match any `WithdrawalRequest` fails closed (logs and 200s, doesn't 500 --
+   mirrors the existing `elif reference:` unrecognized-prefix handling).
+4. `documentation-and-adrs`: a short ADR-0004 addendum recording the "reuse the existing webhook
+   endpoint, not a new one" decision and why (ask before editing ADR-0004, per standing instruction).
+
+**Order:** PR 2 before PR 3. The batch driver's own resume path (step 3 above) is correctness-complete
+without the webhook -- a transfer that resolves before the next Friday just waits for that next
+cycle's poll. Building PR 2 first means the whole payout mechanism is provably correct via polling
+alone before PR 3 adds the webhook's latency optimization on top.
+
+**Checkpoint after PR 2:** full `tests/unit/withdrawal/` + `tests/unit/commissions/` suites green,
+real MySQL CI green, a manual Django shell run of the batch driver against a seeded
+`approved_debited` row (Paystack Transfers still blocked on this account tier, so this can only be
+verified against mocked/sandboxed responses, not a real live transfer -- note this explicitly in the
+PR description rather than implying live verification happened).
+
+**Checkpoint after PR 3:** duplicate-webhook-delivery test green, a manual webhook POST replay (same
+technique already used to verify the Didit webhook) confirms signature verification actually rejects
+a tampered body.
+
 ---
 
 #### Task 16g: Distributor-facing status + notifications
