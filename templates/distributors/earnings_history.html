@@ -46,7 +46,7 @@
 
 {% if page_obj.object_list %}
 <div class="overflow-x-auto">
-<table class="w-full text-left border-collapse">
+<table class="w-full min-w-[720px] text-left border-collapse">
 <thead class="bg-surface-container-low">
 <tr>
 <th class="px-6 py-4 font-label-md text-label-md text-gray-muted uppercase tracking-wider">Type</th>
@@ -89,14 +89,14 @@
 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">receipt_long</span>
 </div>
 {% endif %}
-<span class="font-body-md font-semibold">{{ txn.get_transaction_type_display }}</span>
+<span class="font-body-md text-body-md font-semibold">{{ txn.get_transaction_type_display }}</span>
 </div>
 </td>
-<td class="px-6 py-5 text-gray-muted font-body-md">{{ txn.reference|default:"—" }}</td>
-<td class="px-6 py-5 text-right font-headline-md text-headline-md {% if txn.amount < 0 %}text-error{% else %}text-success{% endif %}">
+<td class="px-6 py-5 text-gray-muted font-body-md text-body-md">{{ txn.reference|default:"—" }}</td>
+<td class="px-6 py-5 text-right font-body-md text-body-md font-semibold {% if txn.amount < 0 %}text-error{% else %}text-success{% endif %}">
 {% if txn.amount < 0 %}-{% else %}+{% endif %}GHS {{ txn.amount|floatformat:2|intcomma|cut:"-" }}
 </td>
-<td class="px-6 py-5 text-gray-muted font-body-md">{{ txn.created_at|date:"M d, Y | g:i A" }}</td>
+<td class="px-6 py-5 text-gray-muted font-body-md text-body-md">{{ txn.created_at|date:"M d, Y | g:i A" }}</td>
 </tr>
 {% endfor %}
 </tbody>
