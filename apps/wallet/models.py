@@ -53,6 +53,13 @@ class WalletTransaction(models.Model):
         # need.
         WITHDRAWAL_DEBIT = "withdrawal_debit", "Withdrawal Debit"
         REFUND_REVERSAL = "refund_reversal", "Refund Reversal"
+        # Task 16f: credited back when a Paystack Transfer fails/reverses
+        # after the wallet was already debited at admin approval (Task
+        # 16d). Deliberately distinct from REFUND_REVERSAL -- that type
+        # is for product-order refunds, a different domain entirely
+        # (doubt-driven-development finding: reusing it would conflate
+        # two unrelated reasons money re-enters a wallet).
+        WITHDRAWAL_REVERSAL = "withdrawal_reversal", "Withdrawal Reversal"
 
     wallet = models.ForeignKey(
         Wallet, on_delete=models.CASCADE, related_name="transactions"

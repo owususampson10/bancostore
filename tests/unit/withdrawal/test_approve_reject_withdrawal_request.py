@@ -7,7 +7,7 @@ from django.db import connection
 
 import pytest
 
-from apps.distributors.models import Distributor
+from apps.distributors.models import DiditVerification, Distributor
 from apps.wallet.models import Wallet, WalletTransaction
 from apps.wallet.services import credit
 
@@ -90,6 +90,44 @@ def test_approving_snapshots_the_payout_destination_onto_the_request():
 
     assert approved.payout_mobile_money_number == "+233247111222"
     assert approved.payout_mobile_money_network == "mtn"
+
+
+@pytest.mark.django_db
+def test_approving_snapshots_the_distributors_full_name_for_the_recipient():
+    from apps.withdrawal.services import approve_withdrawal_request
+
+    distributor = _make_eligible_distributor()
+    distributor.full_name = "Ama Mensah"
+    distributor.save(update_fields=["full_name"])
+    request = _make_submitted_request(distributor)
+    admin = _make_admin()
+
+    approved = approve_withdrawal_request(request, reviewed_by=admin)
+
+    assert approved.payout_recipient_name == "Ama Mensah"
+
+
+@pytest.mark.django_db
+def test_approving_falls_back_to_the_extracted_id_name_when_full_name_is_blank():
+    """Mirrors kyc_review_detail/withdrawal_review_detail's own fallback:
+    Distributor.full_name is only ever set from PendingRegistration at
+    registration time -- a distributor who registered before that field
+    existed still has a name Didit extracted from their ID."""
+    from apps.withdrawal.services import approve_withdrawal_request
+
+    distributor = _make_eligible_distributor()
+    assert distributor.full_name == ""
+    DiditVerification.objects.create(
+        distributor=distributor,
+        session_id=f"sess-{distributor.pk}",
+        extracted_full_name="Kojo Antwi",
+    )
+    request = _make_submitted_request(distributor)
+    admin = _make_admin()
+
+    approved = approve_withdrawal_request(request, reviewed_by=admin)
+
+    assert approved.payout_recipient_name == "Kojo Antwi"
 
 
 @pytest.mark.django_db
