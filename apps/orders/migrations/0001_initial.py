@@ -2,10 +2,11 @@
 
 import django.db.models.deletion
 import django.db.models.expressions
-import phonenumber_field.modelfields
-import simple_history.models
 from django.conf import settings
 from django.db import migrations, models
+
+import phonenumber_field.modelfields
+import simple_history.models
 
 
 class Migration(migrations.Migration):
