@@ -218,7 +218,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   session-engine fallback — is tracked in the "Known issues" sections at the top of
   `tasks/todo.md`; read those before touching auth or deployment code.
 
-Existing apps: `apps/{accounts,admin_portal,binary_tree,catalog,commissions,distributors,notifications,platform_settings,pv_ledger,wallet,withdrawal}`. Shared
+Existing apps: `apps/{accounts,admin_portal,binary_tree,catalog,commissions,distributors,notifications,orders,platform_settings,pv_ledger,wallet,withdrawal}`. Shared
 concurrency helper: `bancostore/concurrency.py` (`retry_on_lock_contention`,
 `select_for_update_nowait_if_supported`) — use it for any counter/stock/attempt update rather than
 reinventing locking. See `tasks/plan.md` and `tasks/todo.md` for the full task breakdown and

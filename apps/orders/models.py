@@ -144,6 +144,11 @@ class Order(models.Model):
             # other CheckConstraint precedent in this codebase
             # (WithdrawalRequest, Distributor) uses raw values for the same
             # reason.
+            # CodeRabbit (PR #24): the pickup branch required
+            # delivery_zone/address/area blank but never delivery_fee=0,
+            # so a pickup order could persist with a positive fee --
+            # violating "pickup is always free" (ADR-0005 decision 1).
+            # Fixed by adding delivery_fee=0 to the pickup branch.
             models.CheckConstraint(
                 check=(
                     models.Q(
@@ -151,6 +156,7 @@ class Order(models.Model):
                         delivery_zone="",
                         address="",
                         area="",
+                        delivery_fee=0,
                     )
                     | (
                         models.Q(delivery_method="home_delivery")

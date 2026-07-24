@@ -177,6 +177,23 @@ def test_pickup_with_all_address_fields_blank_is_allowed():
 
 
 @pytest.mark.django_db
+def test_pickup_with_a_positive_delivery_fee_is_rejected_at_db_level():
+    # CodeRabbit (PR #24): pickup is always free (ADR-0005 decision 1) --
+    # a positive delivery_fee on a pickup order must be impossible to
+    # persist, not just discouraged by the service layer.
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            _make_order(
+                delivery_method=Order.DeliveryMethod.PICKUP,
+                delivery_zone="",
+                address="",
+                area="",
+                delivery_fee=Decimal("20.00"),
+                total=Decimal("470.00"),
+            )
+
+
+@pytest.mark.django_db
 def test_home_delivery_requires_all_address_fields_at_db_level():
     with pytest.raises(IntegrityError):
         with transaction.atomic():

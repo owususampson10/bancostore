@@ -2380,14 +2380,17 @@ the schema itself can't guarantee it.
 
 #### Task 17b: Session-based cart
 
-**Description:** `apps/orders/cart.py::Cart` -- a thin wrapper over `request.session` (`{variant_id:
+**Description:** `apps/orders/cart.py::Cart` -- a thin wrapper over `request.session` (`{product_id:
 quantity}`), identical for guest and logged-in visitors per ADR-0005 decision 2. Add/update-quantity/
 remove-item views, a cart review page, and wiring `templates/catalog/product_detail.html`'s
-existing disabled add-to-cart stub (Task 8) to a real add-to-cart action.
+existing disabled add-to-cart stub (Task 8) to a real add-to-cart action. Product-level, not
+variant-level (corrected via 17a's own schema review, CodeRabbit-caught on PR #24 as stale wording
+here specifically): no interactive variant selection exists anywhere in this codebase yet, and
+stock is tracked at the Product level only (Task 7).
 
 **Acceptance criteria:**
 - [ ] Add to cart, update quantity, remove item all work for both anonymous and logged-in sessions
-- [ ] Cart total (excluding delivery, computed in 17c) reflects live `ProductVariant` prices, quantities capped by current stock
+- [ ] Cart total (excluding delivery, computed in 17c) reflects live `Product` prices, quantities capped by current product stock
 - [ ] Product detail page's add-to-cart button is no longer disabled
 
 **Verification:**
