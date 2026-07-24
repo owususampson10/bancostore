@@ -50,10 +50,15 @@ class Cart:
         return True
 
     def update(self, product, quantity):
-        if quantity < 1:
+        # CodeRabbit (PR #25): must check the POST-cap quantity, not the
+        # raw param -- a product gone out of stock (or deactivated) since
+        # being added has product.stock=0, so an update(product, 5) would
+        # otherwise store a zero-quantity line instead of removing it.
+        new_quantity = min(quantity, product.stock)
+        if new_quantity < 1:
             self.remove(product)
             return
-        self._data[str(product.pk)] = min(quantity, product.stock)
+        self._data[str(product.pk)] = new_quantity
         self._save()
 
     def remove(self, product):

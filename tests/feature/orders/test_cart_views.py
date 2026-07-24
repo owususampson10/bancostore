@@ -88,7 +88,7 @@ def test_add_to_cart_redirects_to_the_product_page_not_the_cart_when_stock_is_ex
 
 
 @pytest.mark.django_db
-def test_update_removes_a_line_for_a_product_deactivated_after_being_added(client):
+def test_update_still_works_for_a_product_deactivated_after_being_added(client):
     # code-review-and-quality (2026-07-24): cart_update previously used
     # Product.objects.storefront_visible() (is_active=True), 404ing this
     # action the moment a cart product was deactivated -- a dead end the
@@ -103,8 +103,11 @@ def test_update_removes_a_line_for_a_product_deactivated_after_being_added(clien
     )
 
     assert response.status_code == 302
+    # CodeRabbit (PR #25): assert the real quantity from context, not a
+    # bare "2" substring search against raw HTML -- Tailwind classes and
+    # other markup can contain that digit even if the update did nothing.
     cart_response = client.get(reverse("orders:cart"))
-    assert "2" in cart_response.content.decode()
+    assert cart_response.context["cart_items"][0].quantity == 2
 
 
 @pytest.mark.django_db

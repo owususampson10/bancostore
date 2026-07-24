@@ -137,6 +137,23 @@ def test_update_to_zero_removes_the_item():
 
 
 @pytest.mark.django_db
+def test_update_removes_the_item_when_stock_capping_leaves_zero():
+    # CodeRabbit (PR #25): the original guard checked the pre-cap
+    # quantity param against < 1, not the post-cap value -- a product
+    # gone out of stock (stock=0) since being added would have stored a
+    # zero-quantity line instead of removing it.
+    product = _make_product(stock=10)
+    cart = Cart(_request_with_session())
+    cart.add(product, quantity=1)
+
+    product.stock = 0
+    product.save()
+    cart.update(product, quantity=5)
+
+    assert cart.items() == []
+
+
+@pytest.mark.django_db
 def test_remove_removes_the_item():
     product = _make_product(stock=10)
     cart = Cart(_request_with_session())

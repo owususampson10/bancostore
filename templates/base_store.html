@@ -32,18 +32,25 @@
 <a href="#" title="Coming soon" class="text-on-surface-variant hover:text-primary text-xs font-bold uppercase tracking-widest transition-colors duration-200">About</a>
 <a href="#" title="Coming soon" class="text-on-surface-variant hover:text-primary text-xs font-bold uppercase tracking-widest transition-colors duration-200">Contact</a>
 </div>
+<div class="flex items-center gap-4">
 <div class="hidden lg:flex items-center gap-4">
 <a href="{% url 'account_login' %}" class="px-6 py-2 rounded-full border border-primary text-primary text-sm font-semibold hover:bg-primary/10 transition-all active:scale-95">Log In</a>
 <a href="{% url 'distributors:register' %}" class="px-6 py-2 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Become a Distributor</a>
-<div class="flex gap-4 ml-2">
-<a href="{% url 'catalog:product_list' %}" class="material-symbols-outlined hover:text-primary transition-colors" title="Search products">search</a>
+<a href="{% url 'catalog:product_list' %}" class="material-symbols-outlined hover:text-primary transition-colors ml-2" title="Search products">search</a>
+</div>
+<!-- CodeRabbit (PR #25): unlike search/login/distributor-CTA above, the
+     cart icon is NOT lg:hidden -- once this was the only way to reach
+     /cart/ (Task 17b), keeping it desktop-only left mobile users with no
+     way to open their cart at all. The rest of the mobile nav (behind the
+     hamburger button below) stays a pre-existing, separate gap -- Task 8
+     shipped it as a decorative, non-functional button with no menu behind
+     it; building a real mobile nav drawer is out of this task's scope. -->
 <a href="{% url 'orders:cart' %}" class="relative material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors" title="Cart" aria-label="Cart{% if cart_count %}, {{ cart_count }} item{{ cart_count|pluralize }}{% endif %}">
 shopping_cart
 {% if cart_count %}
 <span class="absolute -top-1.5 -right-1.5 bg-primary text-on-primary text-[10px] w-4 h-4 flex items-center justify-center rounded-full">{{ cart_count }}</span>
 {% endif %}
 </a>
-</div>
 </div>
 <button class="md:hidden">
 <span class="material-symbols-outlined">menu</span>
