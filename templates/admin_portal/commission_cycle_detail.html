@@ -35,8 +35,15 @@
 <div class="px-6 py-4 border-b border-outline-variant">
 <h3 class="font-headline-md text-headline-md text-on-surface">Failed Distributors</h3>
 </div>
+<!-- Sizing convention (2026-07-24): the table needs an explicit min-width
+     inside overflow-x-auto, or narrow viewports crush each column instead
+     of scrolling the whole table as a block. Every data cell needs BOTH a
+     font-X (family) and a paired text-X (size/line-height/weight) class
+     from the design system, e.g. font-body-md text-body-md together --
+     font-X alone sets only the family and silently falls back to browser
+     default sizing. -->
 <div class="overflow-x-auto">
-<table class="w-full text-left border-collapse">
+<table class="w-full min-w-[640px] text-left border-collapse">
 <thead>
 <tr class="bg-surface-container-low">
 <th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Distributor ID</th>

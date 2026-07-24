@@ -42,8 +42,15 @@
 </div>
 
 <div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<!-- Sizing convention (2026-07-24): the table needs an explicit min-width
+     inside overflow-x-auto, or narrow viewports crush each column instead
+     of scrolling the whole table as a block. Every data cell needs BOTH a
+     font-X (family) and a paired text-X (size/line-height/weight) class
+     from the design system, e.g. font-body-md text-body-md together --
+     font-X alone sets only the family and silently falls back to browser
+     default sizing. -->
 <div class="overflow-x-auto">
-<table class="w-full text-left border-collapse">
+<table class="w-full min-w-[1000px] text-left border-collapse">
 <thead>
 <tr class="bg-surface-container-low">
 <th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Distributor</th>
@@ -73,12 +80,12 @@
 {% if distributor.ir_id %}
 <span class="bg-surface-container-high px-2 py-1 rounded text-xs font-mono text-tertiary">{{ distributor.ir_id }}</span>
 {% else %}
-<span class="text-secondary italic text-xs font-label-md">Not yet assigned</span>
+<span class="text-secondary italic font-label-md text-label-md">Not yet assigned</span>
 {% endif %}
 </td>
 <td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant text-right">{{ withdrawal_request.amount|floatformat:2 }}</td>
 <td class="px-6 py-4 font-body-md text-body-md text-error text-right">{{ withdrawal_request.tax_amount|floatformat:2 }}</td>
-<td class="px-6 py-4 font-bold text-on-surface text-right">{{ withdrawal_request.net_amount|floatformat:2 }}</td>
+<td class="px-6 py-4 font-body-md text-body-md font-bold text-on-surface text-right">{{ withdrawal_request.net_amount|floatformat:2 }}</td>
 <td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ withdrawal_request.created_at|date:"M j, Y · g:i A" }}</td>
 <td class="px-6 py-4">
 <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-fixed text-admin-primary font-label-md text-label-md">
