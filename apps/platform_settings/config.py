@@ -265,6 +265,35 @@ WITHDRAWAL_AND_PAYOUT_SETTINGS = {
     ),
 }
 
+DELIVERY_SETTINGS = {
+    # Task 17a (SPEC.md Open Question #4, resolved 2026-07-24): the source
+    # doc's own Section 5.1 worked example, not a guess -- see
+    # docs/decisions/0005-checkout-cart-design.md decision 1. All four
+    # remain fully admin-editable at runtime; these are just starting
+    # values, same treatment as WITHDRAWAL_AND_PAYOUT_SETTINGS's own
+    # min/max amounts.
+    "DELIVERY_FEE_KUMASI": (
+        Decimal("20"),
+        "Delivery fee for orders within Kumasi (GHS)",
+        "non_negative_money_field",
+    ),
+    "DELIVERY_FEE_ACCRA": (
+        Decimal("50"),
+        "Delivery fee for orders within Accra (GHS)",
+        "non_negative_money_field",
+    ),
+    "DELIVERY_FEE_OTHER_REGIONS": (
+        Decimal("70"),
+        "Delivery fee for orders outside Kumasi and Accra (GHS)",
+        "non_negative_money_field",
+    ),
+    "FREE_DELIVERY_THRESHOLD": (
+        Decimal("500"),
+        "Orders at or above this subtotal (GHS) get free delivery in any zone",
+        "non_negative_money_field",
+    ),
+}
+
 KYC_SETTINGS = {
     "KYC_REQUIRED": (
         True,
@@ -501,6 +530,7 @@ CONSTANCE_CONFIG = {
     **COMMISSION_AND_BONUS_SETTINGS,
     **REGISTRATION_AND_MEMBERSHIP_SETTINGS,
     **WITHDRAWAL_AND_PAYOUT_SETTINGS,
+    **DELIVERY_SETTINGS,
     **KYC_SETTINGS,
     **IR_ID_NUMBER_SETTINGS,
     **PAYMENT_GATEWAY_SETTINGS,
@@ -512,6 +542,7 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "Commission & Bonus Settings": tuple(COMMISSION_AND_BONUS_SETTINGS),
     "Registration & Membership Settings": tuple(REGISTRATION_AND_MEMBERSHIP_SETTINGS),
     "Withdrawal & Payout Settings": tuple(WITHDRAWAL_AND_PAYOUT_SETTINGS),
+    "Delivery Settings": tuple(DELIVERY_SETTINGS),
     "KYC Settings": tuple(KYC_SETTINGS),
     "IR ID Number Settings": tuple(IR_ID_NUMBER_SETTINGS),
     "Payment Gateway Settings": tuple(PAYMENT_GATEWAY_SETTINGS),

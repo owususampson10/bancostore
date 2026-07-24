@@ -1599,17 +1599,21 @@ sliced sub-tasks below (16a-16h), ordered so the money-safety-critical core (sta
 calc, debit/reversal) ships and is fully tested before the UI/admin polish and batch-payout layers.
 
 **Acceptance criteria (whole-task, verified by Checkpoint F below):**
-- [ ] Withdrawal blocked if KYC is not approved, payout destination isn't set, amount is below
+- [x] Withdrawal blocked if KYC is not approved, payout destination isn't set, amount is below
       minimum/above maximum, or one was already made this `WITHDRAWAL_FREQUENCY` window
-- [ ] Tax is deducted using the `WITHHOLDING_TAX_RATE` setting and shown to the distributor before confirming
-- [ ] Admin can approve individually or in bulk; approving debits the wallet immediately
-- [ ] The Friday batch job pays out every approved-but-unpaid request via Paystack Transfer (sandbox)
-- [ ] A failed/reversed Paystack transfer reverses the wallet debit exactly once (idempotent against webhook/poll retries)
+- [x] Tax is deducted using the `WITHHOLDING_TAX_RATE` setting and shown to the distributor before confirming
+- [x] Admin can approve individually or in bulk; approving debits the wallet immediately
+- [x] The Friday batch job pays out every approved-but-unpaid request via Paystack Transfer (sandbox)
+- [x] A failed/reversed Paystack transfer reverses the wallet debit exactly once (idempotent against webhook/poll retries)
 
 **Verification (whole-task):**
-- [ ] pytest test reproducing the doc example exactly: GHS 500 requested → GHS 5 tax → GHS 495 paid
-- [ ] pytest test: second withdrawal request in the same `WITHDRAWAL_FREQUENCY` window is rejected
-- [ ] pytest test: a reversed Paystack transfer credits the wallet back exactly once, even if the webhook fires twice
+- [x] pytest test reproducing the doc example exactly: GHS 500 requested → GHS 5 tax → GHS 495 paid
+  (`tests/unit/withdrawal/test_submit_withdrawal_request.py::test_matches_the_documented_worked_example_exactly`)
+- [x] pytest test: second withdrawal request in the same `WITHDRAWAL_FREQUENCY` window is rejected
+  (`tests/unit/withdrawal/test_submit_withdrawal_request.py::test_second_request_within_the_same_window_is_rejected`)
+- [x] pytest test: a reversed Paystack transfer credits the wallet back exactly once, even if the webhook fires twice
+  (`tests/unit/withdrawal/test_apply_verified_transfer_outcome.py::test_applying_failed_twice_never_double_credits`,
+  `::test_concurrent_applications_of_a_failed_outcome_never_double_reverse`)
 
 **Dependencies:** Task 11 (KYC), Task 15 (wallet `debit()`), withdrawal min/max/day decision (resolved),
 ADR-0004 design decisions (resolved), Paystack sandbox access, **explicit user sign-off before 16e/16f
@@ -2207,17 +2211,34 @@ request → tax deducted → admin approves → simulated Paystack payout succee
 same branch → PR → CI (real MySQL) → CodeRabbit → merge workflow every prior task has used.
 
 **Acceptance criteria:**
-- [ ] Full pytest suite green, including every new withdrawal test from 16a-16g
-- [ ] `black`/`ruff` clean, `manage.py check` clean
-- [ ] CI green against real MySQL, not just local SQLite
-- [ ] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning
+- [x] Full pytest suite green, including every new withdrawal test from 16a-16g (730 passed)
+- [x] `black`/`ruff` clean, `manage.py check` clean
+- [x] CI green against real MySQL, not just local SQLite (verified at the log level, not just the
+  checkmark -- confirmed against `mysql:8.4.10` via `gh run view --log`)
+- [x] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning
+  (PR #22: one real bug fixed pre-merge -- widened `apply_verified_transfer_outcome`'s exception
+  catch to cover a malformed Paystack response; one finding verified as a contract-misread, not a
+  real gap -- test SMS safety is already covered by `tests/conftest.py`'s autouse fixture. PR #23:
+  UI-only, no CodeRabbit findings)
 
 **Verification:**
-- [ ] Checkpoint F (below) passes end-to-end in a real browser session, not just pytest
+- [x] Checkpoint F (below) passes end-to-end in a real browser session, not just pytest -- run
+  2026-07-24 with a real distributor ("Checkpoint F Distributor"), a real admin login (TOTP 2FA),
+  and every financial figure checked against the database after each step, not just the UI:
+  withdrawal of GHS 500.00 -> GHS 5.00 tax -> GHS 495.00 net; admin approval debited the wallet
+  exactly once (GHS 1000.00 -> GHS 505.00, one `WalletTransaction` row); a mocked Paystack payout
+  (real Transfers are blocked on this sandbox account's tier -- see
+  `project_paystack_transfer_account_tier_blocked`) resolved the request to `paid` with no
+  double-debit; the distributor's own withdrawal history page correctly showed the final "Paid"
+  status. Caught one real process gap during the walkthrough: a manual verification shell command
+  is NOT covered by `tests/conftest.py`'s pytest-only autouse SMS-suppression fixture, so it made a
+  live (rejected, no message sent) call to mNotify's API -- manual verification scripts must mock
+  `send_sms` directly rather than relying on that fixture or the dev server's own env override.
 
 **Dependencies:** 16a-16g all merged
 
-**Files likely touched:** none new -- this is verification, not implementation
+**Files likely touched:** none new -- this is verification, not implementation. No PR opened for this
+task -- purely verification, nothing to merge.
 
 **Estimated scope:** XS (process, not code)
 
@@ -2265,23 +2286,259 @@ and a simulated Paystack payout succeeds.
 ### Task 17: Cart + checkout
 
 **Description:** Cart review, delivery vs. pickup choice, delivery fee calculated by zone, order
-summary, Paystack payment. Distributor purchases generate PV; regular purchases do not. **Needs
-delivery zone fee table + free-delivery threshold decided before starting.**
+summary, Paystack payment. Distributor purchases generate PV; regular purchases do not.
 
-**Acceptance criteria:**
+**2026-07-24 -- delivery zone fee decision resolved, design gaps closed via `spec-driven-development`
+before any code.** Open Question #4 (delivery zone fee table, "set by admin" with no real numbers)
+is resolved: Kumasi GHS 20, Accra GHS 50, other regions GHS 70 (the source doc's own Section 5.1
+worked example, corrected against an earlier different-numbers proposal once the primary source was
+actually checked), free-delivery threshold GHS 500, pickup always free -- all four seeded as
+admin-editable `django-constance` settings, not hardcoded. Three further architecture questions had
+no answer anywhere in `SPEC.md` and were resolved and recorded in
+`docs/decisions/0005-checkout-cart-design.md` rather than assumed: cart is session-based for every
+visitor, guest or logged-in, with no `Cart`/`CartItem` DB model or merge-on-login path (no MVP
+requirement demands cross-device cart persistence); `Order` is created in a `pending` state at
+checkout confirmation, *before* payment -- a deliberate divergence from Task 16's
+`PendingRegistration`-holds-data-until-paid precedent, because Section 5.2's own order-status table
+starts at "Pending -- payment not yet confirmed" as a real visible state and Task 18 needs a real row
+to auto-cancel; stock is checked and decremented at payment confirmation, not reserved at
+add-to-cart. Broken into 6 vertically-sliced sub-tasks below (17a-17f), ordered so the schema +
+cart mechanics ship and are fully tested before payment integration and the UI/frontend layer.
+**Frontend note:** this task has real UI (cart, checkout, order confirmation). Per explicit user
+instruction, the UI is designed via Stitch from a prompt the user sends themselves, not built
+freehand -- 17e is gated on that prompt/export round-trip, not on Claude generating a design.
+
+**Acceptance criteria (whole-task, verified by Checkpoint G below alongside Task 18):**
 - [ ] Delivery fee is correctly looked up by zone from settings, or free above the threshold
 - [ ] A distributor's purchase generates PV and updates the ledger (Task 10d's write path); a regular customer's does not
 - [ ] Order confirmation is sent (SMS/email) on successful payment
+- [ ] Guest checkout works with no account required; logged-in checkout works for both customer and distributor roles
 
-**Verification:**
+**Verification (whole-task):**
 - [ ] pytest test: distributor purchase increments PV ledger; regular customer purchase does not
 - [ ] pytest test: delivery fee matches the configured zone table, and is zero above the free threshold
 
-**Dependencies:** Task 8, Task 10d, delivery zone fee decision
+**Dependencies:** Task 8, Task 10d, delivery zone fee decision (resolved), ADR-0005 design decisions
+(resolved), **explicit user sign-off before 17a's schema migration and before 17d's Paystack
+integration code specifically** (both are standing `SPEC.md` Boundary "ask first" items,
+independent of this breakdown having already been reviewed)
 
-**Files likely touched:** `apps/orders/views.py` (checkout), `apps/orders/services.py` (`DeliveryFeeCalculator`), `tests/feature/orders/test_checkout.py`
+**Estimated scope:** L as a whole -- hence the 17a-17f split
+
+---
+
+#### Task 17a: `apps/orders` app scaffold + delivery-zone settings + `Order`/`OrderItem` models + state machine
+
+**Description:** New Django app. Four new constance settings (`DELIVERY_FEE_KUMASI`,
+`DELIVERY_FEE_ACCRA`, `DELIVERY_FEE_OTHER_REGIONS`, `FREE_DELIVERY_THRESHOLD`, all
+`non_negative_money_field`) in a new `DELIVERY_SETTINGS` fieldset. `Order` (nullable customer FK
+for guest checkout, flat address fields matching `PendingRegistration`'s `address`/`area`/`landmark`
+shape, `payment_reference`, delivery/pickup choice, delivery fee snapshot, total, a `pv_earned`
+audit field, full `status` choice set per Section 5.2 even though this task only transitions through
+`pending`/`confirmed`) and `OrderItem` (product, quantity, unit price + unit PV snapshot -- never a
+live product-price/pv_value lookup after the fact).
+
+**Built 2026-07-24.** A `doubt-driven-development` pass before the migration found 8 real gaps in
+the first draft, all resolved before implementation -- see `docs/decisions/0005-checkout-cart-design.md`'s
+"Task 17a Schema Review" section for the full writeup. The two substantive ones: no PV snapshot
+existed anywhere in the original draft (`Product.pv_value` would have been read live at confirmation
+time otherwise -- the exact class of bug the delivery-fee/price snapshot decisions already existed
+to prevent, just not originally extended to PV), fixed via `OrderItem.unit_pv` + `Order.pv_earned`;
+and `Order.email` was originally required, which would have broken checkout for a distributor with
+no real email (`apps/distributors/forms.py`'s email field is already `required=False` for exactly
+this reason) -- fixed via `blank=True, default=""`. `OrderItem` intentionally has no variant field
+(no interactive variant selection exists anywhere in this codebase yet -- Task 7 explicitly deferred
+it, and `product_detail.html`'s variant display is plain, non-interactive `<span>` elements) --
+corrects this ADR's own decision-2 wording, which had said the cart is keyed by `variant_id`; it's
+keyed by product id.
+
+**Acceptance criteria:**
+- [x] `Order`/`OrderItem` migrations apply cleanly; `status` choices include every Section 5.2 stage
+- [x] Delivery zone settings visible and editable in Django Admin's constance panel
+- [x] `OrderItem` unit price is a snapshot at order-creation time, never re-derived from `Product` later
+
+**Verification:**
+- [x] pytest test: creating an `Order` with a snapshotted zone fee does not change if the live constance setting changes afterward
+
+**Dependencies:** none beyond Task 17's own (explicit user sign-off required before this migration, per SPEC.md Boundaries -- given 2026-07-24)
+
+**Files likely touched:** `apps/orders/` (new app), `apps/orders/models.py`, `apps/orders/admin.py`, `apps/platform_settings/config.py`, `bancostore/settings.py`, `tests/unit/orders/test_order_model.py`, migrations
+
+**Estimated scope:** S
+
+**Skills:**
+- *Before:* `doubt-driven-development` (schema/state-machine review before the migration exists, mirroring ADR-0004's Task 16a review -- 8 findings, all resolved, see ADR-0005)
+- *During:* `test-driven-development`, `incremental-implementation`
+- *After:* `code-review-and-quality`, `security-and-hardening` (guest-checkout PII fields)
+
+**Carried forward to 17c/17d:** `Order.subtotal` equaling `sum(OrderItem.unit_price * quantity)`
+cannot be enforced by a DB `CheckConstraint` (can't reference another table) -- 17c (order creation)
+and 17d (payment confirmation) must each have an explicit test proving this identity holds, since
+the schema itself can't guarantee it.
+
+---
+
+#### Task 17b: Session-based cart
+
+**Description:** `apps/orders/cart.py::Cart` -- a thin wrapper over `request.session` (`{product_id:
+quantity}`), identical for guest and logged-in visitors per ADR-0005 decision 2. Add/update-quantity/
+remove-item views, a cart review page, and wiring `templates/catalog/product_detail.html`'s
+existing disabled add-to-cart stub (Task 8) to a real add-to-cart action. Product-level, not
+variant-level (corrected via 17a's own schema review, CodeRabbit-caught on PR #24 as stale wording
+here specifically): no interactive variant selection exists anywhere in this codebase yet, and
+stock is tracked at the Product level only (Task 7).
+
+**Acceptance criteria:**
+- [ ] Add to cart, update quantity, remove item all work for both anonymous and logged-in sessions
+- [ ] Cart total (excluding delivery, computed in 17c) reflects live `Product` prices, quantities capped by current product stock
+- [ ] Product detail page's add-to-cart button is no longer disabled
+
+**Verification:**
+- [ ] pytest test: cart survives across requests within a session; a fresh session starts empty
+- [ ] pytest test: cannot add more of an item than current stock allows
+
+**Dependencies:** 17a merged
+
+**Files likely touched:** `apps/orders/cart.py`, `apps/orders/views.py` (cart), `templates/catalog/product_detail.html`, `tests/feature/orders/test_cart.py`
+
+**Estimated scope:** S
+
+**Skills:**
+- *During:* `test-driven-development`, `incremental-implementation`, `api-and-interface-design` (Cart class shape)
+- *After:* `code-review-and-quality`
+
+---
+
+#### Task 17c: Checkout flow -- delivery/pickup choice, address, order summary, `Order` creation
+
+**Description:** Cart review -> delivery-or-pickup choice -> address entry (Home Delivery only) ->
+`DeliveryFeeCalculator` service (zone lookup + free-threshold check, per ADR-0005 decision 1) ->
+order summary showing items/subtotal/delivery fee/total -> confirming creates the `Order`/
+`OrderItem` rows in `pending` status with everything snapshotted (per 17a), not yet paid.
+
+**Acceptance criteria:**
+- [ ] `DeliveryFeeCalculator` returns the correct fee for each zone and zero above the free threshold
+- [ ] Pickup selection always yields a zero delivery fee, no zone lookup
+- [ ] Confirming the order summary creates a real `pending` `Order`, decrements nothing yet (stock untouched until 17d)
+
+**Verification:**
+- [ ] pytest test: `DeliveryFeeCalculator` matches the configured zone table exactly (whole-task verification bullet)
+- [ ] pytest test: order total is fee-plus-subtotal, snapshotted correctly
+
+**Dependencies:** 17a, 17b merged
+
+**Files likely touched:** `apps/orders/services.py` (`DeliveryFeeCalculator`), `apps/orders/views.py` (checkout), `tests/feature/orders/test_checkout.py`
 
 **Estimated scope:** M
+
+**Skills:**
+- *During:* `test-driven-development`, `incremental-implementation`
+- *After:* `code-review-and-quality`
+
+---
+
+#### Task 17d: Paystack payment + confirmation -- stock decrement, PV branch, order confirmation notification
+
+**Description:** `initialize_transaction` call + redirect from the confirmed `pending` `Order`;
+webhook/callback triggers `confirm_order_payment(reference)`, mirroring
+`consume_paid_starter_pack`'s idempotent locked-consume shape exactly (per ADR-0005 decision 4):
+locks the `Order` row, no-ops if already resolved, `verify_transaction` + exact-amount check, then
+inside the lock decrements stock per line item (`apps.catalog.services.decrement_stock`), credits
+PV via `record_purchase_pv` **only if `is_distributor(order.customer)`** (decision 6), transitions
+to `confirmed`. SMS+email confirmation sent after the lock releases, never inside it (Task 16g's
+standard). An out-of-stock line item discovered at confirmation time (not reserved earlier, per
+decision 5) must fail the order cleanly, not partially decrement other lines.
+
+**Acceptance criteria:**
+- [ ] A regular customer's confirmed order never calls `record_purchase_pv`
+- [ ] A distributor's confirmed order credits PV correctly up the ancestor chain (Task 10d's existing write path, reused not reimplemented)
+- [ ] A duplicate webhook delivery for an already-confirmed order is a no-op, not a double stock-decrement or double PV credit
+- [ ] Order confirmation SMS/email fires on successful payment (whole-task acceptance criterion)
+
+**Verification:**
+- [ ] pytest test: distributor purchase increments PV ledger; regular customer purchase does not (whole-task verification bullet)
+- [ ] pytest test: concurrent confirmation attempts for the same reference never double-decrement stock or double-credit PV
+
+**Dependencies:** 17c merged, **explicit user sign-off before this slice specifically** (Paystack integration code, per SPEC.md Boundaries)
+
+**Files likely touched:** `apps/orders/services.py` (`confirm_order_payment`), `apps/orders/views.py` (webhook/callback), `tests/unit/orders/test_confirm_order_payment.py`
+
+**Estimated scope:** M
+
+**Skills:**
+- *Before:* `doubt-driven-development` (fresh adversarial review before writing payment-confirmation code -- same rigor as every prior Paystack-adjacent slice), `security-and-hardening`
+- *During:* `test-driven-development`, `incremental-implementation`, `source-driven-development` (confirming Paystack Transaction webhook/callback payload shape against real docs, not assumption)
+- *After:* `code-review-and-quality`, `code-simplification`
+
+---
+
+#### Task 17e: Frontend -- cart, checkout, order confirmation UI
+
+**Description:** Real Stitch-designed UI for the cart review, checkout (delivery/pickup + address +
+summary), and order confirmation screens, matching this project's established pattern (every prior
+customer/distributor-facing page came from a Stitch screen, verified against its own design prompt
+before building). **Claude does not design this UI freehand** -- the user sends a Stitch prompt
+(provided at this slice's start) and shares the resulting screens/export back for template
+integration.
+
+**Acceptance criteria:**
+- [ ] Cart, checkout, and confirmation pages render the real Stitch design, integrated with 17b/17c/17d's actual data
+- [ ] Mobile-responsive at 320/768/1024/1440px, verified in a real browser (this project's own repeated table/badge-sizing bugs make source-only review insufficient)
+
+**Verification:**
+- [ ] Manual check: full guest checkout and full distributor checkout both walk correctly through the real UI in a browser
+
+**Dependencies:** 17b, 17c, 17d merged; Stitch prompt sent and screens received from the user
+
+**Files likely touched:** `templates/orders/cart.html`, `templates/orders/checkout.html`, `templates/orders/order_confirmation.html`
+
+**Estimated scope:** M
+
+**Skills:**
+- *During:* `frontend-ui-engineering`, `incremental-implementation`
+- *After:* `code-review-and-quality`, `browser-testing-with-devtools`
+
+---
+
+#### Task 17f: Full-suite verification, CI, PR, Checkpoint G (Task 17's portion)
+
+**Description:** Same branch -> PR -> CI (real MySQL) -> CodeRabbit -> merge workflow as every prior
+task. Verifies Task 17's own slice of Checkpoint G (purchase + correct PV branching); the
+"order status updates correctly with notifications" portion of Checkpoint G closes with Task 18.
+
+**Acceptance criteria:**
+- [ ] Full pytest suite green, including every new orders test from 17a-17e
+- [ ] `black`/`ruff` clean, `manage.py check` clean
+- [ ] CI green against real MySQL, not just local SQLite
+- [ ] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning
+
+**Verification:**
+- [ ] Checkpoint G's purchase+PV portion passes end-to-end in a real browser session: a customer completes a guest checkout (no PV), a distributor completes a checkout (PV credited correctly) -- not just pytest
+
+**Dependencies:** 17a-17e all merged
+
+**Files likely touched:** none new -- this is verification, not implementation
+
+**Estimated scope:** XS (process, not code)
+
+**Skills:**
+- *After:* `ci-cd-and-automation`, `git-workflow-and-versioning`, `debugging-and-error-recovery` if anything breaks in CI that didn't break locally
+
+---
+
+**Skills deliberately not called out per-slice above, and why:**
+- `api-and-interface-design` -- called out explicitly at 17b (the `Cart` class shape is the one new
+  interface convention this task introduces); applies lightly elsewhere via existing conventions
+  (`DeliveryFeeCalculator`, `confirm_order_payment` matching `consume_paid_starter_pack`'s shape).
+- `ci-cd-and-automation` -- only relevant at 17f; nothing about cart/checkout changes the pipeline itself before then.
+- `context-engineering` -- applies to how each slice should be worked (load only that slice's section plus relevant source), not to the product being built.
+- `deprecation-and-migration` -- not applicable; nothing existing is being removed. (17b replaces Task 8's *disabled* add-to-cart stub with a real one, which is completing deferred scope, not deprecating a live system.)
+- `documentation-and-adrs` -- already applied, producing ADR-0005 before this breakdown was written.
+- `idea-refine` / `interview-me` -- already done for this task, via the `AskUserQuestion` rounds that resolved the delivery-zone numbers and confirmed ADR-0005's decisions, before this breakdown was written.
+- `observability-and-instrumentation` -- worth a look at 17d specifically (order state changes are money-adjacent, same question Task 16 asked of `WithdrawalRequest`) but not a dedicated pass unless that review surfaces a real gap; `django-simple-history` coverage should be checked on `Order` the same way it was confirmed sufficient for `Distributor`'s payout fields in ADR-0004.
+- `performance-optimization` -- no known bottleneck; cart/checkout is not a batch process like the commission cycles. Only invoke if a real measurement shows a problem.
+- `shipping-and-launch` -- this is a task within an ongoing build, not a production launch.
+- `using-agent-skills` -- the meta-skill governing this whole breakdown's own construction; already applied.
 
 ---
 
