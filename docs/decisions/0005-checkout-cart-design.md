@@ -55,8 +55,10 @@ requirement (where one applies) is about checkout identity/contact info, not abo
 No requirement anywhere states a logged-in customer's cart must survive a device switch or a
 session expiry. Given that, the cart itself lives entirely in `request.session` (already
 Redis-backed per this project's Task 1-3 scaffold — durable enough for a shopping session, not
-durable across devices) via a small `apps/orders/cart.py::Cart` wrapper class (`{variant_id:
-quantity}`), identical in shape whether the visitor is anonymous or logged in. This avoids a
+durable across devices) via a small `apps/orders/cart.py::Cart` wrapper class (`{product_id:
+quantity}` — corrected from an earlier `variant_id` draft of this decision; no interactive variant
+selection exists anywhere in this codebase yet, see the Task 17a/17b schema review notes below),
+identical in shape whether the visitor is anonymous or logged in. This avoids a
 `Cart`/`CartItem` DB model, a merge-on-login reconciliation path, and an abandoned-cart cleanup job
 — three real pieces of speculative complexity with no stated requirement driving them.
 

@@ -37,10 +37,12 @@
 <a href="{% url 'distributors:register' %}" class="px-6 py-2 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Become a Distributor</a>
 <div class="flex gap-4 ml-2">
 <a href="{% url 'catalog:product_list' %}" class="material-symbols-outlined hover:text-primary transition-colors" title="Search products">search</a>
-<span class="relative material-symbols-outlined text-on-surface-variant" title="Cart — coming soon">
+<a href="{% url 'orders:cart' %}" class="relative material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors" title="Cart" aria-label="Cart{% if cart_count %}, {{ cart_count }} item{{ cart_count|pluralize }}{% endif %}">
 shopping_cart
-<span class="absolute -top-1.5 -right-1.5 bg-primary text-on-primary text-[10px] w-4 h-4 flex items-center justify-center rounded-full">0</span>
-</span>
+{% if cart_count %}
+<span class="absolute -top-1.5 -right-1.5 bg-primary text-on-primary text-[10px] w-4 h-4 flex items-center justify-center rounded-full">{{ cart_count }}</span>
+{% endif %}
+</a>
 </div>
 </div>
 <button class="md:hidden">

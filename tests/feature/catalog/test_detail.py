@@ -52,7 +52,9 @@ def test_detail_renders_all_fields(client, category):
 
 
 @pytest.mark.django_db
-def test_in_stock_product_shows_disabled_cart_stub_not_a_dead_link(client, category):
+def test_in_stock_product_shows_a_real_add_to_cart_action(client, category):
+    # Task 17b: this button was an honest disabled stub through Task 8;
+    # it's real now that apps.orders.cart exists.
     product = Product.objects.create(
         name="In Stock Item", category=category, price=Decimal("100.00"), stock=1
     )
@@ -61,7 +63,7 @@ def test_in_stock_product_shows_disabled_cart_stub_not_a_dead_link(client, categ
 
     content = response.content.decode()
     assert "Add to Cart" in content
-    assert "disabled" in content
+    assert reverse("orders:cart_add", args=[product.pk]) in content
     assert "In Stock" in content
 
 

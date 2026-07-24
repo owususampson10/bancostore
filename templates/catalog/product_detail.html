@@ -75,10 +75,13 @@ Earns {{ product.pv_value }} PV for distributors
 
 <div class="mb-8">
 {% if product.in_stock %}
-<button type="button" disabled class="w-full bg-surface-variant text-gray-500 rounded-full py-4 px-8 font-semibold flex items-center justify-center gap-2 cursor-not-allowed">
+<form method="post" action="{% url 'orders:cart_add' product.pk %}">
+{% csrf_token %}
+<button type="submit" class="w-full bg-primary text-on-primary rounded-full py-4 px-8 font-semibold flex items-center justify-center gap-2 hover:brightness-110 transition-all active:scale-95">
 <span class="material-symbols-outlined">shopping_cart</span>
-Add to Cart — Coming Soon
+Add to Cart
 </button>
+</form>
 {% else %}
 <span class="block text-center bg-surface-variant text-gray-600 rounded-full py-4 px-8 font-semibold">Out of Stock</span>
 {% endif %}
