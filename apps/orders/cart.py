@@ -74,9 +74,27 @@ class Cart:
         # item.product.primary_image (which queries .images.all() per
         # product with no prefetch, a real N+1 -- empirically confirmed
         # 6 queries for 5 cart lines) but never reads item.product.category.
-        products = Product.objects.filter(pk__in=self._data.keys()).prefetch_related(
-            "images"
+        products = list(
+            Product.objects.filter(pk__in=self._data.keys()).prefetch_related("images")
         )
+
+        # Real bug report (2026-07-24): a product deleted after being
+        # added left a permanent stale entry -- this query already
+        # excludes it (nothing matches a deleted pk), but the session
+        # dict itself was never updated, so count() (which never queries
+        # the DB, by design -- it's read on every page via the header
+        # badge context processor) kept including it forever. The cart
+        # page rendered empty while the badge claimed otherwise, with
+        # nothing to ever self-correct it. Pruning here means visiting
+        # the cart page heals the session; count() stays cheap (no DB
+        # query) everywhere else.
+        resolved_ids = {str(product.pk) for product in products}
+        stale_ids = self._data.keys() - resolved_ids
+        if stale_ids:
+            for stale_id in stale_ids:
+                del self._data[stale_id]
+            self._save()
+
         return [
             CartLine(
                 product=product,

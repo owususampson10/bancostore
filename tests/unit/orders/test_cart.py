@@ -238,3 +238,27 @@ def test_a_different_session_starts_empty():
     Cart(_request_with_session()).add(product, quantity=2)
 
     assert Cart(_request_with_session()).items() == []
+
+
+@pytest.mark.django_db
+def test_a_deleted_product_is_pruned_from_the_session_when_items_is_read():
+    # Real bug report: a distributor/customer adds an item, it later
+    # vanishes from the cart with no explanation. Root cause -- a product
+    # deleted after being added left a permanent stale entry: items()
+    # correctly excluded it (the query just returns nothing for a
+    # nonexistent pk) but count() kept including it forever, since it
+    # only ever summed the raw session dict with no validation. The
+    # header badge showed a phantom count while the cart page rendered
+    # fully empty, with nothing to ever self-correct it.
+    request = _request_with_session()
+    product = _make_product(stock=10)
+    cart = Cart(request)
+    cart.add(product, quantity=2)
+    assert cart.count() == 2
+
+    product.delete()
+
+    # Reading items() must prune the now-unresolvable entry from the
+    # session, not just silently omit it from this one return value.
+    assert Cart(request).items() == []
+    assert Cart(request).count() == 0
