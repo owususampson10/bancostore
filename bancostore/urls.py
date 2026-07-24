@@ -33,6 +33,7 @@ urlpatterns = [
     path("accounts/", include("allauth.urls")),
     path("distributors/", include("apps.distributors.urls")),
     path("admin-portal/", include("apps.admin_portal.urls")),
+    path("cart/", include("apps.orders.urls")),
     path("", include("apps.catalog.urls")),
     path("", include(two_factor_urls)),
 ]

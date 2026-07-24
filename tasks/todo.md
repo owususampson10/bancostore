@@ -2388,24 +2388,46 @@ variant-level (corrected via 17a's own schema review, CodeRabbit-caught on PR #2
 here specifically): no interactive variant selection exists anywhere in this codebase yet, and
 stock is tracked at the Product level only (Task 7).
 
+**Built 2026-07-24.** A `code-review-and-quality` pass on the first draft found and fixed two real
+bugs before merge: `Cart.items()` prefetched the wrong relation (`select_related("category")`
+instead of `prefetch_related("images")`, a genuine N+1 on `cart.html`'s `primary_image` access,
+empirically confirmed via a query-count comparison test mirroring `test_listing.py`'s own
+silk-tolerant pattern); and `cart_update`/`cart_remove` resolved products via
+`Product.objects.storefront_visible()` (which filters `is_active=True`), 404ing on a product
+deactivated after being added to the cart with no way for the customer to recover -- fixed by using
+the plain manager for those two views (visibility gates *adding* new items, not modifying/removing
+an existing line). Also fixed: `Cart.add()` previously returned nothing, so `cart_add` always
+redirected to `/cart/` as if it succeeded even when a product had zero available stock at add time
+(a silent no-op); `add()` now returns a bool and the view redirects back to the product page
+instead when nothing was added. A bounded session read-modify-write race (two concurrent requests
+from the same session, no compare-and-swap) was reviewed and deliberately left unfixed, documented
+in `Cart`'s own docstring -- checkout, not the cart, is the source of truth (ADR-0005), so the worst
+case is a lost add/update the customer can retry, not a money bug. `ADR-0005`'s own decision-2
+wording (`{variant_id: quantity}`) was corrected to `{product_id: quantity}` to match. Verified live
+in a real browser: guest add/update/remove/stock-cap/empty-state, and the identical flow again as a
+logged-in customer.
+
 **Acceptance criteria:**
-- [ ] Add to cart, update quantity, remove item all work for both anonymous and logged-in sessions
-- [ ] Cart total (excluding delivery, computed in 17c) reflects live `Product` prices, quantities capped by current product stock
-- [ ] Product detail page's add-to-cart button is no longer disabled
+- [x] Add to cart, update quantity, remove item all work for both anonymous and logged-in sessions
+- [x] Cart total (excluding delivery, computed in 17c) reflects live `Product` prices, quantities capped by current product stock
+- [x] Product detail page's add-to-cart button is no longer disabled
 
 **Verification:**
-- [ ] pytest test: cart survives across requests within a session; a fresh session starts empty
-- [ ] pytest test: cannot add more of an item than current stock allows
+- [x] pytest test: cart survives across requests within a session; a fresh session starts empty
+- [x] pytest test: cannot add more of an item than current stock allows
 
 **Dependencies:** 17a merged
 
-**Files likely touched:** `apps/orders/cart.py`, `apps/orders/views.py` (cart), `templates/catalog/product_detail.html`, `tests/feature/orders/test_cart.py`
+**Files likely touched:** `apps/orders/cart.py`, `apps/orders/views.py` (cart), `apps/orders/urls.py`,
+`apps/orders/context_processors.py` (header cart badge, new), `templates/orders/cart.html` (new),
+`templates/catalog/product_detail.html`, `templates/base_store.html` (header cart icon wiring),
+`tests/unit/orders/test_cart.py`, `tests/feature/orders/test_cart_views.py`
 
 **Estimated scope:** S
 
 **Skills:**
 - *During:* `test-driven-development`, `incremental-implementation`, `api-and-interface-design` (Cart class shape)
-- *After:* `code-review-and-quality`
+- *After:* `code-review-and-quality` (2 real bugs found and fixed, see narrative above), `browser-testing-with-devtools` (guest + logged-in verified live)
 
 ---
 

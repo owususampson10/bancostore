@@ -1,0 +1,98 @@
+{% extends "base_store.html" %}
+{% load humanize %}
+{% block title %}Bancostore | Your Cart{% endblock %}
+{% block content %}
+<div class="max-w-[1280px] mx-auto px-margin-mobile md:px-margin-desktop py-12">
+
+{% if cart_items %}
+<div class="flex items-baseline justify-between mb-8">
+<h1 class="font-headline-lg text-headline-lg text-on-surface">Your Cart</h1>
+<span class="text-secondary font-body-md text-body-md">({{ cart_items|length }} item{{ cart_items|length|pluralize }})</span>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-12">
+<!-- Left column: cart items -->
+<div class="lg:col-span-8 space-y-6">
+{% for item in cart_items %}
+<div class="flex flex-col md:flex-row gap-6 p-6 bg-surface-container-lowest border border-outline-variant rounded-xl">
+<div class="w-full md:w-32 h-32 bg-surface-variant rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0">
+{% if item.product.primary_image %}
+<img class="w-full h-full object-cover" src="{{ item.product.primary_image.image.url }}" alt="{{ item.product.name }}">
+{% else %}
+<span class="material-symbols-outlined text-4xl text-gray-400" aria-hidden="true">image</span>
+{% endif %}
+</div>
+<div class="flex-grow flex flex-col justify-between">
+<div class="flex justify-between items-start gap-4">
+<h3 class="font-headline-md text-headline-md text-on-surface">{{ item.product.name }}</h3>
+<p class="font-headline-md text-headline-md text-primary whitespace-nowrap">GHS {{ item.product.price|intcomma }}</p>
+</div>
+{% if item.quantity >= item.product.stock %}
+<p class="text-error text-sm mt-1">Only {{ item.product.stock }} left in stock</p>
+{% endif %}
+<div class="flex items-center justify-between mt-6">
+<div class="flex items-center border border-outline rounded-lg overflow-hidden">
+<form method="post" action="{% url 'orders:cart_update' item.product.pk %}">
+{% csrf_token %}
+<input type="hidden" name="quantity" value="{{ item.quantity|add:'-1' }}">
+<button type="submit" class="px-3 py-1 hover:bg-surface-container-low transition-colors material-symbols-outlined text-secondary text-sm" aria-label="Decrease quantity">remove</button>
+</form>
+<span class="px-4 py-1 font-semibold text-on-surface border-x border-outline">{{ item.quantity }}</span>
+<form method="post" action="{% url 'orders:cart_update' item.product.pk %}">
+{% csrf_token %}
+<input type="hidden" name="quantity" value="{{ item.quantity|add:'1' }}">
+<button type="submit" class="px-3 py-1 hover:bg-surface-container-low transition-colors material-symbols-outlined text-secondary text-sm" aria-label="Increase quantity" {% if item.quantity >= item.product.stock %}disabled{% endif %}>add</button>
+</form>
+</div>
+<div class="flex items-center gap-4">
+<p class="hidden md:block text-xs uppercase tracking-widest text-secondary">Subtotal: GHS {{ item.line_total|intcomma }}</p>
+<form method="post" action="{% url 'orders:cart_remove' item.product.pk %}">
+{% csrf_token %}
+<button type="submit" class="material-symbols-outlined text-secondary hover:text-error transition-colors p-2" aria-label="Remove {{ item.product.name }} from cart">delete</button>
+</form>
+</div>
+</div>
+</div>
+</div>
+{% endfor %}
+</div>
+
+<!-- Right column: order summary -->
+<div class="lg:col-span-4">
+<aside class="sticky top-28 p-8 bg-surface-container-low rounded-xl border border-outline-variant">
+<h2 class="font-headline-md text-headline-md text-on-surface mb-6">Order Summary</h2>
+<div class="space-y-3 mb-6">
+<div class="flex justify-between items-center text-body-md font-body-md text-secondary">
+<span>Subtotal</span>
+<span>GHS {{ cart_subtotal|intcomma }}</span>
+</div>
+<div class="flex justify-between items-center text-body-md font-body-md text-secondary">
+<span>Delivery</span>
+<span class="italic">Calculated at checkout</span>
+</div>
+</div>
+<div class="space-y-3">
+<button type="button" disabled title="Checkout — coming soon" class="w-full bg-surface-variant text-gray-500 py-4 rounded-lg font-semibold cursor-not-allowed">
+Proceed to Checkout
+</button>
+<a href="{% url 'catalog:product_list' %}" class="block w-full text-center py-3 border border-outline rounded-lg font-semibold text-on-surface hover:bg-surface-container transition-all">
+Continue Shopping
+</a>
+</div>
+</aside>
+</div>
+</div>
+
+{% else %}
+<div class="flex flex-col items-center justify-center py-24 px-6 text-center">
+<div class="w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-[32px] text-gray-muted" aria-hidden="true">shopping_cart</span>
+</div>
+<h1 class="font-headline-md text-headline-md text-on-surface mb-1">Your cart is empty</h1>
+<p class="text-secondary max-w-xs mb-6">Looks like you haven't added anything yet.</p>
+<a href="{% url 'catalog:product_list' %}" class="bg-primary text-on-primary font-semibold px-8 py-3 rounded-full hover:brightness-110 transition-all shadow-lg">Continue Shopping</a>
+</div>
+{% endif %}
+
+</div>
+{% endblock %}
