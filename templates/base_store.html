@@ -21,11 +21,19 @@
 <span class="text-xs font-bold uppercase tracking-widest">Free Shipping on orders over GHS 1000 — Shop Now</span>
 </div>
 <!-- Header (reconciled from the Storefront Home / Product Listing / Product Detail Stitch screens) -->
-<header class="sticky top-0 z-50 bg-surface border-b border-outline-variant">
+<header class="sticky top-0 z-50 bg-surface border-b border-outline-variant" x-data="{ mobileMenuOpen: false }">
 <nav class="flex justify-between items-center w-full px-margin-mobile md:px-16 py-4 max-w-[1440px] mx-auto">
+<!-- Hamburger grouped with the logo on the left, cart alone on the
+     right -- the standard ecommerce mobile layout (was previously
+     hamburger-far-right with the cart icon stranded in between). -->
+<div class="flex items-center gap-3">
+<button type="button" class="md:hidden p-1 -ml-1" x-on:click="mobileMenuOpen = !mobileMenuOpen" :aria-expanded="mobileMenuOpen.toString()" aria-label="Open menu">
+<span class="material-symbols-outlined" x-text="mobileMenuOpen ? 'close' : 'menu'"></span>
+</button>
 <a href="{% url 'catalog:home' %}">
 <img src="{% static 'bancostore-brand/logo/bancostore-logo-light.svg' %}" alt="Bancostore" class="h-9 w-auto">
 </a>
+</div>
 <div class="hidden md:flex gap-8 items-center">
 <a href="{% url 'catalog:home' %}" class="{% block nav_home_class %}text-on-surface-variant hover:text-primary{% endblock %} text-xs font-bold uppercase tracking-widest transition-colors duration-200">Home</a>
 <a href="{% url 'catalog:product_list' %}" class="{% block nav_shop_class %}text-on-surface-variant hover:text-primary{% endblock %} text-xs font-bold uppercase tracking-widest transition-colors duration-200 pb-1">Shop</a>
@@ -38,13 +46,6 @@
 <a href="{% url 'distributors:register' %}" class="px-6 py-2 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Become a Distributor</a>
 <a href="{% url 'catalog:product_list' %}" class="material-symbols-outlined hover:text-primary transition-colors ml-2" title="Search products">search</a>
 </div>
-<!-- CodeRabbit (PR #25): unlike search/login/distributor-CTA above, the
-     cart icon is NOT lg:hidden -- once this was the only way to reach
-     /cart/ (Task 17b), keeping it desktop-only left mobile users with no
-     way to open their cart at all. The rest of the mobile nav (behind the
-     hamburger button below) stays a pre-existing, separate gap -- Task 8
-     shipped it as a decorative, non-functional button with no menu behind
-     it; building a real mobile nav drawer is out of this task's scope. -->
 <a href="{% url 'orders:cart' %}" class="relative material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors" title="Cart" aria-label="Cart{% if cart_count %}, {{ cart_count }} item{{ cart_count|pluralize }}{% endif %}">
 shopping_cart
 {% if cart_count %}
@@ -52,10 +53,24 @@ shopping_cart
 {% endif %}
 </a>
 </div>
-<button class="md:hidden">
-<span class="material-symbols-outlined">menu</span>
-</button>
 </nav>
+<!-- Mobile dropdown menu -- same links already hidden behind md:/lg:
+     breakpoints above (Home/Shop/About/Contact, Log In/Become a
+     Distributor), just made reachable on mobile now that the hamburger
+     button actually does something. Same x-data/x-show/x-cloak pattern
+     as templates/distributors/base_dashboard.html's sidebar toggle. -->
+<div class="md:hidden border-t border-outline-variant bg-surface" x-show="mobileMenuOpen" x-cloak x-on:click.outside="mobileMenuOpen = false">
+<div class="flex flex-col px-margin-mobile py-4 gap-1">
+<a href="{% url 'catalog:home' %}" class="py-3 text-sm font-bold uppercase tracking-widest text-on-surface-variant hover:text-primary transition-colors">Home</a>
+<a href="{% url 'catalog:product_list' %}" class="py-3 text-sm font-bold uppercase tracking-widest text-on-surface-variant hover:text-primary transition-colors">Shop</a>
+<a href="#" title="Coming soon" class="py-3 text-sm font-bold uppercase tracking-widest text-on-surface-variant hover:text-primary transition-colors">About</a>
+<a href="#" title="Coming soon" class="py-3 text-sm font-bold uppercase tracking-widest text-on-surface-variant hover:text-primary transition-colors">Contact</a>
+<div class="flex flex-col gap-3 mt-3 pt-4 border-t border-outline-variant">
+<a href="{% url 'account_login' %}" class="w-full text-center px-6 py-3 rounded-full border border-primary text-primary text-sm font-semibold hover:bg-primary/10 transition-all active:scale-95">Log In</a>
+<a href="{% url 'distributors:register' %}" class="w-full text-center px-6 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Become a Distributor</a>
+</div>
+</div>
+</div>
 </header>
 <main class="flex-grow">
 {% block content %}{% endblock %}
