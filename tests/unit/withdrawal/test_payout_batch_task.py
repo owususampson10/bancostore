@@ -23,6 +23,7 @@ from apps.withdrawal.models import (
 )
 from apps.withdrawal.services import (
     approve_withdrawal_request,
+    claim_for_payout,
     submit_withdrawal_request,
 )
 from apps.withdrawal.tasks import (
@@ -66,8 +67,6 @@ def _make_approved_debited_request(amount=Decimal("500.00"), full_name="Ama Mens
 def test_evaluates_both_approved_debited_and_queued_for_payout_requests(mock_now):
     mock_now.return_value = RUN_AT
     debited = _make_approved_debited_request()
-    from apps.withdrawal.services import claim_for_payout
-
     queued = claim_for_payout(_make_approved_debited_request())
 
     with patch.object(
