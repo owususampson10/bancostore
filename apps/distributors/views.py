@@ -36,6 +36,12 @@ from apps.withdrawal.services import (
     submit_withdrawal_request,
 )
 
+# Task 16f PR 3: paystack_webhook is this project's one shared dispatcher
+# for every Paystack event type (established by charge.success's own
+# reg-/pack- prefix dispatch) -- withdrawal-specific dispatch logic stays
+# a single .delay() call here, not duplicated withdrawal business logic.
+from apps.withdrawal.tasks import TRANSFER_WEBHOOK_EVENTS, process_transfer_webhook_task
+
 from .didit import DiditError
 from .didit import create_verification_session as create_didit_session
 from .didit import verify_webhook_signature as verify_didit_webhook_signature
@@ -268,10 +274,22 @@ def paystack_webhook(request):
     """Source: https://paystack.com/docs/payments/webhooks/ -- must verify
     the x-paystack-signature header before acting, and must return 200 OK
     or Paystack retries the same event for up to 72 hours (so this handler
-    must be idempotent, which both consume functions are). One webhook URL
-    handles every Paystack use case in this project (Paystack has no
-    per-transaction webhook config), so it dispatches by reference prefix
-    -- "reg-" (Task 10b) vs "pack-" (Task 10c)."""
+    must be idempotent, which both consume functions are, and which
+    process_transfer_webhook_task's own no-raise contract exists to
+    preserve for transfer events too). One webhook URL handles every
+    Paystack use case in this project (Paystack has no per-transaction
+    webhook config), so it dispatches by event type, then by reference
+    prefix -- "reg-" (Task 10b), "pack-" (Task 10c), "withdrawal-payout-"
+    (Task 16f PR 3).
+
+    Transfer events (Task 16f PR 3, doubt-driven-development, 2026-07-24):
+    confirmed against Paystack's own docs that transfer.success/failed/
+    reversed use this same x-paystack-signature scheme, so the check
+    above already covers them -- no separate signature path needed.
+    Deferred to a Celery task (process_transfer_webhook_task) rather than
+    handled inline, mirroring didit_webhook's own reasoning: verify_transfer
+    alone can take up to REQUEST_TIMEOUT_SECONDS, which risks exceeding a
+    webhook provider's response-time budget if called synchronously here."""
     signature = request.headers.get("x-paystack-signature", "")
     if not verify_webhook_signature(request.body, signature):
         return HttpResponseBadRequest("invalid signature")
@@ -281,7 +299,8 @@ def paystack_webhook(request):
     except ValueError:
         return HttpResponseBadRequest("invalid JSON")
 
-    if payload.get("event") == "charge.success":
+    event = payload.get("event")
+    if event == "charge.success":
         reference = payload.get("data", {}).get("reference", "")
         # Two prefixes is still simplest as if/elif -- if a third payment
         # type is added (e.g. checkout/order references, Task 18),
@@ -293,6 +312,20 @@ def paystack_webhook(request):
         elif reference:
             logger.warning(
                 "paystack_webhook: unrecognized reference prefix: %s", reference
+            )
+    elif event in TRANSFER_WEBHOOK_EVENTS:
+        reference = payload.get("data", {}).get("reference", "")
+        # doubt-driven-development finding, 2026-07-24: a blank reference
+        # (e.g. an unexpected payload shape) must log the same as an
+        # unrecognized prefix, not fall through silently -- both are
+        # "this event didn't dispatch anywhere" and equally worth
+        # noticing, not just the latter.
+        if reference.startswith("withdrawal-payout-"):
+            process_transfer_webhook_task.delay(reference)
+        else:
+            logger.warning(
+                "paystack_webhook: unrecognized/missing transfer reference: %r",
+                reference,
             )
 
     return HttpResponse(status=200)

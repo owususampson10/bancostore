@@ -9,10 +9,18 @@ from celery import shared_task
 from constance import config
 from django_celery_beat.models import CrontabSchedule, PeriodicTask
 
-from apps.distributors.paystack import REQUEST_TIMEOUT_SECONDS
+from apps.distributors.paystack import (
+    REQUEST_TIMEOUT_SECONDS,
+    PaystackError,
+    verify_transfer,
+)
 
 from .models import WithdrawalCycleFailure, WithdrawalCycleRun, WithdrawalRequest
-from .services import process_withdrawal_payout
+from .services import (
+    WithdrawalRequestNotFound,
+    apply_verified_transfer_outcome,
+    process_withdrawal_payout,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -371,3 +379,90 @@ def process_withdrawal_payouts():
         }
     finally:
         cache.delete(WITHDRAWAL_PAYOUT_LOCK_KEY)
+
+
+# Task 16f PR 3. Reference prefix from apps.withdrawal.services
+# ._generate_transfer_reference -- stable, matches what claim_for_payout
+# (PR 1) pins onto WithdrawalRequest.paystack_transfer_reference. Confirmed
+# against Paystack's own docs (docs-v2.paystack.com, 2026-07-24) that
+# transfer webhook events use the exact strings below and the same
+# x-paystack-signature HMAC-SHA512 scheme already implemented for
+# charge.success -- see apps/distributors/views.py::paystack_webhook,
+# which dispatches these to process_transfer_webhook_task below.
+#
+# code-review-and-quality note (2026-07-24): the event names and
+# signature scheme are confirmed against real Paystack sources above, but
+# the exact payload path (payload["data"]["reference"], mirroring
+# charge.success's own webhook shape) has NOT been observed from a real
+# live transfer webhook delivery -- Paystack Transfers are still blocked
+# on this sandbox account's tier (project_paystack_transfer_account_tier_
+# blocked memory), so this is inferred from the official Transfer
+# resource schema (which has a top-level `reference` field) plus this
+# project's own established webhook convention, not directly verified.
+# If wrong, every transfer webhook falls through to the "unrecognized/
+# missing transfer reference" warning log in paystack_webhook -- which
+# exists specifically so this exact class of mistaken assumption surfaces
+# loudly on the very first real delivery, not silently.
+TRANSFER_WEBHOOK_EVENTS = {"transfer.success", "transfer.failed", "transfer.reversed"}
+
+
+@shared_task
+def process_transfer_webhook_task(reference: str) -> None:
+    """Task 16f PR 3. Mirrors apps.distributors.tasks
+    .consume_didit_result_task's shape: the webhook view only extracts
+    the reference and enqueues this before responding, since
+    verify_transfer's own REQUEST_TIMEOUT_SECONDS alone risks exceeding a
+    webhook provider's response-time budget if called inline.
+
+    Never trusts the webhook payload's own claimed status (doubt-driven-
+    development contract, 2026-07-24) -- re-fetches the authoritative
+    outcome via verify_transfer, matching apply_verified_transfer_outcome's
+    own documented contract (it's also called this way by the batch
+    driver's resume path, so this task is not a second, differently-
+    trusted path into the same transition).
+
+    Deliberately never raises: Paystack retries a webhook delivery for up
+    to 72 hours on any non-2xx response (apps.distributors.views
+    .paystack_webhook's own docstring), and every failure mode here (row
+    not found, Paystack error, row deleted mid-call) is one this system
+    will never resolve by retrying the same delivery -- the webhook view
+    has already returned 200 by the time this runs, so there is nothing
+    left to communicate back to Paystack. Every such case still logs, and
+    the Friday batch driver's own resume-via-poll path remains the
+    correctness backstop regardless -- this task is a latency
+    optimization, not the sole path to resolution."""
+    try:
+        withdrawal_request = WithdrawalRequest.objects.get(
+            paystack_transfer_reference=reference
+        )
+    except WithdrawalRequest.DoesNotExist:
+        logger.warning(
+            "process_transfer_webhook_task: no WithdrawalRequest found for "
+            "reference=%s",
+            reference,
+        )
+        return
+
+    try:
+        result = verify_transfer(reference)
+    except PaystackError:
+        logger.exception(
+            "process_transfer_webhook_task: verify_transfer failed for "
+            "reference=%s -- leaving queued_for_payout for the next "
+            "Friday batch cycle to resolve via its own resume path",
+            reference,
+        )
+        return
+
+    try:
+        apply_verified_transfer_outcome(withdrawal_request, result["status"])
+    except WithdrawalRequestNotFound:
+        # The row existed at the lookup above but was deleted during the
+        # verify_transfer call (e.g. a Distributor cascade-delete) --
+        # nothing left to update.
+        logger.warning(
+            "process_transfer_webhook_task: WithdrawalRequest for "
+            "reference=%s no longer exists by the time verify_transfer "
+            "returned",
+            reference,
+        )
