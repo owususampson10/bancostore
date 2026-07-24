@@ -2134,13 +2134,52 @@ the Direct Referral Bonus SMS pattern from Task 12. The UI must say plainly that
 mean "paid yet" (ADR-0004 consequence: a request can sit approved-but-unpaid for up to a week).
 
 **Acceptance criteria:**
-- [ ] Distributor can see every past request and its current status, scoped to their own requests only
-- [ ] Status copy is honest about the approved-but-not-yet-paid window (no implication that approval == payment)
-- [ ] SMS/email failure is logged but never reverts the underlying status transition
+- [x] Distributor can see every past request and its current status, scoped to their own requests only
+- [x] Status copy is honest about the approved-but-not-yet-paid window (no implication that approval == payment)
+- [x] SMS/email failure is logged but never reverts the underlying status transition
 
 **Verification:**
-- [ ] pytest: notification-provider exception doesn't roll back the transaction that triggered it
-- [ ] Verified live in a real browser
+- [x] pytest: notification-provider exception doesn't roll back the transaction that triggered it
+- [x] Verified live in a real browser (desktop, tablet, and mobile widths)
+
+**Built 2026-07-24.** `templates/distributors/withdrawal_history.html` (new page, not folded into
+Earnings History -- `WithdrawalRequest`'s own status/lifecycle isn't represented by
+`WalletTransaction` rows, so this is genuinely different data, not a duplicate view). Wired into the
+sidebar's previously-disabled "Withdraw" nav item. SMS notifications added to
+`approve_withdrawal_request`/`reject_withdrawal_request`/`apply_verified_transfer_outcome`
+(`apps/withdrawal/services.py`'s new `_notify()` helper), sent only after `retry_on_lock_contention`
+returns -- never from inside the locked `_attempt()` closure, a stricter standard than Task 12's own
+precedent (`_credit_direct_referral_bonus` sends from inside its lock), matching Task 16f's "never
+hold a lock across external I/O" principle. `apply_verified_transfer_outcome`'s internal `_attempt()`
+return shape changed from `locked_request` to `(locked_request, transition)` so the notification
+fires exactly once per real transition, not once per call -- its own idempotent no-op case (a
+duplicate webhook delivery, or the webhook racing the batch driver's resume path) must not
+re-notify. Public contract unchanged (still returns `WithdrawalRequest`).
+
+Also fixed while building/testing this page in a real browser (not part of the original scope, but
+discovered live): a Tailwind build-cache miss on the new template (the "Withdraw Now" button
+rendering with no styling until `npm run build` ran), a mismatched type-scale across the status
+badges/amount columns (some cells were missing their `text-X` size token entirely, defaulting to
+browser sizing next to correctly-sized siblings), and a missing `min-width` on the table causing
+mobile viewports to crush columns instead of scrolling the whole table as a block. The same two
+bugs (missing size token, missing table `min-width`) turned out to already exist on
+`earnings_history.html` and all 5 `admin_portal` tables (`withdrawal_review_queue.html`,
+`kyc_review_queue.html`, `commission_oversight.html`, `commission_cycle_detail.html`,
+`partials/directory_results.html`) -- fixed there too, each table now has a documenting comment on
+both rules so this doesn't recur silently.
+
+**Deferred, not decided silently (code-review-and-quality, 2026-07-24):** `approve_withdrawal_request`
+/`reject_withdrawal_request`'s SMS send is synchronous, inside the same HTTP request Django Admin's
+`approve_selected`/`reject_selected` bulk actions use. An admin bulk-approving/rejecting many requests
+in one action now waits on one SMS send per row (mNotify's own timeout is 10s) before the request
+completes -- a handful of rows is fine, but a large bulk selection risks a slow admin page load or a
+web-server request timeout. Not a money-safety issue (the debit/credit itself is unaffected, only
+how long the admin's browser waits), and the batch driver's own lock-timeout budget was re-verified
+and re-documented to still hold safely with this extra call (`apps/withdrawal/tasks.py`'s
+`WITHDRAWAL_PAYOUT_LOCK_TIMEOUT_SECONDS` comment). The real fix -- deferring the SMS send via a
+Celery task, mirroring `consume_didit_result_task`/`process_transfer_webhook_task`'s already-
+established pattern -- was surfaced to the user and explicitly deferred rather than fixed now; revisit
+if bulk admin actions on withdrawals start processing large batches in practice.
 
 **Dependencies:** 16c, 16d, 16f (all three states need to be visible)
 

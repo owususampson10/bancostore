@@ -24,6 +24,7 @@ from django_ratelimit.decorators import ratelimit
 from apps.accounts.permissions import is_distributor
 from apps.notifications.otp import generate_otp, verify_otp
 from apps.wallet.models import WalletTransaction
+from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
     AboveMaximumAmount,
     BelowMinimumAmount,
@@ -638,6 +639,41 @@ def earnings_history(request):
             "total_withdrawn": total_withdrawn,
             "last_withdrawal_at": last_withdrawal_at,
             "active_nav": "earnings_history",
+        },
+    )
+
+
+@login_required(login_url="distributors:login")
+def withdrawal_history(request):
+    """Task 16g: a distributor's own withdrawal request history and
+    current status. Always scoped to request.user.distributor -- same
+    is_distributor() + no id/param IDOR surface as earnings_history/
+    payout_settings/withdrawal_request (Task 15d/16a/16c) -- CLAUDE.md's
+    own "Deferred, not silently skipped" note on Task 15 flagged this
+    exact unguarded-request.user.distributor pattern as still open in
+    three other views; this one is built correctly from the start.
+
+    Ordered -created_at, -pk (not -created_at alone) -- Task 15d's own
+    pagination bug (a timestamp collision could skip/duplicate a row
+    across a page boundary with no tie-breaker) is a mistake worth not
+    repeating here."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+
+    distributor = request.user.distributor
+    requests_qs = WithdrawalRequest.objects.filter(distributor=distributor).order_by(
+        "-created_at", "-pk"
+    )
+
+    paginator = Paginator(requests_qs, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    return render(
+        request,
+        "distributors/withdrawal_history.html",
+        {
+            "page_obj": page_obj,
+            "active_nav": "withdrawal_history",
         },
     )
 
