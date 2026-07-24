@@ -56,6 +56,20 @@ class PayoutDestinationNotSet(Exception):
     pass
 
 
+class PayoutRecipientNameNotSet(Exception):
+    """CodeRabbit finding, PR #19: create_transfer_recipient (Task 16e)
+    requires a name, and Distributor.full_name/DiditVerification
+    .extracted_full_name can both be blank -- rare (KYC approval implies
+    a submitted DiditVerification exists, but Didit's own OCR extraction
+    can still fail to find a name while face-match/liveness still pass),
+    but real. Without this check, approve_withdrawal_request would debit
+    the wallet for a request that's guaranteed to fail unclearly at
+    Paystack later (Task 16f), leaving it debited and stuck with no
+    automatic recovery path."""
+
+    pass
+
+
 class BelowMinimumAmount(Exception):
     pass
 
@@ -288,7 +302,8 @@ def approve_withdrawal_request(withdrawal_request, *, reviewed_by) -> Withdrawal
 
     Raises WithdrawalRequestNotPending (see its own docstring for why
     this isn't idempotent-silent), WithdrawalRequestNotFound,
-    KycNotApproved, PayoutDestinationNotSet, or InsufficientWalletBalance."""
+    KycNotApproved, PayoutDestinationNotSet, PayoutRecipientNameNotSet,
+    or InsufficientWalletBalance."""
     if reviewed_by is None:
         raise TypeError("approve_withdrawal_request() reviewed_by must not be None")
 
@@ -342,6 +357,11 @@ def approve_withdrawal_request(withdrawal_request, *, reviewed_by) -> Withdrawal
             locked_request.payout_recipient_name = locked_distributor.full_name or (
                 verification.extracted_full_name if verification else ""
             )
+            if not locked_request.payout_recipient_name:
+                raise PayoutRecipientNameNotSet(
+                    f"distributor {locked_distributor.pk} has no name available "
+                    f"for the Paystack transfer recipient"
+                )
 
             try:
                 debit(

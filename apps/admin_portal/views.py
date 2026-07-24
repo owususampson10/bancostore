@@ -22,6 +22,7 @@ from apps.withdrawal.services import (
     InsufficientWalletBalance,
     KycNotApproved,
     PayoutDestinationNotSet,
+    PayoutRecipientNameNotSet,
     WithdrawalRequestNotFound,
     WithdrawalRequestNotPending,
     approve_withdrawal_request,
@@ -36,6 +37,8 @@ from .permissions import is_admin_portal_staff
 _APPROVE_FAILURE_MESSAGES = {
     KycNotApproved: "KYC is no longer approved.",
     PayoutDestinationNotSet: "Payout destination is no longer set.",
+    # PR #19 CodeRabbit finding, mirrored from apps.withdrawal.admin.
+    PayoutRecipientNameNotSet: "Distributor has no name available for payout.",
     InsufficientWalletBalance: "Wallet balance is now insufficient.",
     WithdrawalRequestNotFound: "This request no longer exists.",
     WithdrawalRequestNotPending: "This request has already been handled.",

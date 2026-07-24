@@ -16,12 +16,13 @@ User = get_user_model()
 _phone_seq = count(1)
 
 
-def _make_eligible_distributor(balance=Decimal("1000.00")):
+def _make_eligible_distributor(balance=Decimal("1000.00"), full_name="Ama Mensah"):
     phone = f"+233246{next(_phone_seq):06d}"
     user = User.objects.create_user(username=phone, password="Passw0rd!")
     distributor = Distributor.objects.create(
         user=user,
         phone_number=phone,
+        full_name=full_name,
         kyc_status=Distributor.KycStatus.APPROVED,
         mobile_money_number="+233247111222",
         mobile_money_network=Distributor.MobileMoneyNetwork.MTN,

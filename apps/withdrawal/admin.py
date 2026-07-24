@@ -8,6 +8,7 @@ from .services import (
     InsufficientWalletBalance,
     KycNotApproved,
     PayoutDestinationNotSet,
+    PayoutRecipientNameNotSet,
     WithdrawalRequestNotFound,
     WithdrawalRequestNotPending,
     approve_withdrawal_request,
@@ -29,6 +30,11 @@ from .services import (
 _APPROVE_FAILURE_MESSAGES = {
     KycNotApproved: "KYC is no longer approved",
     PayoutDestinationNotSet: "payout destination is no longer set",
+    # PR #19 CodeRabbit finding: full_name/DiditVerification
+    # .extracted_full_name can both be blank -- rare but real, and
+    # without this check the wallet gets debited for a request
+    # guaranteed to fail unclearly at Paystack later (Task 16f).
+    PayoutRecipientNameNotSet: "distributor has no name available for payout",
     InsufficientWalletBalance: "wallet balance is now insufficient",
     WithdrawalRequestNotFound: "this request no longer exists",
 }
