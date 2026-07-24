@@ -118,6 +118,22 @@ def test_a_paystack_error_does_not_raise(mock_verify):
 
 @pytest.mark.django_db
 @patch("apps.withdrawal.tasks.verify_transfer")
+def test_a_malformed_verify_transfer_response_does_not_raise(mock_verify):
+    """CodeRabbit finding, PR #21: a syntactically valid but incomplete
+    response (missing "status") must not raise a bare KeyError -- that's
+    not a PaystackError (no HTTP failure occurred), so it wasn't covered
+    by the PaystackError catch alone until this fix."""
+    request = _make_queued_for_payout_request()
+    mock_verify.return_value = {}
+
+    process_transfer_webhook_task(request.paystack_transfer_reference)  # must not raise
+
+    request.refresh_from_db()
+    assert request.status == WithdrawalRequest.Status.QUEUED_FOR_PAYOUT
+
+
+@pytest.mark.django_db
+@patch("apps.withdrawal.tasks.verify_transfer")
 def test_a_paystack_not_found_error_does_not_raise(mock_verify):
     """PaystackNotFoundError is a subclass of PaystackError -- confirmed
     directly against apps/distributors/paystack.py before writing this

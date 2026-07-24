@@ -444,8 +444,15 @@ def process_transfer_webhook_task(reference: str) -> None:
         return
 
     try:
+        # CodeRabbit finding, PR #21: verify_transfer's own
+        # response.json()["data"] can raise a bare KeyError/TypeError if
+        # Paystack ever returns a 200 with an unexpected JSON shape --
+        # that's not a PaystackError (no HTTP failure occurred), so it
+        # wasn't covered by the except below until this fix. Caught here
+        # alongside PaystackError since, from this task's perspective,
+        # both mean the same thing: no usable outcome, defer to Friday.
         result = verify_transfer(reference)
-    except PaystackError:
+    except (PaystackError, KeyError, TypeError):
         logger.exception(
             "process_transfer_webhook_task: verify_transfer failed for "
             "reference=%s -- leaving queued_for_payout for the next "
@@ -454,8 +461,14 @@ def process_transfer_webhook_task(reference: str) -> None:
         )
         return
 
+    # .get(), not ["status"] (CodeRabbit finding, PR #21): a syntactically
+    # valid but incomplete response (missing "status") must not raise --
+    # None safely falls through apply_verified_transfer_outcome's own
+    # existing "any other status is a no-op" branch, the same safe-by-
+    # default handling already established for a genuinely unrecognized
+    # status string.
     try:
-        apply_verified_transfer_outcome(withdrawal_request, result["status"])
+        apply_verified_transfer_outcome(withdrawal_request, result.get("status"))
     except WithdrawalRequestNotFound:
         # The row existed at the lookup above but was deleted during the
         # verify_transfer call (e.g. a Distributor cascade-delete) --
