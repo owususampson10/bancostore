@@ -111,6 +111,7 @@ INSTALLED_APPS = [
     "apps.commissions",
     "apps.withdrawal",
     "apps.admin_portal",
+    "apps.orders",
 ]
 
 MIDDLEWARE = [

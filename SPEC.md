@@ -329,8 +329,11 @@ class BinaryBonusCalculator:
    verified working end-to-end with a real send (see `SPEC.md` Local dev environment and
    `tasks/todo.md` Task 4). Revisit for Mailgun before real production volume — Gmail's free-tier
    sending cap (500/day) and deliverability aren't built for that.
-4. Exact delivery zone fee table and free-delivery threshold values (docs say "set by admin" —
-   need real starting numbers to seed)
+4. ~~Exact delivery zone fee table and free-delivery threshold values~~ (also "set by admin" in
+   docs) — resolved 2026-07-24: Kumasi GHS 20, Accra GHS 50, other regions GHS 70 (the source doc's
+   own Section 5.1 worked example), free-delivery threshold GHS 500, pickup always free. Seeded as
+   four new `django-constance` settings — all admin-editable, these are just the starting values.
+   See `docs/decisions/0005-checkout-cart-design.md`.
 5. ~~Minimum/maximum withdrawal amount and withdrawal day~~ (also "set by admin" in docs) —
    resolved 2026-07-22: minimum GHS 100, maximum GHS 10,000 per request, processed Fridays.
    Seeded in `apps/platform_settings/config.py`'s `WITHDRAWAL_AND_PAYOUT_SETTINGS` — all three

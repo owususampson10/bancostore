@@ -4,9 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–15 are done — Phase 4's Commission Engine (Direct Referral, Binary, Matching bonuses) and
-Task 15 (Wallet ledger, the first slice of Phase 5) are complete; Task 16 (Withdrawal request flow)
-is next.** What exists and is verified working:
+**Tasks 1–16 are done — Phase 5 (Wallet ledger + Withdrawal request flow) is complete; Task 17
+(Cart + checkout, opening Phase 6) is next.** What exists and is verified working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -174,6 +173,42 @@ is next.** What exists and is verified working:
   task fixed in `earnings_history` still exists in `select_starter_pack`, `start_kyc_verification`,
   and `dashboard` (pre-existing, untouched here) -- both review passes suggested a shared
   `@distributor_required` decorator applied codebase-wide as a fast-follow.
+- **Withdrawal request flow (Task 16), closing Phase 5:** built as 8 vertically-sliced sub-tasks
+  (16a-16h) per `docs/decisions/0004-withdrawal-payout-design.md`, which resolved four money-safety
+  design gaps up front (payout destination storage, what `WITHDRAWAL_DAY` actually gates, exact
+  debit timing relative to admin approval vs. confirmed Paystack payout, and the never-wired
+  `AUTO_APPROVE_WITHDRAWALS_ENABLED` settings staying permanently unwired per `SPEC.md`'s hard
+  Boundary against auto-approving a withdrawal). Distributor payout destination (mobile money
+  number + network) is a one-time `Distributor` profile field gating request submission the same
+  way `kyc_status` already does; a distributor can request any day but only once per
+  `WITHDRAWAL_FREQUENCY`; `WITHDRAWAL_DAY` gates a Friday Celery batch that actually pays out, not
+  submission; the wallet is debited at admin approval (`apps/wallet/services.py::debit()`, Task
+  15's previously-uncalled function), with a `credit()`-based reversal if the subsequent Paystack
+  Transfer fails or is reversed -- idempotent against webhook/poll retries and duplicate webhook
+  deliveries, verified by a concurrent-applications test. `apps/withdrawal/services.py` implements
+  the full state machine (`submitted` -> `approved_debited`/`rejected` -> `queued_for_payout` ->
+  `paid`/`reversed`), tax computed from the admin-editable `WITHHOLDING_TAX_RATE` and matching the
+  doc's own worked example exactly (GHS 500 -> GHS 5 tax -> GHS 495 net). The Friday payout batch
+  (`apps/withdrawal/tasks.py`) reuses Task 13/14's `CommissionCycleRun`/`Failure` audit-trail
+  pattern and per-iteration-renewed Redis lock convention rather than inventing a new one; the
+  Paystack Transfer wrapper (`apps/distributors/paystack.py` additions) tries `verify_transfer`
+  before `initiate_transfer` on every resume so a retry landing after a crash never double-initiates
+  a transfer Paystack already has. **Known limitation, not silently worked around:** this sandbox
+  Paystack account's "Starter Business" tier blocks all real Transfers even in test mode (recipient
+  creation live-verified working; initiate/verify are not) -- see
+  `project_paystack_transfer_account_tier_blocked` memory; Checkpoint F's real-browser verification
+  used a mocked Paystack response for the payout step instead. Distributor-facing status page
+  (`templates/distributors/withdrawal_history.html`, Task 16g) plus SMS notifications (not in-app --
+  the dashboard's notification bell stays intentionally disabled, "coming soon", until Task 21 wires
+  up real Channels-based in-app notifications) on approval/rejection/paid/reversed, with the SMS
+  send always placed after the locked state transition returns, never inside it. A UI bug sweep
+  found and fixed the same two defects (missing table `min-width` inside `overflow-x-auto`, and
+  inconsistent paired `font-X`/`text-X` design-token sizing) across both this new page and 5
+  pre-existing `admin_portal` tables, each now carrying a comment documenting the convention so it
+  doesn't get silently reintroduced. Checkpoint F (a distributor requests a withdrawal, tax is
+  deducted correctly, admin approves, and a simulated Paystack payout succeeds) passed end-to-end in
+  a real browser session 2026-07-24, verifying every financial figure against the database at each
+  step, not just the UI.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
@@ -183,7 +218,7 @@ is next.** What exists and is verified working:
   session-engine fallback — is tracked in the "Known issues" sections at the top of
   `tasks/todo.md`; read those before touching auth or deployment code.
 
-Existing apps: `apps/{accounts,binary_tree,catalog,commissions,distributors,notifications,platform_settings,pv_ledger,wallet}`. Shared
+Existing apps: `apps/{accounts,admin_portal,binary_tree,catalog,commissions,distributors,notifications,platform_settings,pv_ledger,wallet,withdrawal}`. Shared
 concurrency helper: `bancostore/concurrency.py` (`retry_on_lock_contention`,
 `select_for_update_nowait_if_supported`) — use it for any counter/stock/attempt update rather than
 reinventing locking. See `tasks/plan.md` and `tasks/todo.md` for the full task breakdown and
