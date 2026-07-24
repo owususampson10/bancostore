@@ -11,6 +11,7 @@ from apps.distributors.models import Distributor
 from apps.distributors.paystack import (
     MOBILE_MONEY_BANK_CODES,
     PaystackError,
+    PaystackNotFoundError,
     create_transfer_recipient,
     initialize_transaction,
     initiate_transfer,
@@ -26,8 +27,13 @@ def _fake_response(json_data, status_code=200):
     response.status_code = status_code
     response.json.return_value = json_data
     if status_code >= 400:
+        # response=response, matching requests.Response.raise_for_status()'s
+        # real behavior exactly -- without this, exc.response is None
+        # regardless of status_code, and _raise_as_paystack_error's
+        # 404-vs-everything-else distinction could never be tested for
+        # real (a bug in the test double, not just an omission).
         response.raise_for_status.side_effect = requests.HTTPError(
-            f"{status_code} error"
+            f"{status_code} error", response=response
         )
     else:
         response.raise_for_status.return_value = None
@@ -317,6 +323,34 @@ def test_verify_transfer_raises_paystack_error_on_http_failure(mock_get):
 
     with pytest.raises(PaystackError):
         verify_transfer("withdrawal-00000042")
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.get")
+def test_verify_transfer_raises_not_found_specifically_on_404(mock_get):
+    """Task 16f needs to distinguish "Paystack has never seen this
+    reference" (404) from every other failure -- that's what lets a
+    payout retry safely fall back to initiate_transfer instead of
+    treating a transient error the same way."""
+    mock_get.return_value = _fake_response({"status": False}, status_code=404)
+
+    with pytest.raises(PaystackNotFoundError):
+        verify_transfer("withdrawal-00000042")
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.get")
+def test_verify_transfer_does_not_raise_not_found_on_a_non_404_failure(mock_get):
+    """A 500, a timeout, or any other failure must NOT be treated as
+    "reference not found" -- doing so would risk a real double-initiate
+    if the transfer actually does exist and verification merely failed
+    for an unrelated, possibly transient reason."""
+    mock_get.return_value = _fake_response({"status": False}, status_code=500)
+
+    with pytest.raises(PaystackError) as exc_info:
+        verify_transfer("withdrawal-00000042")
+
+    assert not isinstance(exc_info.value, PaystackNotFoundError)
 
 
 @override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")

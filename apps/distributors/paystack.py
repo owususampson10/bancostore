@@ -31,8 +31,30 @@ class PaystackError(Exception):
     pass
 
 
+class PaystackNotFoundError(PaystackError):
+    """Raised specifically when Paystack returns 404 -- e.g.
+    verify_transfer() called against a reference Paystack has never
+    seen (Task 16f: distinguishing this from every other failure is
+    what lets a payout retry safely tell "not yet initiated" apart from
+    "initiated, but something else went wrong verifying it"). A subclass
+    of PaystackError, not a sibling -- every existing caller that only
+    catches the base class keeps working unchanged."""
+
+
 def _auth_headers():
     return {"Authorization": f"Bearer {settings.PAYSTACK_SECRET_KEY}"}
+
+
+def _raise_as_paystack_error(exc, action):
+    """Shared by every wrapper function's except block below. Raises
+    PaystackNotFoundError for a 404 specifically, the base PaystackError
+    for everything else (including network-level failures with no
+    response at all, e.g. a timeout -- those are "we don't know", not
+    "not found", and must not be treated as the same thing)."""
+    response = getattr(exc, "response", None)
+    if response is not None and response.status_code == 404:
+        raise PaystackNotFoundError(f"Paystack {action} failed: {exc}") from exc
+    raise PaystackError(f"Paystack {action} failed: {exc}") from exc
 
 
 def initialize_transaction(*, email, amount_pesewas, reference, callback_url):
@@ -55,7 +77,7 @@ def initialize_transaction(*, email, amount_pesewas, reference, callback_url):
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        raise PaystackError(f"Paystack initialize_transaction failed: {exc}") from exc
+        _raise_as_paystack_error(exc, "initialize_transaction")
     return response.json()["data"]
 
 
@@ -72,7 +94,7 @@ def verify_transaction(reference):
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        raise PaystackError(f"Paystack verify_transaction failed: {exc}") from exc
+        _raise_as_paystack_error(exc, "verify_transaction")
     return response.json()["data"]
 
 
@@ -94,7 +116,7 @@ def list_banks(*, country="ghana", currency="GHS", bank_type="mobile_money"):
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        raise PaystackError(f"Paystack list_banks failed: {exc}") from exc
+        _raise_as_paystack_error(exc, "list_banks")
     return response.json()["data"]
 
 
@@ -123,9 +145,7 @@ def create_transfer_recipient(*, name, account_number, bank_code, currency="GHS"
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        raise PaystackError(
-            f"Paystack create_transfer_recipient failed: {exc}"
-        ) from exc
+        _raise_as_paystack_error(exc, "create_transfer_recipient")
     return response.json()["data"]
 
 
@@ -157,7 +177,7 @@ def initiate_transfer(*, amount_pesewas, recipient_code, reference, reason=""):
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        raise PaystackError(f"Paystack initiate_transfer failed: {exc}") from exc
+        _raise_as_paystack_error(exc, "initiate_transfer")
     return response.json()["data"]
 
 
@@ -177,7 +197,7 @@ def verify_transfer(reference):
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        raise PaystackError(f"Paystack verify_transfer failed: {exc}") from exc
+        _raise_as_paystack_error(exc, "verify_transfer")
     return response.json()["data"]
 
 

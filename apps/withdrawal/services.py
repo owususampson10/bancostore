@@ -9,8 +9,15 @@ from django.utils import timezone
 from constance import config
 
 from apps.distributors.models import Distributor
+from apps.distributors.paystack import (
+    MOBILE_MONEY_BANK_CODES,
+    PaystackNotFoundError,
+    create_transfer_recipient,
+    initiate_transfer,
+    verify_transfer,
+)
 from apps.wallet.models import WalletTransaction
-from apps.wallet.services import InsufficientBalanceError, debit
+from apps.wallet.services import InsufficientBalanceError, credit, debit
 from bancostore.concurrency import (
     retry_on_lock_contention,
     select_for_update_nowait_if_supported,
@@ -46,6 +53,20 @@ class KycNotApproved(Exception):
 
 
 class PayoutDestinationNotSet(Exception):
+    pass
+
+
+class PayoutRecipientNameNotSet(Exception):
+    """CodeRabbit finding, PR #19: create_transfer_recipient (Task 16e)
+    requires a name, and Distributor.full_name/DiditVerification
+    .extracted_full_name can both be blank -- rare (KYC approval implies
+    a submitted DiditVerification exists, but Didit's own OCR extraction
+    can still fail to find a name while face-match/liveness still pass),
+    but real. Without this check, approve_withdrawal_request would debit
+    the wallet for a request that's guaranteed to fail unclearly at
+    Paystack later (Task 16f), leaving it debited and stuck with no
+    automatic recovery path."""
+
     pass
 
 
@@ -281,7 +302,8 @@ def approve_withdrawal_request(withdrawal_request, *, reviewed_by) -> Withdrawal
 
     Raises WithdrawalRequestNotPending (see its own docstring for why
     this isn't idempotent-silent), WithdrawalRequestNotFound,
-    KycNotApproved, PayoutDestinationNotSet, or InsufficientWalletBalance."""
+    KycNotApproved, PayoutDestinationNotSet, PayoutRecipientNameNotSet,
+    or InsufficientWalletBalance."""
     if reviewed_by is None:
         raise TypeError("approve_withdrawal_request() reviewed_by must not be None")
 
@@ -326,6 +348,20 @@ def approve_withdrawal_request(withdrawal_request, *, reviewed_by) -> Withdrawal
             locked_request.payout_mobile_money_network = (
                 locked_distributor.mobile_money_network
             )
+            # Task 16f: create_transfer_recipient requires a name.
+            # Mirrors kyc_review_detail/withdrawal_review_detail's own
+            # fallback exactly -- a distributor with a blank full_name
+            # (only ever set from PendingRegistration at registration
+            # time) still has a real name Didit extracted from their ID.
+            verification = getattr(locked_distributor, "didit_verification", None)
+            locked_request.payout_recipient_name = locked_distributor.full_name or (
+                verification.extracted_full_name if verification else ""
+            )
+            if not locked_request.payout_recipient_name:
+                raise PayoutRecipientNameNotSet(
+                    f"distributor {locked_distributor.pk} has no name available "
+                    f"for the Paystack transfer recipient"
+                )
 
             try:
                 debit(
@@ -406,3 +442,270 @@ def reject_withdrawal_request(
             return locked_request
 
     return retry_on_lock_contention(_attempt)
+
+
+def _generate_transfer_reference(withdrawal_request_id):
+    """Stable across retries -- no timestamp/uuid component, so the same
+    WithdrawalRequest always gets the same reference. That's what makes
+    claim_for_payout idempotent, and lets Paystack's own reference-
+    uniqueness enforcement double as a backstop against an accidental
+    duplicate initiate_transfer call (doubt-driven-development finding).
+
+    28 characters, safely inside Paystack's real 16-50 char lowercase-
+    alphanumeric-dash-underscore requirement (confirmed against
+    Paystack's own docs during Task 16e) regardless of how large the pk
+    ever grows -- zero-padded to 10 digits."""
+    return f"withdrawal-payout-{withdrawal_request_id:010d}"
+
+
+def claim_for_payout(withdrawal_request) -> WithdrawalRequest:
+    """Task 16f. Locked, fast, local-only status transition
+    approved_debited -> queued_for_payout with a pinned Paystack
+    transfer reference. No external HTTP call happens inside this lock
+    (doubt-driven-development finding: holding a row lock across a
+    Paystack round-trip -- up to REQUEST_TIMEOUT_SECONDS -- is a real
+    denial-of-service vector against this project's limited worker
+    pool, the same concern bancostore/concurrency.py's own module
+    docstring exists to prevent). Callers make the actual Paystack calls
+    afterward, with no lock held.
+
+    Idempotent by construction: if the row is already queued_for_payout
+    (already claimed, with a reference), this is a silent no-op that
+    returns the existing request unchanged rather than re-claiming or
+    regenerating the reference -- process_withdrawal_payout relies on
+    this to call claim_for_payout unconditionally on every attempt,
+    regardless of whether a prior attempt already claimed the row.
+
+    Does NOT lock Distributor -- unlike approve_withdrawal_request, this
+    function never reads anything off Distributor. The payout
+    destination and recipient name are already snapshotted onto the
+    request itself (approve_withdrawal_request, Task 16d/16f), so there
+    is no Distributor-first lock-ordering question to resolve here.
+
+    Raises WithdrawalRequestNotFound, or WithdrawalRequestNotPending if
+    the row is in any other status (already paid/rejected/reversed) --
+    an unexpected state at this point, not something to silently retry."""
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                locked_request = select_for_update_nowait_if_supported(
+                    WithdrawalRequest.objects.filter(pk=withdrawal_request.pk)
+                ).get()
+            except WithdrawalRequest.DoesNotExist:
+                raise WithdrawalRequestNotFound(
+                    f"WithdrawalRequest {withdrawal_request.pk} does not exist"
+                ) from None
+
+            if locked_request.status == WithdrawalRequest.Status.QUEUED_FOR_PAYOUT:
+                return locked_request
+
+            if locked_request.status != WithdrawalRequest.Status.APPROVED_DEBITED:
+                raise WithdrawalRequestNotPending(
+                    f"WithdrawalRequest {locked_request.pk} is not ready for "
+                    f"payout (status={locked_request.status})",
+                    status=locked_request.status,
+                )
+
+            locked_request.paystack_transfer_reference = _generate_transfer_reference(
+                locked_request.pk
+            )
+            locked_request.status = WithdrawalRequest.Status.QUEUED_FOR_PAYOUT
+            locked_request.save()
+            logger.info(
+                "claim_for_payout: withdrawal_request_id=%s reference=%s",
+                locked_request.pk,
+                locked_request.paystack_transfer_reference,
+            )
+            return locked_request
+
+    return retry_on_lock_contention(_attempt)
+
+
+# Recognized as failure outcomes needing a reversal -- any other
+# verified_status (e.g. "pending") is a no-op, left queued_for_payout
+# for a future check to resolve, not treated as either success or
+# failure. Safe-by-default: an unrecognized status never causes an
+# incorrect payment, only a request that stays queued longer than it
+# should.
+#
+# code-review flag, not silently assumed complete: Paystack's List
+# Transfers endpoint documents a wider status vocabulary --
+# pending/success/failed/otp/abandoned/reversed/blocked/rejected/
+# received -- and it's unconfirmed whether verify_transfer's own
+# response uses the identical set. "otp"/"abandoned"/"blocked"/
+# "rejected" may also be terminal-failure states that belong here.
+# Verifying this needs a real failed/blocked/rejected transfer to
+# observe, which the account-tier restriction tracked in memory
+# (project_paystack_transfer_account_tier_blocked) currently prevents.
+_TRANSFER_FAILURE_STATUSES = {"failed", "reversed"}
+
+
+def apply_verified_transfer_outcome(
+    withdrawal_request, verified_status
+) -> WithdrawalRequest:
+    """Task 16f. The SOLE place that transitions a request away from
+    queued_for_payout -- called by both the transfer webhook handler and
+    the batch driver's own verify_transfer resume path. This is a
+    doubt-driven-development finding, not a stylistic choice: two
+    independently-written check-then-write paths for the same
+    transition is exactly the race that would let a duplicate webhook
+    delivery, or a webhook racing the batch driver's own verification,
+    double-reverse or double-transition a request. One locked, idempotent
+    function used by both callers removes the race by construction
+    instead of trying to make two separate implementations individually
+    safe.
+
+    Locks the WithdrawalRequest row and no-ops (returns the row
+    unchanged) if it has already left queued_for_payout -- this is the
+    idempotency guarantee duplicate webhook deliveries and a webhook
+    racing the batch driver both rely on.
+
+    `verified_status` must be Paystack's own verify_transfer(...)["status"]
+    value -- never a webhook body's own unverified claim (see
+    apps.distributors.paystack.verify_transfer's own docstring for why).
+    "success" transitions to paid. "failed"/"reversed" credits the
+    distributor back net_amount (transaction_type=WITHDRAWAL_REVERSAL,
+    a reference stable per request -- WalletTransaction's own unique
+    constraint on (wallet, reference, transaction_type) is a second,
+    structural backstop against a genuine duplicate reversal slipping
+    past this function's own lock-based idempotency check) and
+    transitions to payout_failed_reversed. Any other status is a no-op.
+
+    Raises WithdrawalRequestNotFound if the row no longer exists."""
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                locked_request = select_for_update_nowait_if_supported(
+                    WithdrawalRequest.objects.filter(pk=withdrawal_request.pk)
+                ).get()
+            except WithdrawalRequest.DoesNotExist:
+                raise WithdrawalRequestNotFound(
+                    f"WithdrawalRequest {withdrawal_request.pk} does not exist"
+                ) from None
+
+            if locked_request.status != WithdrawalRequest.Status.QUEUED_FOR_PAYOUT:
+                return locked_request
+
+            if verified_status == "success":
+                locked_request.status = WithdrawalRequest.Status.PAID
+                locked_request.save()
+                logger.info(
+                    "apply_verified_transfer_outcome: withdrawal_request_id=%s "
+                    "verified_status=success -> paid",
+                    locked_request.pk,
+                )
+            elif verified_status in _TRANSFER_FAILURE_STATUSES:
+                credit(
+                    locked_request.distributor,
+                    locked_request.net_amount,
+                    transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_REVERSAL,
+                    reference=f"withdrawal-reversal-{locked_request.pk}",
+                )
+                locked_request.status = WithdrawalRequest.Status.PAYOUT_FAILED_REVERSED
+                locked_request.save()
+                logger.info(
+                    "apply_verified_transfer_outcome: withdrawal_request_id=%s "
+                    "verified_status=%s -> payout_failed_reversed, reversed "
+                    "net_amount=%s",
+                    locked_request.pk,
+                    verified_status,
+                    locked_request.net_amount,
+                )
+            else:
+                logger.info(
+                    "apply_verified_transfer_outcome: withdrawal_request_id=%s "
+                    "verified_status=%s -- not a terminal outcome, leaving "
+                    "queued_for_payout",
+                    locked_request.pk,
+                    verified_status,
+                )
+
+            return locked_request
+
+    return retry_on_lock_contention(_attempt)
+
+
+def _local_mobile_money_number(e164_number):
+    """Paystack's create_transfer_recipient was live-verified during
+    Task 16e to accept and echo back Ghana mobile money account numbers
+    in the local "0..." format (account_number="0551234987"), not
+    E.164 -- confirmed by a real successful sandbox call, not assumed.
+    This codebase stores payout_mobile_money_number as E.164 ("+233...",
+    PHONENUMBER_DEFAULT_REGION="GH" with the library's own default
+    format), so it must be converted before every call."""
+    return "0" + str(e164_number)[4:]
+
+
+def process_withdrawal_payout(withdrawal_request) -> str:
+    """Task 16f. Orchestrates one WithdrawalRequest's actual payout to
+    Paystack -- outside any row lock (claim_for_payout's own lock never
+    spans an external HTTP call, and neither does anything below it).
+    Safe to call repeatedly for the same request -- a Celery retry, or
+    the batch driver revisiting a row across cycles -- because every
+    step here is itself idempotent:
+
+    1. claim_for_payout() -- idempotent. If the row isn't
+       approved_debited/queued_for_payout (already paid/rejected/
+       reversed -- e.g. a webhook already resolved it before this call
+       ran), that status is returned immediately with no Paystack calls
+       at all, not treated as a failure.
+    2. Ensures a Paystack transfer recipient exists, built from the
+       request's OWN snapshotted payout fields (ADR-0004 point 7) --
+       never read live off Distributor. Paystack itself deduplicates
+       recipients by account_number, so calling this again on a retry
+       is safe and cheap, not a race to guard against locally.
+    3. Tries verify_transfer(reference) FIRST, not initiate_transfer --
+       the doubt-driven-development fix for the original design's
+       critical gap: a retry landing between the claim commit and the
+       actual initiate_transfer call must not assume Paystack already
+       has the transfer. PaystackNotFoundError (Paystack has never seen
+       this reference -- the expected case on a genuinely first
+       attempt, or a crash before step 3 ever went out) falls back to
+       actually calling initiate_transfer with the same pinned
+       reference. Whatever verified status this finds is applied via
+       apply_verified_transfer_outcome, the sole place that transitions
+       a request out of queued_for_payout.
+
+    Returns the request's resulting WithdrawalRequest.Status value."""
+    try:
+        claimed = claim_for_payout(withdrawal_request)
+    except WithdrawalRequestNotPending as exc:
+        return exc.status
+
+    # code-review finding: a prior version of this function called
+    # create_transfer_recipient unconditionally, making one wasted
+    # Paystack API call on every resume attempt even when the recipient
+    # was already cached from a first attempt -- real cost on a request
+    # the batch driver might revisit across several Friday cycles while
+    # a slow transfer resolves. Skipping when already cached is safe
+    # because the cached code was itself confirmed correct by an earlier
+    # call to this same endpoint for this same request.
+    if claimed.paystack_recipient_code:
+        recipient_code = claimed.paystack_recipient_code
+    else:
+        recipient = create_transfer_recipient(
+            name=claimed.payout_recipient_name,
+            account_number=_local_mobile_money_number(
+                claimed.payout_mobile_money_number
+            ),
+            bank_code=MOBILE_MONEY_BANK_CODES[claimed.payout_mobile_money_network],
+        )
+        recipient_code = recipient["recipient_code"]
+        WithdrawalRequest.objects.filter(pk=claimed.pk).update(
+            paystack_recipient_code=recipient_code
+        )
+
+    try:
+        result = verify_transfer(claimed.paystack_transfer_reference)
+    except PaystackNotFoundError:
+        result = initiate_transfer(
+            amount_pesewas=int(claimed.net_amount * 100),
+            recipient_code=recipient_code,
+            reference=claimed.paystack_transfer_reference,
+            reason="Bancostore withdrawal payout",
+        )
+
+    updated = apply_verified_transfer_outcome(claimed, result["status"])
+    return updated.status

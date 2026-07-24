@@ -46,6 +46,12 @@ class WithdrawalRequest(models.Model):
         blank=True,
         default="",
     )
+    # Task 16f (doubt-driven-development finding): create_transfer_recipient
+    # requires a name, and ADR-0004's existing snapshot never captured one.
+    # Snapshotted alongside the payout destination above, for the same
+    # reason -- a distributor editing their profile after approval must
+    # not change what 16f later sends to Paystack.
+    payout_recipient_name = models.CharField(max_length=255, blank=True, default="")
 
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

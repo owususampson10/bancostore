@@ -7,7 +7,7 @@ from django.db import connection
 
 import pytest
 
-from apps.distributors.models import Distributor
+from apps.distributors.models import DiditVerification, Distributor
 from apps.wallet.models import Wallet, WalletTransaction
 from apps.wallet.services import credit
 
@@ -15,12 +15,13 @@ User = get_user_model()
 _phone_seq = count(1)
 
 
-def _make_eligible_distributor(balance=Decimal("1000.00")):
+def _make_eligible_distributor(balance=Decimal("1000.00"), full_name="Ama Mensah"):
     phone = f"+233245{next(_phone_seq):06d}"
     user = User.objects.create_user(username=phone, password="Passw0rd!")
     distributor = Distributor.objects.create(
         user=user,
         phone_number=phone,
+        full_name=full_name,
         kyc_status=Distributor.KycStatus.APPROVED,
         mobile_money_number="+233247111222",
         mobile_money_network=Distributor.MobileMoneyNetwork.MTN,
@@ -90,6 +91,77 @@ def test_approving_snapshots_the_payout_destination_onto_the_request():
 
     assert approved.payout_mobile_money_number == "+233247111222"
     assert approved.payout_mobile_money_network == "mtn"
+
+
+@pytest.mark.django_db
+def test_approving_snapshots_the_distributors_full_name_for_the_recipient():
+    from apps.withdrawal.services import approve_withdrawal_request
+
+    distributor = _make_eligible_distributor()
+    distributor.full_name = "Ama Mensah"
+    distributor.save(update_fields=["full_name"])
+    request = _make_submitted_request(distributor)
+    admin = _make_admin()
+
+    approved = approve_withdrawal_request(request, reviewed_by=admin)
+
+    assert approved.payout_recipient_name == "Ama Mensah"
+
+
+@pytest.mark.django_db
+def test_approving_falls_back_to_the_extracted_id_name_when_full_name_is_blank():
+    """Mirrors kyc_review_detail/withdrawal_review_detail's own fallback:
+    Distributor.full_name is only ever set from PendingRegistration at
+    registration time -- a distributor who registered before that field
+    existed still has a name Didit extracted from their ID."""
+    from apps.withdrawal.services import approve_withdrawal_request
+
+    distributor = _make_eligible_distributor(full_name="")
+    assert distributor.full_name == ""
+    DiditVerification.objects.create(
+        distributor=distributor,
+        session_id=f"sess-{distributor.pk}",
+        extracted_full_name="Kojo Antwi",
+    )
+    request = _make_submitted_request(distributor)
+    admin = _make_admin()
+
+    approved = approve_withdrawal_request(request, reviewed_by=admin)
+
+    assert approved.payout_recipient_name == "Kojo Antwi"
+
+
+@pytest.mark.django_db
+def test_approving_raises_when_no_name_is_available_for_the_recipient():
+    """CodeRabbit finding, PR #19: full_name and DiditVerification
+    .extracted_full_name can both be blank -- rare (KYC approval implies
+    a submitted DiditVerification exists, but Didit's own OCR can still
+    fail to extract a name while face-match/liveness still pass), but
+    real. Approval must not debit the wallet for a request that's
+    guaranteed to fail unclearly at Paystack later."""
+    from apps.withdrawal.models import WithdrawalRequest
+    from apps.withdrawal.services import (
+        PayoutRecipientNameNotSet,
+        approve_withdrawal_request,
+    )
+
+    distributor = _make_eligible_distributor(full_name="")
+    assert distributor.full_name == ""
+    DiditVerification.objects.create(
+        distributor=distributor,
+        session_id=f"sess-{distributor.pk}",
+        extracted_full_name="",
+    )
+    request = _make_submitted_request(distributor)
+    admin = _make_admin()
+
+    with pytest.raises(PayoutRecipientNameNotSet):
+        approve_withdrawal_request(request, reviewed_by=admin)
+
+    wallet = Wallet.objects.get(distributor=distributor)
+    assert wallet.balance == Decimal("1000.00")  # untouched
+    request.refresh_from_db()
+    assert request.status == WithdrawalRequest.Status.SUBMITTED  # untouched
 
 
 @pytest.mark.django_db
