@@ -72,9 +72,9 @@
 </div>
 </div>
 <div class="space-y-3">
-<button type="button" disabled title="Checkout — coming soon" class="w-full bg-surface-variant text-gray-500 py-4 rounded-lg font-semibold cursor-not-allowed">
+<a href="{% url 'orders:checkout' %}" class="block w-full text-center bg-primary text-on-primary py-4 rounded-lg font-semibold hover:brightness-110 transition-all active:scale-[0.98] shadow-md">
 Proceed to Checkout
-</button>
+</a>
 <a href="{% url 'catalog:product_list' %}" class="block w-full text-center py-3 border border-outline rounded-lg font-semibold text-on-surface hover:bg-surface-container transition-all">
 Continue Shopping
 </a>

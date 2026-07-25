@@ -1,0 +1,243 @@
+{% extends "base_store.html" %}
+{% load humanize %}
+{% block title %}Bancostore | Checkout{% endblock %}
+{% block content %}
+{{ delivery_zone_choices|json_script:"delivery-zone-choices" }}
+{{ selected_delivery_method|json_script:"checkout-selected-delivery-method" }}
+{{ selected_delivery_zone|json_script:"checkout-selected-delivery-zone" }}
+<div class="max-w-[1280px] mx-auto px-margin-mobile md:px-margin-desktop py-12"
+     x-data="{
+       // security-and-hardening (2026-07-25): both read via JSON.parse from
+       // the json_script blocks above, never interpolated directly into
+       // this x-data string -- same XSS reasoning as zoneOptions below and
+       // payout_settings.html's selected/options (see the long comment in
+       // views.py::payout_settings for why a raw interpolation here was a
+       // real XSS bug). The view has already constrained both to
+       // known-good choices before they reach this template.
+       deliveryMethod: JSON.parse(document.getElementById('checkout-selected-delivery-method').textContent),
+       deliveryZone: JSON.parse(document.getElementById('checkout-selected-delivery-zone').textContent),
+       subtotal: {{ cart_subtotal }},
+       freeThreshold: {{ free_delivery_threshold }},
+       fees: {
+         kumasi: {{ delivery_fee_kumasi }},
+         accra: {{ delivery_fee_accra }},
+         other_regions: {{ delivery_fee_other_regions }}
+       },
+       get deliveryFee() {
+         // code-review-and-quality (2026-07-25): null, not 0, when a zone
+         // hasn't been chosen yet -- showing a zero amount before
+         // selection read as a promise of free delivery. Only a real
+         // answer (0 for pickup/above-threshold, or the zone's actual
+         // rate) returns a number; the template shows a placeholder for
+         // null.
+         if (this.deliveryMethod === 'pickup') return 0;
+         if (this.subtotal >= this.freeThreshold) return 0;
+         if (!this.deliveryZone) return null;
+         return this.fees[this.deliveryZone] ?? 0;
+       },
+       get total() { return this.subtotal + (this.deliveryFee ?? 0); },
+       // Custom listbox state for the Delivery Zone control (2026-07-25
+       // design fix, matching payout_settings.html's mobile-money-network
+       // listbox) -- a native <select>'s open options list can't be themed
+       // via CSS in any browser, which was the whole point of that control
+       // and this one. zoneOptions read via JSON.parse from the json_script
+       // block above, never interpolated directly into this x-data string.
+       zoneOpen: false,
+       zoneHighlighted: -1,
+       zoneOptions: JSON.parse(document.getElementById('delivery-zone-choices').textContent),
+       get zoneSelectedLabel() {
+         const found = this.zoneOptions.find(o => o.value === this.deliveryZone);
+         return found ? found.label : 'Select a delivery zone';
+       },
+       openZoneList() {
+         this.zoneOpen = true;
+         this.zoneHighlighted = Math.max(this.zoneOptions.findIndex(o => o.value === this.deliveryZone), 0);
+       },
+       chooseZone(index) {
+         this.deliveryZone = this.zoneOptions[index].value;
+         this.zoneOpen = false;
+       },
+     }">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-8">Checkout</h1>
+
+<form method="post" class="grid grid-cols-1 lg:grid-cols-12 gap-12">
+{% csrf_token %}
+
+<!-- Left column: form -->
+<div class="lg:col-span-7 space-y-8">
+
+<!-- Contact Information -->
+<section class="space-y-4 p-6 bg-surface-container-lowest rounded-xl border border-outline-variant">
+<h2 class="font-headline-md text-headline-md text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">person_outline</span>
+Contact Information
+</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div>
+<label for="{{ form.full_name.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary mb-1">Full Name</label>
+{{ form.full_name }}
+{% for error in form.full_name.errors %}<p class="text-error text-sm mt-1">{{ error }}</p>{% endfor %}
+</div>
+<div>
+<label for="{{ form.phone_number.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary mb-1">Phone Number</label>
+{{ form.phone_number }}
+{% for error in form.phone_number.errors %}<p class="text-error text-sm mt-1">{{ error }}</p>{% endfor %}
+</div>
+<div class="md:col-span-2">
+<label for="{{ form.email.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary mb-1">Email (Optional)</label>
+{{ form.email }}
+{% for error in form.email.errors %}<p class="text-error text-sm mt-1">{{ error }}</p>{% endfor %}
+</div>
+</div>
+</section>
+
+<!-- Delivery Method -->
+<section class="space-y-4">
+<h2 class="font-headline-md text-headline-md text-on-surface flex items-center gap-2 px-2">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">local_shipping</span>
+Delivery Method
+</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<label class="cursor-pointer p-6 bg-surface-container-lowest rounded-xl border-2 flex flex-col items-center text-center gap-2 transition-all"
+       :class="deliveryMethod === 'home_delivery' ? 'border-primary ring-1 ring-primary' : 'border-outline-variant hover:border-outline'">
+<input type="radio" name="delivery_method" value="home_delivery" x-model="deliveryMethod" class="sr-only">
+<span class="material-symbols-outlined text-4xl text-primary" aria-hidden="true">local_shipping</span>
+<span class="font-semibold">Home Delivery</span>
+<p class="text-sm text-secondary">Doorstep delivery across Ghana.</p>
+</label>
+<label class="cursor-pointer p-6 bg-surface-container-lowest rounded-xl border-2 flex flex-col items-center text-center gap-2 transition-all"
+       :class="deliveryMethod === 'pickup' ? 'border-primary ring-1 ring-primary' : 'border-outline-variant hover:border-outline'">
+<input type="radio" name="delivery_method" value="pickup" x-model="deliveryMethod" class="sr-only">
+<span class="material-symbols-outlined text-4xl text-primary" aria-hidden="true">store</span>
+<span class="font-semibold">Pickup</span>
+<p class="text-sm text-secondary">Collect from our Bancostore location, free.</p>
+</label>
+</div>
+{% if form.delivery_method.errors %}<p class="text-error text-sm">{{ form.delivery_method.errors.0 }}</p>{% endif %}
+</section>
+
+<!-- Delivery Details (home delivery only) -->
+<section x-show="deliveryMethod === 'home_delivery'" x-cloak class="space-y-4 p-6 bg-surface-container-lowest rounded-xl border border-outline-variant">
+<h2 class="font-headline-md text-headline-md text-on-surface">Delivery Details</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="md:col-span-2">
+<label class="block text-xs font-bold uppercase tracking-widest text-secondary mb-1" id="delivery-zone-label">Delivery Zone</label>
+<!-- Custom listbox, not a native <select> -- a native select's open
+     options list can't be themed via CSS in any browser, which was the
+     whole point of this control (2026-07-25, matching
+     payout_settings.html's mobile-money-network listbox exactly).
+     Backed by a plain hidden input (name="delivery_zone") so Django's
+     form processing doesn't need to know this isn't a real select. -->
+<div class="relative" @click.outside="zoneOpen = false">
+<button type="button"
+        class="w-full p-4 rounded-lg border border-outline-variant bg-surface-bright text-left flex items-center justify-between focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-labelledby="delivery-zone-label"
+        aria-controls="delivery-zone-listbox"
+        :aria-expanded="zoneOpen.toString()"
+        :aria-activedescendant="zoneHighlighted >= 0 ? 'delivery-zone-option-' + zoneHighlighted : null"
+        @click="zoneOpen ? (zoneOpen = false) : openZoneList()"
+        @keydown.down.prevent="zoneOpen ? zoneHighlighted = Math.min(zoneHighlighted + 1, zoneOptions.length - 1) : openZoneList()"
+        @keydown.up.prevent="zoneOpen ? zoneHighlighted = Math.max(zoneHighlighted - 1, 0) : openZoneList()"
+        @keydown.enter.prevent="if (zoneOpen && zoneHighlighted >= 0) chooseZone(zoneHighlighted)"
+        @keydown.escape="zoneOpen = false">
+<span :class="deliveryZone ? 'text-on-surface' : 'text-secondary'" x-text="zoneSelectedLabel">{{ form.delivery_zone.value|default:"Select a delivery zone" }}</span>
+<span class="material-symbols-outlined text-secondary transition-transform" :class="zoneOpen && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<ul x-show="zoneOpen"
+    x-cloak
+    role="listbox"
+    id="delivery-zone-listbox"
+    aria-labelledby="delivery-zone-label"
+    class="absolute z-10 mt-1 w-full bg-surface-bright border border-outline-variant rounded-lg shadow-lg overflow-hidden py-1">
+<template x-for="(option, index) in zoneOptions" :key="option.value">
+<li :id="'delivery-zone-option-' + index"
+    role="option"
+    :aria-selected="(deliveryZone === option.value).toString()"
+    class="px-4 py-3 text-sm cursor-pointer transition-colors"
+    :class="(zoneHighlighted === index) ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    @click="chooseZone(index)"
+    @mouseenter="zoneHighlighted = index"
+    x-text="option.label">
+</li>
+</template>
+</ul>
+</div>
+<input type="hidden" name="delivery_zone" id="{{ form.delivery_zone.id_for_label }}" value="{{ form.delivery_zone.value|default:'' }}" :value="deliveryZone">
+{% for error in form.delivery_zone.errors %}<p class="text-error text-sm mt-1">{{ error }}</p>{% endfor %}
+</div>
+<div class="md:col-span-2">
+<label for="{{ form.address.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary mb-1">Address</label>
+{{ form.address }}
+{% for error in form.address.errors %}<p class="text-error text-sm mt-1">{{ error }}</p>{% endfor %}
+</div>
+<div>
+<label for="{{ form.area.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary mb-1">Area / Suburb</label>
+{{ form.area }}
+{% for error in form.area.errors %}<p class="text-error text-sm mt-1">{{ error }}</p>{% endfor %}
+</div>
+<div>
+<label for="{{ form.landmark.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary mb-1">Landmark (Optional)</label>
+{{ form.landmark }}
+</div>
+</div>
+</section>
+</div>
+
+<!-- Right column: order summary -->
+<div class="lg:col-span-5">
+<aside class="sticky top-28 p-8 bg-surface-container-low rounded-xl border border-outline-variant space-y-6">
+<h2 class="font-headline-md text-headline-md text-on-surface border-b border-outline-variant pb-3">Order Summary</h2>
+
+<div class="space-y-4">
+{% for item in cart_items %}
+<div class="flex gap-4">
+<div class="w-16 h-16 bg-surface-variant rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0">
+{% if item.product.primary_image %}
+<img class="w-full h-full object-cover" src="{{ item.product.primary_image.image.url }}" alt="{{ item.product.name }}">
+{% else %}
+<span class="material-symbols-outlined text-gray-400" aria-hidden="true">image</span>
+{% endif %}
+</div>
+<div class="flex-1">
+<p class="font-semibold text-on-surface">{{ item.product.name }}</p>
+<div class="flex justify-between items-center mt-1 text-sm">
+<span class="text-secondary">{{ item.quantity }} x GHS {{ item.product.price|intcomma }}</span>
+<span class="font-bold text-primary">GHS {{ item.line_total|intcomma }}</span>
+</div>
+</div>
+</div>
+{% endfor %}
+</div>
+
+<div class="space-y-2 border-t border-outline-variant pt-4">
+<div class="flex justify-between text-secondary">
+<span>Subtotal</span>
+<span class="text-on-surface font-semibold">GHS {{ cart_subtotal|intcomma }}</span>
+</div>
+<div class="flex justify-between text-secondary">
+<span>Delivery Fee</span>
+<span x-text="deliveryFee === null ? 'Select a delivery zone' : 'GHS ' + deliveryFee.toFixed(2)" :class="deliveryFee === null && 'italic'"></span>
+</div>
+<div class="flex justify-between font-headline-md text-headline-md text-on-surface pt-2">
+<span>Total</span>
+<span class="text-primary" x-text="'GHS ' + total.toFixed(2)"></span>
+</div>
+</div>
+
+<div class="space-y-3">
+<button type="submit" class="w-full bg-primary text-on-primary py-4 rounded-lg font-semibold uppercase tracking-widest hover:brightness-110 transition-all active:scale-[0.98] shadow-md">
+Place Order
+</button>
+<div class="flex items-center justify-center gap-2 text-secondary text-sm opacity-80">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">lock</span>
+<p>Secure checkout — you'll be redirected to complete payment</p>
+</div>
+</div>
+</aside>
+</div>
+
+</form>
+</div>
+{% endblock %}

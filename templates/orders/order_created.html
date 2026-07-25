@@ -1,0 +1,21 @@
+{% extends "base_store.html" %}
+{% load humanize %}
+{% block title %}Bancostore | Order Placed{% endblock %}
+{% block content %}
+<div class="max-w-[640px] mx-auto px-margin-mobile md:px-margin-desktop py-24 text-center">
+<div class="w-16 h-16 rounded-full bg-primary-fixed flex items-center justify-center mx-auto mb-6">
+<span class="material-symbols-outlined text-primary text-4xl" aria-hidden="true">check_circle</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Placed</h1>
+<p class="text-secondary mb-8">
+Your order total is <span class="font-semibold text-on-surface">GHS {{ order.total|intcomma }}</span>.
+Payment is the next step — we're not ready to take you there automatically yet, but your order is
+saved and waiting.
+</p>
+<div class="bg-surface-container-low border border-outline-variant rounded-xl p-6 text-left mb-8">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Order Reference</p>
+<p class="font-mono text-on-surface">{{ order.payment_reference }}</p>
+</div>
+<a href="{% url 'catalog:product_list' %}" class="inline-block bg-primary text-on-primary font-semibold px-8 py-3 rounded-full hover:brightness-110 transition-all">Continue Shopping</a>
+</div>
+{% endblock %}

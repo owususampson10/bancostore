@@ -88,11 +88,20 @@ def test_add_to_cart_redirects_to_the_product_page_not_the_cart_when_stock_is_ex
 
 
 @pytest.mark.django_db
-def test_update_still_works_for_a_product_deactivated_after_being_added(client):
+def test_update_does_not_404_for_a_product_deactivated_after_being_added(client):
     # code-review-and-quality (2026-07-24): cart_update previously used
     # Product.objects.storefront_visible() (is_active=True), 404ing this
     # action the moment a cart product was deactivated -- a dead end the
-    # customer couldn't recover from.
+    # customer couldn't recover from. Fixed by using the plain manager
+    # here, so a stale page/direct POST for a since-deactivated product
+    # still redirects cleanly instead of erroring.
+    #
+    # doubt-driven-development (Task 17c design review) then found
+    # Cart.items() itself didn't exclude deactivated products either --
+    # fixed separately (test_cart.py), which changes this test's own
+    # expected outcome: the line self-heals out of the cart entirely
+    # (not just "doesn't 404"), since a deactivated product is exactly as
+    # unpurchasable as a deleted one.
     product = _make_product(stock=10)
     client.post(reverse("orders:cart_add", args=[product.pk]))
     product.is_active = False
@@ -103,11 +112,8 @@ def test_update_still_works_for_a_product_deactivated_after_being_added(client):
     )
 
     assert response.status_code == 302
-    # CodeRabbit (PR #25): assert the real quantity from context, not a
-    # bare "2" substring search against raw HTML -- Tailwind classes and
-    # other markup can contain that digit even if the update did nothing.
     cart_response = client.get(reverse("orders:cart"))
-    assert cart_response.context["cart_items"][0].quantity == 2
+    assert cart_response.context["cart_items"] == []
 
 
 @pytest.mark.django_db

@@ -292,6 +292,18 @@ Revisit with real cache-busting once there's a deploy pipeline (Task 24). To ski
 rebuild step, run `npm run dev` (Vite watch mode) instead of `npm run build` — it recompiles on
 every save; a hard-refresh is still needed to see it.
 
+**Don't run the full pytest suite in the background while live-browser-testing against
+`runserver` (Task 17c gotcha).** `tests/conftest.py`'s `autouse=True` `_clear_django_cache`
+fixture calls `cache.clear()` before and after every single test, and `REDIS_URL` defaults to the
+same `redis://localhost:6379/0` for both pytest and the manually-running dev server — there's no
+separate DB number splitting them. A background full-suite run will intermittently wipe the dev
+server's session/cart data mid-browser-check, with no error surfaced anywhere, and it looks
+exactly like a real "data disappears" application bug (this cost a long, disciplined debugging
+session before `redis-cli monitor` + TTL polling + server-log timestamp correlation proved the
+cart/checkout code was correct and the interference was the actual cause). Either run the full
+suite in the foreground and wait for it before live-testing, or don't run it at all while a
+`runserver` browser session is active.
+
 **Media files need an explicit URL route that pytest can never verify.** `django.contrib.staticfiles`
 auto-serves `STATIC_URL` under `runserver`, but `MEDIA_URL` (uploaded product photos) doesn't get
 served automatically — `bancostore/urls.py` needs its own `if DEBUG: urlpatterns += static(...)`
