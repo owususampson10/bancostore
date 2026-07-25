@@ -490,6 +490,6 @@ def test_concurrent_confirmation_attempts_never_double_decrement_or_double_credi
     product.refresh_from_db()
     assert order.status == Order.Status.CONFIRMED
     assert order.pv_earned == 60
-    assert product.stock == 4  # decremented exactly once across 5 concurrent calls
+    assert product.stock == 4  # decremented exactly once across both concurrent calls
     ledger = PvLedger.objects.get(distributor=sponsor)
     assert ledger.right_leg_pv == 60  # credited exactly once

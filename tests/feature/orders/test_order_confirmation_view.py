@@ -102,6 +102,25 @@ def test_pending_order_shows_a_waiting_state_not_the_old_payment_next_step_copy(
     # actively wrong to still show once this page can be reached after a
     # real (if not-yet-confirmed) payment attempt.
     assert "not ready to take you there automatically" not in content
+    assert "Awaiting Payment Confirmation" in content
+
+
+@pytest.mark.django_db
+def test_a_later_lifecycle_status_does_not_show_the_awaiting_payment_copy(client):
+    # CodeRabbit (PR #27): Order.Status also has processing/dispatched/
+    # delivered/refunded (Task 18's scope) -- this page is reachable by
+    # reference at any time, so a dispatched order landing in the bare
+    # {% else %} branch would tell the customer their payment isn't
+    # confirmed yet, which is actively wrong once it's been dispatched.
+    order = _make_order(status=Order.Status.DISPATCHED)
+
+    response = client.get(
+        reverse("orders:order_confirmation", args=[order.payment_reference])
+    )
+
+    content = response.content.decode()
+    assert "Awaiting Payment Confirmation" not in content
+    assert "Item No Longer Available" not in content
 
 
 @pytest.mark.django_db

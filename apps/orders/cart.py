@@ -65,6 +65,14 @@ class Cart:
         if self._data.pop(str(product.pk), None) is not None:
             self._save()
 
+    def clear(self):
+        # CodeRabbit (PR #27, Task 17d): called once a purchase actually
+        # confirms (apps/orders/views.py::order_payment_callback) -- left
+        # unfixed, the just-purchased items stayed in the cart and the
+        # customer could immediately re-order them.
+        self._data = {}
+        self._save()
+
     def items(self):
         if not self._data:
             return []

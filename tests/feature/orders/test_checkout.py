@@ -179,6 +179,27 @@ def test_checkout_shows_an_error_if_paystack_initialize_fails(mock_initialize, c
 
 
 @pytest.mark.django_db
+@patch("apps.orders.views.initialize_transaction")
+def test_checkout_shows_an_error_if_paystack_returns_no_authorization_url(
+    mock_initialize, client
+):
+    # CodeRabbit (PR #27): every other Paystack response read in this
+    # codebase uses .get() so a malformed/unexpected shape logs and
+    # returns instead of raising -- data["authorization_url"] was the
+    # one bracket-indexed read, turning a missing key into an unhandled
+    # 500 after the order already existed.
+    mock_initialize.return_value = {}
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    response = client.post(reverse("orders:checkout"), _valid_home_delivery_data())
+
+    assert response.status_code == 200
+    assert Order.objects.exists()
+    assert "trouble reaching our payment provider" in response.content.decode()
+
+
+@pytest.mark.django_db
 def test_missing_required_home_delivery_fields_does_not_create_an_order(client):
     product = _make_product()
     _add_to_cart(client, product)

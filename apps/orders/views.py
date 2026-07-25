@@ -115,7 +115,21 @@ def checkout_view(request):
                 )
                 payment_error = True
             else:
-                return redirect(data["authorization_url"])
+                # CodeRabbit (PR #27): every other Paystack response read
+                # in this codebase uses .get() so a malformed/unexpected
+                # shape logs and returns rather than raising --
+                # data["authorization_url"] was the one bracket-indexed
+                # read, turning a missing key into an unhandled 500 after
+                # the order already existed as PENDING.
+                authorization_url = data.get("authorization_url")
+                if authorization_url:
+                    return redirect(authorization_url)
+                logger.error(
+                    "checkout_view: Paystack initialize_transaction "
+                    "returned no authorization_url for order=%s",
+                    order.payment_reference,
+                )
+                payment_error = True
     else:
         form = CheckoutForm(initial=prefill_contact_info(request.user))
 
@@ -205,9 +219,28 @@ def order_payment_callback(request):
     payment status for anything beyond triggering the same server-side
     re-verification the webhook does -- confirm_order_payment always
     re-fetches and re-checks everything itself, and is a safe idempotent
-    no-op if the webhook already won the race."""
+    no-op if the webhook already won the race.
+
+    CodeRabbit (PR #27) caught two real gaps in the original version:
+    (1) reference was reversed into a URL unvalidated -- fully
+    attacker-controlled query-string input, and reverse() raises
+    NoReverseMatch (confirmed via manage.py shell) for any value
+    containing "/", an unauthenticated 500 on this public GET endpoint.
+    Fixed by resolving the Order first and redirecting to the cart if no
+    match exists, the same way a missing/blank reference already did.
+    (2) The session cart was never cleared once a payment actually
+    confirmed, so the customer could immediately re-order the same
+    items. Fixed by re-checking the order's status after
+    confirm_order_payment runs and clearing the cart only then --
+    confirm_order_payment itself has no request/session to clear."""
     reference = request.GET.get("reference", "")
     if not reference:
         return redirect("orders:cart")
+    order = Order.objects.filter(payment_reference=reference).first()
+    if order is None:
+        return redirect("orders:cart")
     confirm_order_payment(reference)
+    order.refresh_from_db()
+    if order.status == Order.Status.CONFIRMED:
+        Cart(request).clear()
     return redirect("orders:order_confirmation", reference)
