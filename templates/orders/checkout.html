@@ -60,6 +60,12 @@
      }">
 <h1 class="font-headline-lg text-headline-lg text-on-surface mb-8">Checkout</h1>
 
+{% if payment_error %}
+<div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm mb-6">
+We had trouble reaching our payment provider. Your order is saved -- please try again.
+</div>
+{% endif %}
+
 <form method="post" class="grid grid-cols-1 lg:grid-cols-12 gap-12">
 {% csrf_token %}
 

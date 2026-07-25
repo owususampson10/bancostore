@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from django.shortcuts import get_object_or_404, redirect, render
@@ -7,11 +8,14 @@ from django.views.decorators.http import require_POST
 from constance import config
 
 from apps.catalog.models import Product
+from apps.distributors.paystack import PaystackError, initialize_transaction
 
 from .cart import Cart
 from .forms import CheckoutForm
 from .models import Order
-from .services import create_pending_order, prefill_contact_info
+from .services import confirm_order_payment, create_pending_order, prefill_contact_info
+
+logger = logging.getLogger(__name__)
 
 
 def cart_view(request):
@@ -72,6 +76,7 @@ def checkout_view(request):
     if not cart_items:
         return redirect("orders:cart")
 
+    payment_error = False
     if request.method == "POST":
         form = CheckoutForm(request.POST)
         if form.is_valid():
@@ -80,14 +85,37 @@ def checkout_view(request):
                 cart_items=cart_items,
                 form_data=form.cleaned_data,
             )
-            # code-review-and-quality (2026-07-25): Post/Redirect/Get --
-            # rendering order_created.html directly as the POST response
-            # meant an ordinary page refresh on the confirmation screen
-            # resubmitted the form and created a duplicate pending Order.
-            # Redirecting to a GET view keyed by the order's own
-            # unguessable payment_reference closes off the single most
-            # common way a customer stumbles into that.
-            return redirect("orders:order_confirmation", order.payment_reference)
+            # Task 17d (ADR-0005 decision 3): Order creation and Paystack
+            # initialization happen in the same step, exactly as the ADR
+            # documents it -- there's no separate decision point between
+            # confirming the order summary and being sent to pay.
+            callback_url = request.build_absolute_uri(
+                reverse("orders:order_payment_callback")
+            )
+            # Paystack requires an email on every transaction; Order.email
+            # is optional (a guest may leave it blank) -- fall back to a
+            # synthetic address that satisfies the API without claiming
+            # it's a real contact channel, mirroring
+            # pay_registration_fee's own established workaround. Never
+            # persisted onto Order.email itself.
+            email = order.email or f"{order.phone_number}@bancostore.test"
+            try:
+                data = initialize_transaction(
+                    email=email,
+                    amount_pesewas=int(order.total * 100),
+                    reference=order.payment_reference,
+                    callback_url=callback_url,
+                )
+            except PaystackError:
+                logger.exception(
+                    "checkout_view: Paystack initialize_transaction failed "
+                    "for order=%s -- the order already exists as PENDING; "
+                    "the customer can retry from this same page.",
+                    order.payment_reference,
+                )
+                payment_error = True
+            else:
+                return redirect(data["authorization_url"])
     else:
         form = CheckoutForm(initial=prefill_contact_info(request.user))
 
@@ -124,6 +152,7 @@ def checkout_view(request):
             "form": form,
             "cart_items": cart_items,
             "cart_subtotal": cart_subtotal,
+            "payment_error": payment_error,
             # For the live delivery-fee preview only (Alpine, client-side)
             # -- the authoritative fee is always recomputed server-side by
             # calculate_delivery_fee() at submission, never trusted from
@@ -154,5 +183,31 @@ def order_confirmation_view(request, payment_reference):
     # unguessable token rather than requiring the same session
     # (apps/distributors's PendingRegistration). No PII beyond what the
     # order's own creator already knows (total, reference) is shown here.
-    order = get_object_or_404(Order, payment_reference=payment_reference)
+    #
+    # code-review-and-quality (2026-07-25): order_created.html's confirmed
+    # state iterates order.items.all and reads item.product.primary_image
+    # per item -- Product.primary_image's own docstring requires a
+    # caller's prefetch_related("images") to avoid a query per call, and
+    # without prefetching items__product too, item.product itself would
+    # also be a query per item. Both prefetched here to avoid an N+1.
+    order = get_object_or_404(
+        Order.objects.prefetch_related("items__product__images"),
+        payment_reference=payment_reference,
+    )
     return render(request, "orders/order_created.html", {"order": order})
+
+
+def order_payment_callback(request):
+    """Task 17d. The customer's browser lands here after attempting
+    payment on Paystack's hosted page. Mirrors
+    apps.distributors.views.starter_pack_payment_callback's shape
+    exactly: never trusts the callback's own query-string claims about
+    payment status for anything beyond triggering the same server-side
+    re-verification the webhook does -- confirm_order_payment always
+    re-fetches and re-checks everything itself, and is a safe idempotent
+    no-op if the webhook already won the race."""
+    reference = request.GET.get("reference", "")
+    if not reference:
+        return redirect("orders:cart")
+    confirm_order_payment(reference)
+    return redirect("orders:order_confirmation", reference)

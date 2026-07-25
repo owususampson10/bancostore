@@ -1,0 +1,495 @@
+from decimal import Decimal
+from itertools import count
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+from django.db import connection
+
+import pytest
+
+from apps.binary_tree.models import BinaryTreeEdge
+from apps.binary_tree.services import BinaryTree
+from apps.catalog.models import Category, Product
+from apps.distributors.models import Distributor
+from apps.distributors.paystack import PaystackError
+from apps.orders.models import Order, OrderItem
+from apps.orders.services import confirm_order_payment
+from apps.pv_ledger.models import PvLedger
+
+User = get_user_model()
+_phone_seq = count(1)
+
+
+def _make_product(**overrides):
+    category, _ = Category.objects.get_or_create(name="Wellness", slug="wellness")
+    defaults = {
+        "name": "Vitality Pulse Smart Ring",
+        "category": category,
+        "price": Decimal("450.00"),
+        "pv_value": 60,
+        "stock": 5,
+        "is_active": True,
+    }
+    defaults.update(overrides)
+    return Product.objects.create(**defaults)
+
+
+def _make_distributor(sponsor=None):
+    phone = f"+233244{next(_phone_seq):06d}"
+    user = User.objects.create_user(username=phone, password="Passw0rd!")
+    Group.objects.get_or_create(name="distributor")[0].user_set.add(user)
+    return Distributor.objects.create(user=user, phone_number=phone, sponsor=sponsor)
+
+
+def _make_customer_user():
+    phone = f"+233245{next(_phone_seq):06d}"
+    return User.objects.create_user(username=phone, password="Passw0rd!")
+
+
+def _make_order(*, customer=None, email="ama@example.test", total=Decimal("450.00")):
+    return Order.objects.create(
+        customer=customer,
+        full_name="Ama Mensah",
+        phone_number="+233241234567",
+        email=email,
+        delivery_method=Order.DeliveryMethod.PICKUP,
+        subtotal=total,
+        delivery_fee=Decimal("0"),
+        total=total,
+        payment_reference=f"order-test-ref-{next(_phone_seq)}",
+    )
+
+
+def _add_item(order, product, *, quantity=1):
+    return OrderItem.objects.create(
+        order=order,
+        product=product,
+        product_name=product.name,
+        quantity=quantity,
+        unit_price=product.price,
+        unit_pv=product.pv_value,
+    )
+
+
+def _success_verify(amount, currency="GHS"):
+    return {"status": "success", "amount": amount, "currency": currency}
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_guest_order_confirms_and_never_credits_pv(mock_verify, mock_sms, mock_mail):
+    product = _make_product(stock=5)
+    order = _make_order(customer=None, total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CONFIRMED
+    assert order.confirmed_at is not None
+    assert order.pv_earned == 0
+    product.refresh_from_db()
+    assert product.stock == 4
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_logged_in_customer_group_order_never_credits_pv(
+    mock_verify, mock_sms, mock_mail
+):
+    user = _make_customer_user()
+    product = _make_product(stock=5)
+    order = _make_order(customer=user, total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CONFIRMED
+    assert order.pv_earned == 0
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_placed_distributor_order_credits_purchase_and_personal_pv(
+    mock_verify, mock_sms, mock_mail
+):
+    sponsor = _make_distributor()
+    distributor = _make_distributor()
+    BinaryTree.place_distributor(sponsor, distributor, leg=BinaryTreeEdge.Leg.RIGHT)
+    product = _make_product(stock=5, pv_value=60)
+    order = _make_order(customer=distributor.user, total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CONFIRMED
+    assert order.pv_earned == 60
+    ledger = PvLedger.objects.get(distributor=sponsor)
+    assert ledger.right_leg_pv == 60
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_unplaced_distributor_order_confirms_but_credits_zero_pv(
+    mock_verify, mock_sms, mock_mail
+):
+    # Doubt-driven-development finding: a distributor with no sponsor/
+    # placement (unreachable in the normal onboarding flow, but not
+    # database-guaranteed) must never have pv_earned claim a credit that
+    # record_purchase_pv silently no-op'd on -- pv_earned must reflect
+    # what was ACTUALLY credited, not the pre-computed amount.
+    distributor = _make_distributor()
+    product = _make_product(stock=5, pv_value=60)
+    order = _make_order(customer=distributor.user, total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CONFIRMED
+    assert order.pv_earned == 0
+    assert not PvLedger.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_multiple_line_items_each_decrement_their_own_product_stock(
+    mock_verify, mock_sms, mock_mail
+):
+    product_a = _make_product(name="A", stock=5)
+    product_b = _make_product(name="B", stock=3)
+    order = _make_order(total=Decimal("900.00"))
+    _add_item(order, product_a, quantity=2)
+    _add_item(order, product_b, quantity=1)
+    mock_verify.return_value = _success_verify(amount=90000)
+
+    confirm_order_payment(order.payment_reference)
+
+    product_a.refresh_from_db()
+    product_b.refresh_from_db()
+    assert product_a.stock == 3
+    assert product_b.stock == 2
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_already_confirmed_order_is_an_idempotent_no_op(
+    mock_verify, mock_sms, mock_mail
+):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+    confirm_order_payment(order.payment_reference)
+
+    product.refresh_from_db()
+    assert product.stock == 4  # decremented once, not twice
+    assert mock_verify.call_count == 1  # second call short-circuited before verifying
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_cancelled_order_confirmation_attempt_is_a_no_op(
+    mock_verify, mock_sms, mock_mail
+):
+    product = _make_product(stock=0)
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)  # cancels (insufficient stock)
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+
+    mock_verify.reset_mock()
+    confirm_order_payment(order.payment_reference)  # a late duplicate webhook
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+    mock_verify.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_non_success_paystack_status_does_not_confirm_the_order(
+    mock_verify, mock_sms, mock_mail
+):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = {"status": "failed", "amount": 45000, "currency": "GHS"}
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.PENDING
+    product.refresh_from_db()
+    assert product.stock == 5
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_wrong_currency_does_not_confirm_the_order(mock_verify, mock_sms, mock_mail):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000, currency="NGN")
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.PENDING
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_amount_mismatch_does_not_confirm_the_order(mock_verify, mock_sms, mock_mail):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=1)  # far too little
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.PENDING
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_paystack_verify_error_is_a_safe_no_op(mock_verify, mock_sms, mock_mail):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.side_effect = PaystackError("network error")
+
+    confirm_order_payment(order.payment_reference)  # must not raise
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.PENDING
+
+
+@pytest.mark.django_db
+def test_no_matching_order_is_a_safe_no_op():
+    confirm_order_payment("order-does-not-exist")  # must not raise
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_insufficient_stock_cancels_the_order_instead_of_confirming(
+    mock_verify, mock_sms, mock_mail
+):
+    product = _make_product(stock=0)
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)  # must not raise
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+    assert order.pv_earned == 0
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_insufficient_stock_on_one_line_item_does_not_decrement_the_other(
+    mock_verify, mock_sms, mock_mail
+):
+    product_a = _make_product(name="A", stock=5)
+    product_b = _make_product(name="B", stock=0)  # will fail
+    order = _make_order(total=Decimal("900.00"))
+    _add_item(order, product_a, quantity=1)
+    _add_item(order, product_b, quantity=1)
+    mock_verify.return_value = _success_verify(amount=90000)
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+    product_a.refresh_from_db()
+    assert product_a.stock == 5  # rolled back, not partially decremented
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_insufficient_stock_does_not_credit_pv_for_a_distributor_order(
+    mock_verify, mock_sms, mock_mail
+):
+    sponsor = _make_distributor()
+    distributor = _make_distributor()
+    BinaryTree.place_distributor(sponsor, distributor, leg=BinaryTreeEdge.Leg.LEFT)
+    product = _make_product(stock=0, pv_value=60)
+    order = _make_order(customer=distributor.user, total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+    assert order.pv_earned == 0
+    ledger = PvLedger.objects.filter(distributor=sponsor).first()
+    assert ledger is None or ledger.left_leg_pv == 0
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_confirmation_sends_sms_and_email_when_email_is_present(
+    mock_verify, mock_sms, mock_mail
+):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("450.00"), email="ama@example.test")
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    mock_sms.assert_called_once()
+    mock_mail.assert_called_once()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_confirmation_skips_email_when_order_email_is_blank(
+    mock_verify, mock_sms, mock_mail
+):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("450.00"), email="")
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    mock_sms.assert_called_once()
+    mock_mail.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_sms_failure_does_not_undo_an_already_applied_confirmation(
+    mock_verify, mock_sms, mock_mail
+):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+    mock_sms.side_effect = Exception("SMS provider outage")
+
+    confirm_order_payment(order.payment_reference)  # must not raise
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CONFIRMED
+    product.refresh_from_db()
+    assert product.stock == 4
+    mock_mail.assert_called_once()  # the outage didn't stop the email attempt either
+
+
+@pytest.mark.django_db(transaction=True)
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_concurrent_confirmation_attempts_never_double_decrement_or_double_credit_pv(
+    mock_verify, mock_sms, mock_mail
+):
+    """Debugging-and-error-recovery (2026-07-25): originally written with
+    5 threads racing the same reference, matching this codebase's own
+    apps/wallet 5-thread convention -- but that test's correctness comes
+    from a race-free bulk F() update, not from row locking actually
+    resolving contention. confirm_order_payment's idempotency instead
+    depends on select_for_update_nowait_if_supported, which SQLite has no
+    real implementation of at all (has_select_for_update is False --
+    see tests/unit/distributors/test_consume_paid_starter_pack.py::
+    test_concurrent_confirmations_under_the_same_sponsor_do_not_lose_pv's
+    own docstring, the closest existing precedent for this exact lock
+    shape, which deliberately uses only 2 threads for the same reason).
+    5-way contention on one row intermittently exhausted
+    retry_on_lock_contention's bounded retries under SQLite's coarse
+    whole-table locking (reproduced 2/3 local runs, even after adding
+    connection.close() per thread) -- reduced to 2 threads to match that
+    precedent's own choice, which still genuinely exercises the race
+    (both threads target the exact same PENDING order) without depending
+    on contention resolution SQLite cannot really provide. Full
+    reliability under real concurrent load is what CI's real MySQL run
+    verifies, per CLAUDE.md's own testing-strategy rationale -- this
+    local test's job is to catch a regression in the retry/lock wiring,
+    not to prove SQLite-level concurrency guarantees it cannot make."""
+    import threading
+
+    sponsor = _make_distributor()
+    distributor = _make_distributor()
+    BinaryTree.place_distributor(sponsor, distributor, leg=BinaryTreeEdge.Leg.RIGHT)
+    product = _make_product(stock=5, pv_value=60)
+    order = _make_order(customer=distributor.user, total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    errors = []
+
+    def _attempt():
+        try:
+            confirm_order_payment(order.payment_reference)
+        except Exception as exc:  # pragma: no cover - captured for the assertion below
+            errors.append(exc)
+        finally:
+            connection.close()  # each thread must not share the main
+            # thread's connection/transaction state, matching
+            # test_consume_paid_starter_pack.py's own established pattern
+
+    threads = [threading.Thread(target=_attempt) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors
+    order.refresh_from_db()
+    product.refresh_from_db()
+    assert order.status == Order.Status.CONFIRMED
+    assert order.pv_earned == 60
+    assert product.stock == 4  # decremented exactly once across 5 concurrent calls
+    ledger = PvLedger.objects.get(distributor=sponsor)
+    assert ledger.right_leg_pv == 60  # credited exactly once

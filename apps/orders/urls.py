@@ -15,4 +15,9 @@ urlpatterns = [
         views.order_confirmation_view,
         name="order_confirmation",
     ),
+    path(
+        "checkout/payment-callback/",
+        views.order_payment_callback,
+        name="order_payment_callback",
+    ),
 ]
