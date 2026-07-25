@@ -262,3 +262,23 @@ def test_a_deleted_product_is_pruned_from_the_session_when_items_is_read():
     # session, not just silently omit it from this one return value.
     assert Cart(request).items() == []
     assert Cart(request).count() == 0
+
+
+@pytest.mark.django_db
+def test_a_deactivated_product_is_pruned_the_same_way_as_a_deleted_one():
+    # doubt-driven-development (Task 17c design review): a product an
+    # admin deactivates -- not deletes -- after it's added to a cart is
+    # just as unpurchasable as a deleted one, but the original fix only
+    # excluded genuinely deleted pks. Left unfixed, checkout could
+    # silently snapshot an OrderItem for a no-longer-purchasable product.
+    request = _request_with_session()
+    product = _make_product(stock=10, is_active=True)
+    cart = Cart(request)
+    cart.add(product, quantity=2)
+    assert cart.count() == 2
+
+    product.is_active = False
+    product.save()
+
+    assert Cart(request).items() == []
+    assert Cart(request).count() == 0
