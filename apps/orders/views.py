@@ -112,7 +112,9 @@ def checkout_view(request):
         if submitted_method in valid_delivery_methods
         else Order.DeliveryMethod.HOME_DELIVERY
     )
-    selected_delivery_zone = submitted_zone if submitted_zone in valid_delivery_zones else ""
+    selected_delivery_zone = (
+        submitted_zone if submitted_zone in valid_delivery_zones else ""
+    )
 
     cart_subtotal = sum((line.line_total for line in cart_items), start=Decimal("0"))
     return render(
