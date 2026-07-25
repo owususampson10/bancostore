@@ -205,6 +205,13 @@ class OrderItem(models.Model):
             ),
         ]
 
+    @property
+    def line_total(self):
+        # Mirrors apps/orders/cart.py::CartLine.line_total's exact
+        # computation -- unit_price is already the snapshotted price, so
+        # this never re-reads a live Product.price.
+        return self.unit_price * self.quantity
+
     def __str__(self):
         return (
             f"OrderItem<order={self.order_id} "

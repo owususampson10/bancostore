@@ -1,4 +1,5 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -9,6 +10,8 @@ from apps.catalog.models import Category, Product
 from apps.orders.models import Order
 
 User = get_user_model()
+
+_FAKE_AUTHORIZATION_URL = "https://checkout.paystack.com/fake-access-code"
 
 
 def _make_product(**overrides):
@@ -92,7 +95,11 @@ def test_logged_in_customer_gets_contact_info_prefilled(client):
 
 
 @pytest.mark.django_db
-def test_submitting_valid_checkout_creates_a_pending_order(client):
+@patch("apps.orders.views.initialize_transaction")
+def test_submitting_valid_checkout_creates_a_pending_order_and_redirects_to_paystack(
+    mock_initialize, client
+):
+    mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
     product = _make_product()
     _add_to_cart(client, product)
 
@@ -100,21 +107,27 @@ def test_submitting_valid_checkout_creates_a_pending_order(client):
 
     # Post/Redirect/Get (code-review-and-quality, 2026-07-25): a page
     # refresh on a directly-rendered response would resubmit the form and
-    # create a duplicate order.
+    # create a duplicate order. Task 17d: the redirect target is now
+    # Paystack's hosted checkout, not our own confirmation page directly
+    # -- confirm_order_payment (webhook/callback) is what moves the order
+    # to CONFIRMED once payment actually completes.
     order = Order.objects.get()
     assert response.status_code == 302
-    assert response.url == reverse(
-        "orders:order_confirmation", args=[order.payment_reference]
-    )
+    assert response.url == _FAKE_AUTHORIZATION_URL
     assert order.status == Order.Status.PENDING
     assert order.customer is None
     assert order.items.count() == 1
+    mock_initialize.assert_called_once()
+    assert mock_initialize.call_args.kwargs["reference"] == order.payment_reference
+    assert mock_initialize.call_args.kwargs["amount_pesewas"] == int(order.total * 100)
 
 
 @pytest.mark.django_db
+@patch("apps.orders.views.initialize_transaction")
 def test_submitting_valid_checkout_as_a_logged_in_user_links_the_order_to_the_account(
-    client,
+    mock_initialize, client
 ):
+    mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
     user = User.objects.create_user(username="+233551234568", password="Passw0rd!")
     client.force_login(user)
     product = _make_product()
@@ -124,6 +137,66 @@ def test_submitting_valid_checkout_as_a_logged_in_user_links_the_order_to_the_ac
 
     order = Order.objects.get()
     assert order.customer_id == user.pk
+
+
+@pytest.mark.django_db
+@patch("apps.orders.views.initialize_transaction")
+def test_checkout_uses_a_synthetic_email_for_paystack_when_order_email_is_blank(
+    mock_initialize, client
+):
+    # Paystack requires an email on every transaction; Order.email is
+    # optional (a guest may leave it blank) -- the synthetic fallback
+    # mirrors pay_registration_fee's own established workaround and must
+    # never be persisted onto Order.email itself.
+    mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    client.post(reverse("orders:checkout"), _valid_home_delivery_data(email=""))
+
+    order = Order.objects.get()
+    assert order.email == ""
+    assert (
+        mock_initialize.call_args.kwargs["email"]
+        == f"{order.phone_number}@bancostore.test"
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.orders.views.initialize_transaction")
+def test_checkout_shows_an_error_if_paystack_initialize_fails(mock_initialize, client):
+    from apps.distributors.paystack import PaystackError
+
+    mock_initialize.side_effect = PaystackError("network error")
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    response = client.post(reverse("orders:checkout"), _valid_home_delivery_data())
+
+    assert response.status_code == 200
+    assert Order.objects.exists()  # already created before the Paystack call
+    assert "trouble reaching our payment provider" in response.content.decode()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.views.initialize_transaction")
+def test_checkout_shows_an_error_if_paystack_returns_no_authorization_url(
+    mock_initialize, client
+):
+    # CodeRabbit (PR #27): every other Paystack response read in this
+    # codebase uses .get() so a malformed/unexpected shape logs and
+    # returns instead of raising -- data["authorization_url"] was the
+    # one bracket-indexed read, turning a missing key into an unhandled
+    # 500 after the order already existed.
+    mock_initialize.return_value = {}
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    response = client.post(reverse("orders:checkout"), _valid_home_delivery_data())
+
+    assert response.status_code == 200
+    assert Order.objects.exists()
+    assert "trouble reaching our payment provider" in response.content.decode()
 
 
 @pytest.mark.django_db
@@ -142,7 +215,9 @@ def test_missing_required_home_delivery_fields_does_not_create_an_order(client):
 
 
 @pytest.mark.django_db
-def test_pickup_checkout_does_not_require_address_fields(client):
+@patch("apps.orders.views.initialize_transaction")
+def test_pickup_checkout_does_not_require_address_fields(mock_initialize, client):
+    mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
     product = _make_product()
     _add_to_cart(client, product)
 
@@ -163,7 +238,10 @@ def test_pickup_checkout_does_not_require_address_fields(client):
 
 
 @pytest.mark.django_db
-def test_pickup_discards_delivery_zone_address_and_area_even_if_submitted(client):
+@patch("apps.orders.views.initialize_transaction")
+def test_pickup_discards_delivery_zone_address_and_area_even_if_submitted(
+    mock_initialize, client
+):
     # code-review-and-quality (2026-07-25): Alpine only hides the delivery-
     # details fields via x-show when pickup is selected -- it doesn't
     # clear their values, so a user who filled in home-delivery fields
@@ -172,6 +250,7 @@ def test_pickup_discards_delivery_zone_address_and_area_even_if_submitted(client
     # CheckConstraint (pickup implies blank) -- unproven by any existing
     # test until now, since every other pickup test already posts blank
     # values.
+    mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
     product = _make_product()
     _add_to_cart(client, product)
 

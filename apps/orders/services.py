@@ -1,13 +1,27 @@
+import logging
 import uuid
 from decimal import Decimal
 
+from django.core.mail import send_mail
 from django.db import transaction
+from django.utils import timezone
 
 from constance import config
 
 from apps.accounts.permissions import is_distributor
+from apps.binary_tree.models import BinaryTreeEdge
+from apps.catalog.services import InsufficientStockError, decrement_stock
+from apps.distributors.paystack import PaystackError, verify_transaction
+from apps.notifications.sms import send_sms
+from apps.pv_ledger.services import record_personal_pv, record_purchase_pv
+from bancostore.concurrency import (
+    retry_on_lock_contention,
+    select_for_update_nowait_if_supported,
+)
 
 from .models import Order, OrderItem
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_delivery_fee(delivery_method, delivery_zone, subtotal):
@@ -153,3 +167,240 @@ def create_pending_order(*, user, cart_items, form_data) -> Order:
         )
 
     return order
+
+
+def confirm_order_payment(reference: str) -> None:
+    """Task 17d (ADR-0005 decision 4). Mirrors
+    apps.distributors.services.consume_paid_starter_pack's exact shape:
+    lock the Order row, no-op if already resolved, verify_transaction +
+    exact pinned-amount check, then inside that same lock decrement stock
+    per line item and credit PV, transition status, and send the
+    SMS/email confirmation only after the lock releases (never inside
+    it) -- matching Task 16g's "never hold a lock across external I/O
+    for a notification" standard.
+
+    A fresh-context doubt-driven-development review (two independent
+    cross-model passes, reconciled 2026-07-25) before this was written
+    found and fixed several gaps against the original draft:
+
+    - Both record_purchase_pv (ancestors) AND record_personal_pv (self)
+      must be called for a distributor purchase, matching
+      consume_paid_starter_pack's own dual-call pattern exactly -- the
+      original draft only had the former, which would have silently
+      never built a distributor's own monthly-100-PV eligibility from
+      storefront purchases.
+    - Order.pv_earned must reflect what was ACTUALLY credited, not the
+      pre-computed amount: record_purchase_pv silently no-ops if the
+      distributor has no BinaryTreeEdge yet (unplaced -- unreachable
+      through normal onboarding, since placement happens at starter-pack
+      confirmation, but not database-guaranteed), so placement is checked
+      explicitly here before crediting anything.
+    - OrderItems are processed in deterministic product_id order before
+      decrementing stock, so two orders sharing multiple hot products
+      always attempt their per-product locks in the same order --
+      reduces (does not need to eliminate, since NOWAIT fails fast
+      rather than blocks) contention between concurrent orders.
+    - The whole attempt is wrapped in retry_on_lock_contention, matching
+      every comparable locked flow in this codebase.
+    - verify_transaction's response is read via .get(), never bracket
+      indexing -- an unexpected/malformed payload shape must log and
+      return, never raise, preserving the "webhook handler never raises"
+      contract paystack_webhook depends on.
+    - InsufficientStockError is caught here, not left to propagate: per
+      ADR-0005 decision 5 ("a later confirmation finding insufficient
+      stock must fail the order cleanly... rather than silently
+      over-selling"), which the ADR explicitly left the exact terminal
+      handling "TBD at implementation time" -- resolved with the user as
+      the manual-admin path (below), not automated refund. Real Paystack
+      Refund API integration is out of scope here, deliberately deferred
+      to Task 18 (which already owns the rest of the Cancelled/Refunded
+      lifecycle per this same ADR's Consequences section), not silently
+      assumed done.
+    - int(order.total * 100) is exact, not a float-precision risk: Order
+      is created (17c) from a sum of already-2dp Decimals
+      (Product.price * an integer quantity, plus a 2dp delivery fee), so
+      order.total is always an exact multiple of one pesewa -- the same
+      invariant apps/distributors/services.py already relies on for
+      REGISTRATION_FEE/starter_pack_price_pesewas.
+    """
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                order = select_for_update_nowait_if_supported(
+                    Order.objects.filter(payment_reference=reference)
+                ).get()
+            except Order.DoesNotExist:
+                logger.error(
+                    "confirm_order_payment: no Order found for reference=%s "
+                    "-- a payment may have been confirmed with no matching "
+                    "record. Needs manual investigation.",
+                    reference,
+                )
+                return
+
+            if order.status != Order.Status.PENDING:
+                return  # Already resolved (confirmed or cancelled) -- idempotent no-op.
+
+            try:
+                verified = verify_transaction(reference)
+            except PaystackError:
+                logger.exception(
+                    "confirm_order_payment: Paystack verify_transaction "
+                    "failed for reference=%s",
+                    reference,
+                )
+                return
+
+            if verified.get("status") != "success":
+                return
+            if verified.get("currency") != "GHS":
+                logger.warning(
+                    "confirm_order_payment: unexpected currency %r for " "reference=%s",
+                    verified.get("currency"),
+                    reference,
+                )
+                return
+            expected_pesewas = int(order.total * 100)
+            if verified.get("amount") != expected_pesewas:
+                logger.warning(
+                    "confirm_order_payment: amount mismatch for "
+                    "reference=%s (paid=%r, expected=%r)",
+                    reference,
+                    verified.get("amount"),
+                    expected_pesewas,
+                )
+                return
+
+            items = list(order.items.select_related("product").order_by("product_id"))
+            for item in items:
+                decrement_stock(item.product, item.quantity)
+
+            pv_earned = 0
+            if order.customer_id is not None and is_distributor(order.customer):
+                distributor = order.customer.distributor
+                if BinaryTreeEdge.objects.filter(descendant=distributor).exists():
+                    pv_amount = sum(item.unit_pv * item.quantity for item in items)
+                    if pv_amount:
+                        record_purchase_pv(distributor, pv_amount)
+                        record_personal_pv(distributor, pv_amount)
+                        pv_earned = pv_amount
+
+            order.pv_earned = pv_earned
+            order.status = Order.Status.CONFIRMED
+            order.confirmed_at = timezone.now()
+            order.save(update_fields=["pv_earned", "status", "confirmed_at"])
+        _send_confirmation_notifications(order)
+
+    try:
+        retry_on_lock_contention(_attempt)
+    except InsufficientStockError:
+        _cancel_order_for_insufficient_stock(reference)
+
+
+def _cancel_order_for_insufficient_stock(reference: str) -> None:
+    """The prior transaction.atomic() block already rolled back entirely
+    (including any earlier line items' stock decrements), so this needs
+    its own fresh lock/transaction -- the Order is back to PENDING in the
+    database at this point. Manual-admin path, confirmed with the user
+    2026-07-25: the customer's payment has already been captured by
+    Paystack, so this is CANCELLED (not left PENDING to retry forever on
+    every webhook redelivery) with an ERROR-level log for a human to
+    action the actual GHS refund -- real Paystack Refund API automation
+    is Task 18's scope, not assumed here."""
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                order = select_for_update_nowait_if_supported(
+                    Order.objects.filter(payment_reference=reference)
+                ).get()
+            except Order.DoesNotExist:
+                return
+            if order.status != Order.Status.PENDING:
+                return  # A concurrent attempt already handled this.
+            order.status = Order.Status.CANCELLED
+            order.save(update_fields=["status"])
+        logger.error(
+            "confirm_order_payment: payment verified but stock was "
+            "insufficient for reference=%s -- Order CANCELLED, customer "
+            "already paid. Needs manual admin refund.",
+            reference,
+        )
+        _send_stock_unavailable_notification(order)
+
+    retry_on_lock_contention(_attempt)
+
+
+def _send_confirmation_notifications(order: Order) -> None:
+    # Each channel is wrapped individually -- money/stock/PV are already
+    # committed by this point, so a notification-provider outage must
+    # never look like this confirmation was rolled back, and one
+    # channel's failure must not skip the other.
+    try:
+        send_sms(
+            str(order.phone_number),
+            f"Your Bancostore order (GHS {order.total}) is confirmed! "
+            f"Reference: {order.payment_reference}",
+        )
+    except Exception:
+        logger.exception(
+            "confirm_order_payment: failed to send SMS confirmation for "
+            "reference=%s",
+            order.payment_reference,
+        )
+
+    if order.email:
+        try:
+            send_mail(
+                subject="Your Bancostore order is confirmed",
+                message=(
+                    f"Your order (GHS {order.total}) is confirmed. "
+                    f"Reference: {order.payment_reference}"
+                ),
+                from_email=None,
+                recipient_list=[order.email],
+            )
+        except Exception:
+            logger.exception(
+                "confirm_order_payment: failed to send email confirmation "
+                "for reference=%s",
+                order.payment_reference,
+            )
+
+
+def _send_stock_unavailable_notification(order: Order) -> None:
+    try:
+        send_sms(
+            str(order.phone_number),
+            "We're sorry -- an item in your Bancostore order "
+            f"({order.payment_reference}) is no longer available. Your "
+            "payment was received; our team will contact you about a "
+            "refund.",
+        )
+    except Exception:
+        logger.exception(
+            "confirm_order_payment: failed to send stock-unavailable SMS "
+            "for reference=%s",
+            order.payment_reference,
+        )
+
+    if order.email:
+        try:
+            send_mail(
+                subject="An item in your Bancostore order is unavailable",
+                message=(
+                    "We're sorry -- an item in your order "
+                    f"({order.payment_reference}) is no longer available. "
+                    "Your payment was received; our team will contact you "
+                    "about a refund."
+                ),
+                from_email=None,
+                recipient_list=[order.email],
+            )
+        except Exception:
+            logger.exception(
+                "confirm_order_payment: failed to send stock-unavailable "
+                "email for reference=%s",
+                order.payment_reference,
+            )

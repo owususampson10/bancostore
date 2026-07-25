@@ -282,3 +282,31 @@ def test_a_deactivated_product_is_pruned_the_same_way_as_a_deleted_one():
 
     assert Cart(request).items() == []
     assert Cart(request).count() == 0
+
+
+@pytest.mark.django_db
+def test_clear_empties_a_populated_cart():
+    # CodeRabbit (PR #27): confirm_order_payment/order_payment_callback
+    # need a way to empty the session cart once a purchase actually
+    # confirms -- without this, the just-purchased items stayed in the
+    # cart and the customer could immediately re-order them.
+    request = _request_with_session()
+    product = _make_product(stock=5)
+    cart = Cart(request)
+    cart.add(product, quantity=2)
+    assert cart.count() == 2
+
+    cart.clear()
+
+    assert Cart(request).items() == []
+    assert Cart(request).count() == 0
+
+
+@pytest.mark.django_db
+def test_clear_on_an_already_empty_cart_is_a_safe_no_op():
+    request = _request_with_session()
+    cart = Cart(request)
+
+    cart.clear()  # must not raise
+
+    assert Cart(request).items() == []

@@ -23,6 +23,7 @@ from django_ratelimit.decorators import ratelimit
 
 from apps.accounts.permissions import is_distributor
 from apps.notifications.otp import generate_otp, verify_otp
+from apps.orders.services import confirm_order_payment
 from apps.wallet.models import WalletTransaction
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
@@ -275,13 +276,20 @@ def paystack_webhook(request):
     """Source: https://paystack.com/docs/payments/webhooks/ -- must verify
     the x-paystack-signature header before acting, and must return 200 OK
     or Paystack retries the same event for up to 72 hours (so this handler
-    must be idempotent, which both consume functions are, and which
-    process_transfer_webhook_task's own no-raise contract exists to
+    must be idempotent, which every charge.success handler below is, and
+    which process_transfer_webhook_task's own no-raise contract exists to
     preserve for transfer events too). One webhook URL handles every
     Paystack use case in this project (Paystack has no per-transaction
     webhook config), so it dispatches by event type, then by reference
-    prefix -- "reg-" (Task 10b), "pack-" (Task 10c), "withdrawal-payout-"
-    (Task 16f PR 3).
+    prefix -- "reg-" (Task 10b), "pack-" (Task 10c), "order-" (Task 17d)
+    for charge.success, or "withdrawal-payout-" (Task 16f PR 3) below for
+    transfer events. The prefix -> handler dict is built fresh inside
+    this function (not module-level) so each entry resolves the current
+    module-level name at call time -- a module-level dict would instead
+    capture these function objects once at import time, silently
+    defeating @patch("apps.distributors.views.consume_paid_starter_pack")
+    -style test mocking, which every existing test for this dispatch
+    already relies on.
 
     Transfer events (Task 16f PR 3, doubt-driven-development, 2026-07-24):
     confirmed against Paystack's own docs that transfer.success/failed/
@@ -303,13 +311,27 @@ def paystack_webhook(request):
     event = payload.get("event")
     if event == "charge.success":
         reference = payload.get("data", {}).get("reference", "")
-        # Two prefixes is still simplest as if/elif -- if a third payment
-        # type is added (e.g. checkout/order references, Task 18),
-        # consider a prefix -> handler dict instead of more branches here.
-        if reference.startswith("reg-"):
-            consume_paid_registration(reference)
-        elif reference.startswith("pack-"):
-            consume_paid_starter_pack(reference)
+        # Task 17d added the third prefix (order-) the old if/elif's own
+        # comment anticipated -- a prefix -> handler dict instead of more
+        # branches, per that comment's own suggestion. Built here, not at
+        # module level, so @patch("apps.distributors.views.consume_...")
+        # -style test mocking still works (see this function's own
+        # docstring for why a module-level dict would defeat that).
+        charge_success_handlers = {
+            "reg-": consume_paid_registration,
+            "pack-": consume_paid_starter_pack,
+            "order-": confirm_order_payment,
+        }
+        handler = next(
+            (
+                fn
+                for prefix, fn in charge_success_handlers.items()
+                if reference.startswith(prefix)
+            ),
+            None,
+        )
+        if handler:
+            handler(reference)
         elif reference:
             logger.warning(
                 "paystack_webhook: unrecognized reference prefix: %s", reference
