@@ -118,17 +118,26 @@ def process_binary_bonus_for_distributor(distributor, run_at) -> Decimal:
     WalletTransaction via the check below and returns early instead of
     ever calling `credit()` a second time for the same reference.
 
-    Never touches PvLedger (an immutable all-time historical total) --
-    reads/writes only PvDailyBucket, via `sum_leg_pv` / `expire_old_pv` /
-    `consume_leg_pv_fifo`. PvDailyBucket.pv is only ever INCREASED
-    outside this function (by the write-time purchase-credit path in
+    Never touches PvLedger -- reads/writes only PvDailyBucket, via
+    `sum_leg_pv` / `expire_old_pv` / `consume_leg_pv_fifo`. (PvLedger is
+    read only by apps.binary_tree.services.BinaryTree._weaker_leg's
+    auto-balance placement decision and a reporting display, and since
+    Task 18b is no longer immutable -- apps.orders.services.
+    cancel_or_refund_order reverses it on a paid order's cancellation/
+    refund.) PvDailyBucket.pv was only ever INCREASED outside this
+    function (by the write-time purchase-credit path in
     apps.pv_ledger.services.record_purchase_pv) and only ever DECREASED
-    by this function -- so a concurrent purchase landing mid-cycle for
-    this same distributor can only make MORE PV available than this
-    cycle's totals counted, never less, and `consume_leg_pv_fifo` never
-    needs to (and structurally cannot) reach into PV a concurrent
-    purchase just added, since it never consumes more than what
-    `sum_leg_pv` already counted for that leg.
+    by this function, UNTIL Task 18b added a second decrementer
+    (cancel_or_refund_order, reversing a refunded/cancelled order's PV).
+    That function locks the same ancestor Distributor row this function
+    locks (below) before touching that ancestor's PvDailyBucket rows --
+    the two can never interleave for the same ancestor, so the "a
+    concurrent purchase landing mid-cycle can only make MORE PV
+    available, never less" reasoning below still holds against
+    record_purchase_pv (which takes no such lock, but only ever
+    increases); it does NOT need to separately reason about
+    cancel_or_refund_order, since that path is fully serialized out by
+    the shared lock instead.
 
     If the weekly cap reduces the payout below the raw calculated bonus,
     only the proportional PV actually monetized this cycle is consumed

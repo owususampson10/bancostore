@@ -152,6 +152,24 @@ guessed at.
   mutable tag rather than a commit SHA, and there's no dependency vulnerability scan step
   (`pip-audit`/`safety`) yet — cheap to add now while the dependency set is still small.
 
+## Known issues — flagged during Task 18b verification, unrelated to Task 18b (2026-07-26)
+
+- [ ] `tests/feature/admin_portal/test_withdrawal_review.py` intermittently fails 5 of its 17 tests
+  (`test_queue_summary_cards_show_real_totals_not_the_stitch_mockup_numbers`,
+  `test_high_priority_card_counts_requests_above_the_threshold`,
+  `test_detail_shows_the_request_and_distributor_data`,
+  `test_approving_from_the_detail_screen_debits_the_wallet`,
+  `test_approve_flash_message_shows_the_real_name_not_the_debug_repr`) when run as part of the
+  **full** suite, but passes 17/17 every time in isolation. Confirmed unrelated to Task 18b's own
+  changes two ways: (1) `tests/feature/admin_portal/` collects alphabetically before any file Task
+  18b touched, so causation the other direction is structurally impossible; (2) running the full
+  suite again with Task 18b's changes entirely stashed out (`git stash -u`) still passed clean
+  (870/870) — the flake didn't even reproduce without this task's code present at all, meaning it's
+  intermittent/order-dependent against something else in the suite, not deterministic either way.
+  Not root-caused or fixed here — out of scope for Task 18b — but flagged rather than silently
+  worked around. Worth a real `debugging-and-error-recovery` pass whenever withdrawal-review or a
+  neighboring `admin_portal` test file is next touched.
+
 ---
 
 ## Phase 0: Foundation
@@ -2694,47 +2712,84 @@ passed) both before and after the fix.
 
 ---
 
-#### Task 18b: Confirmed-order cancel/refund -- stock + PV reversal (elevated rigor)
+#### Task 18b: Paid-order cancel/refund -- stock + PV reversal (elevated rigor)
 
-**Description:** `apps/orders/services.py::cancel_confirmed_order`/`refund_order` (or similar),
-mirroring `confirm_order_payment`'s locked, idempotent shape (Task 17d): lock the `Order` row,
-validate the transition is legal (18a), and — for any already-paid order (`confirmed`,
-`processing`, `dispatched`, or `delivered`, per the ADR-0006/18a transition graph's own set of
-legal `-> refunded` edges, not just `confirmed`) being cancelled or refunded — inside that same
-lock, reverse stock per line item and reverse PV, before transitioning status and notifying after
-the lock releases. **Scope correction (CodeRabbit, PR #28):** this slice was originally scoped to
-"a `confirmed` order" only, but the 18a transition graph legally allows `processing`/`dispatched`/
-`delivered` -> `refunded` too (cancellation stays restricted to `confirmed`/`processing`, i.e.
-pre-dispatch, per ADR-0006 decision 1) -- a refund from any of those later paid states must reverse
-stock/PV exactly the same way a `confirmed`-order refund does, or the ledger goes inconsistent
-(credited PV surviving a refund). Per ADR-0006 decision 2, PV reversal is the hard part: this
-slice's own `doubt-driven-development` pass must design around the fact that
-`apps.pv_ledger.services.record_purchase_pv`/`record_personal_pv` both hardcode "now" internally
-(today's date for `PvDailyBucket`, this calendar month for `MonthlyPersonalPv`) with no way to
-target the *original* purchase's date/month -- a naive negative-amount call at cancellation/refund
-time (which can happen days or weeks after `confirmed_at`) would adjust the wrong day/month.
-`PvLedger`'s own running leg totals have no such date dependency and are safe to reverse directly.
+**Description:** `apps/orders/services.py::cancel_or_refund_order(order_id, to_status, tracking_note="", restock=None)`,
+mirroring `confirm_order_payment`'s locked, idempotent shape (Task 17d). Design finalized 2026-07-26
+via a three-cycle `doubt-driven-development` pass (see ADR-0006's "Update (2026-07-26)" section for
+the full reasoning) -- summary of what that pass changed from the original plan:
+
+- `to_status` is hard-restricted to `CANCELLED`/`REFUNDED` only -- an early draft let any legal
+  transition through `is_legal_order_status_transition`, which would have let a future caller
+  reverse a healthy order's PV/stock by mistakenly calling this for e.g. `PROCESSING`.
+- Reverses **stock, `PvLedger`, `PvDailyBucket`, and `MonthlyPersonalPv`** -- all four, not just
+  stock and the two date-keyed PV structures. `PvLedger` was originally assumed safe-but-skippable
+  (or not even in scope); confirmed it must reverse too, both per real-world MLM returns-policy
+  practice and to close a leg-inflation gaming vector (buy-then-refund under a leg to permanently
+  bias future auto-balance placement toward the other leg). This required correcting a factual
+  error repeated in this project's own docs (including ADR-0006's own decision-2 text above):
+  `PvLedger` is NOT read by Binary Bonus (`process_binary_bonus_for_distributor`'s own docstring:
+  "Never touches PvLedger") -- it's read only by `BinaryTree._weaker_leg` (new-distributor
+  placement) and a reporting display. The two docstrings calling it "immutable all-time historical
+  total" (`process_binary_bonus_for_distributor`, `pv_ledger.services.sum_leg_pv`) need updating.
+- The `PvDailyBucket`/`MonthlyPersonalPv` date-drift problem (ADR-0006's original flag) is fixed
+  **without a new migration**: `confirm_order_payment` now captures one `now = timezone.now()`
+  before crediting, passes `now.date()` explicitly into new `today=` parameters on
+  `record_purchase_pv`/`record_personal_pv` (backward-compatible; `consume_paid_starter_pack` is
+  the only other caller and doesn't pass it), and reuses that same `now` for `order.confirmed_at`
+  -- guaranteeing `order.confirmed_at.date()` is always exactly the credited date, by construction.
+- **New accepted limitation, wider than ADR-0006 decision 2's original sunk-cost acceptance:**
+  `PvDailyBucket` is a fungible same-day pool across every order sharing an ancestor+leg
+  (`_credit_daily_buckets` merges them; `consume_leg_pv_fifo` drains without per-order attribution)
+  -- a reversal that only checks "is the pool currently >= this order's amount" cannot always tell
+  whether it's reversing this order's own remaining PV or a different, still-valid sibling order's.
+  Real per-order attribution would need a much bigger schema change; accepted as documented, not
+  built here.
+- **Refund restocking is an explicit admin choice** (`restock: bool`, required -- no silent default
+  -- whenever `to_status == REFUNDED`); cancellation always restocks automatically (pre-dispatch,
+  unambiguous). Matches standard e-commerce practice (e.g. Shopify's refund flow: an explicit
+  "Restock items" checkbox, not automatic) -- a goodwill refund on a delivered order must not
+  silently inflate `Product.stock` for units never actually returned.
+- Ancestor `Distributor` row locking (needed before mutating their `PvDailyBucket` rows, to
+  actually serialize against a concurrent Binary Bonus cycle -- `process_binary_bonus_for_distributor`
+  locks the same row before its own `consume_leg_pv_fifo` read-then-write) uses a sequential
+  per-ancestor loop in sorted-pk order, deliberately mirroring `BinaryTree.place_distributor`'s own
+  already-established "fixed, PK-ascending order" convention -- not a new, unverified bulk-lock
+  assumption. Accepted as a bounded (~20-40 iteration) loop since this is a rare, admin-triggered
+  cold path, not the hot per-purchase write path Scale Architecture protects.
+- `PvLedger` reversal uses the same "conditional filter + count affected + warn if short" pattern as
+  `PvDailyBucket`/`MonthlyPersonalPv` (not a silent `Greatest(..., 0)` floor) -- but logs at `ERROR`,
+  not `WARNING`, since nothing else has ever decremented `PvLedger`; a shortfall there signals a
+  real bug, not an expected gap.
+- The post-lock notification helper must wrap each channel in its own `try/except Exception`,
+  matching `_send_confirmation_notifications`'s existing convention -- an uncaught exception there
+  would risk `retry_on_lock_contention` re-running an already-committed transaction.
 
 **Acceptance criteria:**
-- [ ] Cancelling a `confirmed`/`processing` order, or refunding a `confirmed`/`processing`/`dispatched`/`delivered` order, restores each line item's `Product.stock` by the order's quantity
-- [ ] The same reversal restores the correct ancestor leg PV in `PvLedger`, using the order's own `confirmed_at`-derived period where a period matters, never "now"
+- [ ] Cancelling a `confirmed`/`processing` order always restores stock; refunding a `confirmed`/`processing`/`dispatched`/`delivered` order restores stock only if `restock=True` is passed
+- [ ] `restock` is required (raises, no silent default) whenever `to_status=REFUNDED`
+- [ ] The same reversal restores `PvLedger`, the correct dated `PvDailyBucket` row(s), and the correct-period `MonthlyPersonalPv` row -- using `order.confirmed_at`-derived dates, never "now"
+- [ ] `to_status` other than `CANCELLED`/`REFUNDED` is rejected outright, before any reversal logic runs
 - [ ] `Order.pv_earned` is zeroed out once its PV is reversed (it must never keep claiming a credit that no longer exists)
 - [ ] A duplicate cancel/refund attempt on an already-cancelled/refunded order is a no-op, not a double reversal
+- [ ] Ancestor `Distributor` rows are locked (sorted-pk order) before their `PvDailyBucket` rows are touched, so a concurrent Binary Bonus cycle for the same ancestor can't interleave
 
 **Verification:**
-- [ ] pytest test: cancelling a confirmed order gives stock back exactly once
-- [ ] pytest test: refunding a `dispatched`/`delivered` order reverses stock/PV exactly the same way a `confirmed`-order refund does
-- [ ] pytest test: cancelling/refunding an order reverses ancestor leg PV correctly, including when the reversal happens in a different calendar month than confirmation
+- [ ] pytest test: cancelling a confirmed order gives stock back exactly once, automatically, with no `restock` argument needed
+- [ ] pytest test: refunding a `dispatched`/`delivered` order with `restock=True` restores stock; `restock=False` does not; omitting `restock` raises
+- [ ] pytest test: cancelling/refunding an order reverses `PvLedger`/`PvDailyBucket`/`MonthlyPersonalPv` correctly, including when the reversal happens in a different calendar month than confirmation
 - [ ] pytest test: a duplicate cancel/refund attempt (webhook-style race, matching Task 17d's own idempotency test shape) never double-reverses stock or PV
+- [ ] pytest test: calling with `to_status=PROCESSING` (or any non-terminal status) is rejected
+- [ ] pytest test (real MySQL in CI): a concurrent Binary Bonus cycle and a reversal for an overlapping ancestor never drive `PvDailyBucket.pv` negative
 
 **Dependencies:** 18a merged
 
-**Files likely touched:** `apps/orders/services.py`, `apps/pv_ledger/services.py` (likely needs an explicit historical-period parameter added to the reversal path), `tests/unit/orders/test_cancel_confirmed_order.py`
+**Files likely touched:** `apps/orders/services.py`, `apps/pv_ledger/services.py` (new `today=` params on `record_purchase_pv`/`record_personal_pv`, corrected `sum_leg_pv` docstring), `apps/catalog/services.py` (new `increment_stock`), `apps/commissions/services.py` (corrected `process_binary_bonus_for_distributor` docstring), `tests/unit/orders/test_cancel_or_refund_order.py`
 
 **Estimated scope:** M
 
 **Skills:**
-- *Before:* `doubt-driven-development` (the PvDailyBucket/MonthlyPersonalPv historical-period problem specifically -- fresh adversarial review before writing this, same rigor as every prior money-adjacent slice), `security-and-hardening`
+- *Before:* `doubt-driven-development` (done, three cycles, 2026-07-26 -- see ADR-0006), `security-and-hardening`
 - *During:* `test-driven-development`, `incremental-implementation`
 - *After:* `code-review-and-quality`, `code-simplification`
 

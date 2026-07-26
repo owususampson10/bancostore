@@ -41,6 +41,22 @@ def test_record_personal_pv_creates_a_row_for_the_current_month(mock_now):
 
 @pytest.mark.django_db
 @patch("apps.pv_ledger.services.timezone.now")
+def test_explicit_today_overrides_the_real_current_date(mock_now):
+    """Task 18b: confirm_order_payment captures one shared `now` and passes
+    its date explicitly, so a later reversal can target the exact month
+    the original credit landed in -- this must not depend on whatever
+    timezone.now() happens to return at call time when `today` is given."""
+    mock_now.return_value = _at("2026-07-20")
+    distributor = _make_distributor()
+
+    record_personal_pv(distributor, 60, today=date(2026, 5, 3))
+
+    row = MonthlyPersonalPv.objects.get(distributor=distributor)
+    assert row.period == date(2026, 5, 1)
+
+
+@pytest.mark.django_db
+@patch("apps.pv_ledger.services.timezone.now")
 def test_a_second_credit_in_the_same_month_adds_rather_than_overwrites(mock_now):
     mock_now.return_value = _at("2026-07-01")
     distributor = _make_distributor()

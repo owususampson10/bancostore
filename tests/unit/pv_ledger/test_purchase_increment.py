@@ -1,4 +1,7 @@
+from datetime import date, datetime
+from datetime import timezone as dt_timezone
 from itertools import count
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import connection
@@ -9,7 +12,7 @@ import pytest
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.binary_tree.services import BinaryTree
 from apps.distributors.models import Distributor
-from apps.pv_ledger.models import PvLedger
+from apps.pv_ledger.models import PvDailyBucket, PvLedger
 from apps.pv_ledger.services import record_purchase_pv
 
 User = get_user_model()
@@ -33,6 +36,24 @@ def test_credits_the_placed_leg_of_a_direct_ancestor():
     ledger = PvLedger.objects.get(distributor=sponsor)
     assert ledger.right_leg_pv == 500
     assert ledger.left_leg_pv == 0
+
+
+@pytest.mark.django_db
+@patch("apps.pv_ledger.services.timezone.now")
+def test_explicit_today_overrides_the_real_current_date(mock_now):
+    """Task 18b: confirm_order_payment captures one shared `now` and passes
+    its date explicitly, so a later reversal can target the exact bucket
+    the original credit landed in -- this must not depend on whatever
+    timezone.now() happens to return at call time when `today` is given."""
+    mock_now.return_value = datetime(2026, 7, 20, tzinfo=dt_timezone.utc)
+    sponsor = _make_distributor()
+    distributor = _make_distributor()
+    BinaryTree.place_distributor(sponsor, distributor, leg=BinaryTreeEdge.Leg.RIGHT)
+
+    record_purchase_pv(distributor, 500, today=date(2026, 7, 1))
+
+    bucket = PvDailyBucket.objects.get(distributor=sponsor)
+    assert bucket.date == date(2026, 7, 1)
 
 
 @pytest.mark.django_db

@@ -1,3 +1,5 @@
+from datetime import datetime
+from datetime import timezone as dt_timezone
 from decimal import Decimal
 from itertools import count
 from unittest.mock import patch
@@ -15,7 +17,7 @@ from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import confirm_order_payment
-from apps.pv_ledger.models import PvLedger
+from apps.pv_ledger.models import PvDailyBucket, PvLedger
 
 User = get_user_model()
 _phone_seq = count(1)
@@ -138,6 +140,62 @@ def test_placed_distributor_order_credits_purchase_and_personal_pv(
     assert order.pv_earned == 60
     ledger = PvLedger.objects.get(distributor=sponsor)
     assert ledger.right_leg_pv == 60
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_confirmed_at_date_always_matches_the_pv_daily_bucket_it_credited(
+    mock_verify, mock_sms, mock_mail
+):
+    """Task 18b (doubt-driven-development, round 3): record_purchase_pv's
+    own internal `timezone.now().date()` call and confirm_order_payment's
+    `order.confirmed_at = timezone.now()` are two independent calls with
+    real work (a retry loop with sleep) happening between them -- across a
+    real midnight boundary they could disagree, and a later cancel/refund
+    reversal targeting PvDailyBucket via order.confirmed_at.date() would
+    then target the WRONG day's bucket. Simulated here by patching
+    django.utils.timezone.now (the one function both apps.orders.services
+    and apps.pv_ledger.services import and call) ONLY around the
+    confirm_order_payment call itself -- not around setup, which needs its
+    own real/unpatched timestamps for auto_now_add fields -- with a
+    side_effect returning a different date on each of its first two
+    calls. Under the old, buggy call order (record_purchase_pv's internal
+    call happens before order.confirmed_at is set), this reproduces
+    exactly the drift the fix closes: confirm_order_payment must capture
+    `now` once and reuse it, so apps.pv_ledger.services never calls
+    timezone.now() a second, differently-dated time for this same
+    confirmation."""
+    sponsor = _make_distributor()
+    distributor = _make_distributor()
+    BinaryTree.place_distributor(sponsor, distributor, leg=BinaryTreeEdge.Leg.RIGHT)
+    product = _make_product(stock=5, pv_value=60)
+    order = _make_order(customer=distributor.user, total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    call_count = {"n": 0}
+
+    def _now_side_effect():
+        call_count["n"] += 1
+        # Only the very first call (record_purchase_pv's internal "today"
+        # under the old, buggy code) sees day 1 -- every other call,
+        # however many there turn out to be (confirmed_at, simple_history,
+        # or anything else), sees day 2. This models real time passing
+        # between the first PV-related date computation and everything
+        # after it, without depending on an exact incidental call count.
+        if call_count["n"] == 1:
+            return datetime(2026, 7, 1, tzinfo=dt_timezone.utc)
+        return datetime(2026, 7, 2, tzinfo=dt_timezone.utc)
+
+    with patch("django.utils.timezone.now") as mock_now:
+        mock_now.side_effect = _now_side_effect
+        confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    bucket = PvDailyBucket.objects.get(distributor=sponsor)
+    assert bucket.date == order.confirmed_at.date()
 
 
 @pytest.mark.django_db
