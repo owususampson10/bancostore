@@ -171,3 +171,63 @@ design, deferred rather than bundled.
 - **No new Paystack integration surface, no wallet-clawback mechanism, no customer-facing cancel
   UI** are in scope for Task 18, per decisions 2–4 — each flagged explicitly as deferred rather than
   silently out of scope.
+
+## Update (2026-07-26): Task 18b design finalized via a three-cycle `doubt-driven-development` pass
+
+Three rounds of fresh-context adversarial review (each grounded in the real code, not assumption)
+resolved the subtlety flagged above and found several more. Corrections and final decisions:
+
+- **Correction: the claim above that "Binary Bonus's own calculation reads" `PvLedger` was wrong.**
+  `apps/commissions/services.py::process_binary_bonus_for_distributor`'s own docstring states
+  plainly: "Never touches PvLedger... reads/writes only PvDailyBucket." `PvLedger` is actually read
+  by exactly two things: `apps/binary_tree/services.py::BinaryTree._weaker_leg` (the auto-balance
+  fallback's weak-leg comparison when placing a **new** distributor with no explicit leg choice),
+  and a read-only ancestor-aggregate admin/reporting display. This changes the stakes of decrementing
+  it: not a Binary-Bonus-overpayment risk (that risk lives entirely in `PvDailyBucket`), but a
+  tree-placement-fairness question instead.
+- **Decision: reverse `PvLedger` too, not just `PvDailyBucket`/`MonthlyPersonalPv`.** Confirmed with
+  the user against real-world MLM practice: compensation-plan "returns policies" universally reverse
+  the underlying volume on a refund, not just the commission — leaving it un-reversed opens a real
+  gaming vector (buy-then-refund under a specific leg to permanently bias that leg's apparent
+  strength, steering future unspecified-leg registrants away from it for free). `PvLedger` is a
+  single running counter here, not a separate immutable transaction ledger, so there's no compliance
+  reason to preserve monotonicity. **The two docstrings currently calling it "immutable all-time
+  historical total"** (`process_binary_bonus_for_distributor` and
+  `apps.pv_ledger.services.sum_leg_pv`) **must be corrected**, not left describing a no-longer-true
+  contract.
+- **The date-drift subtlety flagged above is fixed without a new migration or field.**
+  `confirm_order_payment` captures one `now = timezone.now()` at the point PV crediting begins,
+  passes `now.date()` explicitly into both `record_purchase_pv` and `record_personal_pv` (each gains
+  a new optional `today=` parameter, backward-compatible with their only other caller,
+  `apps.distributors.services.consume_paid_starter_pack`), and reuses that same `now` for
+  `order.confirmed_at` — guaranteeing `order.confirmed_at.date()` is always exactly the date the
+  original PV credit landed on, by construction, not by re-derivation from two independent
+  `timezone.now()` calls with real retry-and-sleep work happening between them.
+- **New, deeper limitation found and accepted (broader than the sunk-cost acceptance in decision 2
+  above): `PvDailyBucket` is a fungible pool, not a per-order ledger.** `_credit_daily_buckets`
+  already merges every same-day order for the same ancestor+leg into one row, and
+  `consume_leg_pv_fifo` drains it without recording whose contribution it spent. A reversal that
+  only checks "is the pool currently ≥ this order's amount" cannot distinguish reversing *this
+  order's own* still-there PV from incorrectly clawing back a *different, still-valid* sibling
+  order's PV that happens to add up to enough. Building real per-order PV attribution would mean
+  turning `PvDailyBucket` from an aggregate into a per-order ledger — a much larger schema change
+  than Task 18b's scope. **Accepted as a documented limitation**, same spirit as decision 2's
+  already-paid-bonus acceptance, just wider than originally scoped there.
+- **Decision: refund restocking is an explicit admin choice, cancellation is not.** Matches standard
+  e-commerce practice (e.g. Shopify's refund flow has an explicit "Restock items" checkbox, off by
+  default) rather than assuming refunded always means physically returned — a goodwill refund on an
+  already-delivered order, or a damaged-item refund the customer keeps, must not silently inflate
+  `Product.stock` for units never actually returned. Pre-dispatch cancellation has no such ambiguity
+  (goods never shipped) and always restocks automatically. The new
+  `apps/orders/services.py::cancel_or_refund_order` function takes `to_status` restricted to only
+  `CANCELLED`/`REFUNDED` (a caller-bug guard the draft design was initially missing — a permissive
+  version could have been miscalled with a normal lifecycle transition like `PROCESSING` and
+  silently reversed a healthy order's PV/stock) and a `restock` parameter required (no silent
+  default) whenever `to_status == REFUNDED`.
+- Two smaller implementation-discipline fixes carried into Task 18b's actual code: the notification
+  helper this function calls after its lock releases must wrap each channel in its own
+  `try/except Exception`, matching `_send_confirmation_notifications`'s existing convention exactly
+  (an uncaught exception there would otherwise risk `retry_on_lock_contention` re-running an
+  already-committed transaction a second time); and a `PvLedger` reversal shortfall is logged at
+  `ERROR`, not `WARNING`, unlike `PvDailyBucket`/`MonthlyPersonalPv` — since nothing else has ever
+  decremented `PvLedger`, a shortfall there signals a real accounting bug, not an expected gap.

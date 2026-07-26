@@ -6,7 +6,11 @@ from django.db import connection
 import pytest
 
 from apps.catalog.models import Category, Product
-from apps.catalog.services import InsufficientStockError, decrement_stock
+from apps.catalog.services import (
+    InsufficientStockError,
+    decrement_stock,
+    increment_stock,
+)
 
 
 @pytest.fixture
@@ -46,6 +50,54 @@ def test_decrement_stock_raises_when_insufficient(product):
 def test_decrement_stock_rejects_a_non_positive_quantity(product):
     with pytest.raises(ValueError):
         decrement_stock(product, quantity=0)
+
+
+@pytest.mark.django_db
+def test_increment_stock_increases_the_count(product):
+    increment_stock(product, quantity=3)
+
+    product.refresh_from_db()
+    assert product.stock == 13
+
+
+@pytest.mark.django_db
+def test_increment_stock_rejects_a_non_positive_quantity(product):
+    with pytest.raises(ValueError):
+        increment_stock(product, quantity=0)
+
+    product.refresh_from_db()
+    assert product.stock == 10
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_increments_never_lose_a_unit():
+    """Mirrors test_concurrent_decrements_never_oversell_the_last_unit's own
+    reasoning: this only genuinely proves the locking itself once run
+    against real MySQL in CI (SQLite drops FOR UPDATE), but still catches a
+    regression in the surrounding lock/transaction wrapper on SQLite too."""
+    category = Category.objects.create(name="Watches", slug="watches")
+    product = Product.objects.create(
+        name="Restocked Watch", category=category, price=Decimal("1500.00"), stock=0
+    )
+
+    lock = threading.Lock()
+    outcomes = []
+
+    def attempt():
+        increment_stock(product, quantity=1)
+        connection.close()
+        with lock:
+            outcomes.append("done")
+
+    threads = [threading.Thread(target=attempt) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(outcomes) == 5
+    product.refresh_from_db()
+    assert product.stock == 5
 
 
 @pytest.mark.django_db(transaction=True)

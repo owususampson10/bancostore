@@ -4,15 +4,22 @@ from decimal import Decimal
 
 from django.core.mail import send_mail
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from constance import config
 
 from apps.accounts.permissions import is_distributor
 from apps.binary_tree.models import BinaryTreeEdge
-from apps.catalog.services import InsufficientStockError, decrement_stock
+from apps.catalog.services import (
+    InsufficientStockError,
+    decrement_stock,
+    increment_stock,
+)
+from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError, verify_transaction
 from apps.notifications.sms import send_sms
+from apps.pv_ledger.models import MonthlyPersonalPv, PvDailyBucket, PvLedger
 from apps.pv_ledger.services import record_personal_pv, record_purchase_pv
 from bancostore.concurrency import (
     retry_on_lock_contention,
@@ -314,14 +321,24 @@ def confirm_order_payment(reference: str) -> None:
             for item in items:
                 decrement_stock(item.product, item.quantity)
 
+            # Captured once, reused for both the PV credit's date/period
+            # and confirmed_at below -- record_purchase_pv/record_personal_pv
+            # each hardcoded their own independent timezone.now() call
+            # until Task 18b, meaning the credit's date and confirmed_at
+            # could disagree across a real midnight boundary (real work,
+            # including a retry-with-sleep loop, happens between them).
+            # A later cancel/refund reversal targets PvDailyBucket/
+            # MonthlyPersonalPv via confirmed_at.date() -- it must always
+            # be the exact date/period the original credit landed in.
+            now = timezone.now()
             pv_earned = 0
             if order.customer_id is not None and is_distributor(order.customer):
                 distributor = order.customer.distributor
                 if BinaryTreeEdge.objects.filter(descendant=distributor).exists():
                     pv_amount = sum(item.unit_pv * item.quantity for item in items)
                     if pv_amount:
-                        record_purchase_pv(distributor, pv_amount)
-                        record_personal_pv(distributor, pv_amount)
+                        record_purchase_pv(distributor, pv_amount, today=now.date())
+                        record_personal_pv(distributor, pv_amount, today=now.date())
                         pv_earned = pv_amount
 
             if not is_legal_order_status_transition(
@@ -336,7 +353,7 @@ def confirm_order_payment(reference: str) -> None:
                 )
             order.pv_earned = pv_earned
             order.status = Order.Status.CONFIRMED
-            order.confirmed_at = timezone.now()
+            order.confirmed_at = now
             order.save(update_fields=["pv_earned", "status", "confirmed_at"])
         _send_confirmation_notifications(order)
 
@@ -459,5 +476,295 @@ def _send_stock_unavailable_notification(order: Order) -> None:
             logger.exception(
                 "confirm_order_payment: failed to send stock-unavailable "
                 "email for reference=%s",
+                order.payment_reference,
+            )
+
+
+def cancel_or_refund_order(order_id, to_status, tracking_note="", restock=None) -> None:
+    """Task 18b (ADR-0006, three-cycle doubt-driven-development pass,
+    2026-07-26). Cancels or refunds an already-paid order: locks the
+    `Order` row, validates the transition (18a), and reverses stock and
+    PV (`PvLedger`, `PvDailyBucket`, `MonthlyPersonalPv`) inside that same
+    lock before transitioning status and notifying after the lock
+    releases -- mirroring `confirm_order_payment`'s locked, idempotent
+    shape (Task 17d) in reverse.
+
+    `to_status` MUST be `Order.Status.CANCELLED` or `.REFUNDED` -- every
+    other legal transition (Processing/Dispatched/Delivered) belongs to
+    Task 18c's own function. This is enforced here, not just documented:
+    a round-3 doubt-driven-development finding caught that an earlier
+    draft let any `is_legal_order_status_transition`-legal target through,
+    meaning a caller mistake (e.g. passing `PROCESSING`) would silently
+    reverse a perfectly healthy order's PV/stock.
+
+    `restock` is REQUIRED (no silent default) whenever `to_status` is
+    `REFUNDED` -- matches standard e-commerce practice (e.g. Shopify's
+    refund flow has an explicit "Restock items" choice, not automatic):
+    a refund doesn't always mean the goods physically came back (a
+    goodwill credit, or a damaged item the customer keeps). Cancellation
+    is pre-dispatch only (per the 18a transition graph) so the goods
+    never shipped -- it always restocks automatically, no argument
+    needed.
+
+    This function only operates on orders that are ALREADY paid
+    (`confirmed`/`processing`/`dispatched`/`delivered`) -- a `pending`
+    order is a caller bug (a separate, existing function,
+    `_cancel_order_for_insufficient_stock`, plus Task 18d's future
+    auto-cancel, own the unpaid `pending` -> `cancelled` path, which has
+    nothing to reverse since nothing was ever decremented/credited).
+
+    **Accepted limitation (ADR-0006, wider than its original sunk-cost
+    acceptance):** `PvDailyBucket` is a fungible same-day pool shared by
+    every order crediting the same ancestor+leg -- a reversal can only
+    check whether the pool currently holds enough to reverse, not whether
+    what remains is genuinely this order's own contribution versus a
+    different, still-valid sibling order's. Real per-order PV attribution
+    would need a much larger schema change; not built here."""
+    if to_status not in (Order.Status.CANCELLED, Order.Status.REFUNDED):
+        raise ValueError(
+            f"cancel_or_refund_order: to_status must be CANCELLED or "
+            f"REFUNDED, got {to_status!r}."
+        )
+    if to_status == Order.Status.REFUNDED and restock is None:
+        raise ValueError(
+            "cancel_or_refund_order: restock (True/False) is required "
+            "when to_status is REFUNDED -- whether the goods were "
+            "physically returned is never assumed."
+        )
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                locked_order = select_for_update_nowait_if_supported(
+                    Order.objects.filter(pk=order_id)
+                ).get()
+            except Order.DoesNotExist:
+                logger.error("cancel_or_refund_order: no Order pk=%s", order_id)
+                return
+
+            if locked_order.status == Order.Status.PENDING:
+                logger.warning(
+                    "cancel_or_refund_order: called on a PENDING order "
+                    "pk=%s -- this function is for already-paid orders "
+                    "only; caller bug.",
+                    order_id,
+                )
+                return
+
+            if locked_order.status in (
+                Order.Status.CANCELLED,
+                Order.Status.REFUNDED,
+            ):
+                if locked_order.status != to_status:
+                    logger.warning(
+                        "cancel_or_refund_order: order pk=%s already "
+                        "resolved as %s, but this call requested %s -- "
+                        "ignoring (idempotent no-op).",
+                        order_id,
+                        locked_order.status,
+                        to_status,
+                    )
+                return  # Idempotent no-op either way.
+
+            if not is_legal_order_status_transition(locked_order.status, to_status):
+                raise RuntimeError(
+                    f"Illegal order status transition: "
+                    f"{locked_order.status} -> {to_status} for order "
+                    f"pk={order_id}"
+                )
+
+            if locked_order.pv_earned > 0:
+                _reverse_ancestor_pv(locked_order, order_id)
+
+            should_restock = to_status == Order.Status.CANCELLED or restock
+            if should_restock:
+                for item in locked_order.items.select_related("product").order_by(
+                    "product_id"
+                ):
+                    increment_stock(item.product, item.quantity)
+
+            locked_order.pv_earned = 0
+            locked_order.status = to_status
+            if tracking_note:
+                locked_order.tracking_note = tracking_note
+            locked_order.save(update_fields=["pv_earned", "status", "tracking_note"])
+        _send_order_status_notification(locked_order)
+
+    retry_on_lock_contention(_attempt)
+
+
+def _reverse_ancestor_pv(locked_order: Order, order_id) -> None:
+    """Reverses `locked_order.pv_earned` across `PvLedger`,
+    `PvDailyBucket`, and `MonthlyPersonalPv` for the purchasing
+    distributor's ancestors (and, for `MonthlyPersonalPv`, the
+    purchasing distributor themselves) -- called from inside
+    `cancel_or_refund_order`'s own lock, before stock reversal."""
+    if locked_order.customer_id is None:
+        logger.warning(
+            "cancel_or_refund_order: order pk=%s has pv_earned=%s but "
+            "customer_id is now NULL (account deleted since "
+            "confirmation) -- PV ledger reversal skipped, pv_earned "
+            "zeroed anyway.",
+            order_id,
+            locked_order.pv_earned,
+        )
+        return
+
+    try:
+        distributor = locked_order.customer.distributor
+    except Distributor.DoesNotExist:
+        logger.warning(
+            "cancel_or_refund_order: order pk=%s has pv_earned=%s but "
+            "its customer is no longer a distributor -- PV ledger "
+            "reversal skipped, pv_earned zeroed anyway.",
+            order_id,
+            locked_order.pv_earned,
+        )
+        return
+
+    edges = list(BinaryTreeEdge.objects.filter(descendant=distributor))
+    if not edges:
+        return
+
+    left_ids = sorted(
+        {e.ancestor_id for e in edges if e.leg == BinaryTreeEdge.Leg.LEFT}
+    )
+    right_ids = sorted(
+        {e.ancestor_id for e in edges if e.leg == BinaryTreeEdge.Leg.RIGHT}
+    )
+    all_ancestor_ids = sorted(set(left_ids) | set(right_ids))
+
+    # Locked one at a time, in sorted-pk order -- deliberately mirrors
+    # apps.binary_tree.services.BinaryTree.place_distributor's own
+    # "fixed, PK-ascending order" convention (a bulk multi-row NOWAIT
+    # statement's internal lock-acquisition order isn't a fact this
+    # codebase has verified against real InnoDB docs, so this reuses the
+    # pattern it HAS already established and proven instead). Needed so
+    # this reversal actually serializes against a concurrent Binary Bonus
+    # cycle for any of these ancestors -- apps.commissions.services.
+    # process_binary_bonus_for_distributor locks the exact same row
+    # (Distributor, not PvDailyBucket) before its own read-then-write
+    # PvDailyBucket consumption.
+    for pk in all_ancestor_ids:
+        select_for_update_nowait_if_supported(Distributor.objects.filter(pk=pk)).get()
+
+    pv_amount = locked_order.pv_earned
+    purchase_date = locked_order.confirmed_at.date()
+
+    for field, leg, ancestor_ids in (
+        ("left_leg_pv", BinaryTreeEdge.Leg.LEFT, left_ids),
+        ("right_leg_pv", BinaryTreeEdge.Leg.RIGHT, right_ids),
+    ):
+        if not ancestor_ids:
+            continue
+
+        # PvLedger: nothing else has ever decremented it (append-only
+        # until this function), so a shortfall here is a real bug (a
+        # double reversal, or a pv_earned/ledger mismatch elsewhere) --
+        # logged at ERROR, unlike the two expected-gap cases below.
+        sufficient_ids = set(
+            PvLedger.objects.filter(
+                distributor_id__in=ancestor_ids, **{f"{field}__gte": pv_amount}
+            ).values_list("distributor_id", flat=True)
+        )
+        PvLedger.objects.filter(distributor_id__in=sufficient_ids).update(
+            **{field: F(field) - pv_amount}
+        )
+        short_ids = set(ancestor_ids) - sufficient_ids
+        if short_ids:
+            logger.error(
+                "cancel_or_refund_order: order pk=%s could not fully "
+                "reverse PvLedger.%s (%s leg) for ancestor(s)=%s -- "
+                "ledger already below pv_amount=%s. Needs manual "
+                "investigation.",
+                order_id,
+                field,
+                leg,
+                sorted(short_ids),
+                pv_amount,
+            )
+
+        # PvDailyBucket: a shortfall here IS an expected, accepted gap
+        # (ADR-0006) -- the PV may have already been consumed by a
+        # completed Binary Bonus cycle, or expired past
+        # PV_CARRY_FORWARD_EXPIRY_DAYS. Logged at WARNING, not raised.
+        sufficient_ids = set(
+            PvDailyBucket.objects.filter(
+                distributor_id__in=ancestor_ids,
+                leg=leg,
+                date=purchase_date,
+                pv__gte=pv_amount,
+            ).values_list("distributor_id", flat=True)
+        )
+        PvDailyBucket.objects.filter(
+            distributor_id__in=sufficient_ids, leg=leg, date=purchase_date
+        ).update(pv=F("pv") - pv_amount)
+        short_ids = set(ancestor_ids) - sufficient_ids
+        if short_ids:
+            logger.warning(
+                "cancel_or_refund_order: order pk=%s only reversed "
+                "PvDailyBucket for %s/%s %s-leg ancestor(s) -- %s already "
+                "short (PV already consumed/expired) -- accepted gap, "
+                "ADR-0006.",
+                order_id,
+                len(sufficient_ids),
+                len(ancestor_ids),
+                leg,
+                sorted(short_ids),
+            )
+
+    period = purchase_date.replace(day=1)
+    personal_affected = MonthlyPersonalPv.objects.filter(
+        distributor=distributor, period=period, pv__gte=pv_amount
+    ).update(pv=F("pv") - pv_amount)
+    if not personal_affected:
+        logger.warning(
+            "cancel_or_refund_order: order pk=%s MonthlyPersonalPv "
+            "reversal for distributor=%s period=%s was a no-op (already "
+            "below pv_amount=%s) -- accepted gap, ADR-0006.",
+            order_id,
+            distributor.pk,
+            period,
+            pv_amount,
+        )
+
+
+def _send_order_status_notification(order: Order) -> None:
+    # Each channel wrapped individually, matching
+    # _send_confirmation_notifications's existing convention exactly --
+    # stock/PV are already committed by this point, so a notification-
+    # provider outage must never look like this cancellation/refund was
+    # rolled back. This also runs INSIDE retry_on_lock_contention's
+    # caller (_attempt), so an uncaught exception here would propagate
+    # out of cancel_or_refund_order entirely after the DB work already
+    # committed -- or, in the unlikely case it happens to look like a
+    # lock-contention OperationalError, get misread as one and re-run an
+    # already-committed transaction a second time.
+    try:
+        send_sms(
+            str(order.phone_number),
+            f"Your Bancostore order {order.payment_reference} is now "
+            f"{order.get_status_display()}.",
+        )
+    except Exception:
+        logger.exception(
+            "cancel_or_refund_order: failed to send SMS for " "reference=%s",
+            order.payment_reference,
+        )
+
+    if order.email:
+        try:
+            send_mail(
+                subject=f"Your Bancostore order is {order.get_status_display()}",
+                message=(
+                    f"Your order {order.payment_reference} is now "
+                    f"{order.get_status_display()}."
+                ),
+                from_email=None,
+                recipient_list=[order.email],
+            )
+        except Exception:
+            logger.exception(
+                "cancel_or_refund_order: failed to send email for " "reference=%s",
                 order.payment_reference,
             )

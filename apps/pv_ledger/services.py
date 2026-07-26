@@ -19,10 +19,18 @@ from .models import MonthlyPersonalPv, PvDailyBucket, PvLedger
 logger = logging.getLogger(__name__)
 
 
-def record_purchase_pv(distributor, pv_amount):
+def record_purchase_pv(distributor, pv_amount, today=None):
     """Task 10d: credits `pv_amount` to the correct leg of every ancestor
     of `distributor`, event-driven at write time (SPEC.md Scale
     Architecture) -- never a recursive tree walk or a full recompute.
+
+    `today` (Task 18b) lets a caller pin the exact date this credit lands
+    in `PvDailyBucket`, instead of implicitly using whatever
+    `timezone.now().date()` happens to be at call time. `confirm_order_payment`
+    passes this explicitly so a later cancel/refund reversal can target the
+    exact bucket the original credit landed in, with no drift between two
+    independent `timezone.now()` calls. Defaults to `timezone.now().date()`
+    when omitted, matching every existing caller's behavior unchanged.
 
     `distributor` must already be placed in the binary tree (see
     apps.binary_tree.services.BinaryTree.place_distributor) before this is
@@ -52,7 +60,7 @@ def record_purchase_pv(distributor, pv_amount):
         edge.ancestor_id for edge in edges if edge.leg == BinaryTreeEdge.Leg.RIGHT
     ]
 
-    today = timezone.now().date()
+    today = today or timezone.now().date()
     for field, leg, ancestor_ids in (
         ("left_leg_pv", BinaryTreeEdge.Leg.LEFT, left_ids),
         ("right_leg_pv", BinaryTreeEdge.Leg.RIGHT, right_ids),
@@ -246,12 +254,17 @@ def _credit_daily_buckets(ancestor_ids, leg, pv_amount, today, max_retries=3):
     )
 
 
-def record_personal_pv(distributor, pv_amount) -> None:
+def record_personal_pv(distributor, pv_amount, today=None) -> None:
     """Credits `pv_amount` to `distributor`'s OWN monthly personal PV
     total -- distinct from record_purchase_pv, which credits PV to the
     purchasing distributor's ANCESTORS' legs, never their own record.
     Needed for the Binary/Matching Bonus "minimum personal PV this month"
     eligibility rule.
+
+    `today` (Task 18b) lets a caller pin the exact date this credit's
+    month is derived from, matching record_purchase_pv's own new `today`
+    parameter -- see that function's docstring for why. Defaults to
+    `timezone.now().date()` when omitted.
 
     Lazily creates the current month's row (mirrors PvLedger's own
     get_or_create convention) and does not retry on lock contention
@@ -262,7 +275,7 @@ def record_personal_pv(distributor, pv_amount) -> None:
     if not pv_amount:
         return
 
-    period = timezone.now().date().replace(day=1)
+    period = (today or timezone.now().date()).replace(day=1)
     row, _ = MonthlyPersonalPv.objects.get_or_create(
         distributor=distributor, period=period
     )
@@ -290,10 +303,16 @@ def is_eligible_for_binary_bonus(distributor, now=None) -> bool:
 def sum_leg_pv(distributor, leg, cutoff_date):
     """The non-expired PV currently sitting in `distributor`'s `leg`
     buckets -- the authoritative "spendable" total the Binary Bonus
-    cycle reads, distinct from PvLedger's immutable all-time total
-    (which this module never touches for bonus payout purposes).
-    `Coalesce` guards the empty-leg case, where `Sum` would otherwise
-    return NULL rather than 0."""
+    cycle reads, distinct from PvLedger's all-time running total (which
+    this module never touches for bonus payout purposes -- PvLedger is
+    read only by apps.binary_tree.services.BinaryTree._weaker_leg's
+    auto-balance placement decision and a read-only reporting display,
+    never by Binary/Matching Bonus). **Not immutable** since Task 18b:
+    apps.orders.services.cancel_or_refund_order reverses it on a paid
+    order's cancellation/refund, matching real-world MLM returns-policy
+    practice and closing a leg-inflation gaming vector. `Coalesce` guards
+    the empty-leg case, where `Sum` would otherwise return NULL rather
+    than 0."""
     return PvDailyBucket.objects.filter(
         distributor=distributor, leg=leg, date__gte=cutoff_date, pv__gt=0
     ).aggregate(total=Coalesce(Sum("pv"), 0))["total"]
