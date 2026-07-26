@@ -480,6 +480,61 @@ def _send_stock_unavailable_notification(order: Order) -> None:
             )
 
 
+_ADVANCEABLE_STATUSES = (
+    Order.Status.PROCESSING,
+    Order.Status.DISPATCHED,
+    Order.Status.DELIVERED,
+)
+
+
+def advance_order_status(order_id, to_status, tracking_note="") -> None:
+    """Task 18c. Admin-triggered forward progression through the
+    non-money-adjacent stages (Processing, Dispatched, Delivered --
+    Delivered is admin-only per ADR-0006's stated assumption, no
+    separate Delivery role exists). Mirrors `cancel_or_refund_order`'s
+    locked, idempotent shape (Task 18b) minus the stock/PV reversal,
+    which these stages never need (nothing was reversed at any point --
+    the order stays `confirmed` in every money-adjacent sense).
+
+    `to_status` MUST be one of `_ADVANCEABLE_STATUSES` -- `Cancelled`/
+    `Refunded` belong to `cancel_or_refund_order`, not this function,
+    same "reject the wrong target outright" discipline as that
+    function's own `to_status` guard."""
+    if to_status not in _ADVANCEABLE_STATUSES:
+        raise ValueError(
+            f"advance_order_status: to_status must be one of "
+            f"{_ADVANCEABLE_STATUSES}, got {to_status!r}."
+        )
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                locked_order = select_for_update_nowait_if_supported(
+                    Order.objects.filter(pk=order_id)
+                ).get()
+            except Order.DoesNotExist:
+                logger.error("advance_order_status: no Order pk=%s", order_id)
+                return
+
+            if locked_order.status == to_status:
+                return  # Idempotent no-op -- a duplicate admin click.
+
+            if not is_legal_order_status_transition(locked_order.status, to_status):
+                raise RuntimeError(
+                    f"Illegal order status transition: "
+                    f"{locked_order.status} -> {to_status} for order "
+                    f"pk={order_id}"
+                )
+
+            locked_order.status = to_status
+            if tracking_note:
+                locked_order.tracking_note = tracking_note
+            locked_order.save(update_fields=["status", "tracking_note"])
+        _send_order_status_notification(locked_order)
+
+    retry_on_lock_contention(_attempt)
+
+
 def cancel_or_refund_order(order_id, to_status, tracking_note="", restock=None) -> None:
     """Task 18b (ADR-0006, three-cycle doubt-driven-development pass,
     2026-07-26). Cancels or refunds an already-paid order: locks the

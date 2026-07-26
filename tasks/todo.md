@@ -2805,13 +2805,22 @@ changes"), placed after the locked transition returns, never inside it, matching
 established standard.
 
 **Acceptance criteria:**
-- [ ] Each of Processing/Dispatched/Delivered can only be reached via a legal transition (18a) from the correct prior status
-- [ ] Every status change (18b and 18c alike) sends an SMS/email; the message names the new status
-- [ ] Adding a tracking note alongside a status update persists it on the order
+- [x] Each of Processing/Dispatched/Delivered can only be reached via a legal transition (18a) from the correct prior status
+- [x] Every status change (18b and 18c alike) sends an SMS/email; the message names the new status
+- [x] Adding a tracking note alongside a status update persists it on the order
 
 **Verification:**
-- [ ] pytest test: transition sequence Confirmed -> Processing -> Dispatched -> Delivered succeeds in order; skipping a stage is rejected
-- [ ] pytest test: notification fires on each transition (mocked send_sms/send_mail, matching Task 17d's own test pattern)
+- [x] pytest test: transition sequence Confirmed -> Processing -> Dispatched -> Delivered succeeds in order; skipping a stage is rejected
+- [x] pytest test: notification fires on each transition (mocked send_sms/send_mail, matching Task 17d's own test pattern)
+
+**Built:** `apps/orders/services.py::advance_order_status(order_id, to_status, tracking_note="")`,
+mirroring `cancel_or_refund_order`'s locked/idempotent shape (18b) minus stock/PV reversal (none of
+these three stages ever touch stock or PV -- the order stays `confirmed` in every money-adjacent
+sense the whole time). `to_status` is hard-restricted to `{Processing, Dispatched, Delivered}`,
+matching 18b's own "reject the wrong target outright" discipline for `Cancelled`/`Refunded`. Reuses
+18b's already-generic `_send_order_status_notification` helper unchanged -- no new notification
+code needed. 10 new tests (`tests/unit/orders/test_order_transitions.py`); full `tests/unit/orders/`
+suite (126 tests) green.
 
 **Dependencies:** 18a, 18b merged
 
