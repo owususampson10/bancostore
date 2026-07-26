@@ -219,3 +219,59 @@ class OrderItem(models.Model):
             f"OrderItem<order={self.order_id} "
             f"product={self.product_name} x{self.quantity}>"
         )
+
+
+class OrderCycleRun(models.Model):
+    """Task 18d. Mirrors CommissionCycleRun/WithdrawalCycleRun's own
+    audit-trail shape and rationale (financial/scheduled jobs with no
+    human review per cycle need a durable record, not just ephemeral
+    logging) for the auto-cancel-unpaid-orders batch driver
+    (apps.orders.tasks.auto_cancel_unpaid_orders) -- but as its own
+    model, not a third consumer of either: this job moves no money at
+    all, so the `total_amount` field both of those require doesn't apply
+    here, and CommissionCycleFailure.distributor_id /
+    WithdrawalCycleFailure.withdrawal_request_id can't hold an order_id
+    without corrupting either field's meaning. `cancelled` is this job's
+    own domain-appropriate name for what CommissionCycleRun calls `paid`.
+
+    No job_name discriminator -- exactly one job writes here, matching
+    WithdrawalCycleRun's own reasoning for the same omission. Uniqueness
+    is on run_at alone for the same reason."""
+
+    run_at = models.DateTimeField(unique=True)
+    evaluated = models.PositiveIntegerField()
+    cancelled = models.PositiveIntegerField()
+    failed = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-run_at"]
+
+    def __str__(self):
+        return f"auto-cancel cycle {self.run_at.isoformat()}"
+
+
+class OrderCycleFailure(models.Model):
+    """One row per Order whose per-order auto-cancel call raised during
+    a cycle -- not one row per routine already-resolved skip (an order
+    found already confirmed/cancelled by the time this cycle reached it
+    is not a failure).
+
+    Deliberately not a ForeignKey to Order, mirroring
+    CommissionCycleFailure/WithdrawalCycleFailure's own reasoning: the
+    audit record must survive even if the underlying Order row is later
+    deleted (no delete-lock exists on OrderAdmin the way WalletAdmin/
+    WithdrawalRequestAdmin/CommissionCycleRunAdmin have)."""
+
+    cycle_run = models.ForeignKey(
+        OrderCycleRun, on_delete=models.CASCADE, related_name="failures"
+    )
+    order_id = models.PositiveIntegerField()
+    error = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order_id"]
+
+    def __str__(self):
+        return f"order_id={self.order_id}"

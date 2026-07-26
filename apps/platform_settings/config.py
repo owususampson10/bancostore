@@ -294,6 +294,20 @@ DELIVERY_SETTINGS = {
     ),
 }
 
+ORDER_SETTINGS = {
+    # Task 18d. Admin-editable cutoff for apps.orders.tasks
+    # .auto_cancel_unpaid_orders (ADR-0006 decision 6) -- purely a
+    # housekeeping window, not tied to any stock reservation (none exists,
+    # per ADR-0005 decision 5) or payment retry logic. 24 hours, matching
+    # standard e-commerce abandoned-checkout cleanup convention, confirmed
+    # with the user 2026-07-26.
+    "PENDING_ORDER_AUTO_CANCEL_HOURS": (
+        24,
+        "How many hours an unpaid order can stay pending before it is "
+        "automatically cancelled",
+    ),
+}
+
 KYC_SETTINGS = {
     "KYC_REQUIRED": (
         True,
@@ -531,6 +545,7 @@ CONSTANCE_CONFIG = {
     **REGISTRATION_AND_MEMBERSHIP_SETTINGS,
     **WITHDRAWAL_AND_PAYOUT_SETTINGS,
     **DELIVERY_SETTINGS,
+    **ORDER_SETTINGS,
     **KYC_SETTINGS,
     **IR_ID_NUMBER_SETTINGS,
     **PAYMENT_GATEWAY_SETTINGS,
@@ -543,6 +558,7 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "Registration & Membership Settings": tuple(REGISTRATION_AND_MEMBERSHIP_SETTINGS),
     "Withdrawal & Payout Settings": tuple(WITHDRAWAL_AND_PAYOUT_SETTINGS),
     "Delivery Settings": tuple(DELIVERY_SETTINGS),
+    "Order Settings": tuple(ORDER_SETTINGS),
     "KYC Settings": tuple(KYC_SETTINGS),
     "IR ID Number Settings": tuple(IR_ID_NUMBER_SETTINGS),
     "Payment Gateway Settings": tuple(PAYMENT_GATEWAY_SETTINGS),
