@@ -448,3 +448,26 @@ def test_concurrent_binary_bonus_consumption_and_reversal_never_drive_pv_negativ
 
     bucket.refresh_from_db()
     assert bucket.pv >= 0
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_whitespace_only_tracking_note_does_not_clear_an_existing_one(
+    mock_sms, mock_mail
+):
+    """Same bug class CodeRabbit caught in Task 18c's advance_order_status
+    (PR #30): a whitespace-only string is truthy in Python, so a naive
+    `if tracking_note:` check would persist "   " as if it were a real
+    note, silently overwriting a genuine existing one."""
+    product = _make_product(stock=5)
+    order = _make_order()
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 45000)
+    order.tracking_note = "Customer requested cancellation."
+    order.save(update_fields=["tracking_note"])
+
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED, tracking_note="   ")
+
+    order.refresh_from_db()
+    assert order.tracking_note == "Customer requested cancellation."

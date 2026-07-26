@@ -527,7 +527,7 @@ def advance_order_status(order_id, to_status, tracking_note="") -> None:
                 )
 
             locked_order.status = to_status
-            if tracking_note:
+            if tracking_note and tracking_note.strip():
                 locked_order.tracking_note = tracking_note
             locked_order.save(update_fields=["status", "tracking_note"])
         _send_order_status_notification(locked_order)
@@ -640,7 +640,7 @@ def cancel_or_refund_order(order_id, to_status, tracking_note="", restock=None) 
 
             locked_order.pv_earned = 0
             locked_order.status = to_status
-            if tracking_note:
+            if tracking_note and tracking_note.strip():
                 locked_order.tracking_note = tracking_note
             locked_order.save(update_fields=["pv_earned", "status", "tracking_note"])
         _send_order_status_notification(locked_order)

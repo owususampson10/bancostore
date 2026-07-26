@@ -115,6 +115,39 @@ def test_notification_fires_on_a_real_transition(mock_sms, mock_mail):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    "from_status,to_status",
+    [
+        (Order.Status.CONFIRMED, Order.Status.PROCESSING),
+        (Order.Status.PROCESSING, Order.Status.DISPATCHED),
+        (Order.Status.DISPATCHED, Order.Status.DELIVERED),
+    ],
+)
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_both_notification_channels_fire_with_the_new_status_for_every_transition(
+    mock_sms, mock_mail, from_status, to_status
+):
+    """CodeRabbit (PR #30): the single-transition test above only proved
+    SMS content once -- _send_order_status_notification itself has no
+    per-transition branching (same function, same message shape,
+    regardless of which status triggered it, already proven by 18b's own
+    suite using the exact same helper), so this parametrization mainly
+    guards against a regression in the from/to wiring itself, not a
+    distinct code path per stage."""
+    order = _make_order(status=from_status)
+
+    advance_order_status(order.pk, to_status)
+
+    mock_sms.assert_called_once()
+    mock_mail.assert_called_once()
+    order.refresh_from_db()
+    expected = order.get_status_display()
+    assert expected in mock_sms.call_args[0][1]
+    assert expected in mock_mail.call_args.kwargs["message"]
+
+
+@pytest.mark.django_db
 @patch("apps.orders.services.send_mail")
 @patch("apps.orders.services.send_sms")
 def test_tracking_note_persists_alongside_a_status_update(mock_sms, mock_mail):
@@ -127,6 +160,25 @@ def test_tracking_note_persists_alongside_a_status_update(mock_sms, mock_mail):
     order.refresh_from_db()
     assert order.status == Order.Status.DISPATCHED
     assert order.tracking_note == "Handed to Speedaf courier."
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_whitespace_only_tracking_note_does_not_clear_an_existing_one(
+    mock_sms, mock_mail
+):
+    """CodeRabbit (PR #30): a whitespace-only string is truthy in Python,
+    so a naive `if tracking_note:` check would persist "   " as if it
+    were a real note, silently overwriting a genuine existing one."""
+    order = _make_order(status=Order.Status.PROCESSING)
+    order.tracking_note = "Already noted at Processing."
+    order.save(update_fields=["tracking_note"])
+
+    advance_order_status(order.pk, Order.Status.DISPATCHED, tracking_note="   ")
+
+    order.refresh_from_db()
+    assert order.tracking_note == "Already noted at Processing."
 
 
 @pytest.mark.django_db
