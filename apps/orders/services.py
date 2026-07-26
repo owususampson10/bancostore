@@ -324,6 +324,16 @@ def confirm_order_payment(reference: str) -> None:
                         record_personal_pv(distributor, pv_amount)
                         pv_earned = pv_amount
 
+            if not is_legal_order_status_transition(
+                order.status, Order.Status.CONFIRMED
+            ):
+                # Unreachable given the PENDING guard above -- this is a
+                # tripwire against _ALLOWED_TRANSITIONS drifting out of
+                # sync with this call site (CodeRabbit, PR #28).
+                raise RuntimeError(
+                    f"Illegal order status transition: {order.status} -> "
+                    f"confirmed for reference={reference}"
+                )
             order.pv_earned = pv_earned
             order.status = Order.Status.CONFIRMED
             order.confirmed_at = timezone.now()
@@ -357,6 +367,15 @@ def _cancel_order_for_insufficient_stock(reference: str) -> None:
                 return
             if order.status != Order.Status.PENDING:
                 return  # A concurrent attempt already handled this.
+            if not is_legal_order_status_transition(
+                order.status, Order.Status.CANCELLED
+            ):
+                # Unreachable given the PENDING guard above -- same
+                # tripwire as confirm_order_payment's (CodeRabbit, PR #28).
+                raise RuntimeError(
+                    f"Illegal order status transition: {order.status} -> "
+                    f"cancelled for reference={reference}"
+                )
             order.status = Order.Status.CANCELLED
             order.save(update_fields=["status"])
         logger.error(

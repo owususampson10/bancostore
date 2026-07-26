@@ -2668,11 +2668,19 @@ before writing a new status, so an illegal jump (e.g. `pending` straight to `dis
 loudly rather than silently corrupting the lifecycle.
 
 **Acceptance criteria:**
-- [ ] `Order.tracking_note` migration applies cleanly, defaults to empty, never required
-- [ ] The legality helper rejects every transition not in ADR-0006's table (e.g. `delivered` -> `pending`) and accepts every one that is
+- [x] `Order.tracking_note` migration applies cleanly, defaults to empty, never required
+- [x] The legality helper rejects every transition not in ADR-0006's table (e.g. `delivered` -> `pending`) and accepts every one that is
 
 **Verification:**
-- [ ] pytest test: every legal transition in the ADR's table is accepted; a representative sample of illegal ones (skipping a stage, moving backward, transitioning from a terminal status) are rejected
+- [x] pytest test: every legal transition in the ADR's table is accepted; a representative sample of illegal ones (skipping a stage, moving backward, transitioning from a terminal status) are rejected
+
+**Built:** Shipped via PR #28, 2026-07-26. `is_legal_order_status_transition` also retrofitted into
+Task 17c/17d's pre-existing direct status writes (`confirm_order_payment`,
+`_cancel_order_for_insufficient_stock`) as a tripwire against `_ALLOWED_TRANSITIONS` drifting out of
+sync with those call sites -- CodeRabbit caught that the helper had been added but never actually
+wired into the two status writes that already existed before this task, which would have let a
+future change to the graph silently go unenforced at those two sites. Full suite green (870+
+passed) both before and after the fix.
 
 **Dependencies:** Task 17 merged, **explicit user sign-off before this migration** (schema change, per `SPEC.md` Boundaries)
 
@@ -2688,28 +2696,36 @@ loudly rather than silently corrupting the lifecycle.
 
 #### Task 18b: Confirmed-order cancel/refund -- stock + PV reversal (elevated rigor)
 
-**Description:** `apps/orders/services.py::cancel_confirmed_order` (or similar), mirroring
-`confirm_order_payment`'s locked, idempotent shape (Task 17d): lock the `Order` row, validate the
-transition is legal (18a), and — only for a `confirmed` order being cancelled or refunded — inside
-that same lock, reverse stock per line item and reverse PV, before transitioning status and
-notifying after the lock releases. Per ADR-0006 decision 2, PV reversal is the hard part: this
+**Description:** `apps/orders/services.py::cancel_confirmed_order`/`refund_order` (or similar),
+mirroring `confirm_order_payment`'s locked, idempotent shape (Task 17d): lock the `Order` row,
+validate the transition is legal (18a), and — for any already-paid order (`confirmed`,
+`processing`, `dispatched`, or `delivered`, per the ADR-0006/18a transition graph's own set of
+legal `-> refunded` edges, not just `confirmed`) being cancelled or refunded — inside that same
+lock, reverse stock per line item and reverse PV, before transitioning status and notifying after
+the lock releases. **Scope correction (CodeRabbit, PR #28):** this slice was originally scoped to
+"a `confirmed` order" only, but the 18a transition graph legally allows `processing`/`dispatched`/
+`delivered` -> `refunded` too (cancellation stays restricted to `confirmed`/`processing`, i.e.
+pre-dispatch, per ADR-0006 decision 1) -- a refund from any of those later paid states must reverse
+stock/PV exactly the same way a `confirmed`-order refund does, or the ledger goes inconsistent
+(credited PV surviving a refund). Per ADR-0006 decision 2, PV reversal is the hard part: this
 slice's own `doubt-driven-development` pass must design around the fact that
 `apps.pv_ledger.services.record_purchase_pv`/`record_personal_pv` both hardcode "now" internally
 (today's date for `PvDailyBucket`, this calendar month for `MonthlyPersonalPv`) with no way to
-target the *original* purchase's date/month -- a naive negative-amount call at cancellation time
-(which can happen days or weeks after `confirmed_at`) would adjust the wrong day/month. `PvLedger`'s
-own running leg totals have no such date dependency and are safe to reverse directly.
+target the *original* purchase's date/month -- a naive negative-amount call at cancellation/refund
+time (which can happen days or weeks after `confirmed_at`) would adjust the wrong day/month.
+`PvLedger`'s own running leg totals have no such date dependency and are safe to reverse directly.
 
 **Acceptance criteria:**
-- [ ] Cancelling/refunding a `confirmed` order restores each line item's `Product.stock` by the order's quantity
-- [ ] Cancelling/refunding a `confirmed` order reverses the correct ancestor leg PV in `PvLedger`, using the order's own `confirmed_at`-derived period where a period matters, never "now"
+- [ ] Cancelling a `confirmed`/`processing` order, or refunding a `confirmed`/`processing`/`dispatched`/`delivered` order, restores each line item's `Product.stock` by the order's quantity
+- [ ] The same reversal restores the correct ancestor leg PV in `PvLedger`, using the order's own `confirmed_at`-derived period where a period matters, never "now"
 - [ ] `Order.pv_earned` is zeroed out once its PV is reversed (it must never keep claiming a credit that no longer exists)
 - [ ] A duplicate cancel/refund attempt on an already-cancelled/refunded order is a no-op, not a double reversal
 
 **Verification:**
 - [ ] pytest test: cancelling a confirmed order gives stock back exactly once
-- [ ] pytest test: cancelling a confirmed order reverses ancestor leg PV correctly, including when cancellation happens in a different calendar month than confirmation
-- [ ] pytest test: a duplicate cancellation attempt (webhook-style race, matching Task 17d's own idempotency test shape) never double-reverses stock or PV
+- [ ] pytest test: refunding a `dispatched`/`delivered` order reverses stock/PV exactly the same way a `confirmed`-order refund does
+- [ ] pytest test: cancelling/refunding an order reverses ancestor leg PV correctly, including when the reversal happens in a different calendar month than confirmation
+- [ ] pytest test: a duplicate cancel/refund attempt (webhook-style race, matching Task 17d's own idempotency test shape) never double-reverses stock or PV
 
 **Dependencies:** 18a merged
 
