@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–16 are done — Phase 5 (Wallet ledger + Withdrawal request flow) is complete; Task 17
-(Cart + checkout, opening Phase 6) is next.** What exists and is verified working:
+**Tasks 1–17 are done — Phase 6 (Cart + checkout) is complete; Task 18 (Order status lifecycle +
+admin order management) is next.** What exists and is verified working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -209,6 +209,69 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   deducted correctly, admin approves, and a simulated Paystack payout succeeds) passed end-to-end in
   a real browser session 2026-07-24, verifying every financial figure against the database at each
   step, not just the UI.
+- **Cart + checkout + Paystack payment confirmation (Task 17), closing Phase 6:** built as six
+  vertically-sliced sub-tasks (17a-17f) per `docs/decisions/0005-checkout-cart-design.md`, which
+  resolved the delivery-zone fee table against the source doc's own worked example (Kumasi GHS 20 /
+  Accra GHS 50 / Other Regions GHS 70, not a guess) and made the cart deliberately session-based
+  with no `Cart`/`CartItem` DB model (`apps/orders/cart.py::Cart`, `{product_id: quantity}`,
+  identical for guest and logged-in visitors). `Order`/`OrderItem` (17a) snapshot everything at
+  creation time — price, PV, delivery fee, total — so a later change to a live `Product` or
+  constance setting never retroactively changes an already-placed order; a `doubt-driven-development`
+  review before the migration caught a missing PV snapshot field before it could become a live-read
+  bug identical to the one the price/fee snapshot decisions already existed to prevent.
+  `create_pending_order` (17c) creates the `Order` in `pending` status at checkout confirmation,
+  before payment — a deliberate divergence from Task 16's `PendingRegistration` precedent, since
+  Section 5.2's own status table treats "Pending" as a real, visible state from the moment checkout
+  is confirmed. `confirm_order_payment` (17d) mirrors `consume_paid_starter_pack`'s idempotent
+  locked-consume shape exactly: locks the `Order` row, verifies the exact pinned amount with
+  Paystack, decrements stock per line item, credits PV (both ancestor *and* personal PV — a
+  `doubt-driven-development` review before any code was written caught the original draft only
+  crediting the former, which would have silently left every distributor permanently ineligible for
+  the monthly-100-PV threshold from storefront purchases), and transitions to `confirmed`. An
+  out-of-stock line item discovered at confirmation (stock is never reserved at add-to-cart, per
+  ADR-0005 decision 5) transitions the order to `cancelled` instead — the customer's payment is
+  already captured by that point, so it's never left `pending` to retry forever on every one of
+  Paystack's webhook redeliveries — logged for manual admin refund follow-up; real Paystack Refund
+  API automation is deliberately Task 18's scope, not built here (see the ADR's 2026-07-25 update).
+  Wired into the existing shared `paystack_webhook` (its `charge.success` dispatch refactored from
+  if/elif to a dict, exactly per that code's own comment anticipating a third prefix) and a new
+  `order_payment_callback` mirroring `starter_pack_payment_callback`'s redirect-back-then-re-verify
+  shape, never trusting the callback's own query string for anything beyond triggering the same
+  server-side re-check the webhook does. Checkout's themed Delivery Zone field (and, on the admin
+  side, the Distributor Directory's status filter) replaced a native `<select>` with the same
+  Alpine.js listbox pattern already established by `payout_settings.html`'s mobile-money-network
+  field — a native select's open options popup can't be restyled via CSS in any browser. That work
+  surfaced a real, previously-shipped-once-before XSS: interpolating request-controlled values
+  directly into an Alpine `x-data` JS string is exploitable despite Django's HTML auto-escaping
+  (the browser HTML-decodes the attribute *before* Alpine evaluates it as JS) — fixed the same way
+  `payout_settings` fixed it once already, constrain server-side then pass via `json_script`, never
+  raw interpolation. `templates/orders/order_created.html` (17d) was rebuilt from the user's Stitch
+  screens to branch on `Order.status`, dropping both mockups' fabricated automated-refund timeline
+  and fake progress tracker that didn't match this project's real, manual-admin-follow-up decision.
+  **CodeRabbit caught 5 real issues on PR #27, all fixed pre-merge:** the session cart was never
+  cleared after a confirmed payment (a customer could immediately re-order the same items — fixed
+  with a new `Cart.clear()`); one Paystack response read used bracket indexing instead of `.get()`,
+  the one inconsistency with every other read in this codebase, turning a malformed response into
+  an unhandled 500 after the order already existed; `order_payment_callback` reversed an
+  unvalidated, fully attacker-controlled query-string reference into a URL — confirmed via
+  `manage.py shell` that any reference containing `/` raises `NoReverseMatch` (the `<str:...>`
+  converter excludes it), an unauthenticated 500 on a public endpoint, fixed by resolving the
+  `Order` first; the confirmation template's bare `else` branch would have mislabeled a later
+  lifecycle status (`processing`/`dispatched`/etc., Task 18's scope) as still awaiting payment; and
+  a stale test comment. Verifying 17d's own concurrency test also surfaced and fixed a genuine
+  local-only flake: a 5-thread test (mirroring `apps/wallet`'s own convention) was intermittently
+  flaky under SQLite specifically because `confirm_order_payment`'s correctness depends on
+  `select_for_update` actually resolving contention, which SQLite has no real implementation of at
+  all — unlike the wallet test, whose correctness instead comes from a race-free bulk `F()` update.
+  Reduced to 2 threads matching `test_consume_paid_starter_pack.py`'s own existing precedent for
+  this exact lock shape, verified reliable across 8/8 repeated local runs. Task 17e's mobile-
+  responsive browser pass ran 2026-07-26: `cart.html`/`checkout.html`/`order_created.html` verified
+  clean at 1440/1024/768/500px real browser resize (500px, not 320px, being macOS Chrome's actual
+  window-resize floor — the natural iframe workaround is correctly blocked by Django's own
+  `X-Frame-Options: DENY`, not weakened just to enable a test); see `tasks/todo.md` Task 17e for the
+  full reasoning on why 500px-clean plus no hard-coded fixed-width elements gives reasonable, if not
+  literally-320px-proven, confidence. Shipped via PR #24 (17a), #25 (17b), #26 (17c), #27 (17d);
+  full suite green throughout, 844 passed as of 17d's merge.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,

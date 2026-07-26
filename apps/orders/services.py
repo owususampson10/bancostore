@@ -23,6 +23,44 @@ from .models import Order, OrderItem
 
 logger = logging.getLogger(__name__)
 
+# Task 18a (ADR-0006 decision 1, read directly against the primary source
+# doc's Section 5.2 table). Cancelled is reachable only pre-dispatch
+# (pending/confirmed/processing) per the doc's own "Order was cancelled
+# before dispatch" wording -- the one restriction Refunded deliberately
+# doesn't share, since the doc places no timing restriction on it (a
+# delivered order can still be refunded, e.g. a return). Pending/Confirmed
+# are the two transitions Task 17c/17d already perform automatically;
+# they're listed here too so this graph stays the single source of truth
+# for every legal transition, not just the ones Task 18 adds. Cancelled
+# and Refunded are terminal -- no transition exists out of either.
+_ALLOWED_TRANSITIONS = {
+    Order.Status.PENDING: {Order.Status.CONFIRMED, Order.Status.CANCELLED},
+    Order.Status.CONFIRMED: {
+        Order.Status.PROCESSING,
+        Order.Status.CANCELLED,
+        Order.Status.REFUNDED,
+    },
+    Order.Status.PROCESSING: {
+        Order.Status.DISPATCHED,
+        Order.Status.CANCELLED,
+        Order.Status.REFUNDED,
+    },
+    Order.Status.DISPATCHED: {Order.Status.DELIVERED, Order.Status.REFUNDED},
+    Order.Status.DELIVERED: {Order.Status.REFUNDED},
+    Order.Status.CANCELLED: set(),
+    Order.Status.REFUNDED: set(),
+}
+
+
+def is_legal_order_status_transition(from_status: str, to_status: str) -> bool:
+    """Task 18a. Every later slice's transition function (18b's
+    cancel/refund reversal, 18c's manual admin transitions, 18d's
+    auto-cancel) must call this before writing a new status, so an
+    illegal jump fails loudly rather than silently corrupting the
+    lifecycle. `_ALLOWED_TRANSITIONS` is the single source of truth --
+    see its own comment for the reasoning behind each edge."""
+    return to_status in _ALLOWED_TRANSITIONS.get(from_status, set())
+
 
 def calculate_delivery_fee(delivery_method, delivery_zone, subtotal):
     """Task 17c (ADR-0005 decision 1). Pickup is always free; home

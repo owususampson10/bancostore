@@ -233,3 +233,21 @@ another table in Django/MySQL. This is a required test-coverage item for 17c/17d
 (the actual guardrail for this identity), not a gap in this schema — flagged explicitly rather than
 silently assumed sufficient, mirroring how `WithdrawalRequest`'s own arithmetic constraint
 (ADR-0004) was still found missing a term by CodeRabbit despite being reasoned through carefully.
+
+## Update (2026-07-25): Decision 5's stock-insufficiency handling, resolved at 17d implementation time
+
+Decision 5 above left "the exact terminal handling (refund vs. manual admin resolution)... TBD at
+implementation time, flagged here rather than silently assumed" — resolved directly with the user
+during Task 17d: when `confirm_order_payment` finds insufficient stock after Paystack has already
+verified a successful payment, the `Order` transitions to `cancelled` (not left `pending`, which
+would otherwise retry the same failing decrement on every one of Paystack's webhook redeliveries
+for up to 72 hours), logged at `ERROR` level for a human to action the actual GHS refund.
+
+**Rejected: automated Paystack Refund API integration as part of 17d.** This project has never
+integrated Paystack's Refund API anywhere — doing so here would be new payment-integration surface
+requiring its own `security-and-hardening` pass and sign-off (per `SPEC.md`'s Boundary on Paystack
+integration code), a larger scope increase than 17d's own remit. The race this applies to is
+narrow by construction (decision 5 above: no stock reservation at cart time), so full automation on
+first implementation isn't proportionate. Task 18 — which already owns the rest of the
+`cancelled`/`refunded` lifecycle per this ADR's own Consequences section — is the natural home for
+real refund automation, tracked there rather than assumed done here.

@@ -126,26 +126,44 @@ matching bonus requires actual downline binary-bonus earnings, not just a qualif
   added for the collapsed sidebar's icon-only nav. PDF/CSV export was raised and confirmed
   out of scope per `SPEC.md`'s MVP scope section, not silently skipped. See `tasks/todo.md` Task
   15's full notes and `CLAUDE.md`.
-- [ ] Task 16: Withdrawal request flow — tax deduction, Paystack payout, admin approval — **next
-  up; unblocked as of 2026-07-22 (Open Question #5 below resolved)**. Scoped 2026-07-22 via
+- [x] Task 16: Withdrawal request flow — tax deduction, Paystack payout, admin approval. Scoped via
   `spec-driven-development` (four money-safety design questions with no answer in `SPEC.md` — payout-
   destination capture, `WITHDRAWAL_DAY` semantics, wallet debit timing, the `AUTO_APPROVE_*`
   settings' fate against a hard Boundary — put to the user directly rather than assumed, resolved
-  in `docs/decisions/0004-withdrawal-payout-design.md`) → `planning-and-task-breakdown` (16a–16h,
-  see `tasks/todo.md`). **16e/16f (Paystack Transfer API wrapper + webhook) each need explicit
-  user sign-off before starting**, independent of this breakdown already being reviewed — `SPEC.md`'s
-  Boundary on Paystack integration code applies per change, not once per task.
+  in `docs/decisions/0004-withdrawal-payout-design.md`), built as 8 vertically-sliced sub-tasks
+  (16a–16h, see `tasks/todo.md`). Shipped 2026-07-24; see `CLAUDE.md` for the full build/Checkpoint
+  F narrative, including the sandbox Paystack account-tier limitation on real Transfers.
 
 **Checkpoint F:** a distributor requests a withdrawal, tax is deducted correctly, admin approves,
-and a simulated Paystack payout succeeds.
+and a simulated Paystack payout succeeds. **Passed** 2026-07-24, real browser session, every
+financial figure verified against the database at each step.
 
 ### Phase 6: Checkout & Orders
-- [ ] Task 17: Cart + checkout — delivery/pickup, delivery-fee-by-zone, Paystack payment —
-  **needs delivery zone fee table decision**
-- [ ] Task 18: Order status lifecycle + notifications + admin order management
+- [x] Task 17: Cart + checkout — delivery/pickup, delivery-fee-by-zone, Paystack payment. Built as
+  17a–17f (see `tasks/todo.md` for the full sub-task breakdown and build narrative, `CLAUDE.md` for
+  the phase-level summary). Delivery zone fee table resolved via ADR-0005 decision 1 (the source
+  doc's own worked example: Kumasi GHS 20 / Accra GHS 50 / Other Regions GHS 70). Shipped
+  2026-07-25 via PR #24 (17a), #25 (17b), #26 (17c), #27 (17d) — CodeRabbit found 5 real issues on
+  17d specifically, all fixed pre-merge. 17e's mobile-responsive browser pass ran 2026-07-26:
+  `cart.html`/`checkout.html`/`order_created.html` verified clean at 1440/1024/768/500px real
+  browser resize — true 320px wasn't reachable (macOS Chrome's ~500px window-resize floor, and the
+  iframe workaround is correctly blocked by Django's own `X-Frame-Options: DENY`, not weakened just
+  for a test); code inspection found no fixed-width elements that would break specifically below
+  500px — see `tasks/todo.md` Task 17e for the full reasoning.
+- [ ] Task 18: Order status lifecycle + notifications + admin order management — **in progress,
+  scoped 2026-07-26** via `docs/decisions/0006-order-lifecycle-and-admin-management-design.md`
+  (read directly against the primary source doc's Section 5.2/5.3, plus four decisions confirmed
+  with the user: cancelling/refunding a confirmed order reverses stock *and* PV, not just status;
+  refunds stay manual, no real Paystack Refund API integration is built here after all; customer-
+  facing self-service cancel is deferred to a follow-up task; the admin order view is a custom
+  Stitch-designed `admin_portal` page, not plain Django Admin) → broken into 18a-18g in
+  `tasks/todo.md`, matching Task 17's own 17a-17f granularity.
 
 **Checkpoint G:** both a customer and a distributor complete a purchase; PV is generated only for
-the distributor purchase; order status updates correctly.
+the distributor purchase; order status updates correctly. **Purchase + PV-branching portion passed**
+2026-07-25 (guest checkout verified live end-to-end; distributor PV-credit branch verified via
+`confirm_order_payment`'s own pytest suite, not a dedicated fresh browser session — see
+`tasks/todo.md` Task 17f). The "order status updates correctly" portion remains Task 18's to close.
 
 ### Phase 7: Cooling-Off Refund
 - [ ] Task 19: 7-day cooling-off refund — processing fee, PV reversal, commission reversal

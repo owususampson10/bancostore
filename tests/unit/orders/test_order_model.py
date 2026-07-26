@@ -52,6 +52,20 @@ def test_fields_round_trip_correctly():
 
 
 @pytest.mark.django_db
+def test_tracking_note_defaults_to_blank_and_is_never_required():
+    # Task 18a (ADR-0006, Section 5.3: "Admin can update the order status
+    # and add a tracking note") -- optional, not every status update
+    # needs one.
+    order = _make_order()
+    assert order.tracking_note == ""
+
+    order.tracking_note = "Left with a neighbour, per customer's request."
+    order.save(update_fields=["tracking_note"])
+    order.refresh_from_db()
+    assert order.tracking_note == "Left with a neighbour, per customer's request."
+
+
+@pytest.mark.django_db
 def test_status_choices_include_every_section_5_2_stage():
     values = {choice.value for choice in Order.Status}
     assert values == {
