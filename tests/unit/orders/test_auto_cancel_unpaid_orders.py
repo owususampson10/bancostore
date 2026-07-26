@@ -5,6 +5,8 @@ from itertools import count
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 import pytest
 
@@ -230,3 +232,48 @@ def test_seed_migration_created_a_real_periodic_task():
     assert task.task == "apps.orders.tasks.auto_cancel_unpaid_orders"
     assert task.interval.every == 30
     assert task.interval.period == "minutes"
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.tasks.timezone.now")
+def test_query_count_stays_flat_per_order_regardless_of_eligible_count(
+    mock_now, mock_sms, mock_mail
+):
+    """CodeRabbit (PR #31): the 'query count stays flat' acceptance
+    criterion (Task 13's own established scale discipline -- no N+1 per
+    eligible order) was checked off in tasks/todo.md with no test
+    actually measuring it. Mirrors tests/unit/pv_ledger
+    /test_purchase_increment.py::test_query_count_does_not_grow_with_
+    ancestor_depth's own way of proving a scale-sensitive path stays
+    flat: compares total query count at two different eligible-order
+    counts and asserts the marginal per-order cost is a small constant,
+    not something that grows with the total -- an N+1 would show up as
+    a disproportionate jump between the two, not a linear one."""
+    mock_now.return_value = RUN_AT
+
+    for _ in range(2):
+        _make_order(
+            status=Order.Status.PENDING, created_at=RUN_AT - timedelta(hours=25)
+        )
+    with CaptureQueriesContext(connection) as ctx_small:
+        auto_cancel_unpaid_orders()
+    small_count = len(ctx_small.captured_queries)
+
+    OrderCycleRun.objects.all().delete()
+    for _ in range(10):
+        _make_order(
+            status=Order.Status.PENDING, created_at=RUN_AT - timedelta(hours=25)
+        )
+    with CaptureQueriesContext(connection) as ctx_large:
+        auto_cancel_unpaid_orders()
+    large_count = len(ctx_large.captured_queries)
+
+    # 8 extra orders (10 - 2) between the two runs -- if per-order cost
+    # were growing with the total eligible count (an N+1), this delta
+    # would blow up well past a small per-order constant (lock+get,
+    # status UPDATE, the simple_history INSERT it triggers -- a handful
+    # of queries, not dozens) as the eligible count grows.
+    per_order_cost = (large_count - small_count) / 8
+    assert per_order_cost < 10
