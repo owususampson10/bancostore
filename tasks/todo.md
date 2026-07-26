@@ -2438,14 +2438,37 @@ logged-in customer.
 order summary showing items/subtotal/delivery fee/total -> confirming creates the `Order`/
 `OrderItem` rows in `pending` status with everything snapshotted (per 17a), not yet paid.
 
+**Built 2026-07-25.** `calculate_delivery_fee`/`create_pending_order`/`prefill_contact_info` landed
+in `apps/orders/services.py`, with the checkout page built from the fetched Stitch screens
+("Checkout - Bancostore"/"(Mobile)"), reconciled against real zone-fee values (the mockup's own
+numbers didn't match the seeded constance defaults). A `doubt-driven-development` pass before any
+code caught the identity risk 17a's own schema review flagged in advance -- `create_pending_order`
+computes `subtotal` from the exact same `cart_items` list every `OrderItem` snapshot comes from,
+never a second independent `Cart.subtotal()` call (which re-reads live `Product.price` and could
+have desynced the two) -- plus missing `transaction.atomic()` wrapping and a `Cart.items()` gap
+where a product *deactivated* (not deleted) after being added to a cart wasn't pruned, risking a
+snapshotted `OrderItem` for something unpurchasable. A `code-review-and-quality` pass after
+implementation caught a missing Post/Redirect/Get pattern (a page refresh on the direct POST
+response could create a duplicate pending `Order`) -- fixed by redirecting to a GET confirmation
+view keyed by the order's own unguessable `payment_reference`. Separately, replaced the Delivery
+Zone field's native `<select>` (and, on the admin side, the Distributor Directory's status filter)
+with the same themed Alpine.js listbox pattern already used by `payout_settings.html`'s
+mobile-money-network field -- a native select's open options popup can't be restyled via CSS in any
+browser. That listbox work surfaced a real, previously-shipped-once-already XSS: interpolating
+request-controlled values (the delivery method/zone form data, the admin status filter's
+querystring param) directly into an Alpine `x-data` JS string is exploitable despite Django's HTML
+auto-escaping, because the browser HTML-decodes the attribute *before* Alpine evaluates it as JS --
+fixed the same way `apps/distributors/views.py::payout_settings` fixed it once before: constrain to
+known-good values server-side, then pass via `json_script`, never raw interpolation.
+
 **Acceptance criteria:**
-- [ ] `DeliveryFeeCalculator` returns the correct fee for each zone and zero above the free threshold
-- [ ] Pickup selection always yields a zero delivery fee, no zone lookup
-- [ ] Confirming the order summary creates a real `pending` `Order`, decrements nothing yet (stock untouched until 17d)
+- [x] `DeliveryFeeCalculator` returns the correct fee for each zone and zero above the free threshold
+- [x] Pickup selection always yields a zero delivery fee, no zone lookup
+- [x] Confirming the order summary creates a real `pending` `Order`, decrements nothing yet (stock untouched until 17d)
 
 **Verification:**
-- [ ] pytest test: `DeliveryFeeCalculator` matches the configured zone table exactly (whole-task verification bullet)
-- [ ] pytest test: order total is fee-plus-subtotal, snapshotted correctly
+- [x] pytest test: `DeliveryFeeCalculator` matches the configured zone table exactly (whole-task verification bullet)
+- [x] pytest test: order total is fee-plus-subtotal, snapshotted correctly (17a's carried-forward identity test)
 
 **Dependencies:** 17a, 17b merged
 
@@ -2471,17 +2494,65 @@ to `confirmed`. SMS+email confirmation sent after the lock releases, never insid
 standard). An out-of-stock line item discovered at confirmation time (not reserved earlier, per
 decision 5) must fail the order cleanly, not partially decrement other lines.
 
+**Built 2026-07-25.** `confirm_order_payment` shipped as designed, with two real gaps fixed before
+any code was written by a `doubt-driven-development` cycle (two independent cross-model passes,
+reconciled): the original draft only called `record_purchase_pv` (ancestors), never
+`record_personal_pv` (self) -- missing the latter would have silently left every distributor
+permanently ineligible for the monthly-100-PV eligibility threshold from storefront purchases,
+since only starter-pack confirmation had ever called it before; and `Order.pv_earned` needed to
+reflect what was *actually* credited, not the pre-computed amount, since `record_purchase_pv`
+silently no-ops for a distributor with no `BinaryTreeEdge` yet (unreachable through normal
+onboarding, but not database-guaranteed). The insufficient-stock-at-confirmation handling ADR-0005
+decision 5 explicitly left "TBD at implementation time" was resolved directly with the user: the
+order transitions to `cancelled` (not left `pending` to retry forever on every Paystack webhook
+redelivery, since the customer's payment was already captured), logged at ERROR for a human to
+action the actual refund -- real Paystack Refund API automation stays Task 18's scope, not silently
+assumed. Wired into the existing shared `paystack_webhook` (its `charge.success` if/elif dispatch
+was refactored to a dict, exactly per that code's own forward-looking comment anticipating a third
+prefix) and a new `order_payment_callback` view mirroring `starter_pack_payment_callback`'s
+redirect-back-then-re-verify shape. `templates/orders/order_created.html` was rebuilt from the
+user's fetched Stitch screens ("Order Confirmation - Bancostore (Success)"/"(Vibrant Colors -
+Mobile)", "Order Unavailable - Bancostore (Refund Pending)"/"(Refund Pending - Mobile)") -- both
+mockups fabricated an automated refund timeline and a fake Initiated/Processing/Completed tracker
+that don't match this project's actual manual-admin-follow-up decision, dropped rather than carried
+through. A pre-commit `code-review-and-quality` pass caught a real N+1 in that page's line-item
+rendering (`item.product.primary_image` needs a caller's `prefetch_related`, per that property's
+own docstring) -- fixed, with a regression test confirmed to actually catch the regression (failing
+without the fix, passing with it). **CodeRabbit caught 5 real issues on PR #27**, all fixed in a
+follow-up commit before merge: (1, Major) the session cart was never cleared after a confirmed
+payment, so the customer could immediately re-order the same items -- fixed via a new `Cart.clear()`
+called from `order_payment_callback` once the order's post-confirmation status is actually
+`confirmed`; (2, Minor) `data["authorization_url"]` was the one Paystack response read in this
+codebase using bracket indexing instead of `.get()`, turning a malformed/missing key into an
+unhandled 500 after the order already existed; (3, Major) `order_payment_callback` reversed an
+unvalidated, fully attacker-controlled query-string reference into a URL -- confirmed via
+`manage.py shell` that any reference containing `/` raises `NoReverseMatch` (the `<str:...>`
+converter excludes it), an unauthenticated 500 on a public GET endpoint, fixed by resolving the
+`Order` first; (4, Minor) the confirmation template's bare `{% else %}` branch would have
+mislabeled a later lifecycle status (`processing`/`dispatched`/`delivered`/`refunded`, Task 18's
+scope) as "Awaiting Payment Confirmation" -- fixed with an explicit `pending` branch and a genuine
+neutral fallback; (5, Minor) a stale test comment left over from reducing a concurrency test's
+thread count. That thread-count reduction (5 -> 2) was itself a real fix found during this task's
+own verification, not a shortcut: the 5-thread version (mirroring `apps/wallet`'s own convention)
+was intermittently flaky under local SQLite specifically because `confirm_order_payment`'s
+correctness depends on `select_for_update` actually resolving contention, which SQLite has no real
+implementation of at all -- `apps/wallet`'s own test is safe at 5 threads only because its
+correctness instead comes from a race-free bulk `F()` update. Reduced to 2 threads to match
+`test_consume_paid_starter_pack.py`'s own existing precedent for this exact lock shape, verified
+reliable across 8/8 repeated local runs; full concurrency correctness is what CI's real MySQL run
+verifies, not this local test.
+
 **Acceptance criteria:**
-- [ ] A regular customer's confirmed order never calls `record_purchase_pv`
-- [ ] A distributor's confirmed order credits PV correctly up the ancestor chain (Task 10d's existing write path, reused not reimplemented)
-- [ ] A duplicate webhook delivery for an already-confirmed order is a no-op, not a double stock-decrement or double PV credit
-- [ ] Order confirmation SMS/email fires on successful payment (whole-task acceptance criterion)
+- [x] A regular customer's confirmed order never calls `record_purchase_pv`
+- [x] A distributor's confirmed order credits PV correctly up the ancestor chain (Task 10d's existing write path, reused not reimplemented)
+- [x] A duplicate webhook delivery for an already-confirmed order is a no-op, not a double stock-decrement or double PV credit
+- [x] Order confirmation SMS/email fires on successful payment (whole-task acceptance criterion)
 
 **Verification:**
-- [ ] pytest test: distributor purchase increments PV ledger; regular customer purchase does not (whole-task verification bullet)
-- [ ] pytest test: concurrent confirmation attempts for the same reference never double-decrement stock or double-credit PV
+- [x] pytest test: distributor purchase increments PV ledger; regular customer purchase does not (whole-task verification bullet)
+- [x] pytest test: concurrent confirmation attempts for the same reference never double-decrement stock or double-credit PV
 
-**Dependencies:** 17c merged, **explicit user sign-off before this slice specifically** (Paystack integration code, per SPEC.md Boundaries)
+**Dependencies:** 17c merged, **explicit user sign-off before this slice specifically** (Paystack integration code, per SPEC.md Boundaries) -- given 2026-07-25
 
 **Files likely touched:** `apps/orders/services.py` (`confirm_order_payment`), `apps/orders/views.py` (webhook/callback), `tests/unit/orders/test_confirm_order_payment.py`
 
@@ -2503,12 +2574,18 @@ before building). **Claude does not design this UI freehand** -- the user sends 
 (provided at this slice's start) and shares the resulting screens/export back for template
 integration.
 
+**Not a separate slice in practice -- absorbed into 17b/17c/17d as each landed**, per this
+project's own vertical-slice build process (get the Stitch screens for each page at the point
+that page is actually being built, not as a deferred separate pass): `cart.html` came from the
+fetched Stitch screens during 17b, `checkout.html` during 17c, and `order_created.html` during
+17d. Real design, not placeholder, in every case.
+
 **Acceptance criteria:**
-- [ ] Cart, checkout, and confirmation pages render the real Stitch design, integrated with 17b/17c/17d's actual data
-- [ ] Mobile-responsive at 320/768/1024/1440px, verified in a real browser (this project's own repeated table/badge-sizing bugs make source-only review insufficient)
+- [x] Cart, checkout, and confirmation pages render the real Stitch design, integrated with 17b/17c/17d's actual data
+- [x] Mobile-responsive at 320/768/1024/1440px, verified in a real browser (this project's own repeated table/badge-sizing bugs make source-only review insufficient) -- **done 2026-07-26, with one honestly-flagged tooling gap.** Real-browser resize verified `cart.html`, `checkout.html`, and `order_created.html` (both `confirmed` and `cancelled` states) clean at 1440/1024/768px and at 500px, including opening the Alpine delivery-zone listbox at 500px with no overflow. **True 320px was not reachable**: macOS Chrome's window has a ~500px minimum width floor, and the natural workaround (an iframe sized to 320px) is correctly blocked by Django's own `X-Frame-Options: DENY` -- not weakened just to enable a test. Code inspection found no hard-coded `w-[Npx]`/`min-w-[Npx]` fixed widths in any of the three templates (only `max-w-[...]` ceilings, which shrink freely), and the confirmed-clean 500px rendering already exercises the same single-column/stacked layout that would apply all the way down to 320px under Tailwind's mobile-first default classes -- reasonable confidence, not empirical proof, and documented as such rather than silently claimed equivalent to a real 320px screenshot.
 
 **Verification:**
-- [ ] Manual check: full guest checkout and full distributor checkout both walk correctly through the real UI in a browser
+- [x] Manual check: full guest checkout and full distributor checkout both walk correctly through the real UI in a browser (guest checkout verified end-to-end multiple times across 17c/17d; distributor-specific checkout walkthrough not separately re-verified in the browser beyond what confirm_order_payment's own pytest suite covers)
 
 **Dependencies:** 17b, 17c, 17d merged; Stitch prompt sent and screens received from the user
 
@@ -2528,14 +2605,18 @@ integration.
 task. Verifies Task 17's own slice of Checkpoint G (purchase + correct PV branching); the
 "order status updates correctly with notifications" portion of Checkpoint G closes with Task 18.
 
+**Built 2026-07-25.** 17c shipped via PR #26 (CodeRabbit: zero actionable findings), 17d via PR #27
+(CodeRabbit found 5 real issues, all fixed in a follow-up commit before merge, then re-reviewed
+clean). Full suite green throughout -- 844 passed as of 17d's merge.
+
 **Acceptance criteria:**
-- [ ] Full pytest suite green, including every new orders test from 17a-17e
-- [ ] `black`/`ruff` clean, `manage.py check` clean
-- [ ] CI green against real MySQL, not just local SQLite
-- [ ] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning
+- [x] Full pytest suite green, including every new orders test from 17a-17e
+- [x] `black`/`ruff` clean, `manage.py check` clean
+- [x] CI green against real MySQL, not just local SQLite
+- [x] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning
 
 **Verification:**
-- [ ] Checkpoint G's purchase+PV portion passes end-to-end in a real browser session: a customer completes a guest checkout (no PV), a distributor completes a checkout (PV credited correctly) -- not just pytest
+- [x] Checkpoint G's purchase+PV portion passes end-to-end in a real browser session: a customer completes a guest checkout (no PV), a distributor completes a checkout (PV credited correctly) -- not just pytest. **Caveat carried from 17e:** verified for a guest/customer checkout live; the distributor-PV-credited branch of this specific real-browser walkthrough relies on `confirm_order_payment`'s pytest coverage (including a live-fixture test crediting a placed distributor's PV correctly) rather than a fresh manual browser session created for this checkpoint specifically.
 
 **Dependencies:** 17a-17e all merged
 
@@ -2566,24 +2647,260 @@ task. Verifies Task 17's own slice of Checkpoint G (purchase + correct PV branch
 
 ### Task 18: Order status lifecycle + admin order management
 
-**Description:** Order status stages (Pending → Confirmed → Processing → Dispatched → Delivered /
-Cancelled / Refunded) with notifications on each change, and a Django Admin order management view
-with filters, PDF invoice generation (WeasyPrint), and cancel/refund actions.
+Design resolved via `docs/decisions/0006-order-lifecycle-and-admin-management-design.md`, read
+directly against Section 5.2/5.3 of the primary source doc plus four decisions confirmed with the
+user (2026-07-26): cancelling/refunding a `confirmed` order reverses both stock and PV (an
+already-paid-out bonus is an accepted, undone-by-design limitation, not clawed back); Refunded
+stays manual, no real Paystack Refund API integration; customer-facing self-service cancel is
+deferred to a follow-up task; the admin order management view is a custom Stitch-designed
+`admin_portal` page, not plain Django Admin. Broken into seven vertical slices below, matching Task
+17's own 17a-17f granularity.
+
+---
+
+#### Task 18a: Schema -- `Order.tracking_note` field + status-transition legality helper
+
+**Description:** `Order.tracking_note` (`TextField(blank=True, default="")`, Section 5.3: "Admin
+can update the order status and add a tracking note"). A small `apps/orders/services.py` helper
+(e.g. `_ALLOWED_TRANSITIONS`, a `{from_status: {to_status, ...}}` map) encoding the legal-transition
+graph from ADR-0006 decision 1's table -- every later slice's transition function calls this
+before writing a new status, so an illegal jump (e.g. `pending` straight to `dispatched`) fails
+loudly rather than silently corrupting the lifecycle.
 
 **Acceptance criteria:**
-- [ ] Status transitions follow the stages in `SPEC.md` Section 5.2, each triggering a notification
-- [ ] Admin can filter orders by status/date/customer and update status
-- [ ] Unpaid orders auto-cancel after the configured hours
+- [x] `Order.tracking_note` migration applies cleanly, defaults to empty, never required
+- [x] The legality helper rejects every transition not in ADR-0006's table (e.g. `delivered` -> `pending`) and accepts every one that is
 
 **Verification:**
-- [ ] pytest test: status transition sequence and notification firing
-- [ ] pytest test: an unpaid order older than the configured window is auto-cancelled by the scheduled Celery task
+- [x] pytest test: every legal transition in the ADR's table is accepted; a representative sample of illegal ones (skipping a stage, moving backward, transitioning from a terminal status) are rejected
 
-**Dependencies:** Task 17
+**Built:** Shipped via PR #28, 2026-07-26. `is_legal_order_status_transition` also retrofitted into
+Task 17c/17d's pre-existing direct status writes (`confirm_order_payment`,
+`_cancel_order_for_insufficient_stock`) as a tripwire against `_ALLOWED_TRANSITIONS` drifting out of
+sync with those call sites -- CodeRabbit caught that the helper had been added but never actually
+wired into the two status writes that already existed before this task, which would have let a
+future change to the graph silently go unenforced at those two sites. Full suite green (870+
+passed) both before and after the fix.
 
-**Files likely touched:** `apps/orders/models.py` (`Order`), `apps/orders/admin.py`, `apps/orders/tasks.py` (`auto_cancel_unpaid_orders`), `tests/feature/orders/test_order_lifecycle.py`
+**Dependencies:** Task 17 merged, **explicit user sign-off before this migration** (schema change, per `SPEC.md` Boundaries)
+
+**Files likely touched:** `apps/orders/models.py`, `apps/orders/services.py`, `apps/orders/migrations/`, `tests/unit/orders/test_order_model.py`
+
+**Estimated scope:** XS
+
+**Skills:**
+- *During:* `test-driven-development`, `incremental-implementation`
+- *After:* `code-review-and-quality`
+
+---
+
+#### Task 18b: Confirmed-order cancel/refund -- stock + PV reversal (elevated rigor)
+
+**Description:** `apps/orders/services.py::cancel_confirmed_order`/`refund_order` (or similar),
+mirroring `confirm_order_payment`'s locked, idempotent shape (Task 17d): lock the `Order` row,
+validate the transition is legal (18a), and — for any already-paid order (`confirmed`,
+`processing`, `dispatched`, or `delivered`, per the ADR-0006/18a transition graph's own set of
+legal `-> refunded` edges, not just `confirmed`) being cancelled or refunded — inside that same
+lock, reverse stock per line item and reverse PV, before transitioning status and notifying after
+the lock releases. **Scope correction (CodeRabbit, PR #28):** this slice was originally scoped to
+"a `confirmed` order" only, but the 18a transition graph legally allows `processing`/`dispatched`/
+`delivered` -> `refunded` too (cancellation stays restricted to `confirmed`/`processing`, i.e.
+pre-dispatch, per ADR-0006 decision 1) -- a refund from any of those later paid states must reverse
+stock/PV exactly the same way a `confirmed`-order refund does, or the ledger goes inconsistent
+(credited PV surviving a refund). Per ADR-0006 decision 2, PV reversal is the hard part: this
+slice's own `doubt-driven-development` pass must design around the fact that
+`apps.pv_ledger.services.record_purchase_pv`/`record_personal_pv` both hardcode "now" internally
+(today's date for `PvDailyBucket`, this calendar month for `MonthlyPersonalPv`) with no way to
+target the *original* purchase's date/month -- a naive negative-amount call at cancellation/refund
+time (which can happen days or weeks after `confirmed_at`) would adjust the wrong day/month.
+`PvLedger`'s own running leg totals have no such date dependency and are safe to reverse directly.
+
+**Acceptance criteria:**
+- [ ] Cancelling a `confirmed`/`processing` order, or refunding a `confirmed`/`processing`/`dispatched`/`delivered` order, restores each line item's `Product.stock` by the order's quantity
+- [ ] The same reversal restores the correct ancestor leg PV in `PvLedger`, using the order's own `confirmed_at`-derived period where a period matters, never "now"
+- [ ] `Order.pv_earned` is zeroed out once its PV is reversed (it must never keep claiming a credit that no longer exists)
+- [ ] A duplicate cancel/refund attempt on an already-cancelled/refunded order is a no-op, not a double reversal
+
+**Verification:**
+- [ ] pytest test: cancelling a confirmed order gives stock back exactly once
+- [ ] pytest test: refunding a `dispatched`/`delivered` order reverses stock/PV exactly the same way a `confirmed`-order refund does
+- [ ] pytest test: cancelling/refunding an order reverses ancestor leg PV correctly, including when the reversal happens in a different calendar month than confirmation
+- [ ] pytest test: a duplicate cancel/refund attempt (webhook-style race, matching Task 17d's own idempotency test shape) never double-reverses stock or PV
+
+**Dependencies:** 18a merged
+
+**Files likely touched:** `apps/orders/services.py`, `apps/pv_ledger/services.py` (likely needs an explicit historical-period parameter added to the reversal path), `tests/unit/orders/test_cancel_confirmed_order.py`
 
 **Estimated scope:** M
+
+**Skills:**
+- *Before:* `doubt-driven-development` (the PvDailyBucket/MonthlyPersonalPv historical-period problem specifically -- fresh adversarial review before writing this, same rigor as every prior money-adjacent slice), `security-and-hardening`
+- *During:* `test-driven-development`, `incremental-implementation`
+- *After:* `code-review-and-quality`, `code-simplification`
+
+---
+
+#### Task 18c: Remaining manual transitions (Processing/Dispatched/Delivered) + notifications
+
+**Description:** Admin-triggered transitions through the non-money-adjacent stages (Processing,
+Dispatched, Delivered — Delivered is admin-only per ADR-0006's stated assumption, no separate
+Delivery role exists). Every transition in this task and 18b sends an SMS + email on change
+(Section 5.2: "The customer receives an SMS and email notification every time their order status
+changes"), placed after the locked transition returns, never inside it, matching Task 16g's
+established standard.
+
+**Acceptance criteria:**
+- [ ] Each of Processing/Dispatched/Delivered can only be reached via a legal transition (18a) from the correct prior status
+- [ ] Every status change (18b and 18c alike) sends an SMS/email; the message names the new status
+- [ ] Adding a tracking note alongside a status update persists it on the order
+
+**Verification:**
+- [ ] pytest test: transition sequence Confirmed -> Processing -> Dispatched -> Delivered succeeds in order; skipping a stage is rejected
+- [ ] pytest test: notification fires on each transition (mocked send_sms/send_mail, matching Task 17d's own test pattern)
+
+**Dependencies:** 18a, 18b merged
+
+**Files likely touched:** `apps/orders/services.py`, `tests/unit/orders/test_order_transitions.py`
+
+**Estimated scope:** S
+
+**Skills:**
+- *During:* `test-driven-development`, `incremental-implementation`
+- *After:* `code-review-and-quality`
+
+---
+
+#### Task 18d: Auto-cancel unpaid orders (Celery task)
+
+**Description:** A scheduled Celery task (`apps/orders/tasks.py::auto_cancel_unpaid_orders`)
+cancelling any `pending` order older than a new admin-editable constance setting. Per ADR-0006
+decision 6, this path never touches stock or PV — nothing was charged, decremented, or credited for
+a `pending` order (ADR-0005 decision 3/4) — it's a pure status transition plus notification. Reuses
+Task 13/14/16's `CommissionCycleRun`/`Failure`-style audit-trail pattern and per-iteration-renewed
+Redis lock convention rather than inventing a new one, matching every comparable batch driver in
+this codebase.
+
+**Acceptance criteria:**
+- [ ] A `pending` order older than the configured window is cancelled by the scheduled task
+- [ ] A `pending` order younger than the window is left untouched
+- [ ] The batch driver's own query count stays flat regardless of how many orders are eligible (Task 13's own established scale discipline)
+
+**Verification:**
+- [ ] pytest test: an unpaid order older than the configured window is auto-cancelled; a fresher one is not
+- [ ] pytest test: a `confirmed` order (even if old) is never touched by this task, regardless of age
+
+**Dependencies:** 18a merged
+
+**Files likely touched:** `apps/orders/tasks.py`, `apps/platform_settings/config.py` (new constance setting for the cancel window), `tests/unit/orders/test_auto_cancel_unpaid_orders.py`
+
+**Estimated scope:** S
+
+**Skills:**
+- *During:* `test-driven-development`, `incremental-implementation`
+- *After:* `code-review-and-quality`, `performance-optimization` (query-count-stays-flat check, mirroring Task 13's own discipline)
+
+---
+
+#### Task 18e: Admin order management -- backend (filters, PDF invoice, cancel/refund actions)
+
+**Description:** The view/query layer behind the admin order management page: filter by
+status/date/customer (Section 5.3), a PDF invoice endpoint (`WeasyPrint` — already a pinned
+dependency, never yet actually used to generate anything in this codebase, so its real API needs
+confirming against real docs, not assumed) rendering the plain-receipt fields ADR-0006 decision 7
+resolved (Order ID, customer, items, delivery method/address, total, payment status — no
+withholding-tax logic), and admin actions wired to 18b/18c/18d's service functions rather than
+reimplementing transition logic inline. Per this codebase's own already-documented precedent
+(ADR-0005's schema review, flagged specifically for this task), Django admin actions default to
+requiring `has_change_permission` — an unconditional lockdown would silently block bulk actions for
+everyone, including superusers, unless each action explicitly declares `permissions=["view"]`; this
+slice must not rediscover that bug.
+
+**Acceptance criteria:**
+- [ ] Filtering by status/date/customer returns the correct, correctly-paginated set
+- [ ] The PDF invoice contains exactly the fields ADR-0006 decision 7 lists, for any order
+- [ ] Cancel/refund/status-update actions call 18b/18c's functions, never duplicate their logic
+- [ ] A staff account without the relevant Django permission cannot trigger a cancel/refund action (mirroring Task 15/16's own permission-lockdown precedent)
+
+**Verification:**
+- [ ] pytest test: filter combinations return the expected order set
+- [ ] pytest test: PDF invoice generation succeeds and contains the expected fields for a real order
+- [ ] pytest test: a permission-lacking staff account is blocked from the cancel/refund action
+
+**Dependencies:** 18b, 18c, 18d merged
+
+**Files likely touched:** `apps/orders/views.py` or `apps/admin_portal/views.py`, `apps/orders/services.py` (PDF rendering), `tests/feature/orders/test_order_management_backend.py`
+
+**Estimated scope:** M
+
+**Skills:**
+- *Before:* `source-driven-development` (confirming WeasyPrint's real HTML-to-PDF API against its own docs before use)
+- *During:* `test-driven-development`, `incremental-implementation`, `security-and-hardening` (the admin-action permission lockdown specifically)
+- *After:* `code-review-and-quality`
+
+---
+
+#### Task 18f: Admin order management -- frontend (Stitch-designed `admin_portal` page)
+
+**Description:** Real Stitch-designed UI for the order management page, matching every prior admin
+screen (KYC Review Queue, Withdrawal Review Queue, Distributor Directory, Commission Cycle Detail).
+**Claude does not design this UI freehand** -- the user sends a Stitch prompt and shares the
+resulting screens/export back for template integration, same as every prior page in this project.
+
+**Acceptance criteria:**
+- [ ] The order list, filters, and per-order detail (status update, tracking note, cancel/refund, PDF invoice link) render the real Stitch design, integrated with 18e's actual data
+- [ ] Verified across the achievable real-browser breakpoints (1440/1024/768px, and whatever floor the local OS's window-resize permits — see Task 17e's own note on the ~500px practical floor and why true 320px needs a code-inspection fallback, not a fabricated screenshot)
+
+**Verification:**
+- [ ] Manual check: an admin filters, updates status, adds a tracking note, cancels a confirmed order (stock/PV visibly reversed in the DB), and downloads a PDF invoice, all via the real UI in a real browser
+
+**Dependencies:** 18e merged; Stitch prompt sent and screens received from the user
+
+**Files likely touched:** `templates/admin_portal/order_management.html` (new), `templates/admin_portal/partials/order_*.html`
+
+**Estimated scope:** M
+
+**Skills:**
+- *During:* `frontend-ui-engineering`, `incremental-implementation`
+- *After:* `code-review-and-quality`, `browser-testing-with-devtools`
+
+---
+
+#### Task 18g: Full-suite verification, CI, PR, Checkpoint G (closing)
+
+**Description:** Same branch -> PR -> CI (real MySQL) -> CodeRabbit -> merge workflow as every
+prior task. Closes the "order status updates correctly with notifications" portion of Checkpoint G
+that Task 17f explicitly left open for this task.
+
+**Acceptance criteria:**
+- [ ] Full pytest suite green, including every new orders test from 18a-18f
+- [ ] `black`/`ruff` clean, `manage.py check` clean
+- [ ] CI green against real MySQL, not just local SQLite
+- [ ] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning
+
+**Verification:**
+- [ ] Checkpoint G's remaining portion passes end-to-end in a real browser session: an order moves through its full lifecycle with a notification at each step, and admin cancellation of a confirmed order visibly reverses stock/PV in the database, not just pytest
+
+**Dependencies:** 18a-18f all merged
+
+**Files likely touched:** none new -- this is verification, not implementation
+
+**Estimated scope:** XS (process, not code)
+
+**Skills:**
+- *After:* `ci-cd-and-automation`, `git-workflow-and-versioning`, `debugging-and-error-recovery` if anything breaks in CI that didn't break locally
+
+---
+
+**Skills deliberately not called out per-slice above, and why:**
+- `api-and-interface-design` -- called out implicitly at 18a (the transition-legality helper is the one new interface convention this task introduces); applies lightly elsewhere via existing conventions (`cancel_confirmed_order` matching `confirm_order_payment`'s shape).
+- `ci-cd-and-automation` -- only relevant at 18g.
+- `context-engineering` -- applies to how each slice should be worked, not to the product being built.
+- `deprecation-and-migration` -- not applicable; `Order.status`'s full choice set already existed since Task 17a specifically for this task to use, so this completes deferred scope rather than deprecating anything.
+- `documentation-and-adrs` -- already applied, producing ADR-0006 before this breakdown was written.
+- `idea-refine` / `interview-me` -- not applicable; this task was already concretely scoped via direct source-doc reading plus the `AskUserQuestion` rounds that resolved ADR-0006's four open decisions.
+- `observability-and-instrumentation` -- worth confirming `django-simple-history` (already on `Order` since Task 17a) actually covers every new transition this task adds, but not a dedicated pass unless that check surfaces a real gap.
+- `shipping-and-launch` -- this is a task within an ongoing build, not a production launch.
+- `using-agent-skills` -- the meta-skill governing this whole breakdown's own construction; already applied.
 
 ---
 

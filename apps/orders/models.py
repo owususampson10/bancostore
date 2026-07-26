@@ -100,19 +100,21 @@ class Order(models.Model):
     pv_earned = models.PositiveIntegerField(default=0)
 
     payment_reference = models.CharField(max_length=100, unique=True)
-    # code-review-and-quality (2026-07-24): no index yet, even though
-    # OrderAdmin already filters on this column and WithdrawalRequest
-    # (Task 16b, same task shape) pre-emptively indexed its own status
-    # column for this project's "hundreds of thousands of users" scale
-    # reasoning. Not added here since no real query shape exists yet
-    # (17c/Task 18 will define it) -- a composite index guessed now could
-    # easily be the wrong one. Revisit once 17c/Task 18's actual queries
-    # (e.g. "pending orders older than N hours" for auto-cancel) exist.
+    # Task 18a: the real query shape the code-review-and-quality note
+    # below was waiting for now exists -- Task 18d's auto-cancel task
+    # filters pending orders older than a configured window
+    # (status=PENDING, created_at__lt=cutoff), matching
+    # WithdrawalRequest's own pre-emptive status index (Task 16b) for
+    # this project's "hundreds of thousands of users" scale reasoning.
     status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.PENDING
+        max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True
     )
     confirmed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Task 18a (ADR-0006, Section 5.3: "Admin can update the order status
+    # and add a tracking note"). Optional -- not every status update
+    # needs one.
+    tracking_note = models.TextField(blank=True, default="")
 
     # Money- and PII-adjacent (guest checkout stores raw contact info with
     # no account) -- SPEC.md's "log admin actions affecting money ... via
