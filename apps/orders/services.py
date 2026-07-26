@@ -406,6 +406,89 @@ def _cancel_order_for_insufficient_stock(reference: str) -> None:
     retry_on_lock_contention(_attempt)
 
 
+def _auto_cancel_pending_order(order_id) -> bool:
+    """Task 18d. Per-order auto-cancel for
+    apps.orders.tasks.auto_cancel_unpaid_orders -- mirrors
+    cancel_or_refund_order/advance_order_status's locked shape, but for
+    the `pending` -> `cancelled` transition specifically. Per ADR-0006
+    decision 6, nothing was ever charged, decremented, or credited for a
+    still-pending order (ADR-0005 decision 3/4), so there is nothing to
+    reverse -- a pure status transition plus notification.
+
+    Returns True if this call actually cancelled the order, False if it
+    was a no-op (already resolved by something else -- e.g. the customer
+    completed payment in the same instant this cycle reached it, or a
+    previous cycle/manual action already resolved it)."""
+
+    def _attempt():
+        with transaction.atomic():
+            try:
+                locked_order = select_for_update_nowait_if_supported(
+                    Order.objects.filter(pk=order_id)
+                ).get()
+            except Order.DoesNotExist:
+                logger.error("_auto_cancel_pending_order: no Order pk=%s", order_id)
+                return False
+
+            if locked_order.status != Order.Status.PENDING:
+                return False  # Already resolved concurrently -- safe no-op.
+
+            if not is_legal_order_status_transition(
+                locked_order.status, Order.Status.CANCELLED
+            ):
+                # Unreachable given the PENDING check above (pending ->
+                # cancelled is always legal per 18a's graph) -- same
+                # tripwire convention as confirm_order_payment's own.
+                raise RuntimeError(
+                    f"Illegal order status transition: "
+                    f"{locked_order.status} -> cancelled for order "
+                    f"pk={order_id}"
+                )
+
+            locked_order.status = Order.Status.CANCELLED
+            locked_order.save(update_fields=["status"])
+        _send_auto_cancel_notification(locked_order)
+        return True
+
+    return retry_on_lock_contention(_attempt)
+
+
+def _send_auto_cancel_notification(order: Order) -> None:
+    # Each channel wrapped individually, matching every other
+    # notification helper in this module -- a notification-provider
+    # outage must never look like this cancellation was rolled back.
+    try:
+        send_sms(
+            str(order.phone_number),
+            f"Your Bancostore order {order.payment_reference} was "
+            "automatically cancelled because payment was not completed "
+            "in time.",
+        )
+    except Exception:
+        logger.exception(
+            "_auto_cancel_pending_order: failed to send SMS for " "reference=%s",
+            order.payment_reference,
+        )
+
+    if order.email:
+        try:
+            send_mail(
+                subject="Your Bancostore order was cancelled",
+                message=(
+                    f"Your order {order.payment_reference} was "
+                    "automatically cancelled because payment was not "
+                    "completed in time."
+                ),
+                from_email=None,
+                recipient_list=[order.email],
+            )
+        except Exception:
+            logger.exception(
+                "_auto_cancel_pending_order: failed to send email for " "reference=%s",
+                order.payment_reference,
+            )
+
+
 def _send_confirmation_notifications(order: Order) -> None:
     # Each channel is wrapped individually -- money/stock/PV are already
     # committed by this point, so a notification-provider outage must

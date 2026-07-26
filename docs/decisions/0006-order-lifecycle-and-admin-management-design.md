@@ -111,6 +111,15 @@ order (per ADR-0005 decision 3/4) — auto-cancel is a pure status transition pl
 stock/PV interaction at all. Decision 2 above only applies to cancelling an already-`confirmed`
 order, a materially different and rarer path (admin-initiated, not automatic).
 
+**Implementation confirmed 2026-07-26 (Task 18d):** the batch driver's own audit trail is a new,
+dedicated `OrderCycleRun`/`OrderCycleFailure` model pair, not a third `job_name` value on
+`CommissionCycleRun`/`Failure` — that model requires a `total_amount` field this money-free job has
+nothing to fill, and the same reasoning `apps/withdrawal/models.py::WithdrawalCycleRun` already
+gives for staying its own model applies here too, only more so (Withdrawal at least deals in money;
+this job deals in none). The batch driver itself is hand-written, mirroring
+`process_withdrawal_payouts`'s shape rather than calling into `apps.commissions.tasks
+._run_commission_cycle`, whose `process_one` contract requires a `Decimal` return.
+
 ### 7. PDF invoice is a plain receipt, no GRA withholding-tax logic
 
 Resolved directly from the source doc, Section 5.3's own field list: "Order ID, customer name,

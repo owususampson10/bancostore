@@ -2845,17 +2845,41 @@ Redis lock convention rather than inventing a new one, matching every comparable
 this codebase.
 
 **Acceptance criteria:**
-- [ ] A `pending` order older than the configured window is cancelled by the scheduled task
-- [ ] A `pending` order younger than the window is left untouched
-- [ ] The batch driver's own query count stays flat regardless of how many orders are eligible (Task 13's own established scale discipline)
+- [x] A `pending` order older than the configured window is cancelled by the scheduled task
+- [x] A `pending` order younger than the window is left untouched
+- [x] The batch driver's own query count stays flat regardless of how many orders are eligible (Task 13's own established scale discipline)
 
 **Verification:**
-- [ ] pytest test: an unpaid order older than the configured window is auto-cancelled; a fresher one is not
-- [ ] pytest test: a `confirmed` order (even if old) is never touched by this task, regardless of age
+- [x] pytest test: an unpaid order older than the configured window is auto-cancelled; a fresher one is not
+- [x] pytest test: a `confirmed` order (even if old) is never touched by this task, regardless of age
+
+**Built:** New `OrderCycleRun`/`OrderCycleFailure` models (migration, explicit user sign-off given
+2026-07-26) -- mirror `CommissionCycleRun`/`WithdrawalCycleRun`'s audit-trail *shape*, but as their
+own model pair, not a third `job_name` value on the commissions one: this job moves no money at
+all, so the `total_amount` field both existing models require doesn't apply, and neither existing
+`Failure` model's id field could hold an `order_id` without corrupting its meaning -- same reasoning
+Task 16's own `WithdrawalCycleRun`/`Failure` already established for *not* merging into
+`CommissionCycleRun`/`Failure`. New `PENDING_ORDER_AUTO_CANCEL_HOURS` constance setting (default 24
+hours, confirmed with the user) in a new "Order Settings" fieldset. New
+`apps/orders/services.py::_auto_cancel_pending_order(order_id)` (locked, idempotent, PENDING-only,
+sends a new auto-cancel-specific notification) plus `apps/orders/tasks.py::auto_cancel_unpaid_orders`
+-- a hand-written batch driver mirroring `process_withdrawal_payouts`'s exact shape (fixed run_at,
+per-iteration-renewed Redis lock, per-order exception isolation, systemic-failure guard, audit
+record persisted before that guard's raise), deliberately *not* a call into
+`apps.commissions.tasks._run_commission_cycle` -- that helper's `process_one` contract requires a
+`Decimal` amount return, which doesn't fit "did this order get cancelled" (a bool). Celery Beat
+schedule seeded via a data migration at a fixed 30-minute interval (no admin-editable *run
+frequency* setting -- `PENDING_ORDER_AUTO_CANCEL_HOURS` is the age cutoff the task reads every run,
+not its own schedule, so unlike Binary/Matching Bonus there's nothing to self-sync). `OrderCycleRun`
+registered in Django admin, hard-locked add/change/delete matching `CommissionCycleRunAdmin`
+exactly. 13 new tests (`tests/unit/orders/test_auto_cancel_unpaid_orders.py`) covering the per-order
+function, cutoff-based cancel/no-cancel, confirmed-orders-untouched, audit-record persistence, lock
+release on success, concurrent-trigger skip, systemic-failure raise + failure record, and the seed
+migration itself.
 
 **Dependencies:** 18a merged
 
-**Files likely touched:** `apps/orders/tasks.py`, `apps/platform_settings/config.py` (new constance setting for the cancel window), `tests/unit/orders/test_auto_cancel_unpaid_orders.py`
+**Files likely touched:** `apps/orders/tasks.py`, `apps/orders/models.py` (new `OrderCycleRun`/`OrderCycleFailure`), `apps/orders/admin.py`, `apps/orders/migrations/` (schema + seed), `apps/platform_settings/config.py` (new constance setting for the cancel window), `tests/unit/orders/test_auto_cancel_unpaid_orders.py`
 
 **Estimated scope:** S
 
