@@ -3150,24 +3150,176 @@ the distributor; order status updates correctly with notifications.
 
 ### Task 19: 7-day cooling-off refund
 
-**Description:** Within 7 days of joining, a distributor can cancel and get a refund: starter pack
-price minus the configured processing fee, registration fee not refunded, PV removed from
-upline's legs, any commissions already paid on this signup reversed.
+Design resolved via `docs/decisions/0007-cooling-off-refund-design.md`, read directly against
+Section 9 of the primary source doc plus five decisions confirmed with the user (2026-07-27,
+grounded in real-world MLM/direct-selling industry practice, not guessed): the 7-day window
+anchors to `Distributor.starter_pack_confirmed_at` (the purchase moment — nothing is refundable
+before then), not account/registration creation; the distributor's binary-tree placement is
+soft-deactivated (`user.is_active = False`, mirroring the existing suspend/reactivate toggle), not
+removed (no removal mechanism exists anywhere in this codebase, and building one is real, unbuilt,
+unrequested scope); only the sponsor's direct referral bonus is reversed, not any Binary/Matching
+bonus the cancelling distributor might have personally earned (a week-old distributor realistically
+never generates the latter, and this mirrors ADR-0006's already-accepted "fungible pool, can't
+attribute precisely once mixed into a batch cycle" limitation); a debit shortfall on the sponsor's
+wallet (already withdrawn) is logged for admin follow-up and the distributor's own refund proceeds
+regardless; and the refund is credited to the distributor's own wallet (not paid out externally,
+since — unlike a storefront customer — distributors already have a real `Wallet` and withdrawal
+flow built for exactly this). Broken into four vertically-sliced sub-tasks below, matching Task 18's
+own 18a-18g granularity. No admin-approval gate exists anywhere in Section 9 (unlike Task 16's
+withdrawal flow) — this is fully self-service, so no `admin_portal` slice is needed.
+
+---
+
+#### Task 19a: Generalize the PV-reversal helper for reuse
+
+**Description:** `apps/orders/services.py::_reverse_ancestor_pv` (Task 18b) already implements the
+exact PV-reversal shape this task needs (reverse `PvLedger` directly, reverse
+`PvDailyBucket`/`MonthlyPersonalPv` only what's still live) but is Order-specific. Extract it into
+`apps/pv_ledger/services.py` as a public helper taking `(distributor, pv_amount, purchase_date)`
+directly, and update `apps/orders/services.py` to call the shared version instead of keeping a
+second, duplicate implementation.
 
 **Acceptance criteria:**
-- [ ] Refund amount matches the doc example exactly: Pack B GHS 2,000 → GHS 1,800 refunded (10% fee)
-- [ ] PV added at signup is removed from every ancestor's ledger
-- [ ] Any referral bonus paid to the sponsor for this signup is reversed
+- [x] `apps/pv_ledger/services.py` exposes a public PV-reversal helper with the same
+  PvLedger/PvDailyBucket/MonthlyPersonalPv reversal behavior `_reverse_ancestor_pv` already has
+- [x] `apps/orders/services.py::cancel_or_refund_order` calls the shared helper instead of its own
+  private copy
 
 **Verification:**
-- [ ] pytest test reproducing the doc example exactly
+- [x] Task 18b's own existing test suite (`tests/feature/orders/` or wherever its cancel/refund
+  tests live) passes unchanged — this refactor must be behavior-preserving, not a new test-writing
+  exercise for the order side
+- [x] New direct unit tests for the generalized helper in `apps/pv_ledger/`
+- [x] Full suite green (307 passed), `ruff`/`black`/`isort` clean
+- [x] Bonus fix folded in: `apps/distributors/services.py::consume_paid_starter_pack` had a real
+  date-drift bug (3 independent `timezone.now()` calls could straddle a UTC-midnight boundary) —
+  found via `doubt-driven-development` before writing the extraction, fixed with a RED→GREEN
+  regression test (`test_pv_credit_and_starter_pack_confirmed_at_share_one_pinned_now`)
+
+**Dependencies:** Task 18b merged
+
+**Files likely touched:** `apps/pv_ledger/services.py`, `apps/orders/services.py`,
+`tests/unit/pv_ledger/`
+
+**Estimated scope:** S
+
+**Skills:**
+- *Before:* `doubt-driven-development` (this is a refactor of already-shipped, money-adjacent
+  logic — confirm the extraction is genuinely behavior-preserving before touching the order side)
+- *During:* `test-driven-development`, `code-simplification`
+- *After:* `code-review-and-quality`
+
+---
+
+#### Task 19b: Cooling-off refund service function
+
+**Description:** `apps/distributors/cooling_off_services.py` (new) — the core money/PV/rank logic.
+Validates the request is within `COOLING_OFF_PERIOD_DAYS` of `starter_pack_confirmed_at`, computes
+the refund via `starter_pack_price_pesewas * (1 - COOLING_OFF_REFUND_DEDUCTION_RATE / 100)`,
+reverses ancestor PV (19a's helper) and personal PV, reverses the sponsor's direct referral bonus
+via `apps/wallet/services.py::debit()` (catching `InsufficientBalanceError`, debiting what's
+available, logging any shortfall), credits the refund to the distributor's own wallet, clears
+`rank`/`starter_pack_*` fields, and deactivates the account (`user.is_active = False`). Locked and
+idempotent, mirroring `consume_paid_starter_pack`'s own shape in reverse.
+
+**Acceptance criteria:**
+- [ ] Refund amount matches the doc's own worked example exactly: Pack B GHS 2,000 → GHS 1,800
+- [ ] A request after day 7 (from `starter_pack_confirmed_at`) is rejected
+- [ ] PV added at signup (both ancestor legs and personal PV) is removed
+- [ ] The sponsor's direct referral bonus is reversed when their wallet has sufficient balance
+- [ ] A shortfall (insufficient sponsor balance) is logged, not raised — the distributor's own
+  refund still completes
+- [ ] The distributor's own wallet is credited with the refund amount
+  (`COOLING_OFF_REFUND` transaction type)
+- [ ] The account is deactivated (cannot log in afterward) but the `BinaryTreeEdge` placement is
+  left untouched
+- [ ] A second call for the same distributor is a safe idempotent no-op (already-cancelled)
+
+**Verification:**
+- [ ] pytest test reproducing the doc example exactly (GHS 2,000 → GHS 1,800)
 - [ ] pytest test: request after day 7 is rejected
+- [ ] pytest test: insufficient sponsor balance logs a shortfall and still refunds the distributor
+- [ ] pytest test: PvLedger/PvDailyBucket/MonthlyPersonalPv all correctly reversed
+- [ ] pytest test: double-cancellation is idempotent
 
-**Dependencies:** Task 10b, Task 10c, Task 10d, Task 12
+**Dependencies:** Task 19a
 
-**Files likely touched:** `apps/distributors/cooling_off_services.py`, `apps/distributors/views.py` (cancel membership), `tests/feature/distributors/test_cooling_off_refund.py`
+**Files likely touched:** `apps/distributors/cooling_off_services.py` (new),
+`apps/wallet/models.py` (two new `TransactionType` values + migration),
+`tests/unit/distributors/test_cooling_off_refund.py`
 
 **Estimated scope:** M
+
+**Skills:**
+- *Before:* `doubt-driven-development` (money + PV + commission reversal — this project's own
+  elevated-rigor area)
+- *During:* `test-driven-development`, `incremental-implementation`
+- *After:* `code-review-and-quality`, `security-and-hardening` (race-safety on a self-service
+  double-click)
+
+---
+
+#### Task 19c: Distributor-facing "Cancel Membership & Request Refund" UI
+
+**Description:** Real Stitch-designed UI on the distributor dashboard (per the source doc's own
+"they log into their dashboard and click 'Cancel Membership & Request Refund'" wording) wired to
+19b's service function. Claude does not design this UI freehand — the user sends a Stitch prompt
+and shares the resulting screen(s) back for template integration, same as every prior distributor-
+and admin-facing page in this project.
+
+**Acceptance criteria:**
+- [ ] The action is only offered within the cooling-off window (hidden or disabled after day 7, or
+  once already cancelled)
+- [ ] A confirmation step exists before the irreversible cancel action fires (matches this
+  project's own established danger-action pattern — e.g. `distributor_profile`'s suspend/reactivate
+  modal)
+- [ ] A successful cancellation shows the refund amount and logs the distributor out (their account
+  is now deactivated)
+
+**Verification:**
+- [ ] Manual check: request a refund as a real seeded distributor in a real browser within the
+  window, confirm the wallet credit and account deactivation are both visible/effective
+  end-to-end, not just via pytest
+- [ ] Responsive check at the project's established breakpoints (1440/768/500px)
+
+**Dependencies:** Task 19b; Stitch prompt sent and screen(s) received from the user
+
+**Files likely touched:** `apps/distributors/views.py`, `templates/distributors/*.html`,
+`tests/feature/distributors/test_cooling_off_refund_view.py`
+
+**Estimated scope:** S
+
+**Skills:**
+- *During:* `frontend-ui-engineering`, `incremental-implementation`
+- *After:* `code-review-and-quality`, `browser-testing-with-devtools`
+
+---
+
+#### Task 19d: Full-suite verification, CI, PR, checkpoint close
+
+**Description:** Same branch → PR → CI (real MySQL) → CodeRabbit → merge workflow as every prior
+task.
+
+**Acceptance criteria:**
+- [ ] Full pytest suite green, including every new cooling-off test from 19a-19c
+- [ ] `black`/`ruff` clean, `manage.py check` clean
+- [ ] CI green against real MySQL
+- [ ] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning
+
+**Verification:**
+- [ ] End-to-end real-browser pass: a seeded distributor within their cooling-off window cancels
+  and gets refunded, verified against the database at each step (wallet balance, PV ledger,
+  account status), not just pytest
+
+**Dependencies:** 19a-19c all merged
+
+**Files likely touched:** none new — this is verification, not implementation
+
+**Estimated scope:** XS (process, not code)
+
+**Skills:**
+- *After:* `ci-cd-and-automation`, `git-workflow-and-versioning`, `debugging-and-error-recovery` if
+  anything breaks in CI that didn't break locally
 
 ---
 

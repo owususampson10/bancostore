@@ -14,6 +14,8 @@ from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError
 from apps.distributors.services import consume_paid_starter_pack
 from apps.pv_ledger.models import MonthlyPersonalPv, PvLedger
+from apps.pv_ledger.services import record_personal_pv as _real_record_personal_pv
+from apps.pv_ledger.services import record_purchase_pv as _real_record_purchase_pv
 from apps.wallet.models import Wallet, WalletTransaction
 
 User = get_user_model()
@@ -196,6 +198,53 @@ def test_confirmed_pack_b_purchase_credits_1000_pv_to_sponsors_weaker_leg(
     ama_ledger = PvLedger.objects.get(distributor=ama)
     assert ama_ledger.left_leg_pv == 500
     assert ama_ledger.right_leg_pv == 1000
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+@patch(
+    "apps.distributors.services.record_personal_pv",
+    wraps=_real_record_personal_pv,
+)
+@patch(
+    "apps.distributors.services.record_purchase_pv",
+    wraps=_real_record_purchase_pv,
+)
+def test_pv_credit_and_starter_pack_confirmed_at_share_one_pinned_now(
+    mock_record_purchase_pv, mock_record_personal_pv, mock_verify
+):
+    """Date-drift bug (Task 19's doubt-driven-development review, found
+    while designing the cooling-off refund's PV reversal): record_purchase_pv
+    and record_personal_pv were each called with no explicit `today`,
+    independently defaulting to their own timezone.now().date() call,
+    while starter_pack_confirmed_at was set via a separate, independent
+    timezone.now() call -- two unrelated reads of "now" that could
+    resolve to different calendar dates at a UTC-midnight boundary.
+    record_purchase_pv/record_personal_pv's own `today` parameter (Task
+    18b) exists specifically so a later PV reversal can target the exact
+    PvDailyBucket/MonthlyPersonalPv row the original credit landed in --
+    Task 19's cooling-off reversal uses starter_pack_confirmed_at.date()
+    as that anchor, so it must always match the date the credit actually
+    used, not drift from it.
+
+    Wraps (not replaces) both functions so the real implementation still
+    runs -- this test's job is to check WHAT ARGUMENT they were called
+    with, not to fake their behavior. (Globally mocking timezone.now
+    itself was tried and rejected: django-simple-history's own internal
+    HistoricalDistributor snapshot also calls it on every Distributor
+    .save(), and feeding it a raw MagicMock crashes a real SQL INSERT --
+    unrelated to what this test is actually about.)"""
+    ama = _make_distributor()
+    PvLedger.objects.create(distributor=ama, left_leg_pv=0, right_leg_pv=0)
+    kofi = _select_pack_b(_make_distributor(sponsor=ama))
+    mock_verify.return_value = _success_verify(amount=200000)
+
+    consume_paid_starter_pack("pack-ref-1")
+
+    kofi.refresh_from_db()
+    confirmed_date = kofi.starter_pack_confirmed_at.date()
+    assert mock_record_purchase_pv.call_args.kwargs.get("today") == confirmed_date
+    assert mock_record_personal_pv.call_args.kwargs.get("today") == confirmed_date
 
 
 @pytest.mark.django_db

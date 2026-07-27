@@ -410,17 +410,31 @@ def consume_paid_starter_pack(reference: str) -> None:
                     distributor.pk,
                 )
 
-            record_purchase_pv(distributor, distributor.starter_pack_pv)
+            # Task 19 (doubt-driven-development finding): pinned once and
+            # reused for the PV credit AND starter_pack_confirmed_at --
+            # three independent timezone.now() calls here previously
+            # (record_purchase_pv's own default, record_personal_pv's own
+            # default, and this assignment) could in principle straddle a
+            # UTC-midnight boundary and land in different calendar dates,
+            # exactly the class of bug Task 18b's own `today` parameter on
+            # confirm_order_payment was already built to avoid. Task 19's
+            # cooling-off refund reversal uses starter_pack_confirmed_at
+            # .date() as its purchase_date anchor, so it must always match
+            # the date the credit itself actually used.
+            now = timezone.now()
+            today = now.date()
+
+            record_purchase_pv(distributor, distributor.starter_pack_pv, today=today)
             # Task 13a: record_purchase_pv only credits ANCESTORS' legs --
             # nothing previously credited the purchasing distributor's own
             # personal PV, needed for Binary/Matching Bonus eligibility.
-            record_personal_pv(distributor, distributor.starter_pack_pv)
+            record_personal_pv(distributor, distributor.starter_pack_pv, today=today)
 
             if distributor.sponsor_id:
                 _credit_direct_referral_bonus(distributor, reference)
 
             distributor.rank = distributor.starter_pack_rank
-            distributor.starter_pack_confirmed_at = timezone.now()
+            distributor.starter_pack_confirmed_at = now
             distributor.save(update_fields=["rank", "starter_pack_confirmed_at"])
 
     retry_on_lock_contention(_attempt)
