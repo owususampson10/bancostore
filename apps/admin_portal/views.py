@@ -20,6 +20,7 @@ from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import (
+    ADVANCEABLE_STATUSES,
     advance_order_status,
     cancel_or_refund_order,
     is_legal_order_status_transition,
@@ -701,16 +702,6 @@ def order_management_queue(request):
     return render(request, "admin_portal/order_management_queue.html", context)
 
 
-# The only statuses advance_order_status ever accepts (18c) -- offering
-# CANCELLED/REFUNDED here too would duplicate order_management_action's
-# own cancel/refund buttons under a different code path.
-_ADVANCEABLE_STATUSES = (
-    Order.Status.PROCESSING,
-    Order.Status.DISPATCHED,
-    Order.Status.DELIVERED,
-)
-
-
 @login_required(login_url="two_factor:login")
 def order_detail(request, pk):
     """Task 18f. GET-only single-order detail view, the page
@@ -745,7 +736,7 @@ def order_detail(request, pk):
     )
     advanceable_statuses = [
         (status, status.label)
-        for status in _ADVANCEABLE_STATUSES
+        for status in ADVANCEABLE_STATUSES
         if is_legal_order_status_transition(order.status, status)
     ]
     return render(
@@ -829,6 +820,18 @@ def order_management_action(request, pk):
     elif action == "advance":
         to_status = request.POST.get("to_status", "")
         tracking_note = request.POST.get("tracking_note", "")
+        # CodeRabbit (2026-07-27): the "Save Changes" button that submits
+        # this form lives in the page header, far from the Operational
+        # State radios -- a native HTML5 required-radio validation bubble
+        # anchored there was confusing, so the radios no longer carry
+        # `required` (templates/admin_portal/order_detail.html). Without
+        # this check, a blank to_status would instead reach
+        # advance_order_status's own ValueError, whose message embeds the
+        # raw Order.Status enum repr -- not admin-facing text. Mirrors the
+        # "refund" branch's own restock_raw check just above.
+        if not to_status:
+            messages.error(request, "Choose a status to advance to.")
+            return redirect("admin_portal:order_detail", pk=order.pk)
         try:
             advance_order_status(order.pk, to_status, tracking_note=tracking_note)
             messages.success(

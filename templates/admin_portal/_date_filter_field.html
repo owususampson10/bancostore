@@ -89,7 +89,7 @@ auto-escaping doesn't protect a JS-string-literal context).
 </button>
 </div>
 <div class="grid grid-cols-7 gap-1 text-center mb-1">
-<template x-for="d in ['S', 'M', 'T', 'W', 'T', 'F', 'S']" :key="d">
+<template x-for="(d, i) in ['S', 'M', 'T', 'W', 'T', 'F', 'S']" :key="i">
 <span class="text-[11px] font-bold text-on-surface-variant/70" x-text="d"></span>
 </template>
 </div>

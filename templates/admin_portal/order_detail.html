@@ -28,7 +28,7 @@ Save Changes
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-<!-- Left column: items + customer/delivery -->
+{# Left column: items + customer/delivery #}
 <div class="lg:col-span-8 space-y-6">
 <section class="bg-white rounded-xl p-6 shadow-sm border border-outline-variant/30">
 <div class="flex items-center justify-between mb-6 flex-wrap gap-2">
@@ -126,7 +126,7 @@ Order Items
 </div>
 </div>
 
-<!-- Right column: status/actions -->
+{# Right column: status/actions #}
 <div class="lg:col-span-4 space-y-6">
 {% comment %}
 Not lg:sticky -- confirmed via real-browser verification (2026-07-27)
@@ -144,19 +144,28 @@ as the left column anyway, so sticky adds no real benefit here.
 {% csrf_token %}
 <input type="hidden" name="action" value="advance">
 {% if advanceable_statuses %}
-<div class="space-y-2">
-<label class="font-label-md text-label-md text-on-surface-variant">Operational State</label>
+<fieldset class="space-y-2 border-0 p-0 m-0">
+<legend class="font-label-md text-label-md text-on-surface-variant">Operational State</legend>
 <div class="grid grid-cols-1 gap-2">
 {% for value, label in advanceable_statuses %}
 <label class="flex items-center justify-between w-full p-4 rounded-xl border border-outline-variant hover:border-admin-primary transition-all cursor-pointer has-[:checked]:border-admin-primary has-[:checked]:bg-admin-primary/5">
 <span class="flex items-center gap-3">
-<input type="radio" name="to_status" value="{{ value }}" required class="w-4 h-4 text-admin-primary focus:ring-admin-primary">
+{% comment %}
+Not required: CodeRabbit (2026-07-27) -- the Save Changes button
+that submits this form lives up in the page header, physically far
+from these radios. A native HTML5 "please select one" validation
+bubble anchored to an off-screen radio is confusing; the server-
+side is_legal_order_status_transition check (advance_order_status,
+apps/orders/services.py) already rejects an empty/blank to_status
+with a clear flash message instead.
+{% endcomment %}
+<input type="radio" name="to_status" value="{{ value }}" class="w-4 h-4 text-admin-primary focus:ring-admin-primary">
 <span class="font-body-md text-body-md font-semibold text-on-surface">{{ label }}</span>
 </span>
 </label>
 {% endfor %}
 </div>
-</div>
+</fieldset>
 <div class="space-y-2">
 <label for="tracking-note" class="font-label-md text-label-md text-on-surface-variant">Tracking Note</label>
 <textarea id="tracking-note" name="tracking_note" rows="3" placeholder="Enter tracking ID or specific delivery instructions..." class="w-full rounded-xl border border-outline-variant focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none font-body-md text-body-md p-3 placeholder:text-on-surface-variant/50">{{ order.tracking_note }}</textarea>
@@ -168,8 +177,8 @@ as the left column anyway, so sticky adds no real benefit here.
 
 {% if can_refund or can_cancel %}
 {% if can_refund %}
-<div class="space-y-3 pt-4 border-t border-outline-variant/40">
-<label class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">Refund Workflow</label>
+<fieldset class="space-y-3 pt-4 border-t border-outline-variant/40 border-x-0 border-b-0 p-0 m-0">
+<legend class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest pt-4">Refund Workflow</legend>
 <form id="refund-form" method="post" action="{% url 'admin_portal:order_management_action' order.pk %}">
 {% csrf_token %}
 <input type="hidden" name="action" value="refund">
@@ -190,7 +199,7 @@ as the left column anyway, so sticky adds no real benefit here.
 </label>
 </div>
 </form>
-</div>
+</fieldset>
 {% endif %}
 <div class="grid grid-cols-2 gap-3 pt-4 border-t border-outline-variant/40">
 {% if can_refund %}

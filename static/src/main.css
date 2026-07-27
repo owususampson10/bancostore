@@ -88,9 +88,9 @@
   --font-headline-md: "Hanken Grotesk", sans-serif;
   --font-headline-sm: "Hanken Grotesk", sans-serif;
   --font-display-lg: "Hanken Grotesk", sans-serif;
-  --font-body-sm: Inter, sans-serif;
-  --font-body-md: Inter, sans-serif;
-  --font-body-lg: Inter, sans-serif;
+  --font-body-sm: "Inter", sans-serif;
+  --font-body-md: "Inter", sans-serif;
+  --font-body-lg: "Inter", sans-serif;
   /* Task 18f: not used by any screen before Order Management/Detail --
      pulled from the same Stitch design system's own designMd values
      (JetBrains Mono, for order reference numbers), not invented here. */

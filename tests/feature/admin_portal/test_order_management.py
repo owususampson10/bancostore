@@ -313,6 +313,7 @@ def test_cancel_action_calls_the_real_service_function(staff_client):
     order.refresh_from_db()
     assert order.status == Order.Status.CANCELLED
     assert response.status_code == 302
+    assert response.url == _detail_url(order)
 
 
 @pytest.mark.django_db
@@ -324,6 +325,7 @@ def test_refund_action_requires_a_restock_choice(staff_client):
     order.refresh_from_db()
     assert order.status == Order.Status.CONFIRMED  # rejected, no restock given
     assert response.status_code == 302
+    assert response.url == _detail_url(order)
 
 
 @pytest.mark.django_db
@@ -337,6 +339,7 @@ def test_refund_action_with_restock_choice_succeeds(staff_client):
     order.refresh_from_db()
     assert order.status == Order.Status.REFUNDED
     assert response.status_code == 302
+    assert response.url == _detail_url(order)
 
 
 @pytest.mark.django_db
@@ -358,6 +361,7 @@ def test_advance_action_calls_the_real_service_function_with_tracking_note(
     assert order.status == Order.Status.PROCESSING
     assert order.tracking_note == "Packed and ready."
     assert response.status_code == 302
+    assert response.url == _detail_url(order)
 
 
 @pytest.mark.django_db
@@ -369,10 +373,38 @@ def test_illegal_transition_shows_an_error_message_not_a_500(staff_client):
     )
 
     assert response.status_code == 302
+    assert response.url == _detail_url(order)
     order.refresh_from_db()
     assert order.status == Order.Status.CONFIRMED
     messages_list = list(get_messages(response.wsgi_request))
     assert any("isn't allowed" in str(m) for m in messages_list)
+
+
+@pytest.mark.django_db
+def test_advance_with_no_status_selected_shows_a_friendly_message_not_a_raw_enum_repr(
+    staff_client,
+):
+    """The "Save Changes" header button submits the advance-form even
+    with no Operational State radio picked (the radios deliberately
+    aren't `required` -- CodeRabbit, 2026-07-26: a native validation
+    bubble anchored to an off-screen radio when the button lives in the
+    page header is confusing). Without a view-level guard, a blank
+    to_status would reach advance_order_status's own ValueError, whose
+    message embeds the raw Order.Status enum repr -- not admin-facing
+    text."""
+    order = _make_order(status=Order.Status.CONFIRMED)
+
+    response = staff_client.post(
+        _action_url(order), {"action": "advance", "to_status": ""}
+    )
+
+    assert response.status_code == 302
+    assert response.url == _detail_url(order)
+    order.refresh_from_db()
+    assert order.status == Order.Status.CONFIRMED
+    messages_list = list(get_messages(response.wsgi_request))
+    assert any("Choose a status to advance to" in str(m) for m in messages_list)
+    assert not any("Order.Status" in str(m) for m in messages_list)
     assert not any("Illegal order status transition" in str(m) for m in messages_list)
 
 
@@ -405,6 +437,7 @@ def test_unrecognized_action_is_a_safe_no_op(staff_client):
     response = staff_client.post(_action_url(order), {"action": "nonsense"})
 
     assert response.status_code == 302
+    assert response.url == _detail_url(order)
     order.refresh_from_db()
     assert order.status == Order.Status.CONFIRMED
 
