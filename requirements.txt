@@ -45,6 +45,18 @@ requests>=2,<3
 
 # PDF / audit trail
 WeasyPrint>=62,<63
+# WeasyPrint 62.x's own Stream class calls super().transform(...) -- pydyf
+# 0.12.0 (2025-12-02) removed that deprecated method entirely (confirmed
+# against pydyf's own release notes, source-driven-development 2026-07-27),
+# breaking every real PDF generation with AttributeError: 'super' object
+# has no attribute 'transform'. WeasyPrint's own pyproject.toml only
+# declares pydyf>=0.11.0 with no upper bound, so pip silently resolves the
+# incompatible 0.12.x -- caught only once this task's first real,
+# non-mocked WeasyPrint call actually ran (in CI; Pango itself blocked
+# this code path from ever running locally at all, see
+# project_weasyprint_pango_blocked_locally memory). Pinned to the last
+# compatible release.
+pydyf>=0.11,<0.12
 django-simple-history>=3,<4
 
 # Dev debugging / query profiling

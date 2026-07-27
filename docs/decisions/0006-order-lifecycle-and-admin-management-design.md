@@ -129,6 +129,16 @@ belongs on this invoice. `WeasyPrint` is already a pinned dependency (`requireme
 never actually been used to generate anything yet in this codebase; its real HTML-to-PDF API needs
 confirming against real docs at implementation time (`source-driven-development`), not assumed.
 
+**Implementation note (Task 18e, 2026-07-26): WeasyPrint cannot run on this project's local dev
+Mac.** `HTML(string=...).write_pdf()` is confirmed correct against WeasyPrint's own docs, but its
+`__init__` eagerly `dlopen()`s the system Pango library at import time, and this Mac (macOS 12) is
+an unsupported Homebrew Tier-3 configuration — `brew install weasyprint` failed after ~50 minutes
+(it had to compile Python 3.13 from source along the way) with `cffi` unable to build. Verified for
+real in CI instead: `.github/workflows/ci.yml`'s `test` job now installs `libpango-1.0-0`/
+`libpangocairo-1.0-0` via `apt` (an ordinary pre-built Ubuntu package, no compiling needed there).
+The real end-to-end PDF test uses this codebase's first `pytest.mark.skipif`, conditioned on
+whether `import weasyprint` actually succeeds — self-healing, not a permanent skip.
+
 ## Alternatives Considered
 
 ### Leave PV/stock uncorrected on cancellation of a confirmed order
