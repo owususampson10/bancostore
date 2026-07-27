@@ -317,91 +317,101 @@ def reverse_ancestor_pv(distributor, pv_amount, purchase_date) -> None:
             f"reverse_ancestor_pv: pv_amount must be positive, got {pv_amount}"
         )
 
+    # CodeRabbit finding, PR #35 (real bug, confirmed): this used to be an
+    # early `return` when a distributor has no ancestors (root distributor,
+    # or not yet placed under a sponsor) -- which skipped the
+    # MonthlyPersonalPv reversal below entirely, since that block runs
+    # after the ancestor-leg loop. A root distributor's OWN personal PV
+    # was therefore never reversed on cancellation/refund, leaving it
+    # permanently inflated. Fixed by scoping the ancestor-only work to
+    # `if edges:` so the no-ancestors case still falls through to the
+    # unconditional MonthlyPersonalPv reversal at the end of this function.
     edges = list(BinaryTreeEdge.objects.filter(descendant=distributor))
-    if not edges:
-        return
 
-    left_ids = sorted(
-        {e.ancestor_id for e in edges if e.leg == BinaryTreeEdge.Leg.LEFT}
-    )
-    right_ids = sorted(
-        {e.ancestor_id for e in edges if e.leg == BinaryTreeEdge.Leg.RIGHT}
-    )
-    all_ancestor_ids = sorted(set(left_ids) | set(right_ids))
-
-    # Locked one at a time, in sorted-pk order -- mirrors
-    # apps.binary_tree.services.BinaryTree.place_distributor's own
-    # "fixed, PK-ascending order" convention, needed so this reversal
-    # actually serializes against a concurrent Binary Bonus cycle for
-    # any of these ancestors (apps.commissions.services.
-    # process_binary_bonus_for_distributor locks the exact same
-    # Distributor row before its own read-then-write PvDailyBucket
-    # consumption).
-    for pk in all_ancestor_ids:
-        select_for_update_nowait_if_supported(Distributor.objects.filter(pk=pk)).get()
-
-    for field, leg, ancestor_ids in (
-        ("left_leg_pv", BinaryTreeEdge.Leg.LEFT, left_ids),
-        ("right_leg_pv", BinaryTreeEdge.Leg.RIGHT, right_ids),
-    ):
-        if not ancestor_ids:
-            continue
-
-        # PvLedger: nothing else has ever decremented it (append-only
-        # until this function), so a shortfall here is a real bug (a
-        # double reversal, or a pv_amount/ledger mismatch elsewhere) --
-        # logged at ERROR, unlike the two expected-gap cases below.
-        sufficient_ids = set(
-            PvLedger.objects.filter(
-                distributor_id__in=ancestor_ids, **{f"{field}__gte": pv_amount}
-            ).values_list("distributor_id", flat=True)
+    if edges:
+        left_ids = sorted(
+            {e.ancestor_id for e in edges if e.leg == BinaryTreeEdge.Leg.LEFT}
         )
-        PvLedger.objects.filter(distributor_id__in=sufficient_ids).update(
-            **{field: F(field) - pv_amount}
+        right_ids = sorted(
+            {e.ancestor_id for e in edges if e.leg == BinaryTreeEdge.Leg.RIGHT}
         )
-        short_ids = set(ancestor_ids) - sufficient_ids
-        if short_ids:
-            logger.error(
-                "reverse_ancestor_pv: distributor=%s pv_amount=%s could "
-                "not fully reverse PvLedger.%s (%s leg) for "
-                "ancestor(s)=%s -- ledger already below pv_amount. Needs "
-                "manual investigation.",
-                distributor.pk,
-                pv_amount,
-                field,
-                leg,
-                sorted(short_ids),
+        all_ancestor_ids = sorted(set(left_ids) | set(right_ids))
+
+        # Locked one at a time, in sorted-pk order -- mirrors
+        # apps.binary_tree.services.BinaryTree.place_distributor's own
+        # "fixed, PK-ascending order" convention, needed so this reversal
+        # actually serializes against a concurrent Binary Bonus cycle for
+        # any of these ancestors (apps.commissions.services.
+        # process_binary_bonus_for_distributor locks the exact same
+        # Distributor row before its own read-then-write PvDailyBucket
+        # consumption).
+        for pk in all_ancestor_ids:
+            select_for_update_nowait_if_supported(
+                Distributor.objects.filter(pk=pk)
+            ).get()
+
+        for field, leg, ancestor_ids in (
+            ("left_leg_pv", BinaryTreeEdge.Leg.LEFT, left_ids),
+            ("right_leg_pv", BinaryTreeEdge.Leg.RIGHT, right_ids),
+        ):
+            if not ancestor_ids:
+                continue
+
+            # PvLedger: nothing else has ever decremented it (append-only
+            # until this function), so a shortfall here is a real bug (a
+            # double reversal, or a pv_amount/ledger mismatch elsewhere) --
+            # logged at ERROR, unlike the two expected-gap cases below.
+            sufficient_ids = set(
+                PvLedger.objects.filter(
+                    distributor_id__in=ancestor_ids, **{f"{field}__gte": pv_amount}
+                ).values_list("distributor_id", flat=True)
             )
+            PvLedger.objects.filter(distributor_id__in=sufficient_ids).update(
+                **{field: F(field) - pv_amount}
+            )
+            short_ids = set(ancestor_ids) - sufficient_ids
+            if short_ids:
+                logger.error(
+                    "reverse_ancestor_pv: distributor=%s pv_amount=%s could "
+                    "not fully reverse PvLedger.%s (%s leg) for "
+                    "ancestor(s)=%s -- ledger already below pv_amount. Needs "
+                    "manual investigation.",
+                    distributor.pk,
+                    pv_amount,
+                    field,
+                    leg,
+                    sorted(short_ids),
+                )
 
-        # PvDailyBucket: a shortfall here IS an expected, accepted gap
-        # (ADR-0006/ADR-0007) -- the PV may have already been consumed
-        # by a completed Binary Bonus cycle, or expired past
-        # PV_CARRY_FORWARD_EXPIRY_DAYS. Logged at WARNING, not raised.
-        sufficient_ids = set(
+            # PvDailyBucket: a shortfall here IS an expected, accepted gap
+            # (ADR-0006/ADR-0007) -- the PV may have already been consumed
+            # by a completed Binary Bonus cycle, or expired past
+            # PV_CARRY_FORWARD_EXPIRY_DAYS. Logged at WARNING, not raised.
+            sufficient_ids = set(
+                PvDailyBucket.objects.filter(
+                    distributor_id__in=ancestor_ids,
+                    leg=leg,
+                    date=purchase_date,
+                    pv__gte=pv_amount,
+                ).values_list("distributor_id", flat=True)
+            )
             PvDailyBucket.objects.filter(
-                distributor_id__in=ancestor_ids,
-                leg=leg,
-                date=purchase_date,
-                pv__gte=pv_amount,
-            ).values_list("distributor_id", flat=True)
-        )
-        PvDailyBucket.objects.filter(
-            distributor_id__in=sufficient_ids, leg=leg, date=purchase_date
-        ).update(pv=F("pv") - pv_amount)
-        short_ids = set(ancestor_ids) - sufficient_ids
-        if short_ids:
-            logger.warning(
-                "reverse_ancestor_pv: distributor=%s pv_amount=%s only "
-                "reversed PvDailyBucket for %s/%s %s-leg ancestor(s) -- "
-                "%s already short (PV already consumed/expired) -- "
-                "accepted gap, ADR-0006/ADR-0007.",
-                distributor.pk,
-                pv_amount,
-                len(sufficient_ids),
-                len(ancestor_ids),
-                leg,
-                sorted(short_ids),
-            )
+                distributor_id__in=sufficient_ids, leg=leg, date=purchase_date
+            ).update(pv=F("pv") - pv_amount)
+            short_ids = set(ancestor_ids) - sufficient_ids
+            if short_ids:
+                logger.warning(
+                    "reverse_ancestor_pv: distributor=%s pv_amount=%s only "
+                    "reversed PvDailyBucket for %s/%s %s-leg ancestor(s) -- "
+                    "%s already short (PV already consumed/expired) -- "
+                    "accepted gap, ADR-0006/ADR-0007.",
+                    distributor.pk,
+                    pv_amount,
+                    len(sufficient_ids),
+                    len(ancestor_ids),
+                    leg,
+                    sorted(short_ids),
+                )
 
     period = purchase_date.replace(day=1)
     personal_affected = MonthlyPersonalPv.objects.filter(
