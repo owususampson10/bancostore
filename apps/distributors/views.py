@@ -3,6 +3,7 @@ import logging
 import math
 from datetime import timedelta
 from decimal import Decimal
+from functools import wraps
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth import login as auth_login
@@ -83,6 +84,38 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 
 AUTH_BACKEND = "apps.distributors.backends.PhoneNumberBackend"
+
+
+def _redirect_if_cooling_off_cancelled(view_func):
+    """Task 19 follow-up (CodeRabbit finding, user-confirmed fix):
+    apps.distributors.backends.PhoneNumberBackend now lets a cooling-off-
+    cancelled distributor log in specifically so they can claim the
+    refund already credited to their own wallet -- this decorator is
+    what actually restricts what they see once logged in. Applied only
+    to the views that make no sense post-cancellation (no rank, no
+    starter pack, nothing left to earn); withdrawal_request/
+    withdrawal_history/payout_settings deliberately do NOT get this
+    decorator, since those are exactly the views that let the refund
+    actually be claimed. cancel_membership also doesn't need it -- its
+    own GET already renders a correct, safe "already cancelled" ineligible
+    state for this same distributor.
+
+    A single shared decorator, not a repeated inline check in each view,
+    so a future new distributor view can't silently reopen full access
+    just by forgetting to add the check -- the risk CLAUDE.md's own Task
+    15 "Deferred, not silently skipped" note already flagged for the
+    unguarded request.user.distributor pattern, applied here to a case
+    where forgetting it would be a real access-control regression, not
+    just an inconsistency."""
+
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        distributor = getattr(request.user, "distributor", None)
+        if distributor is not None and distributor.cooling_off_cancelled_at is not None:
+            return redirect("distributors:withdrawal_request")
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
 
 
 @ratelimit(key="ip", rate="5/h", method="POST")
@@ -205,6 +238,7 @@ def registration_payment_callback(request):
 
 
 @login_required(login_url="distributors:login")
+@_redirect_if_cooling_off_cancelled
 @ratelimit(key="user", rate="20/h", method="POST")
 def select_starter_pack(request):
     """Task 10c: distributor chooses Starter Pack A or B; price/PV/rank
@@ -485,6 +519,7 @@ def reset_success(request):
 
 
 @login_required(login_url="distributors:login")
+@_redirect_if_cooling_off_cancelled
 @ratelimit(key="user", rate="20/h", method="POST")
 def start_kyc_verification(request):
     """Task 11b: redirects the distributor to Didit's hosted verification
@@ -595,6 +630,7 @@ def didit_webhook(request):
 
 
 @login_required(login_url="distributors:login")
+@_redirect_if_cooling_off_cancelled
 def dashboard(request):
     """Placeholder landing page after a successful login/registration — the
     real dashboard is Task 20. Exists so login has somewhere honest to send
@@ -606,6 +642,7 @@ def dashboard(request):
 
 
 @login_required(login_url="distributors:login")
+@_redirect_if_cooling_off_cancelled
 def earnings_history(request):
     """Task 15d: a distributor's own wallet ledger. Always scoped to
     request.user.distributor -- no distributor id is ever accepted from the
@@ -881,6 +918,7 @@ def withdrawal_request(request):
             "max_amount": config.MAX_WITHDRAWAL_AMOUNT,
             "tax_rate": config.WITHHOLDING_TAX_RATE,
             "active_nav": "withdrawal_request",
+            "cooling_off_cancelled": distributor.cooling_off_cancelled_at is not None,
         },
     )
 
