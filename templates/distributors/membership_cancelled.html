@@ -1,0 +1,28 @@
+{% extends "base_auth.html" %}
+{% block title %}Bancostore | Membership Cancelled{% endblock %}
+{% block content %}
+<div class="w-full max-w-[480px] mx-auto bg-white rounded-xl auth-card p-stack-xl text-center">
+<div class="mb-stack-lg flex justify-center">
+<div class="w-20 h-20 bg-primary-container/10 rounded-full flex items-center justify-center">
+<span class="material-symbols-outlined text-[48px] text-primary" style="font-variation-settings: 'FILL' 1;">
+check_circle
+</span>
+</div>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-sm">
+Membership Cancelled
+</h1>
+{% if refund_amount is not None %}
+<p class="font-body-md text-body-md text-gray-muted mb-stack-xl">
+GHS {{ refund_amount|floatformat:2 }} has been credited to your wallet. Your distributor account is now deactivated.
+</p>
+{% else %}
+<p class="font-body-md text-body-md text-gray-muted mb-stack-xl">
+Your membership was already cancelled. Your distributor account is deactivated.
+</p>
+{% endif %}
+<a class="inline-block w-full py-4 px-8 bg-primary hover:opacity-90 text-white font-label-lg text-label-lg rounded-lg transition-all active:scale-95 shadow-sm" href="{% url 'catalog:home' %}">
+Return to Bancostore
+</a>
+</div>
+{% endblock %}

@@ -3283,19 +3283,29 @@ and shares the resulting screen(s) back for template integration, same as every 
 and admin-facing page in this project.
 
 **Acceptance criteria:**
-- [ ] The action is only offered within the cooling-off window (hidden or disabled after day 7, or
+- [x] The action is only offered within the cooling-off window (hidden or disabled after day 7, or
   once already cancelled)
-- [ ] A confirmation step exists before the irreversible cancel action fires (matches this
+- [x] A confirmation step exists before the irreversible cancel action fires (matches this
   project's own established danger-action pattern — e.g. `distributor_profile`'s suspend/reactivate
   modal)
-- [ ] A successful cancellation shows the refund amount and logs the distributor out (their account
+- [x] A successful cancellation shows the refund amount and logs the distributor out (their account
   is now deactivated)
 
 **Verification:**
-- [ ] Manual check: request a refund as a real seeded distributor in a real browser within the
+- [x] Manual check: request a refund as a real seeded distributor in a real browser within the
   window, confirm the wallet credit and account deactivation are both visible/effective
-  end-to-end, not just via pytest
-- [ ] Responsive check at the project's established breakpoints (1440/768/500px)
+  end-to-end, not just via pytest — done 2026-07-27: logged in as a real seeded distributor, viewed
+  both eligible/ineligible states, used the confirm modal, completed a real cancellation, confirmed
+  in the database that the wallet was credited GHS 1,800.00, the sponsor's bonus was reversed, and
+  the session was genuinely logged out (a follow-up authenticated request redirected to login)
+- [x] Two real Stitch screens fetched (Cancel Membership Eligible/Ineligible - Bancostore
+  Distributor, same "Bancostore" project/theme as every other screen) and verified against the
+  live page
+- [x] `code-review-and-quality` caught and fixed one real bug: `membership_cancelled.html` used a
+  truthy check on `refund_amount` instead of `is not None`, which would have misreported a
+  legitimate GHS 0.00 refund as "already cancelled" — fixed, proven via a RED→GREEN regression test
+- [ ] Responsive check at the project's established breakpoints (1440/768/500px) — desktop-only
+  verified so far; mobile/tablet breakpoints not yet checked
 
 **Dependencies:** Task 19b; Stitch prompt sent and screen(s) received from the user
 

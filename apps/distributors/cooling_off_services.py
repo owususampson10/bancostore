@@ -32,6 +32,21 @@ class CoolingOffPeriodExpired(Exception):
     after starter_pack_confirmed_at (ADR-0007 Decision 1)."""
 
 
+def calculate_cooling_off_refund(starter_pack_price_pesewas: int) -> Decimal:
+    """ADR-0007 Decision 5, verified against the source doc's own worked
+    example: Pack B GHS 2,000, rate 10% -> GHS 1,800. Extracted as its own
+    function (Task 19c) so the distributor-facing preview
+    (apps/distributors/views.py::cancel_membership's GET) and the actual
+    refund credited by cancel_membership_and_refund below always agree --
+    a single source of truth rather than two independently-maintained
+    copies of the same formula."""
+    return (
+        Decimal(starter_pack_price_pesewas)
+        / Decimal("100")
+        * (Decimal("1") - config.COOLING_OFF_REFUND_DEDUCTION_RATE / Decimal("100"))
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def cancel_membership_and_refund(distributor_id) -> Decimal | None:
     """Task 19b (ADR-0007): a distributor's self-service 7-day cooling-off
     cancellation. Reverses the PV and sponsor's direct referral bonus
@@ -116,16 +131,9 @@ def cancel_membership_and_refund(distributor_id) -> Decimal | None:
                     f"expired at {deadline}"
                 )
 
-            # ADR-0007 Decision 5, verified against the source doc's own
-            # worked example: Pack B GHS 2,000, rate 10% -> GHS 1,800.
-            refund_amount = (
-                Decimal(distributor.starter_pack_price_pesewas)
-                / Decimal("100")
-                * (
-                    Decimal("1")
-                    - config.COOLING_OFF_REFUND_DEDUCTION_RATE / Decimal("100")
-                )
-            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            refund_amount = calculate_cooling_off_refund(
+                distributor.starter_pack_price_pesewas
+            )
 
             purchase_date = distributor.starter_pack_confirmed_at.date()
             # Reverses ancestor-leg PvLedger/PvDailyBucket AND this

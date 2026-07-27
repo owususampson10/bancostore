@@ -8,6 +8,13 @@
 <p class="font-body-md text-body-md text-gray-muted">Request a withdrawal from your commission balance.</p>
 </div>
 
+{% if cooling_off_cancelled %}
+<div class="flex items-center gap-3 bg-surface-container-low text-on-surface border border-outline-variant px-6 py-4 rounded-xl mb-6" role="status">
+<span class="material-symbols-outlined text-secondary" aria-hidden="true">info</span>
+<p class="font-body-md text-body-md">Your membership was cancelled. The balance below is your cooling-off refund — request a withdrawal to claim it.</p>
+</div>
+{% endif %}
+
 {% if submitted %}
 <div class="flex items-center gap-3 bg-success/10 text-success border border-success/30 px-6 py-4 rounded-xl mb-6" role="status">
 <span class="material-symbols-outlined" aria-hidden="true" style="font-variation-settings: 'FILL' 1;">check_circle</span>
