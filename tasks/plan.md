@@ -150,23 +150,39 @@ financial figure verified against the database at each step.
   iframe workaround is correctly blocked by Django's own `X-Frame-Options: DENY`, not weakened just
   for a test); code inspection found no fixed-width elements that would break specifically below
   500px — see `tasks/todo.md` Task 17e for the full reasoning.
-- [ ] Task 18: Order status lifecycle + notifications + admin order management — **in progress,
-  scoped 2026-07-26** via `docs/decisions/0006-order-lifecycle-and-admin-management-design.md`
-  (read directly against the primary source doc's Section 5.2/5.3, plus four decisions confirmed
-  with the user: cancelling/refunding a confirmed order reverses stock *and* PV, not just status;
-  refunds stay manual, no real Paystack Refund API integration is built here after all; customer-
-  facing self-service cancel is deferred to a follow-up task; the admin order view is a custom
-  Stitch-designed `admin_portal` page, not plain Django Admin) → broken into 18a-18g in
-  `tasks/todo.md`, matching Task 17's own 17a-17f granularity.
+- [x] Task 18: Order status lifecycle + notifications + admin order management — scoped 2026-07-26
+  via `docs/decisions/0006-order-lifecycle-and-admin-management-design.md` (read directly against
+  the primary source doc's Section 5.2/5.3, plus four decisions confirmed with the user:
+  cancelling/refunding a confirmed order reverses stock *and* PV, not just status; refunds stay
+  manual, no real Paystack Refund API integration is built here after all; customer-facing
+  self-service cancel is deferred to a follow-up task; the admin order view is a custom
+  Stitch-designed `admin_portal` page, not plain Django Admin) → built as 18a-18g in `tasks/todo.md`,
+  matching Task 17's own 17a-17f granularity. Shipped 2026-07-26 via PR #33; full suite green
+  throughout, 945 passed as of merge.
 
 **Checkpoint G:** both a customer and a distributor complete a purchase; PV is generated only for
-the distributor purchase; order status updates correctly. **Purchase + PV-branching portion passed**
-2026-07-25 (guest checkout verified live end-to-end; distributor PV-credit branch verified via
-`confirm_order_payment`'s own pytest suite, not a dedicated fresh browser session — see
-`tasks/todo.md` Task 17f). The "order status updates correctly" portion remains Task 18's to close.
+the distributor purchase; order status updates correctly. **Passed in full** 2026-07-26 — the
+purchase + PV-branching portion passed 2026-07-25 (guest checkout verified live end-to-end,
+distributor PV-credit branch verified via `confirm_order_payment`'s own pytest suite); the "order
+status updates correctly" portion closed 2026-07-26 with `MNOTIFY_API_KEY` temporarily blanked
+(explicit user sign-off) to exercise the real fake-sender notification path live through the admin
+UI.
 
 ### Phase 7: Cooling-Off Refund
-- [ ] Task 19: 7-day cooling-off refund — processing fee, PV reversal, commission reversal
+- [x] Task 19: 7-day cooling-off refund — processing fee, PV reversal, commission reversal. Built as
+  19a-19c per `docs/decisions/0007-cooling-off-refund-design.md` (the 7-day window anchors to
+  `starter_pack_confirmed_at`, not registration; `BinaryTreeEdge` placement is never removed, the
+  distributor is soft-deactivated instead; only the sponsor's one-time direct referral bonus is
+  reversed, not any Binary/Matching bonus; a sponsor-wallet shortfall is logged and the refund
+  proceeds regardless; the refund is credited to the distributor's own wallet). CodeRabbit caught
+  two real, previously-unnoticed defects across the PR stack: `reverse_ancestor_pv` (19a) skipped a
+  root distributor's own personal PV reversal (fixed, also affected Task 18b's order-cancellation
+  path); and the refund credited at cancellation was unclaimable, since the same call also
+  deactivates the account and Django blocks login entirely for `is_active=False` — fixed by letting
+  a cooling-off-cancelled distributor log in specifically to claim it, routed to withdrawal-only
+  views. See `CLAUDE.md` for the full build narrative. Shipped 2026-07-27 via PR #35 (19a), #36
+  (19b), #37 (19c), each stacked on the previous and merged into `main` in order; full suite green
+  throughout, 986 passed, 1 skipped as of merge.
 
 ### Phase 8: Distributor Dashboard (real-time)
 - [ ] Task 20: Dashboard core stats (wallet, earnings, team size, leg PV, rank, referral link)
