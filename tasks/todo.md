@@ -2952,6 +2952,18 @@ automatically the moment Pango is available, here or anywhere else. PDF *content
 (every ADR-0006 decision 7 field) is proven independently via a separate template-only test that
 needs no PDF library at all, so this local gap does not weaken content verification.
 
+**A second, genuinely separate bug surfaced once that CI-run smoke test actually executed
+WeasyPrint's real PDF generation for the first time anywhere (2026-07-27):** `AttributeError:
+'super' object has no attribute 'transform'` inside WeasyPrint's own `pdf/stream.py`. Root cause:
+WeasyPrint 62.3's `Stream` class calls `super().transform(...)`, but `pydyf` 0.12.0 (released
+2025-12-02) removed that deprecated method entirely -- `requirements.txt` never pinned `pydyf`
+(WeasyPrint's own `pyproject.toml` only declares `pydyf>=0.11.0`, no upper bound), so `pip install`
+silently resolved the incompatible 0.12.1 both locally and in CI. Unrelated to the Pango/macOS issue
+above -- this would have broken PDF generation on any machine, Pango or no Pango. Confirmed directly
+(`pydyf.Stream` has `transform` on 0.11.0, not on 0.12.x) and fixed by pinning `pydyf>=0.11,<0.12`
+in `requirements.txt`, matching this project's own established convention for pinning undeclared/
+incompatible transitive dependencies (`cbor2`, `phonenumbers`, `PyJWT`).
+
 **Dependencies:** 18b, 18c, 18d merged
 
 **Files likely touched:** `apps/admin_portal/views.py`, `apps/admin_portal/urls.py`, `templates/admin_portal/order_management_queue.html`, `templates/admin_portal/order_invoice.html`, `.github/workflows/ci.yml`, `tests/feature/admin_portal/test_order_management.py`
