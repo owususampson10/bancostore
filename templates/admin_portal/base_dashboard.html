@@ -87,9 +87,35 @@
 </header>
 <main class="flex-1 p-margin-mobile md:p-margin-desktop max-w-[1200px] w-full mx-auto">
 {% if messages %}
-<div class="mb-6 space-y-2">
+{% comment %}
+Shared across every admin_portal page (KYC review, withdrawals,
+distributors, commissions, orders), not a one-off for any single
+screen -- polished once here so the whole portal benefits, rather than
+building a fancier version just for orders and leaving every other
+page with the plain original. Auto-dismisses after 6s but stays
+manually dismissable and pauses for anyone still reading it (no fixed
+timer fighting a user mid-read).
+{% endcomment %}
+<div class="mb-6 space-y-2" role="status" aria-live="polite">
 {% for message in messages %}
-<div class="px-4 py-3 rounded-lg font-body-sm text-body-sm {% if message.tags == 'error' %}bg-error-container text-on-error-container{% else %}bg-surface-container-low text-on-surface{% endif %}">{{ message }}</div>
+<div x-data="{ show: true, timer: null }"
+     x-show="show"
+     x-init="timer = setTimeout(() => show = false, 6000)"
+     @mouseenter="clearTimeout(timer)"
+     @mouseleave="timer = setTimeout(() => show = false, 6000)"
+     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter-start="opacity-0 -translate-y-1"
+     x-transition:enter-end="opacity-100 translate-y-0"
+     x-transition:leave="transition ease-in duration-150"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0"
+     class="flex items-start gap-3 px-4 py-3 rounded-xl border shadow-sm font-body-md text-body-md {% if message.tags == 'error' %}bg-error-container text-on-error-container border-admin-error/20{% else %}bg-green-50 text-green-800 border-green-200{% endif %}">
+<span class="material-symbols-outlined text-[20px] flex-shrink-0" aria-hidden="true">{% if message.tags == 'error' %}error{% else %}check_circle{% endif %}</span>
+<span class="flex-1 pt-0.5">{{ message }}</span>
+<button type="button" class="flex-shrink-0 p-0.5 -m-0.5 rounded hover:bg-black/5 transition-colors" @click="show = false" aria-label="Dismiss">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">close</span>
+</button>
+</div>
 {% endfor %}
 </div>
 {% endif %}
