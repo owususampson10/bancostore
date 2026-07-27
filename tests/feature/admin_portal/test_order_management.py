@@ -64,6 +64,10 @@ def _action_url(order):
     return reverse("admin_portal:order_management_action", args=[order.pk])
 
 
+def _detail_url(order):
+    return reverse("admin_portal:order_detail", args=[order.pk])
+
+
 def _invoice_url(order):
     return reverse("admin_portal:order_invoice_pdf", args=[order.pk])
 
@@ -173,6 +177,118 @@ def test_queue_ordering_has_a_stable_pk_tie_breaker():
     orders, *_ = _filtered_orders(request)
 
     assert orders.query.order_by[-1] in ("pk", "-pk")
+
+
+@pytest.mark.django_db
+def test_htmx_queue_request_returns_only_the_results_partial(staff_client):
+    """Real-time search (no Filter button): a keyup-triggered htmx request
+    must get back just the results fragment, not the full page shell --
+    otherwise the sidebar/header would get swapped into the results div
+    on every keystroke. Mirrors test_distributor_directory.py's own
+    test_htmx_search_request_returns_only_the_results_partial exactly."""
+    order = _make_order(full_name="Ama Mensah")
+
+    response = staff_client.get(_queue_url(q="Ama"), headers={"HX-Request": "true"})
+
+    body = response.content.decode()
+    assert order.payment_reference in body
+    assert "Bancostore Admin Portal" not in body
+
+
+@pytest.mark.django_db
+def test_non_htmx_queue_request_returns_the_full_page(staff_client):
+    order = _make_order(full_name="Ama Mensah")
+
+    response = staff_client.get(_queue_url(q="Ama"))
+
+    body = response.content.decode()
+    assert order.payment_reference in body
+    assert "Bancostore Admin Portal" in body
+
+
+# ---------------------------------------------------------------------------
+# apps.admin_portal.views.order_detail
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_order_detail_requires_admin_portal_staff(client, db):
+    order = _make_order(status=Order.Status.CONFIRMED)
+    non_staff = User.objects.create_user(username="+233241111114", password="Passw0rd!")
+    client.force_login(non_staff)
+
+    response = client.get(_detail_url(order))
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_order_detail_shows_the_order_and_its_items(staff_client):
+    order = _make_order(status=Order.Status.CONFIRMED)
+    _add_item(order, product_name="Vitality Pulse Smart Ring", quantity=2)
+
+    response = staff_client.get(_detail_url(order))
+
+    assert response.status_code == 200
+    assert response.context["order"] == order
+    assert list(response.context["order"].items.all())[0].product_name == (
+        "Vitality Pulse Smart Ring"
+    )
+
+
+@pytest.mark.django_db
+def test_order_detail_returns_404_for_a_missing_order(staff_client):
+    response = staff_client.get(reverse("admin_portal:order_detail", args=[999999]))
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_order_detail_offers_only_the_legal_next_statuses(staff_client):
+    """A CONFIRMED order can only advance to PROCESSING next (18a's own
+    transition graph) -- Dispatched/Delivered must not be offered yet."""
+    order = _make_order(status=Order.Status.CONFIRMED)
+
+    response = staff_client.get(_detail_url(order))
+
+    offered = dict(response.context["advanceable_statuses"])
+    assert Order.Status.PROCESSING in offered
+    assert Order.Status.DISPATCHED not in offered
+    assert Order.Status.DELIVERED not in offered
+
+
+@pytest.mark.django_db
+def test_order_detail_hides_cancel_once_dispatched(staff_client):
+    """Cancellation is pre-dispatch only (18a's transition graph) -- a
+    DISPATCHED order must not offer a Cancel action."""
+    order = _make_order(status=Order.Status.DISPATCHED)
+
+    response = staff_client.get(_detail_url(order))
+
+    assert response.context["can_cancel"] is False
+    assert response.context["can_refund"] is True
+
+
+@pytest.mark.django_db
+def test_order_detail_never_offers_cancel_for_a_pending_order(staff_client):
+    """cancel_or_refund_order (18b) only operates on already-paid orders
+    -- calling it on a PENDING order is a documented caller bug (it
+    silently no-ops, raising nothing), even though is_legal_order_status_
+    transition alone would say PENDING -> CANCELLED is legal (that edge
+    exists for Task 17c/17d's own automatic pre-payment cancellation and
+    Task 18d's auto-cancel, not for this admin action). can_cancel must
+    exclude PENDING explicitly so the Cancel Order button is never shown
+    for an order this call would silently do nothing to."""
+    order = _make_order(status=Order.Status.PENDING)
+
+    response = staff_client.get(_detail_url(order))
+
+    assert response.context["can_cancel"] is False
+
+
+# ---------------------------------------------------------------------------
+# apps.admin_portal.views.order_management_action
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.django_db

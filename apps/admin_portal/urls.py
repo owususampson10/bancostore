@@ -32,6 +32,7 @@ urlpatterns = [
         name="commission_cycle_detail",
     ),
     path("orders/", views.order_management_queue, name="order_management_queue"),
+    path("orders/<int:pk>/", views.order_detail, name="order_detail"),
     path(
         "orders/<int:pk>/action/",
         views.order_management_action,
