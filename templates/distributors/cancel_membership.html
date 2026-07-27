@@ -1,0 +1,141 @@
+{% extends "distributors/base_dashboard.html" %}
+{% block title %}Bancostore | Cancel Membership{% endblock %}
+{% block content %}
+<div class="max-w-[896px]">
+<div class="mb-stack-xl">
+<h2 class="font-headline-lg text-headline-lg mb-stack-sm text-on-surface">Cancel Membership &amp; Request Refund</h2>
+<p class="font-body-md text-body-md text-gray-muted max-w-2xl">Ghana's Direct Selling Act 930 gives you a 7-day cooling-off period to cancel your starter pack purchase for a partial refund.</p>
+</div>
+
+{% if eligible %}
+<div class="space-y-stack-lg" x-data="{ confirmOpen: false }">
+
+{# Card 1: Membership Summary #}
+<section class="bg-white rounded-xl border border-outline-variant p-stack-lg shadow-sm">
+<div class="flex items-start justify-between flex-wrap gap-4">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-lg bg-primary-fixed flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[32px]" aria-hidden="true">inventory_2</span>
+</div>
+<div>
+<h3 class="font-headline-md text-headline-md leading-tight text-on-surface">Pack {{ distributor.starter_pack_choice }} Starter Pack</h3>
+<p class="font-body-sm text-body-sm text-gray-muted">Confirmed {{ distributor.starter_pack_confirmed_at|date:"M j, Y" }}</p>
+</div>
+</div>
+<div class="text-right">
+<p class="font-headline-md text-headline-md text-primary">GHS {{ price|floatformat:2 }}</p>
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary-container text-on-secondary-container mt-2">
+Eligible for Refund
+</span>
+</div>
+</div>
+<div class="mt-6 flex items-center gap-2 py-3 px-4 bg-surface-container-low rounded-lg border border-outline-variant">
+<span class="material-symbols-outlined text-secondary" style="font-variation-settings: 'FILL' 1;" aria-hidden="true">timer</span>
+<p class="font-label-lg text-label-lg text-secondary">{{ days_remaining }} day{{ days_remaining|pluralize }} remaining in your cooling-off period</p>
+</div>
+</section>
+
+{# Card 2: Refund Breakdown #}
+<section class="bg-white rounded-xl border border-outline-variant p-stack-lg shadow-sm">
+<h3 class="font-label-lg text-label-lg uppercase tracking-wider text-gray-muted mb-stack-md">Refund Breakdown</h3>
+<div class="space-y-stack-sm">
+<div class="flex justify-between font-body-md text-body-md">
+<span class="text-on-surface">Starter Pack Price</span>
+<span class="text-on-surface">GHS {{ price|floatformat:2 }}</span>
+</div>
+<div class="flex justify-between font-body-md text-body-md text-error">
+<span>{{ deduction_rate }}% Processing Fee</span>
+<span>-GHS {{ fee_amount|floatformat:2 }}</span>
+</div>
+<div class="h-px bg-outline-variant my-stack-sm"></div>
+<div class="flex justify-between font-headline-md text-headline-md text-on-surface">
+<span>Refund Amount</span>
+<span class="text-primary font-bold">GHS {{ refund_amount|floatformat:2 }}</span>
+</div>
+</div>
+<p class="mt-stack-md font-body-sm text-body-sm text-gray-muted italic">
+Registration fee of GHS {{ registration_fee|floatformat:2 }} is non-refundable.
+</p>
+</section>
+
+{# Card 3: What Happens Next #}
+<section class="bg-white rounded-xl border border-outline-variant p-stack-lg shadow-sm">
+<h3 class="font-label-lg text-label-lg uppercase tracking-wider text-gray-muted mb-stack-md">What happens next</h3>
+<div class="space-y-stack-md">
+<div class="flex gap-4">
+<div class="bg-surface-container-high rounded-full w-8 h-8 flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-secondary text-[18px]" aria-hidden="true">history</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface">PV and commissions from this purchase are reversed across your upline structure.</p>
+</div>
+<div class="flex gap-4">
+<div class="bg-surface-container-high rounded-full w-8 h-8 flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-secondary text-[18px]" aria-hidden="true">no_accounts</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface">Your distributor account is deactivated and you will be logged out immediately.</p>
+</div>
+<div class="flex gap-4">
+<div class="bg-surface-container-high rounded-full w-8 h-8 flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-secondary text-[18px]" aria-hidden="true">account_tree</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface">Your binary tree position is preserved but marked inactive, preventing any future overflow benefits.</p>
+</div>
+</div>
+</section>
+
+{# Danger Action #}
+<form method="post" x-ref="cancelForm" @submit.prevent="confirmOpen = true">
+{% csrf_token %}
+<button type="submit" class="w-full bg-error hover:bg-[#c02d3c] text-on-error font-headline-md text-headline-md py-4 rounded-xl shadow-lg transition-all duration-200 hover:-translate-y-0.5 active:scale-95 flex items-center justify-center gap-3">
+<span class="material-symbols-outlined" aria-hidden="true">cancel</span>
+Cancel Membership &amp; Request Refund
+</button>
+</form>
+<p class="text-center font-body-sm text-body-sm text-gray-muted">
+Need help? <a class="text-secondary font-medium hover:underline" href="{% url 'distributors:dashboard' %}">Contact Distributor Support</a>
+</p>
+
+{# Confirmation modal -- same pattern as payout_settings.html's own #}
+{# irreversible-action confirm, established here rather than the Stitch #}
+{# mockup's native confirm()/alert() calls, which this codebase never uses. #}
+<div x-show="confirmOpen"
+     x-cloak
+     class="fixed inset-0 z-[70] flex items-center justify-center p-4"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="cancel-membership-confirm-title"
+     @keydown.escape.window="confirmOpen = false">
+<div class="fixed inset-0 bg-black/40" @click="confirmOpen = false"></div>
+<div class="relative bg-white rounded-xl border border-outline-variant p-6 max-w-sm w-full shadow-lg">
+<h3 id="cancel-membership-confirm-title" class="font-headline-md text-headline-md text-on-surface mb-2">Cancel your membership?</h3>
+<p class="font-body-md text-body-md text-gray-muted mb-6">This will refund GHS {{ refund_amount|floatformat:2 }} to your wallet, reverse the PV from this purchase, and deactivate your account. You will be logged out immediately and this cannot be undone.</p>
+<div class="flex gap-3">
+<button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="confirmOpen = false">Keep My Membership</button>
+<button type="button" class="flex-1 bg-error text-on-error py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all" @click="confirmOpen = false; $refs.cancelForm.submit()">Yes, Cancel</button>
+</div>
+</div>
+</div>
+</div>
+
+{% else %}
+
+{# Ineligible state #}
+<section class="flex items-center justify-center py-12">
+<div class="bg-white border border-outline-variant rounded-xl p-12 max-w-xl w-full text-center shadow-sm flex flex-col items-center">
+<div class="w-20 h-20 bg-surface-container-high rounded-full flex items-center justify-center mb-8">
+<span class="material-symbols-outlined text-secondary text-5xl" aria-hidden="true" style="font-variation-settings: 'opsz' 48;">history</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-4">Cooling-Off Period Ended</h3>
+<p class="font-body-md text-body-md text-gray-muted mb-8 leading-relaxed">
+The 7-day cooling-off period for your starter pack purchase has ended. Cancellation and refund are no longer available for this account.
+</p>
+<div class="w-16 h-1 bg-outline-variant rounded-full mb-8"></div>
+<p class="font-body-sm text-body-sm text-secondary italic">
+For questions regarding your active status or commissions, please contact distributor support.
+</p>
+</div>
+</section>
+
+{% endif %}
+</div>
+{% endblock %}

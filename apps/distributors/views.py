@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -22,6 +23,12 @@ from constance import config
 from django_ratelimit.decorators import ratelimit
 
 from apps.accounts.permissions import is_distributor
+from apps.distributors.cooling_off_services import (
+    CoolingOffPeriodExpired,
+    NoRefundableStarterPackPurchase,
+    calculate_cooling_off_refund,
+    cancel_membership_and_refund,
+)
 from apps.notifications.otp import generate_otp, verify_otp
 from apps.orders.services import confirm_order_payment
 from apps.wallet.models import WalletTransaction
@@ -876,3 +883,77 @@ def withdrawal_request(request):
             "active_nav": "withdrawal_request",
         },
     )
+
+
+@login_required(login_url="distributors:login")
+@ratelimit(key="user", rate="20/h", method="POST")
+def cancel_membership(request):
+    """Task 19c: the distributor-facing "Cancel Membership & Request
+    Refund" screen (Section 9's 7-day cooling-off right, ADR-0007). Same
+    is_distributor() + no id/param IDOR surface as earnings_history/
+    payout_settings -- always request.user.distributor, never an id from
+    the URL or form. All eligibility/refund-math logic lives in
+    apps.distributors.cooling_off_services; this view only renders it and
+    maps its exceptions to a redirect back to this same page (which will
+    then show the ineligible state on the next GET) -- it never
+    re-implements any of the checks itself.
+
+    POST calls cancel_membership_and_refund, which deactivates
+    request.user (user.is_active = False) as its very last step -- this
+    view then explicitly logs the now-stale session out itself
+    (auth_logout) rather than relying on is_active alone, since Django
+    does not automatically invalidate an already-authenticated session
+    when is_active flips to False mid-session (same characteristic
+    apps/admin_portal's suspend toggle already has). The refund amount is
+    rendered directly in this same response, not carried via a redirect
+    or django.contrib.messages -- logout() flushes the session, which
+    would silently drop a session-backed message before the distributor
+    ever saw it."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+
+    distributor = request.user.distributor
+
+    if request.method == "POST":
+        try:
+            refund_amount = cancel_membership_and_refund(distributor.pk)
+        except (CoolingOffPeriodExpired, NoRefundableStarterPackPurchase):
+            return redirect("distributors:cancel_membership")
+
+        auth_logout(request)
+        return render(
+            request,
+            "distributors/membership_cancelled.html",
+            {"refund_amount": refund_amount},
+        )
+
+    now = timezone.now()
+    has_purchase = distributor.starter_pack_confirmed_at is not None
+    already_cancelled = distributor.cooling_off_cancelled_at is not None
+    deadline = (
+        distributor.starter_pack_confirmed_at
+        + timedelta(days=config.COOLING_OFF_PERIOD_DAYS)
+        if has_purchase
+        else None
+    )
+    eligible = has_purchase and not already_cancelled and now <= deadline
+
+    context = {"eligible": eligible, "active_nav": "payout_settings"}
+    if eligible:
+        price = Decimal(distributor.starter_pack_price_pesewas) / Decimal("100")
+        refund_amount = calculate_cooling_off_refund(
+            distributor.starter_pack_price_pesewas
+        )
+        context.update(
+            {
+                "distributor": distributor,
+                "price": price,
+                "fee_amount": price - refund_amount,
+                "refund_amount": refund_amount,
+                "deduction_rate": config.COOLING_OFF_REFUND_DEDUCTION_RATE,
+                "registration_fee": config.REGISTRATION_FEE,
+                "days_remaining": max(0, (deadline - now).days),
+            }
+        )
+
+    return render(request, "distributors/cancel_membership.html", context)
