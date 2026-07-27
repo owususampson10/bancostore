@@ -52,6 +52,24 @@ class StarterPackAlreadyConfirmed(Exception):
     pass
 
 
+class MembershipCancelled(Exception):
+    """Task 19 (doubt-driven-development finding, pre-implementation
+    review of the cooling-off refund): raised by
+    snapshot_starter_pack_choice for a distributor whose
+    cooling_off_cancelled_at is set. Distinct from
+    StarterPackAlreadyConfirmed -- without this guard, an admin
+    reactivating a cooling-off-cancelled account (apps/admin_portal's
+    existing, unrelated suspend/reactivate toggle on user.is_active,
+    which has no knowledge of cooling_off_cancelled_at) would let them
+    re-select and re-pay for a starter pack. BinaryTreeEdge placement was
+    never removed (ADR-0007), so consume_paid_starter_pack's
+    AlreadyPlacedError-catch path would then credit PV and the sponsor's
+    direct referral bonus a second time for a position that was already
+    paid for and already refunded once."""
+
+    pass
+
+
 @dataclass
 class LoginAttempt:
     success: bool
@@ -313,6 +331,8 @@ def snapshot_starter_pack_choice(distributor_pk, choice: str) -> Distributor:
             ).get()
             if distributor.starter_pack_confirmed_at is not None:
                 raise StarterPackAlreadyConfirmed
+            if distributor.cooling_off_cancelled_at is not None:
+                raise MembershipCancelled
             distributor.starter_pack_choice = choice
             distributor.starter_pack_price_pesewas = int(price * 100)
             distributor.starter_pack_pv = pv
@@ -367,6 +387,29 @@ def consume_paid_starter_pack(reference: str) -> None:
 
             if distributor.starter_pack_confirmed_at is not None:
                 return  # Already consumed -- idempotent no-op.
+
+            # Task 19 (security-and-hardening review, post-implementation):
+            # cancel_membership_and_refund clears starter_pack_confirmed_at
+            # back to None, so the idempotency check above no longer
+            # protects against a REPLAYED webhook/callback for the same old
+            # reference after cancellation -- a genuinely successful
+            # Paystack transaction stays verifiable as "success" forever.
+            # starter_pack_price_pesewas is also cleared, so the amount
+            # check below would incidentally catch this too -- but relying
+            # on that as the only defense is fragile (a future change to
+            # what gets cleared could silently reopen it). This is the
+            # same AlreadyPlacedError double-credit path MembershipCancelled
+            # was added to close for the re-selection route -- this guard
+            # closes it for the payment-replay route.
+            if distributor.cooling_off_cancelled_at is not None:
+                logger.warning(
+                    "consume_paid_starter_pack: distributor_id=%s "
+                    "reference=%s -- membership was already cancelled via "
+                    "cooling-off, ignoring this payment confirmation.",
+                    distributor.pk,
+                    reference,
+                )
+                return
 
             try:
                 verified = verify_transaction(reference)

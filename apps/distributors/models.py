@@ -82,6 +82,19 @@ class Distributor(models.Model):
     )
     starter_pack_confirmed_at = models.DateTimeField(null=True, blank=True)
 
+    # Task 19 (ADR-0007): set when the distributor exercises their 7-day
+    # cooling-off cancellation. Deliberately a separate field from
+    # `user.is_active` -- that field is ALSO used by an unrelated
+    # admin suspend/reactivate toggle (apps/admin_portal/views.py), so it
+    # can't double as "was this distributor's membership cancelled via
+    # cooling-off" without an admin reactivation silently un-cancelling
+    # them. This field is the one true idempotency signal for
+    # apps.distributors.cooling_off_services.cancel_membership_and_refund,
+    # and the one true guard preventing a cancelled distributor from ever
+    # re-selecting a starter pack (see snapshot_starter_pack_choice) even
+    # if later reactivated.
+    cooling_off_cancelled_at = models.DateTimeField(null=True, blank=True)
+
     # Task 16a (ADR-0004): where Paystack Transfer sends a withdrawal
     # payout. Flat fields, not a separate model -- these are a core,
     # directly-owned identity attribute like phone_number, not an

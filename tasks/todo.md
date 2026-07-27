@@ -3223,24 +3223,39 @@ available, logging any shortfall), credits the refund to the distributor's own w
 idempotent, mirroring `consume_paid_starter_pack`'s own shape in reverse.
 
 **Acceptance criteria:**
-- [ ] Refund amount matches the doc's own worked example exactly: Pack B GHS 2,000 → GHS 1,800
-- [ ] A request after day 7 (from `starter_pack_confirmed_at`) is rejected
-- [ ] PV added at signup (both ancestor legs and personal PV) is removed
-- [ ] The sponsor's direct referral bonus is reversed when their wallet has sufficient balance
-- [ ] A shortfall (insufficient sponsor balance) is logged, not raised — the distributor's own
+- [x] Refund amount matches the doc's own worked example exactly: Pack B GHS 2,000 → GHS 1,800
+- [x] A request after day 7 (from `starter_pack_confirmed_at`) is rejected
+- [x] PV added at signup (both ancestor legs and personal PV) is removed
+- [x] The sponsor's direct referral bonus is reversed when their wallet has sufficient balance
+- [x] A shortfall (insufficient sponsor balance) is logged, not raised — the distributor's own
   refund still completes
-- [ ] The distributor's own wallet is credited with the refund amount
+- [x] The distributor's own wallet is credited with the refund amount
   (`COOLING_OFF_REFUND` transaction type)
-- [ ] The account is deactivated (cannot log in afterward) but the `BinaryTreeEdge` placement is
+- [x] The account is deactivated (cannot log in afterward) but the `BinaryTreeEdge` placement is
   left untouched
-- [ ] A second call for the same distributor is a safe idempotent no-op (already-cancelled)
+- [x] A second call for the same distributor is a safe idempotent no-op (already-cancelled)
 
 **Verification:**
-- [ ] pytest test reproducing the doc example exactly (GHS 2,000 → GHS 1,800)
-- [ ] pytest test: request after day 7 is rejected
-- [ ] pytest test: insufficient sponsor balance logs a shortfall and still refunds the distributor
-- [ ] pytest test: PvLedger/PvDailyBucket/MonthlyPersonalPv all correctly reversed
-- [ ] pytest test: double-cancellation is idempotent
+- [x] pytest test reproducing the doc example exactly (GHS 2,000 → GHS 1,800)
+- [x] pytest test: request after day 7 is rejected
+- [x] pytest test: insufficient sponsor balance logs a shortfall and still refunds the distributor
+- [x] pytest test: PvLedger/PvDailyBucket/MonthlyPersonalPv all correctly reversed
+- [x] pytest test: double-cancellation is idempotent
+- [x] `doubt-driven-development` pre-implementation review caught and fixed 4 real defects: the
+  sponsor's bonus reversal must use the amount actually credited (looked up via the original
+  `WalletTransaction`), not recomputed from the live `DIRECT_REFERRAL_BONUS_RATE`; the sponsor's
+  `Wallet` row must be locked via this codebase's NOWAIT convention, not a plain blocking
+  `select_for_update()`; the cancelling distributor's own row and its `BinaryTreeEdge` ancestors
+  must be locked as one combined ascending-pk-sorted set, not the distributor's row separately and
+  first; and a new `MembershipCancelled` guard was needed in `snapshot_starter_pack_choice` to
+  close a double-credit path reachable via an admin reactivating a cancelled account and
+  re-purchasing a starter pack
+- [x] `security-and-hardening` review (post-implementation) caught one more real gap: a replayed
+  Paystack webhook for the distributor's old `starter_pack_payment_reference` after cancellation
+  was only stopped incidentally (the cleared `starter_pack_price_pesewas` happened to fail the
+  amount check), not by an intentional guard — fixed with an explicit `cooling_off_cancelled_at`
+  check in `consume_paid_starter_pack`, proven via a RED→GREEN regression test
+- [x] Full suite green (964+ passed), `ruff`/`black`/`isort`/`manage.py check` clean
 
 **Dependencies:** Task 19a
 
