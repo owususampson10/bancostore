@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–17 are done — Phase 6 (Cart + checkout) is complete; Task 18 (Order status lifecycle +
-admin order management) is next.** What exists and is verified working:
+**Tasks 1–18 are done — Phase 6 (Cart + checkout) and the order-lifecycle/admin-order-management
+work are complete; Task 19 (7-day cooling-off refund, opening Phase 7) is next.** What exists and
+is verified working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -272,6 +273,58 @@ admin order management) is next.** What exists and is verified working:
   full reasoning on why 500px-clean plus no hard-coded fixed-width elements gives reasonable, if not
   literally-320px-proven, confidence. Shipped via PR #24 (17a), #25 (17b), #26 (17c), #27 (17d);
   full suite green throughout, 844 passed as of 17d's merge.
+- **Order status lifecycle + admin order management (Task 18), closing out the checkpoint Task 17f
+  left open ("order status updates correctly with notifications"):** built as seven vertically-
+  sliced sub-tasks (18a-18g) per `docs/decisions/0006-order-lifecycle-and-admin-management-design.md`.
+  `apps/orders/services.py::_ALLOWED_TRANSITIONS`/`is_legal_order_status_transition` (18a) is the
+  single source of truth for the whole lifecycle graph — every later transition function checks
+  against it rather than hand-duplicating the rules. `cancel_or_refund_order` (18b, a three-cycle
+  `doubt-driven-development` pass before any code) reverses stock and PV for an already-paid order
+  being cancelled/refunded — cancellation is pre-dispatch only, refund has no timing restriction and
+  requires an explicit `restock` choice (goods physically returned vs. a pure financial refund);
+  `PvLedger` reverses directly, `PvDailyBucket`/`MonthlyPersonalPv` only reverse what's still live
+  (fungible pools that may already be partially consumed or expired), and an already-paid Binary/
+  Matching Bonus is never clawed back — a documented, accepted limitation, not a bug.
+  `advance_order_status` (18c) handles the non-money-adjacent Processing/Dispatched/Delivered
+  progression. `auto_cancel_unpaid_orders` (18d) is a Celery Beat batch job auto-cancelling
+  `pending` orders older than the admin-editable `PENDING_ORDER_AUTO_CANCEL_HOURS` (default 24),
+  reusing Task 13/14's `CommissionCycleRun`/`Failure` audit-trail pattern, generalized to
+  `OrderCycleRun`/`Failure` via a new migration after explicit user sign-off. The admin_portal
+  backend (18e) — order queue filtering/pagination, cancel/refund/advance actions, and a PDF
+  invoice endpoint — hit a real local-environment wall: WeasyPrint eagerly `dlopen()`s the system
+  Pango library at import time, which isn't installable on this Mac (macOS 12 is an unsupported
+  Homebrew Tier-3 config); verification was deferred to CI instead (a new `apt-get install
+  libpango...` step, this codebase's first `pytest.mark.skipif`), which then caught a real
+  `pydyf`/WeasyPrint version incompatibility the very first time that code path executed anywhere,
+  fixed by pinning `pydyf`. The Stitch-designed frontend (18f) — Order Management Queue and Order
+  Detail pages — replaced Task 18e's placeholder template, added the previously-missing
+  `order_detail` GET view (18e shipped no single-order detail page), and, per explicit user
+  follow-up requests, converted the whole filter bar to real-time htmx filtering (no Filter button,
+  mirroring `distributor_directory`'s own pattern) and replaced the native date-range `<input
+  type="date">` filters with a fully custom themed Alpine.js calendar popover (same "native popups
+  can't be restyled via CSS" reasoning that already justified the status filter's custom listbox).
+  Real-browser verification — not just pytest — caught and fixed several genuine bugs no test
+  suite would have: a `position: sticky` panel visually overlapping a sibling box once its content
+  grew tall enough; a multi-line Django `{# #}` comment rendering as literal visible text (Django's
+  comment tag is single-line only, unlike `{% comment %}`) — this recurred three separate times
+  across new templates before every instance was grepped clean; and a genuine functional bug where
+  "Cancel Order" would show a success message while silently doing nothing to a still-unpaid
+  (`pending`) order, because `is_legal_order_status_transition` alone doesn't know
+  `cancel_or_refund_order`'s narrower real precondition. A CodeRabbit pass on the resulting PR (#33)
+  found two real, fixed issues (an unquoted CSS font-family failing Stylelint, duplicate Alpine
+  `x-for` keys in the date picker's weekday header) plus five nitpicks, all addressed — fixing one
+  of them (removing `required` from the status-advance radios to stop a native validation bubble
+  anchoring to an off-screen control) surfaced a worse regression caught before it shipped: a blank
+  submission would otherwise have leaked a raw Python enum repr into the admin-facing flash message.
+  Task 18g closed the arc: full suite green (945 passed, 1 skipped — the skip is the documented
+  WeasyPrint/Pango CI-only test), CI green on real MySQL, CodeRabbit resolved, and the remaining
+  Checkpoint G piece verified live (not just pytest) — `MNOTIFY_API_KEY` temporarily blanked in
+  `.env` with explicit user sign-off (never spend real SMS credit or Paystack calls without asking)
+  to exercise the real fake-sender notification path end-to-end through the actual admin UI, which
+  also surfaced and fixed a real unrelated gotcha: Django's autoreloader re-execs its worker
+  subprocess without inheriting the `-u` interpreter flag, so unbuffered `print` output needs
+  `PYTHONUNBUFFERED=1` (an env var) instead. Shipped via PR #33; full suite green throughout, 945
+  passed as of merge.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
