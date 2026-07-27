@@ -1,54 +1,115 @@
 {% extends "admin_portal/base_dashboard.html" %}
 {% block title %}Order Management — Bancostore Admin Portal{% endblock %}
 {% block content %}
-{# Task 18e placeholder -- Task 18f replaces this with the real
-   Stitch-designed page. The view (filtering/pagination/actions) is
-   already real and tested; only this template's markup is a stand-in,
-   matching Task 20's own placeholder-dashboard precedent. #}
 <div class="mb-8">
 <h2 class="font-headline-md text-headline-md text-on-surface">Order Management</h2>
-<p class="font-body-md text-body-md text-on-surface-variant mt-1">Placeholder view -- Task 18f builds the real design.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Review and manage customer orders.</p>
 </div>
 
-<form method="get" class="mb-6 flex flex-wrap gap-3 items-end">
-<input type="text" name="q" value="{{ query }}" placeholder="Search name/phone/reference">
-<select name="status">
-<option value="">All statuses</option>
-{% for value, label in status_choices %}
-<option value="{{ value }}" {% if value == status %}selected{% endif %}>{{ label }}</option>
-{% endfor %}
-</select>
-<input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}">
-<input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}">
-<button type="submit">Filter</button>
+{% comment %}
+Real-time filtering: every field change (search keyup, status pick,
+date pick) re-fetches and swaps just #order-results, no Filter button
+-- mirrors distributor_directory.html's own already-established htmx
+pattern exactly (apps/admin_portal/views.py::distributor_directory /
+templates/admin_portal/partials/directory_results.html).
+{% endcomment %}
+<form id="order-filter-form"
+      hx-get="{% url 'admin_portal:order_management_queue' %}"
+      hx-target="#order-results"
+      hx-swap="outerHTML"
+      hx-push-url="true"
+      hx-trigger="change, submit, keyup changed delay:400ms from:#order-search-input"
+      class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant mb-8">
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+<div class="md:col-span-4">
+<label for="order-search-input" class="font-label-md text-label-md text-on-surface-variant block mb-2">Search Orders</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60" aria-hidden="true">search</span>
+<input id="order-search-input" type="search" name="q" value="{{ query }}" placeholder="Name, phone, or reference" class="w-full pl-10 pr-4 py-2.5 bg-white border border-outline-variant rounded-xl focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none font-body-md text-body-md" aria-label="Search orders">
+</div>
+</div>
+
+{{ status_choices|json_script:"order-status-options" }}
+{{ status|json_script:"order-status-selected" }}
+<div class="md:col-span-2 relative"
+     x-data="{
+       open: false,
+       selected: JSON.parse(document.getElementById('order-status-selected').textContent),
+       highlighted: -1,
+       options: [{value: '', label: 'All Statuses'}].concat(
+         JSON.parse(document.getElementById('order-status-options').textContent).map(
+           (pair) => ({value: pair[0], label: pair[1]})
+         )
+       ),
+       get selectedLabel() {
+         const found = this.options.find(o => o.value === this.selected);
+         return found ? found.label : 'All Statuses';
+       },
+       openList() {
+         this.open = true;
+         this.highlighted = Math.max(this.options.findIndex(o => o.value === this.selected), 0);
+       },
+       choose(index) {
+         this.selected = this.options[index].value;
+         this.open = false;
+         // The form's hx-trigger listens for 'change' bubbling up from a
+         // real form control -- Alpine's :value binding on the hidden
+         // input below updates the DOM property but never fires that
+         // event itself, so it's dispatched by hand (matches
+         // distributor_directory's own status listbox exactly).
+         $nextTick(() => $refs.statusInput.dispatchEvent(new Event('change', { bubbles: true })));
+       },
+     }"
+     @click.outside="open = false">
+<label class="font-label-md text-label-md text-on-surface-variant block mb-2" id="order-status-label">Status</label>
+{# Custom listbox, not a native <select> -- matches the Distributor #}
+{# Directory's own status filter (admin_portal/distributor_directory.html) #}
+{# and payout_settings.html's mobile-money-network field: a native #}
+{# select's open options popup can't be restyled via CSS in any browser. #}
+<button type="button"
+        class="w-full h-[42px] pl-4 pr-3 bg-white border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none transition-all"
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-labelledby="order-status-label"
+        aria-controls="order-status-listbox"
+        :aria-expanded="open.toString()"
+        :aria-activedescendant="highlighted >= 0 ? 'order-status-option-' + highlighted : null"
+        @click="open ? (open = false) : openList()"
+        @keydown.down.prevent="open ? highlighted = Math.min(highlighted + 1, options.length - 1) : openList()"
+        @keydown.up.prevent="open ? highlighted = Math.max(highlighted - 1, 0) : openList()"
+        @keydown.enter.prevent="if (open && highlighted >= 0) choose(highlighted)"
+        @keydown.escape="open = false">
+<span x-text="selectedLabel" class="truncate">{% for value, label in status_choices %}{% if value == status %}{{ label }}{% endif %}{% endfor %}{% if not status %}All Statuses{% endif %}</span>
+<span class="material-symbols-outlined text-on-surface-variant transition-transform" :class="open && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<ul x-show="open"
+    x-cloak
+    role="listbox"
+    id="order-status-listbox"
+    class="absolute z-10 mt-1 w-full bg-white border border-outline-variant rounded-xl shadow-lg overflow-hidden py-1 max-h-64 overflow-y-auto">
+<template x-for="(option, index) in options" :key="option.value">
+<li :id="'order-status-option-' + index"
+    role="option"
+    :aria-selected="(selected === option.value).toString()"
+    class="px-4 py-2.5 font-body-md text-body-md cursor-pointer transition-colors"
+    :class="(highlighted === index) ? 'bg-admin-primary/10 text-admin-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    @click="choose(index)"
+    @mouseenter="highlighted = index"
+    x-text="option.label">
+</li>
+</template>
+</ul>
+<input type="hidden" name="status" x-ref="statusInput" :value="selected">
+</div>
+
+<div class="md:col-span-3">
+{% include "admin_portal/_date_filter_field.html" with field_name="date_from" label="From" value=date_from initial_id="order-date-from-initial" %}
+</div>
+<div class="md:col-span-3">
+{% include "admin_portal/_date_filter_field.html" with field_name="date_to" label="To" value=date_to initial_id="order-date-to-initial" %}
+</div>
+</div>
 </form>
 
-<table class="w-full text-left">
-<thead>
-<tr>
-<th>Reference</th><th>Customer</th><th>Status</th><th>Total</th><th>Created</th><th>Actions</th>
-</tr>
-</thead>
-<tbody>
-{% for order in page_obj %}
-<tr>
-<td>{{ order.payment_reference }}</td>
-<td>{{ order.full_name }}</td>
-<td>{{ order.get_status_display }}</td>
-<td>GHS {{ order.total }}</td>
-<td>{{ order.created_at|date:'Y-m-d H:i' }}</td>
-<td>
-<form method="post" action="{% url 'admin_portal:order_management_action' order.pk %}" style="display:inline">
-{% csrf_token %}
-<input type="hidden" name="action" value="cancel">
-<button type="submit">Cancel</button>
-</form>
-</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-
-{% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
-{% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+{% include "admin_portal/partials/order_results.html" %}
 {% endblock %}

@@ -1,0 +1,111 @@
+{% comment %}
+Custom themed calendar popover, not a native <input type="date"> --
+same root reason the status filter got a custom listbox instead of a
+native <select> (admin_portal/order_management_queue.html): a native
+date input's calendar popup can't be restyled via CSS in any browser.
+Two independent instances (From/To) include this with different
+field_name/label/value/initial_id so their json_script element ids
+never collide.
+
+Security: value is passed through json_script, never interpolated
+into the x-data JS string directly -- the exact XSS this codebase
+already found and fixed once (apps/distributors/views.py::
+payout_settings's long comment explains why: the browser HTML-decodes
+an attribute value BEFORE Alpine evaluates it as JS, so Django's
+auto-escaping doesn't protect a JS-string-literal context).
+{% endcomment %}
+{{ value|date:"Y-m-d"|json_script:initial_id }}
+<div class="relative"
+     x-data="{
+       open: false,
+       selected: JSON.parse(document.getElementById('{{ initial_id }}').textContent),
+       viewYear: 0,
+       viewMonth: 0,
+       get selectedLabel() {
+         if (!this.selected) return 'Select date';
+         const [y, m, d] = this.selected.split('-').map(Number);
+         return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+       },
+       get monthLabel() {
+         return new Date(this.viewYear, this.viewMonth, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+       },
+       get calendarDays() {
+         const year = this.viewYear, month = this.viewMonth;
+         const firstWeekday = new Date(year, month, 1).getDay();
+         const daysInMonth = new Date(year, month + 1, 0).getDate();
+         const cells = [];
+         for (let i = 0; i < firstWeekday; i++) cells.push({ day: '', iso: null });
+         for (let d = 1; d <= daysInMonth; d++) {
+           cells.push({ day: d, iso: `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}` });
+         }
+         while (cells.length % 7 !== 0) cells.push({ day: '', iso: null });
+         return cells;
+       },
+       openPicker() {
+         this.open = true;
+         const base = this.selected ? this.selected.split('-').map(Number) : null;
+         const now = new Date();
+         this.viewYear = base ? base[0] : now.getFullYear();
+         this.viewMonth = base ? base[1] - 1 : now.getMonth();
+       },
+       prevMonth() { if (this.viewMonth === 0) { this.viewMonth = 11; this.viewYear--; } else { this.viewMonth--; } },
+       nextMonth() { if (this.viewMonth === 11) { this.viewMonth = 0; this.viewYear++; } else { this.viewMonth++; } },
+       choose(iso) {
+         if (!iso) return;
+         this.selected = iso;
+         this.open = false;
+         $nextTick(() => $refs.hiddenInput.dispatchEvent(new Event('change', { bubbles: true })));
+       },
+       clearDate() {
+         this.selected = '';
+         this.open = false;
+         $nextTick(() => $refs.hiddenInput.dispatchEvent(new Event('change', { bubbles: true })));
+       },
+     }"
+     @click.outside="open = false">
+<label class="font-label-md text-label-md text-on-surface-variant block mb-2" id="{{ initial_id }}-label">{{ label }}</label>
+<button type="button"
+        class="w-full h-[42px] pl-4 pr-3 bg-white border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none transition-all"
+        role="combobox"
+        aria-haspopup="dialog"
+        aria-labelledby="{{ initial_id }}-label"
+        :aria-expanded="open.toString()"
+        @click="open ? (open = false) : openPicker()">
+<span x-text="selectedLabel" class="truncate" :class="!selected && 'text-on-surface-variant/60'">{{ value|date:"j M Y"|default:"Select date" }}</span>
+<span class="material-symbols-outlined text-on-surface-variant text-[20px]" aria-hidden="true">calendar_month</span>
+</button>
+<div x-show="open"
+     x-cloak
+     role="dialog"
+     :aria-label="monthLabel"
+     class="absolute z-20 mt-1 w-72 bg-white border border-outline-variant rounded-xl shadow-lg p-4">
+<div class="flex items-center justify-between mb-3">
+<button type="button" class="p-1 rounded-full hover:bg-surface-container-low" @click="prevMonth()" aria-label="Previous month">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>
+</button>
+<span class="font-label-md text-label-md text-on-surface font-semibold" x-text="monthLabel"></span>
+<button type="button" class="p-1 rounded-full hover:bg-surface-container-low" @click="nextMonth()" aria-label="Next month">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
+</button>
+</div>
+<div class="grid grid-cols-7 gap-1 text-center mb-1">
+<template x-for="(d, i) in ['S', 'M', 'T', 'W', 'T', 'F', 'S']" :key="i">
+<span class="text-[11px] font-bold text-on-surface-variant/70" x-text="d"></span>
+</template>
+</div>
+<div class="grid grid-cols-7 gap-1">
+<template x-for="(cell, index) in calendarDays" :key="index">
+<button type="button"
+        class="h-8 w-8 rounded-full text-body-sm font-body-sm transition-colors"
+        :class="cell.day === '' ? 'invisible' : (cell.iso === selected ? 'bg-admin-primary text-on-primary font-bold' : 'text-on-surface hover:bg-surface-container-low')"
+        :disabled="cell.day === ''"
+        :aria-label="cell.iso"
+        x-text="cell.day"
+        @click="choose(cell.iso)">
+</button>
+</template>
+</div>
+<button type="button" class="w-full mt-3 pt-3 border-t border-outline-variant text-admin-primary font-label-md text-label-md hover:underline" @click="clearDate()">Clear date</button>
+</div>
+<input type="hidden" name="{{ field_name }}" x-ref="hiddenInput" :value="selected">
+</div>

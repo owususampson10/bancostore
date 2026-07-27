@@ -1,0 +1,232 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Order {{ order.payment_reference }} — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="flex items-start justify-between gap-4 mb-8 flex-wrap">
+<div class="flex items-center gap-4">
+<a href="{% url 'admin_portal:order_management_queue' %}" class="p-2 hover:bg-surface-container-low rounded-full transition-colors flex-shrink-0" aria-label="Back to Order Management">
+<span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+</a>
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface flex items-center gap-3 flex-wrap">
+<span class="font-mono-sm text-mono-sm break-all">{{ order.payment_reference }}</span>
+{% include "admin_portal/_order_status_pill.html" with status=order.status label=order.get_status_display %}
+</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Ordered on {{ order.created_at|date:"M j, Y, H:i" }}</p>
+</div>
+</div>
+<div class="flex gap-3 flex-wrap">
+<a href="{% url 'admin_portal:order_invoice_pdf' order.pk %}" target="_blank" rel="noopener" class="bg-white border border-outline-variant text-on-surface px-4 py-2.5 rounded-xl font-label-md text-label-md flex items-center gap-2 hover:bg-surface-container-low transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">download</span>
+Download Invoice (PDF)
+</a>
+{% if advanceable_statuses %}
+<button type="submit" form="advance-form" class="bg-admin-primary text-on-primary px-6 py-2.5 rounded-xl font-label-md text-label-md flex items-center gap-2 hover:opacity-90 transition-all shadow-md active:scale-95">
+Save Changes
+</button>
+{% endif %}
+</div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+{# Left column: items + customer/delivery #}
+<div class="lg:col-span-8 space-y-6">
+<section class="bg-white rounded-xl p-6 shadow-sm border border-outline-variant/30">
+<div class="flex items-center justify-between mb-6 flex-wrap gap-2">
+<h3 class="font-headline-sm text-headline-sm text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-admin-primary" aria-hidden="true">receipt_long</span>
+Order Items
+</h3>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full min-w-[560px] text-left">
+<thead class="bg-surface-container-low">
+<tr>
+<th class="p-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Product</th>
+<th class="p-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Qty</th>
+<th class="p-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider text-right">Price</th>
+<th class="p-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider text-right">Total</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/40">
+{% for item in order.items.all %}
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="p-4">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 bg-surface-container rounded-lg overflow-hidden flex-shrink-0 flex items-center justify-center">
+{% if item.product.primary_image %}
+<img class="w-full h-full object-cover" src="{{ item.product.primary_image.image.url }}" alt="{{ item.product_name }}">
+{% else %}
+<span class="material-symbols-outlined text-on-surface-variant/40" aria-hidden="true">inventory_2</span>
+{% endif %}
+</div>
+<div>
+<div class="font-body-md text-body-lg font-semibold text-on-surface">{{ item.product_name }}</div>
+<div class="font-label-md text-label-md text-on-surface-variant">{{ item.product.category.name }}</div>
+</div>
+</div>
+</td>
+<td class="p-4 font-body-md text-body-md text-on-surface">x{{ item.quantity }}</td>
+<td class="p-4 text-right font-body-md text-body-md text-on-surface">GHS {{ item.unit_price|floatformat:2 }}</td>
+<td class="p-4 text-right font-semibold font-body-md text-body-md text-on-surface">GHS {{ item.line_total|floatformat:2 }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+<div class="mt-6 flex flex-col items-end gap-2 border-t border-outline-variant/40 pt-6">
+<div class="flex justify-between w-full max-w-xs font-body-md text-body-md text-on-surface-variant">
+<span>Subtotal</span>
+<span>GHS {{ order.subtotal|floatformat:2 }}</span>
+</div>
+<div class="flex justify-between w-full max-w-xs font-body-md text-body-md text-on-surface-variant">
+<span>Shipping</span>
+<span>GHS {{ order.delivery_fee|floatformat:2 }}</span>
+</div>
+<div class="flex justify-between w-full max-w-xs pt-2 border-t border-outline-variant/40">
+<span class="font-headline-sm text-headline-sm text-on-surface">Grand Total</span>
+<span class="font-headline-sm text-headline-sm text-admin-primary">GHS {{ order.total|floatformat:2 }}</span>
+</div>
+</div>
+</section>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<section class="bg-white rounded-xl p-6 shadow-sm border border-outline-variant/30">
+<h4 class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest mb-4">Customer Details</h4>
+<div class="flex items-start gap-4">
+<div class="w-12 h-12 bg-primary-fixed text-admin-primary rounded-full flex items-center justify-center font-bold font-headline-sm text-headline-sm flex-shrink-0">
+{% if order.full_name %}{{ order.full_name|slice:":1"|upper }}{% else %}?{% endif %}
+</div>
+<div class="min-w-0">
+<p class="font-body-md text-body-lg font-semibold text-on-surface truncate">{{ order.full_name }}</p>
+<p class="font-body-md text-body-md text-on-surface-variant">{{ order.phone_number }}</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">{{ order.email|default:"No email on file" }}</p>
+</div>
+</div>
+</section>
+<section class="bg-white rounded-xl p-6 shadow-sm border border-outline-variant/30">
+<h4 class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest mb-4">Delivery Information</h4>
+<div class="flex flex-col gap-3">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-admin-primary" aria-hidden="true">local_shipping</span>
+<span class="font-body-md text-body-md font-semibold text-on-surface">{{ order.get_delivery_method_display }}</span>
+</div>
+{% if order.delivery_method == "home_delivery" %}
+<div class="flex items-start gap-3">
+<span class="material-symbols-outlined text-on-surface-variant" aria-hidden="true">location_on</span>
+<span class="font-body-md text-body-md text-on-surface">{{ order.address }}, {{ order.area }}{% if order.landmark %}<br>Near {{ order.landmark }}{% endif %}<br>{{ order.get_delivery_zone_display }}</span>
+</div>
+{% else %}
+<div class="flex items-start gap-3">
+<span class="material-symbols-outlined text-on-surface-variant" aria-hidden="true">storefront</span>
+<span class="font-body-md text-body-md text-on-surface">Customer pickup — no delivery address.</span>
+</div>
+{% endif %}
+</div>
+</section>
+</div>
+</div>
+
+{# Right column: status/actions #}
+<div class="lg:col-span-4 space-y-6">
+{% comment %}
+Not lg:sticky -- confirmed via real-browser verification (2026-07-27)
+that sticky here collides with the Admin Note box below once this
+panel is tall (many advanceable statuses + tracking note + refund
+radios): the sticky containing block is this same right column, which
+isn't tall enough to keep both from overlapping once the section gets
+pushed up to stay inside it. This panel's content is roughly as tall
+as the left column anyway, so sticky adds no real benefit here.
+{% endcomment %}
+<section class="bg-white rounded-xl p-6 shadow-sm border border-outline-variant/30">
+<h3 class="font-headline-sm text-headline-sm text-on-surface mb-6">Update Status</h3>
+<div class="space-y-6">
+<form id="advance-form" method="post" action="{% url 'admin_portal:order_management_action' order.pk %}">
+{% csrf_token %}
+<input type="hidden" name="action" value="advance">
+{% if advanceable_statuses %}
+<fieldset class="space-y-2 border-0 p-0 m-0">
+<legend class="font-label-md text-label-md text-on-surface-variant">Operational State</legend>
+<div class="grid grid-cols-1 gap-2">
+{% for value, label in advanceable_statuses %}
+<label class="flex items-center justify-between w-full p-4 rounded-xl border border-outline-variant hover:border-admin-primary transition-all cursor-pointer has-[:checked]:border-admin-primary has-[:checked]:bg-admin-primary/5">
+<span class="flex items-center gap-3">
+{% comment %}
+Not required: CodeRabbit (2026-07-27) -- the Save Changes button
+that submits this form lives up in the page header, physically far
+from these radios. A native HTML5 "please select one" validation
+bubble anchored to an off-screen radio is confusing; the server-
+side is_legal_order_status_transition check (advance_order_status,
+apps/orders/services.py) already rejects an empty/blank to_status
+with a clear flash message instead.
+{% endcomment %}
+<input type="radio" name="to_status" value="{{ value }}" class="w-4 h-4 text-admin-primary focus:ring-admin-primary">
+<span class="font-body-md text-body-md font-semibold text-on-surface">{{ label }}</span>
+</span>
+</label>
+{% endfor %}
+</div>
+</fieldset>
+<div class="space-y-2">
+<label for="tracking-note" class="font-label-md text-label-md text-on-surface-variant">Tracking Note</label>
+<textarea id="tracking-note" name="tracking_note" rows="3" placeholder="Enter tracking ID or specific delivery instructions..." class="w-full rounded-xl border border-outline-variant focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none font-body-md text-body-md p-3 placeholder:text-on-surface-variant/50">{{ order.tracking_note }}</textarea>
+</div>
+{% else %}
+<p class="font-body-md text-body-md text-on-surface-variant">No further status advance is available from "{{ order.get_status_display }}".</p>
+{% endif %}
+</form>
+
+{% if can_refund or can_cancel %}
+{% if can_refund %}
+<fieldset class="space-y-3 pt-4 border-t border-outline-variant/40 border-x-0 border-b-0 p-0 m-0">
+<legend class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest pt-4">Refund Workflow</legend>
+<form id="refund-form" method="post" action="{% url 'admin_portal:order_management_action' order.pk %}">
+{% csrf_token %}
+<input type="hidden" name="action" value="refund">
+<div class="flex flex-col gap-2 mt-2">
+<label class="relative flex items-center p-4 rounded-xl border border-outline-variant cursor-pointer hover:bg-surface-container-low transition-all has-[:checked]:border-admin-primary has-[:checked]:bg-admin-primary/5">
+<input class="w-4 h-4 text-admin-primary focus:ring-admin-primary" name="restock" type="radio" value="true" required>
+<div class="ml-3">
+<p class="font-body-md text-body-md font-semibold text-on-surface">Goods physically returned</p>
+<p class="font-label-md text-label-md text-on-surface-variant">Inventory count will be incremented automatically.</p>
+</div>
+</label>
+<label class="relative flex items-center p-4 rounded-xl border border-outline-variant cursor-pointer hover:bg-surface-container-low transition-all has-[:checked]:border-admin-primary has-[:checked]:bg-admin-primary/5">
+<input class="w-4 h-4 text-admin-primary focus:ring-admin-primary" name="restock" type="radio" value="false" required>
+<div class="ml-3">
+<p class="font-body-md text-body-md font-semibold text-on-surface">No return</p>
+<p class="font-label-md text-label-md text-on-surface-variant">Pure financial refund without stock adjustment.</p>
+</div>
+</label>
+</div>
+</form>
+</fieldset>
+{% endif %}
+<div class="grid grid-cols-2 gap-3 pt-4 border-t border-outline-variant/40">
+{% if can_refund %}
+<button type="submit" form="refund-form" class="bg-white border border-outline-variant text-on-surface px-4 py-3 rounded-xl font-label-md text-label-md hover:bg-surface-container-low transition-colors">
+Refund Order
+</button>
+{% endif %}
+{% if can_cancel %}
+<form method="post" action="{% url 'admin_portal:order_management_action' order.pk %}" onsubmit="return confirm('Cancel this order? This cannot be undone.');" class="{% if not can_refund %}col-span-2{% endif %}">
+{% csrf_token %}
+<input type="hidden" name="action" value="cancel">
+<button type="submit" class="w-full bg-admin-error text-on-error px-4 py-3 rounded-xl font-label-md text-label-md hover:opacity-90 transition-colors shadow-sm">
+Cancel Order
+</button>
+</form>
+{% endif %}
+</div>
+{% endif %}
+</div>
+</section>
+<div class="p-6 bg-surface-container-highest rounded-xl border border-outline-variant/30">
+<div class="flex items-center gap-2 mb-2 text-admin-primary">
+<span class="material-symbols-outlined" aria-hidden="true">info</span>
+<span class="font-semibold font-body-md text-body-md">Admin Note</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant">Updating status sends the customer an SMS (and email, if on file) automatically. Refunding reverses stock (if selected) and any still-available PV -- already-paid commissions are never clawed back.</p>
+</div>
+</div>
+</div>
+{% endblock %}

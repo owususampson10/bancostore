@@ -563,7 +563,7 @@ def _send_stock_unavailable_notification(order: Order) -> None:
             )
 
 
-_ADVANCEABLE_STATUSES = (
+ADVANCEABLE_STATUSES = (
     Order.Status.PROCESSING,
     Order.Status.DISPATCHED,
     Order.Status.DELIVERED,
@@ -579,14 +579,14 @@ def advance_order_status(order_id, to_status, tracking_note="") -> None:
     which these stages never need (nothing was reversed at any point --
     the order stays `confirmed` in every money-adjacent sense).
 
-    `to_status` MUST be one of `_ADVANCEABLE_STATUSES` -- `Cancelled`/
+    `to_status` MUST be one of `ADVANCEABLE_STATUSES` -- `Cancelled`/
     `Refunded` belong to `cancel_or_refund_order`, not this function,
     same "reject the wrong target outright" discipline as that
     function's own `to_status` guard."""
-    if to_status not in _ADVANCEABLE_STATUSES:
+    if to_status not in ADVANCEABLE_STATUSES:
         raise ValueError(
             f"advance_order_status: to_status must be one of "
-            f"{_ADVANCEABLE_STATUSES}, got {to_status!r}."
+            f"{ADVANCEABLE_STATUSES}, got {to_status!r}."
         )
 
     def _attempt():

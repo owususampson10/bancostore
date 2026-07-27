@@ -6,7 +6,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Prefetch, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -18,8 +18,13 @@ from constance import config
 from apps.commissions.models import CommissionCycleRun
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
-from apps.orders.models import Order
-from apps.orders.services import advance_order_status, cancel_or_refund_order
+from apps.orders.models import Order, OrderItem
+from apps.orders.services import (
+    ADVANCEABLE_STATUSES,
+    advance_order_status,
+    cancel_or_refund_order,
+    is_legal_order_status_transition,
+)
 from apps.wallet.models import WalletTransaction
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
@@ -667,16 +672,93 @@ def order_management_queue(request):
     page_number = request.GET.get("page")
     page_obj = paginator.get_page(page_number)
 
+    # Task 18f: mirrors distributor_directory's own querystring_no_page --
+    # hand-interpolating q/status/date_from/date_to into each pagination
+    # link's href (as the very first draft of this template did) breaks
+    # the moment a search term contains "&" (HTML-unescapes back into a
+    # second bare query param, silently corrupting the filter) instead of
+    # being properly URL-encoded.
+    params = request.GET.copy()
+    params.pop("page", None)
+    querystring_no_page = params.urlencode()
+
+    context = {
+        "page_obj": page_obj,
+        "query": query,
+        "status": status,
+        "date_from": date_from,
+        "date_to": date_to,
+        "querystring_no_page": querystring_no_page,
+        "status_choices": Order.Status.choices,
+        "active_nav": "orders",
+    }
+    # Real-time filtering (search keyup / status pick / date pick, no
+    # Filter button): a change-triggered htmx request must get back just
+    # the results fragment, not the full page shell, or the sidebar/
+    # header would get swapped into the results div -- mirrors
+    # distributor_directory's own request.htmx branch exactly.
+    if request.htmx:
+        return render(request, "admin_portal/partials/order_results.html", context)
+    return render(request, "admin_portal/order_management_queue.html", context)
+
+
+@login_required(login_url="two_factor:login")
+def order_detail(request, pk):
+    """Task 18f. GET-only single-order detail view, the page
+    order_management_action redirects back to after every action so an
+    admin's cancel/refund/advance/tracking-note update is visible in
+    place -- matching the Stitch "Order Detail" screen's own in-place
+    flash-message design, not a bounce back to the queue. Mirrors
+    order_invoice_pdf's own select_related/prefetch_related shape.
+
+    advanceable_statuses/can_cancel/can_refund are all computed via
+    is_legal_order_status_transition (18a's single source of truth) --
+    never a second, hand-maintained copy of _ALLOWED_TRANSITIONS here."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    # Prefetch, not a plain "items__product__images" string: a single
+    # Order lookup already prefetches items -> product in one extra
+    # query, but product.primary_image (rendered per line in the
+    # template) queries product.images.all() again per item with no
+    # prefetch -- the same N+1 apps.orders.cart.Cart.items() already
+    # documents and fixes for the storefront cart page.
+    order = get_object_or_404(
+        Order.objects.select_related("customer").prefetch_related(
+            Prefetch(
+                "items",
+                queryset=OrderItem.objects.select_related(
+                    "product__category"
+                ).prefetch_related("product__images"),
+            )
+        ),
+        pk=pk,
+    )
+    advanceable_statuses = [
+        (status, status.label)
+        for status in ADVANCEABLE_STATUSES
+        if is_legal_order_status_transition(order.status, status)
+    ]
     return render(
         request,
-        "admin_portal/order_management_queue.html",
+        "admin_portal/order_detail.html",
         {
-            "page_obj": page_obj,
-            "query": query,
-            "status": status,
-            "date_from": date_from,
-            "date_to": date_to,
-            "status_choices": Order.Status.choices,
+            "order": order,
+            "advanceable_statuses": advanceable_statuses,
+            # Excludes PENDING explicitly, not just via
+            # is_legal_order_status_transition: that graph legitimately
+            # allows PENDING -> CANCELLED (Task 17c/17d's own automatic
+            # pre-payment cancellation, Task 18d's auto-cancel batch job),
+            # but cancel_or_refund_order (18b) documents PENDING as a
+            # caller bug -- it silently no-ops rather than raising, so
+            # without this exclusion the button would show "cancelled"
+            # while doing nothing. Found via real-browser verification,
+            # 2026-07-27.
+            "can_cancel": order.status != Order.Status.PENDING
+            and is_legal_order_status_transition(order.status, Order.Status.CANCELLED),
+            "can_refund": is_legal_order_status_transition(
+                order.status, Order.Status.REFUNDED
+            ),
             "active_nav": "orders",
         },
     )
@@ -738,6 +820,18 @@ def order_management_action(request, pk):
     elif action == "advance":
         to_status = request.POST.get("to_status", "")
         tracking_note = request.POST.get("tracking_note", "")
+        # CodeRabbit (2026-07-27): the "Save Changes" button that submits
+        # this form lives in the page header, far from the Operational
+        # State radios -- a native HTML5 required-radio validation bubble
+        # anchored there was confusing, so the radios no longer carry
+        # `required` (templates/admin_portal/order_detail.html). Without
+        # this check, a blank to_status would instead reach
+        # advance_order_status's own ValueError, whose message embeds the
+        # raw Order.Status enum repr -- not admin-facing text. Mirrors the
+        # "refund" branch's own restock_raw check just above.
+        if not to_status:
+            messages.error(request, "Choose a status to advance to.")
+            return redirect("admin_portal:order_detail", pk=order.pk)
         try:
             advance_order_status(order.pk, to_status, tracking_note=tracking_note)
             messages.success(
@@ -750,7 +844,11 @@ def order_management_action(request, pk):
     else:
         messages.error(request, "Unrecognized action.")
 
-    return redirect("admin_portal:order_management_queue")
+    # Task 18f: redirects to this same order's detail page, not the queue
+    # -- the Stitch "Order Detail" screen's own design keeps the admin on
+    # the order they just acted on so the flash message and its new
+    # status/history are immediately visible, not lost in a list.
+    return redirect("admin_portal:order_detail", pk=order.pk)
 
 
 @login_required(login_url="two_factor:login")

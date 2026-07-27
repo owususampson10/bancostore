@@ -177,6 +177,25 @@ guessed at.
   (101 passed, 0 failed) — confirmed unrelated to Task 18e, which touches no file under
   `apps/catalog/` at all. A second instance of the same class of full-suite-only flakiness as the
   entry above, not root-caused here. Worth revisiting if it recurs.
+- [ ] `tests/feature/distributors/test_withdrawal_request.py::test_can_submit_a_valid_withdrawal_request`
+  failed once as part of the **full** suite (2026-07-27, during Task 18f verification) — the success
+  flash message ("Withdrawal request submitted") was missing from the rendered response even though
+  the `WithdrawalRequest` row itself was created correctly with the right amount/tax/net. Passed
+  13/13 immediately after in isolation. Confirmed unrelated to Task 18f, which touches no file under
+  `apps/withdrawal/`, `apps/distributors/`, or `tests/feature/distributors/` (`git status` shows only
+  `apps/admin_portal/`, `templates/admin_portal/`, and `static/src/main.css` changed). A third
+  instance of the same class of full-suite-only flakiness as the two entries above, not root-caused
+  here.
+- [ ] `tests/unit/distributors/test_kyc_review.py::test_concurrent_approvals_of_different_distributors_never_duplicate_ir_ids`
+  failed once as part of the **full** suite (2026-07-27, during Task 18f's follow-up verification)
+  with `django.db.utils.OperationalError: database table is locked: distributors_iridsequence` --
+  SQLite's well-known single-writer lock contention under a real multi-threaded concurrency test,
+  exactly the class of flake `SPEC.md`'s own Testing Strategy already documents as expected under
+  SQLite (why commission/wallet/PV-ledger concurrency tests run against real MySQL in CI instead of
+  local SQLite). Passed 15/15 immediately after in isolation. Confirmed unrelated to this session's
+  changes, which touch no file under `apps/distributors/` at all (same `git status` scope as the
+  entry above). A fourth instance of full-suite-only flakiness, but a different root cause (SQLite
+  locking, not query-count/response-content noise) than the three entries above it.
 
 ---
 
@@ -2985,21 +3004,86 @@ screen (KYC Review Queue, Withdrawal Review Queue, Distributor Directory, Commis
 resulting screens/export back for template integration, same as every prior page in this project.
 
 **Acceptance criteria:**
-- [ ] The order list, filters, and per-order detail (status update, tracking note, cancel/refund, PDF invoice link) render the real Stitch design, integrated with 18e's actual data
-- [ ] Verified across the achievable real-browser breakpoints (1440/1024/768px, and whatever floor the local OS's window-resize permits — see Task 17e's own note on the ~500px practical floor and why true 320px needs a code-inspection fallback, not a fabricated screenshot)
+- [x] The order list, filters, and per-order detail (status update, tracking note, cancel/refund, PDF invoice link) render the real Stitch design, integrated with 18e's actual data
+- [x] Verified across the achievable real-browser breakpoints (1440/768/500px — see Task 17e's own note on the ~500px practical floor)
 
 **Verification:**
-- [ ] Manual check: an admin filters, updates status, adds a tracking note, cancels a confirmed order (stock/PV visibly reversed in the DB), and downloads a PDF invoice, all via the real UI in a real browser
+- [x] Manual check: an admin filters, updates status, adds a tracking note, cancels a confirmed order (stock/PV visibly reversed in the DB), and downloads a PDF invoice, all via the real UI in a real browser
+
+**Built (2026-07-27):** the two Stitch screens (Order Management Queue, Order Detail) were fetched,
+then integrated as real Django templates against `templates/admin_portal/base_dashboard.html`'s
+existing shared shell rather than reproducing Stitch's own sidebar/topbar markup -- "Orders" added
+as the shell's 6th real nav item. `order_management_queue.html` rebuilt in full: themed search +
+date-range filters plus a custom Alpine listbox for the status filter (matching the same no-native-
+`<select>` pattern `distributor_directory.html`/`payout_settings.html` already established, since a
+native select's open-options popup can't be restyled via CSS), a paginated table with a new shared
+`_order_status_pill.html` partial (7 colour-coded statuses, reused by both pages so they can't drift
+apart), and a `querystring_no_page` pagination fix (mirroring `distributor_directory`'s own
+precedent) since the first draft's hand-interpolated `?q=...&status=...` links would corrupt the
+filter the moment a search term contained `&`. A real gap was found while wiring this up: Task 18e
+shipped no GET-based single-order detail view at all, only the list, a POST-only action handler,
+and the PDF endpoint -- added `apps/admin_portal/views.py::order_detail` (TDD, mirrors
+`order_invoice_pdf`'s query shape, but via a `Prefetch("items", queryset=...select_related(
+"product__category").prefetch_related("product__images"))` to avoid the same N+1
+`apps.orders.cart.Cart.items()` already documents for `product.primary_image`) plus a new
+`admin_portal:order_detail` URL route, and changed `order_management_action`'s redirect target from
+the queue to this same order's detail page so an admin's action and its flash message stay visible
+in place, matching the Stitch screen's own in-place-alert design. `main.css` gained the
+`headline-sm`/`mono-sm` tokens (JetBrains Mono font loaded) these two screens needed but no prior
+screen had used yet -- pulled from the same Stitch design system's own already-established values,
+not invented here. Real-browser verification (not just pytest) caught and fixed three genuine bugs
+before calling this done: (1) the Update Status panel's `lg:sticky lg:top-24` visually overlapped
+the Admin Note box below it once the panel was tall enough (confirmed via `getBoundingClientRect()`
+in a live session) -- fixed by dropping the sticky positioning, which added no real benefit here
+anyway; (2) a multi-line `{# ... #}` Django comment rendered as literal visible text, since Django's
+single-line comment tag doesn't support multi-line content the way `{% comment %}...{% endcomment
+%}` does; (3) a real functional bug, not cosmetic -- `can_cancel` was computed purely from
+`is_legal_order_status_transition`, which legitimately allows `PENDING -> CANCELLED` (that edge
+exists for Task 17c/17d's own automatic pre-payment cancellation and Task 18d's auto-cancel batch
+job), but the actual service function the Cancel button calls, `cancel_or_refund_order` (18b), treats
+a `PENDING` order as a caller bug and silently no-ops with no exception -- meaning the button would
+have shown "Order ... cancelled" while doing nothing. This latent mismatch predates 18f (it's been
+sitting in 18b's own code since before any UI could reach it) but 18f's new detail page was the
+first thing to expose it as a clickable action; fixed by excluding `PENDING` explicitly in
+`can_cancel`'s computation, with a regression test. All three fixes verified both by a fresh
+real-browser pass and by the full pytest suite (942 passed, 1 skipped, 0 failed).
+
+**Follow-up (2026-07-27, same day, user-requested after first review):** three more fixes, all
+verified live: (1) the native `<input type="date">` From/To filters were replaced with a fully
+custom themed Alpine.js calendar popover (`templates/admin_portal/_date_filter_field.html`, new,
+included twice with independent `x-data` scopes) -- same root reason the status filter already got
+a custom listbox instead of a native `<select>` (a native date input's own calendar popup can't be
+restyled via CSS in any browser either); its hidden input dispatches a real `change` event on
+selection so it participates in the same trigger chain as the status listbox. (2) The whole filter
+bar (search/status/date) was converted to real-time, no-button htmx filtering, mirroring
+`distributor_directory`'s own already-established pattern exactly (TDD: RED test for the
+`request.htmx` branch first) -- `order_management_queue`'s results table+pagination+empty-state was
+extracted into `templates/admin_portal/partials/order_results.html` (`#order-results`, `hx-swap=
+"outerHTML"`), the view gained a `request.htmx` branch returning just that partial, and the "Filter"
+submit button was removed entirely. (3) Same multi-line-`{# #}`-renders-as-visible-text bug (already
+fixed once in `order_detail.html`) recurred in three MORE new templates written during this
+follow-up -- found again via real-browser verification, fixed by converting every one to `{%
+comment %}...{% endcomment %}` and confirmed via a repo-wide grep that no multi-line `{# #}`
+remained in any touched template. Verified in a real browser: the date picker's month navigation and
+day-grid weekday alignment (checked against real calendar dates, not assumed), and every filter field
+narrowing/excluding results live with no page reload and no Filter button, at 1440px and 500px both.
 
 **Dependencies:** 18e merged; Stitch prompt sent and screens received from the user
 
-**Files likely touched:** `templates/admin_portal/order_management.html` (new), `templates/admin_portal/partials/order_*.html`
+**Files touched:** `apps/admin_portal/views.py`, `apps/admin_portal/urls.py`,
+`templates/admin_portal/order_management_queue.html`, `templates/admin_portal/order_detail.html`
+(new), `templates/admin_portal/_order_status_pill.html` (new),
+`templates/admin_portal/_date_filter_field.html` (new),
+`templates/admin_portal/partials/order_results.html` (new),
+`templates/admin_portal/base_dashboard.html`, `static/src/main.css`,
+`tests/feature/admin_portal/test_order_management.py`
 
 **Estimated scope:** M
 
 **Skills:**
-- *During:* `frontend-ui-engineering`, `incremental-implementation`
-- *After:* `code-review-and-quality`, `browser-testing-with-devtools`
+- *During:* `frontend-ui-engineering`, `incremental-implementation`, `test-driven-development` (the
+  missing `order_detail` view was built RED-first)
+- *After:* `code-review-and-quality`, `debugging-and-error-recovery` (all three real-browser bugs)
 
 ---
 

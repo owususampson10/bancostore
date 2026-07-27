@@ -86,10 +86,15 @@
   --font-label-md: Inter, sans-serif;
   --font-headline-lg: "Hanken Grotesk", sans-serif;
   --font-headline-md: "Hanken Grotesk", sans-serif;
+  --font-headline-sm: "Hanken Grotesk", sans-serif;
   --font-display-lg: "Hanken Grotesk", sans-serif;
-  --font-body-sm: Inter, sans-serif;
-  --font-body-md: Inter, sans-serif;
-  --font-body-lg: Inter, sans-serif;
+  --font-body-sm: "Inter", sans-serif;
+  --font-body-md: "Inter", sans-serif;
+  --font-body-lg: "Inter", sans-serif;
+  /* Task 18f: not used by any screen before Order Management/Detail --
+     pulled from the same Stitch design system's own designMd values
+     (JetBrains Mono, for order reference numbers), not invented here. */
+  --font-mono-sm: "JetBrains Mono", monospace;
 
   /* Font sizes (paired with line-height/weight/letter-spacing) */
   --text-label-lg: 14px;
@@ -109,6 +114,12 @@
   --text-headline-md: 24px;
   --text-headline-md--line-height: 32px;
   --text-headline-md--font-weight: 600;
+  --text-headline-sm: 20px;
+  --text-headline-sm--line-height: 28px;
+  --text-headline-sm--font-weight: 600;
+  --text-mono-sm: 13px;
+  --text-mono-sm--line-height: 18px;
+  --text-mono-sm--font-weight: 400;
   --text-display-lg: 48px;
   --text-display-lg--line-height: 56px;
   --text-display-lg--font-weight: 700;
