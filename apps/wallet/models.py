@@ -60,6 +60,20 @@ class WalletTransaction(models.Model):
         # (doubt-driven-development finding: reusing it would conflate
         # two unrelated reasons money re-enters a wallet).
         WITHDRAWAL_REVERSAL = "withdrawal_reversal", "Withdrawal Reversal"
+        # Task 19 (ADR-0007): a 7-day cooling-off cancellation moves money
+        # in two directions, neither of which fits an existing type --
+        # REFUND_REVERSAL is explicitly documented above as "for
+        # product-order refunds, a different domain entirely" (Task 16f),
+        # and WITHDRAWAL_REVERSAL is failed-Transfer-specific.
+        COOLING_OFF_REFUND = "cooling_off_refund", "Cooling-Off Refund"
+        # Named symmetrically with the WITHDRAWAL_DEBIT/WITHDRAWAL_REVERSAL
+        # pairing above: credited to the cancelling distributor's own
+        # wallet is COOLING_OFF_REFUND, debited from their sponsor's wallet
+        # (reversing the one-time direct referral bonus) is this.
+        DIRECT_REFERRAL_BONUS_REVERSAL = (
+            "direct_referral_bonus_reversal",
+            "Direct Referral Bonus Reversal",
+        )
 
     wallet = models.ForeignKey(
         Wallet, on_delete=models.CASCADE, related_name="transactions"

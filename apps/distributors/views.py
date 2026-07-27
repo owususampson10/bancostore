@@ -59,6 +59,7 @@ from .forms import (
 from .models import DiditVerification, Distributor, PendingRegistration
 from .paystack import PaystackError, initialize_transaction, verify_webhook_signature
 from .services import (
+    MembershipCancelled,
     PendingRegistrationAlreadyConsumed,
     PendingRegistrationNotFound,
     StarterPackAlreadyConfirmed,
@@ -217,7 +218,7 @@ def select_starter_pack(request):
             distributor = snapshot_starter_pack_choice(
                 request.user.distributor.pk, choice
             )
-        except StarterPackAlreadyConfirmed:
+        except (StarterPackAlreadyConfirmed, MembershipCancelled):
             return redirect("distributors:dashboard")
 
         callback_url = request.build_absolute_uri(
