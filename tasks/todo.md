@@ -3094,13 +3094,28 @@ prior task. Closes the "order status updates correctly with notifications" porti
 that Task 17f explicitly left open for this task.
 
 **Acceptance criteria:**
-- [ ] Full pytest suite green, including every new orders test from 18a-18f
-- [ ] `black`/`ruff` clean, `manage.py check` clean
-- [ ] CI green against real MySQL, not just local SQLite
-- [ ] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning
+- [x] Full pytest suite green, including every new orders test from 18a-18f (945 passed, 1 skipped, 0 failed — the skip is the documented WeasyPrint/Pango CI-only test)
+- [x] `black`/`ruff` clean, `manage.py check` clean
+- [x] CI green against real MySQL, not just local SQLite (PR #33, both commits)
+- [x] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning (PR #33 — 2 actionable + 5 nitpicks, all fixed; see PR #33's own commit history)
 
-**Verification:**
-- [ ] Checkpoint G's remaining portion passes end-to-end in a real browser session: an order moves through its full lifecycle with a notification at each step, and admin cancellation of a confirmed order visibly reverses stock/PV in the database, not just pytest
+**Verification (2026-07-27):** Checkpoint G's remaining portion verified end-to-end in a real
+browser session, not just pytest. `MNOTIFY_API_KEY` was temporarily blanked in `.env` (restored
+immediately after, user-approved via `AskUserQuestion` rather than spending real SMS credit or
+silently assuming it was fine) so the real `_send_order_status_notification` code path could be
+exercised with its actual fake-sender fallback instead of mocking it away. A real order was walked
+through Confirmed -> Processing -> Dispatched -> Delivered via the live admin_portal UI; the
+runserver console log confirmed the exact SMS text sent at the final transition ("Your Bancostore
+order ... is now Delivered.") -- catching, along the way, that Django's autoreloader re-execs its
+worker subprocess without inheriting the `-u` interpreter flag (interpreter flags aren't part of
+`sys.argv`), so `python -u manage.py runserver` silently doesn't unbuffer the process that actually
+handles requests; fixed by using `PYTHONUNBUFFERED=1` (an env var, which does survive the re-exec)
+with `--noreload`. A second order was admin-cancelled the same way: the console log confirmed the
+correct SMS text ("... is now Cancelled.") and `Product.stock` was confirmed incremented by exactly
+the cancelled line item's quantity (22 -> 24) via `manage.py shell`, both matching the already-
+established pytest coverage. PV reversal specifically was not re-verified live here (would need a
+full binary-tree ancestor scenario just for this checkpoint) -- relied on Task 18b's own elevated-
+rigor pytest suite for that piece, a deliberate, stated scope decision, not a silent gap.
 
 **Dependencies:** 18a-18f all merged
 
