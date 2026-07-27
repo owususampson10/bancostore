@@ -117,7 +117,7 @@ with whether their own cancellation request is valid.
 
 ### 5. Refund math — confirmed against the source doc's own worked example, not assumed
 
-```
+```text
 refund_pesewas = starter_pack_price_pesewas * (1 - COOLING_OFF_REFUND_DEDUCTION_RATE / 100)
 ```
 

@@ -74,12 +74,25 @@ def test_targets_the_exact_purchase_date_bucket_not_todays():
 
 
 @pytest.mark.django_db
-def test_a_root_distributor_with_no_ancestors_is_a_safe_no_op():
+def test_a_root_distributor_still_gets_their_own_personal_pv_reversed():
+    """Regression test (CodeRabbit finding on PR #35, confirmed real): the
+    original implementation early-`return`ed when `edges` was empty (a
+    root distributor, or one not yet placed under a sponsor) before ever
+    reaching the MonthlyPersonalPv reversal below -- silently leaving a
+    root distributor's own personal PV permanently inflated after any
+    cancellation/refund. The original version of this test only asserted
+    "no exception," which is why it didn't catch the bug."""
     distributor = _make_distributor()
     BinaryTree.place_distributor(None, distributor, leg=None)
+    purchase_date = date(2026, 6, 1)
+    record_personal_pv(distributor, 60, today=purchase_date)
+    personal = MonthlyPersonalPv.objects.get(distributor=distributor)
+    assert personal.pv == 60
 
-    # No exception, nothing to reverse.
-    reverse_ancestor_pv(distributor, 60, date(2026, 6, 1))
+    reverse_ancestor_pv(distributor, 60, purchase_date)  # must not raise
+
+    personal.refresh_from_db()
+    assert personal.pv == 0
 
 
 @pytest.mark.django_db

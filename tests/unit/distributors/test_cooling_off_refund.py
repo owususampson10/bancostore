@@ -264,12 +264,18 @@ def test_a_partial_sponsor_balance_debits_only_whats_available():
 
 @pytest.mark.django_db
 def test_root_distributor_with_no_sponsor_has_nothing_to_reverse():
+    """Also proves the CodeRabbit-caught reverse_ancestor_pv fix (PR #35):
+    a root distributor's own personal PV must still be reversed even
+    though they have no ancestors -- the bug this regresses against
+    early-returned before ever reaching that reversal."""
     distributor = _confirmed_pack_b_distributor(sponsor=None)
+    assert MonthlyPersonalPv.objects.get(distributor=distributor).pv == 1000
 
     refund = cancel_membership_and_refund(distributor.pk)  # must not raise
 
     assert refund == Decimal("1800.00")
     assert not Wallet.objects.exclude(distributor=distributor).exists()
+    assert MonthlyPersonalPv.objects.get(distributor=distributor).pv == 0
 
 
 # --- Account state + idempotency ----------------------------------------------
