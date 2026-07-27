@@ -4,8 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–18 are done — Phase 6 (Cart + checkout) and the order-lifecycle/admin-order-management
-work are complete; Task 19 (7-day cooling-off refund, opening Phase 7) is next.** What exists and
+**Tasks 1–19 are done — Phase 7's 7-day cooling-off refund is complete.** What exists and
 is verified working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
@@ -325,6 +324,64 @@ is verified working:
   subprocess without inheriting the `-u` interpreter flag, so unbuffered `print` output needs
   `PYTHONUNBUFFERED=1` (an env var) instead. Shipped via PR #33; full suite green throughout, 945
   passed as of merge.
+- **7-day cooling-off refund (Task 19), opening and closing Phase 7:** built as three vertically-
+  sliced sub-tasks (19a-19c) per `docs/decisions/0007-cooling-off-refund-design.md`, which resolved
+  Section 9's own real gaps against the source doc directly (`source-driven-development`) rather
+  than trusting `tasks/todo.md`'s paraphrase: the 7-day window anchors to
+  `Distributor.starter_pack_confirmed_at` (matching how real cooling-off consumer-protection law
+  attaches the right to the purchase date, not registration), `BinaryTreeEdge` placement is never
+  removed (no removal mechanism exists anywhere in this codebase, and Section 9 never asks for it)
+  — the distributor is soft-deactivated instead, only the sponsor's one-time direct referral bonus
+  is reversed (not any Binary/Matching bonus, mirroring ADR-0006's already-accepted "PvDailyBucket
+  is a fungible pool, can't attribute precisely once mixed into a batch cycle" limitation), a
+  sponsor-wallet shortfall is logged and the refund proceeds regardless, and the refund is credited
+  to the distributor's own wallet (not paid out externally, since unlike a storefront customer a
+  distributor already has a real `Wallet` + withdrawal flow). 19a extracted
+  `apps/orders/services.py::_reverse_ancestor_pv` (Task 18b) into a shared
+  `apps/pv_ledger/services.py::reverse_ancestor_pv(distributor, pv_amount, purchase_date)`, also
+  fixing a real date-drift bug in `consume_paid_starter_pack` (three independent `timezone.now()`
+  calls that could straddle a UTC-midnight boundary) found by a `doubt-driven-development` review
+  before the extraction. 19b built `apps/distributors/cooling_off_services.py::
+  cancel_membership_and_refund` — a `doubt-driven-development` review before implementation caught
+  4 real defects: the sponsor's bonus reversal must use the amount actually credited (looked up
+  from the original `WalletTransaction`, not recomputed from the live `DIRECT_REFERRAL_BONUS_RATE`,
+  matching this codebase's snapshot-at-event-time convention everywhere else money is involved),
+  the sponsor's `Wallet` row needed this codebase's NOWAIT locking convention (not a plain blocking
+  `select_for_update()`), the cancelling distributor's own row and its `BinaryTreeEdge` ancestors
+  needed one combined ascending-pk-sorted lock set (not the distributor's row locked separately and
+  first, which could invert lock order against a concurrent cancellation), and a new
+  `MembershipCancelled` guard was needed in `snapshot_starter_pack_choice` to close a double-credit
+  path reachable via an admin reactivating a cancelled account and re-purchasing a starter pack. A
+  follow-up `security-and-hardening` review caught a 5th: a replayed Paystack webhook for the old
+  `starter_pack_payment_reference` after cancellation was only stopped incidentally (a cleared
+  price field happened to fail the amount check), fixed with an explicit guard in
+  `consume_paid_starter_pack`. 19c built the real distributor-facing UI from two fetched Stitch
+  screens (Cancel Membership Eligible/Ineligible), reusing `payout_settings.html`'s existing
+  Alpine.js confirm-modal pattern rather than the Stitch mockup's native `confirm()`/`alert()`
+  calls, and verified end-to-end in a real browser (not just pytest) — wallet credit, PV reversal,
+  sponsor bonus reversal, and logout all confirmed against the database. All six PV/logic fixes
+  above carry RED→GREEN regression tests, verified by actually reverting each fix and confirming
+  failure before restoring it.
+  **CodeRabbit caught two more real, previously-unnoticed defects across the three PRs** (a real
+  gap in this project's own stacked-PR workflow: PRs targeting a non-default branch get their
+  CodeRabbit auto-review silently skipped entirely until retargeted to `main`, discovered only at
+  merge time): `reverse_ancestor_pv` early-returned for a distributor with no ancestors (a root
+  distributor) before ever reaching the `MonthlyPersonalPv` reversal that runs after the ancestor-
+  leg loop — silently leaving a root distributor's own personal PV permanently inflated after any
+  cancellation/refund, affecting both this task and Task 18b's order-cancellation path, fixed and
+  the weak existing test (which only asserted "no exception") strengthened to actually check the
+  reversal; and a real design gap this task's own ADR hadn't resolved — the refund credited to the
+  distributor's wallet was unclaimable, since the same cancellation call also sets
+  `user.is_active = False`, and Django blocks login entirely for an inactive user. User-confirmed
+  fix (of three options presented): a cooling-off-cancelled distributor can still log in, routed
+  through a new `apps/distributors/views.py::_redirect_if_cooling_off_cancelled` decorator to
+  withdrawal-only views. This needed two changes to `PhoneNumberBackend`, not one —
+  `authenticate()` alone wasn't enough, since `AuthenticationMiddleware` also calls `get_user()`
+  (inherited from `ModelBackend`, which blanket-checks `is_active` too) on every subsequent
+  request, not just at login — caught mid-implementation when a `client.login()`-based test kept
+  redirecting to the login page despite `authenticate()` succeeding. Shipped via PR #35 (19a), #36
+  (19b), #37 (19c), each stacked on the previous and merged into `main` in order 2026-07-27; full
+  suite green throughout, 986 passed, 1 skipped as of merge.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,

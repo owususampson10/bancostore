@@ -3326,19 +3326,55 @@ and admin-facing page in this project.
 task.
 
 **Acceptance criteria:**
-- [ ] Full pytest suite green, including every new cooling-off test from 19a-19c
-- [ ] `black`/`ruff` clean, `manage.py check` clean
-- [ ] CI green against real MySQL
-- [ ] CodeRabbit review complete, actionable findings resolved or explicitly deferred with reasoning
+- [x] Full pytest suite green, including every new cooling-off test from 19a-19c — 986 passed, 1
+  skipped (the pre-existing WeasyPrint/Pango CI-only skip), 0 failures on `main` post-merge
+- [x] `black`/`ruff` clean, `manage.py check` clean
+- [x] CI green against real MySQL (all three PRs)
+- [x] CodeRabbit review complete, actionable findings resolved or explicitly deferred with
+  reasoning — see below
 
 **Verification:**
-- [ ] End-to-end real-browser pass: a seeded distributor within their cooling-off window cancels
-  and gets refunded, verified against the database at each step (wallet balance, PV ledger,
-  account status), not just pytest
+- [x] End-to-end real-browser pass: a seeded distributor within their cooling-off window cancelled
+  and got refunded, verified against the database at each step (wallet balance, PV ledger, account
+  status), not just pytest — done 2026-07-27 (Task 19c's own verification)
 
 **Dependencies:** 19a-19c all merged
 
 **Files likely touched:** none new — this is verification, not implementation
+
+**Shipped 2026-07-27 via PR #35 (19a), #36 (19b), #37 (19c), merged into `main` in that order.**
+Each PR was stacked on the previous (19b on 19a, 19c on 19b) since PRs #36/#37 targeted non-default
+branches, CodeRabbit's auto-review was skipped on them entirely until each was retargeted to `main`
+and re-triggered — a real gap in the stacked-PR workflow this task's own close-out surfaced,
+recorded so it isn't rediscovered fresh next time a stack is used. CodeRabbit caught two real,
+previously-unnoticed defects across the three PRs, both fixed before merge:
+- **PR #35:** `reverse_ancestor_pv` (Task 19a) early-returned for a distributor with no
+  `BinaryTreeEdge` ancestors (a root distributor, or one not yet placed under a sponsor) before
+  ever reaching the `MonthlyPersonalPv` reversal that runs after the ancestor-leg loop — silently
+  leaving a root distributor's own personal PV permanently inflated after any cancellation/refund,
+  affecting both Task 18b's order-cancellation path and Task 19b's cooling-off refund. Fixed by
+  scoping the ancestor-only work to `if edges:` instead of an early `return`; the existing
+  root-distributor test only asserted "no exception" and didn't catch this, strengthened to assert
+  the actual reversal.
+- **PR #36 (flagged against the ADR text) / confirmed on the real code by PR #37's CodeRabbit
+  pass:** `cancel_membership_and_refund` credits a real refund to the distributor's own wallet, but
+  also sets `user.is_active = False` as its last step — Django blocks login entirely for
+  `is_active=False`, so the refund was genuinely unclaimable, contradicting ADR-0007 Decision 7's
+  own stated rationale for crediting the wallet in the first place. User-confirmed fix (of three
+  options presented): let a cooling-off-cancelled distributor still log in, restricted to
+  withdrawal-related views only. Needed two changes to
+  `apps/distributors/backends.py::PhoneNumberBackend`, not one — `authenticate()` alone wasn't
+  sufficient, since Django's `AuthenticationMiddleware` also calls `get_user()` on every subsequent
+  request (inherited from `ModelBackend`, which blanket-checks `is_active` too) — caught mid-
+  implementation when a `client.login()`-based test kept redirecting to the login page despite
+  `authenticate()` succeeding. A new shared `_redirect_if_cooling_off_cancelled` decorator (not a
+  repeated inline check) gates the 4 views that make no sense post-cancellation
+  (dashboard/earnings_history/select_starter_pack/start_kyc_verification), verified exhaustive
+  against the app's full 8-view `@login_required` list.
+- A `code-review-and-quality` pass on Task 19c independently caught a third, smaller bug before
+  CodeRabbit ever saw it: `membership_cancelled.html` used a truthy check on `refund_amount`
+  instead of `is not None`, which would have misreported a legitimate GHS 0.00 refund (reachable
+  only via an admin-misconfigured 100% deduction rate) as "already cancelled."
 
 **Estimated scope:** XS (process, not code)
 
