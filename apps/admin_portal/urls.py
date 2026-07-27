@@ -31,4 +31,15 @@ urlpatterns = [
         views.commission_cycle_detail,
         name="commission_cycle_detail",
     ),
+    path("orders/", views.order_management_queue, name="order_management_queue"),
+    path(
+        "orders/<int:pk>/action/",
+        views.order_management_action,
+        name="order_management_action",
+    ),
+    path(
+        "orders/<int:pk>/invoice/",
+        views.order_invoice_pdf,
+        name="order_invoice_pdf",
+    ),
 ]

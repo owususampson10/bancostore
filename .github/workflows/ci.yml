@@ -92,6 +92,15 @@ jobs:
           python-version: "3.13"
           cache: "pip"
 
+      # Task 18e: WeasyPrint (PDF invoices) dlopen()s Pango at import time
+      # -- ubuntu-latest has no system-level Pango by default. Unlike this
+      # project's local dev Mac (macOS 12, an unsupported Homebrew Tier-3
+      # configuration where this same install failed after ~50 minutes
+      # trying to compile the whole dependency chain from source), Ubuntu
+      # ships Pango as an ordinary pre-built apt package -- no compiling.
+      - name: Install WeasyPrint system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 

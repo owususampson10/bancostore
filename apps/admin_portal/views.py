@@ -9,13 +9,17 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 
 from constance import config
 
 from apps.commissions.models import CommissionCycleRun
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
+from apps.orders.models import Order
+from apps.orders.services import advance_order_status, cancel_or_refund_order
 from apps.wallet.models import WalletTransaction
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
@@ -616,3 +620,174 @@ def commission_cycle_detail(request, pk):
             "active_nav": "commissions",
         },
     )
+
+
+def _filtered_orders(request):
+    """Shared filter logic for the order management queue -- mirrors
+    _filtered_distributors's exact shape: search + status filter, plus a
+    stable pk tie-breaker in ordering (Task 15's own pagination-bug
+    precedent -- created_at alone isn't guaranteed unique, especially
+    across orders confirmed in the same batch/second)."""
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
+    date_from = parse_date(request.GET.get("date_from", "").strip())
+    date_to = parse_date(request.GET.get("date_to", "").strip())
+
+    orders = Order.objects.select_related("customer").order_by("-created_at", "-pk")
+    if query:
+        orders = orders.filter(
+            Q(full_name__icontains=query)
+            | Q(phone_number__icontains=query)
+            | Q(payment_reference__icontains=query)
+        )
+    if status:
+        orders = orders.filter(status=status)
+    if date_from:
+        orders = orders.filter(created_at__date__gte=date_from)
+    if date_to:
+        orders = orders.filter(created_at__date__lte=date_to)
+
+    return orders, query, status, date_from, date_to
+
+
+@login_required(login_url="two_factor:login")
+def order_management_queue(request):
+    """Task 18e. Backend for the admin order management page -- Task 18f
+    builds the real Stitch-designed template this renders into; this
+    view owns filtering, pagination, and nothing else. Cancel/refund/
+    status-update actions live in order_management_action below, wired
+    directly to apps.orders.services's own functions -- never
+    reimplementing their transition/reversal logic here."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    orders, query, status, date_from, date_to = _filtered_orders(request)
+
+    paginator = Paginator(orders, 20)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    return render(
+        request,
+        "admin_portal/order_management_queue.html",
+        {
+            "page_obj": page_obj,
+            "query": query,
+            "status": status,
+            "date_from": date_from,
+            "date_to": date_to,
+            "status_choices": Order.Status.choices,
+            "active_nav": "orders",
+        },
+    )
+
+
+def _friendly_service_error(exc: Exception) -> str:
+    """apps.orders.services's own exception messages are prefixed with
+    the raising function's name (e.g. "cancel_or_refund_order: ..."),
+    a useful detail in logs but not admin-facing copy -- security-and-
+    hardening review (2026-07-26): the underlying reason is still fine
+    to show this specific audience (is_admin_portal_staff-gated, trusted
+    staff, not a public endpoint), only the internal-function-name
+    prefix needs stripping. A RuntimeError specifically only ever means
+    an illegal transition here (18a's tripwire) -- a fixed, friendlier
+    message reads better than the raw "Illegal order status transition:
+    ..." text."""
+    if isinstance(exc, RuntimeError):
+        return "That status change isn't allowed from this order's current status."
+    message = str(exc)
+    return message.split(": ", 1)[1] if ": " in message else message
+
+
+@login_required(login_url="two_factor:login")
+def order_management_action(request, pk):
+    """Task 18e. POST-only action endpoint: translates a form payload
+    into the right apps.orders.services call and turns its exceptions
+    into a flash message, exactly matching withdrawal_review_detail's
+    own established shape. `to_status`/`restock` validation and the
+    transition-legality check all live in the service functions
+    themselves (18a/18b/18c) -- this view never duplicates them."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    order = get_object_or_404(Order, pk=pk)
+    action = request.POST.get("action")
+
+    if action == "cancel":
+        try:
+            cancel_or_refund_order(order.pk, Order.Status.CANCELLED)
+            messages.success(request, f"Order {order.payment_reference} cancelled.")
+        except (ValueError, RuntimeError) as exc:
+            messages.error(request, _friendly_service_error(exc))
+    elif action == "refund":
+        restock_raw = request.POST.get("restock")
+        if restock_raw not in ("true", "false"):
+            messages.error(
+                request, "Choose whether the goods were physically returned."
+            )
+        else:
+            try:
+                cancel_or_refund_order(
+                    order.pk,
+                    Order.Status.REFUNDED,
+                    restock=(restock_raw == "true"),
+                )
+                messages.success(request, f"Order {order.payment_reference} refunded.")
+            except (ValueError, RuntimeError) as exc:
+                messages.error(request, _friendly_service_error(exc))
+    elif action == "advance":
+        to_status = request.POST.get("to_status", "")
+        tracking_note = request.POST.get("tracking_note", "")
+        try:
+            advance_order_status(order.pk, to_status, tracking_note=tracking_note)
+            messages.success(
+                request,
+                f"Order {order.payment_reference} moved to "
+                f"{Order.Status(to_status).label}.",
+            )
+        except (ValueError, RuntimeError) as exc:
+            messages.error(request, _friendly_service_error(exc))
+    else:
+        messages.error(request, "Unrecognized action.")
+
+    return redirect("admin_portal:order_management_queue")
+
+
+@login_required(login_url="two_factor:login")
+def order_invoice_pdf(request, pk):
+    """Task 18e (ADR-0006 decision 7). Renders a plain-receipt PDF
+    invoice for one order -- Order ID, customer name, items ordered,
+    delivery method/address, total, payment status. No GRA withholding-
+    tax logic (that's withdrawal-specific, per the ADR).
+
+    WeasyPrint is imported lazily, inside this function, not at module
+    level: its own __init__ eagerly dlopen()s the system Pango library
+    at import time (confirmed directly by running it -- source-driven-
+    development, 2026-07-26), and this project's local dev Mac has no
+    Pango installed -- `brew install weasyprint` was attempted and
+    failed after ~50 minutes (macOS 12 is an unsupported Homebrew
+    Tier-3 configuration; see project_weasyprint_pango_blocked_locally
+    memory). Verified for real in CI instead, where Pango installs
+    cleanly via `apt` (.github/workflows/ci.yml). A module-level import
+    here would break every OTHER view in this file on any machine
+    missing Pango -- a lazy import confines that failure to this one
+    endpoint. API confirmed against WeasyPrint's own docs: `HTML(string=
+    ...).write_pdf()` returns PDF bytes with no arguments.
+    Source: https://doc.courtbouillon.org/weasyprint/stable/first_steps.html"""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    order = get_object_or_404(
+        Order.objects.select_related("customer").prefetch_related("items"), pk=pk
+    )
+    html_string = render_to_string("admin_portal/order_invoice.html", {"order": order})
+
+    from weasyprint import HTML
+
+    pdf_bytes = HTML(string=html_string).write_pdf()
+
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = (
+        f'inline; filename="invoice-{order.payment_reference}.pdf"'
+    )
+    return response

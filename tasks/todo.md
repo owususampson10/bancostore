@@ -169,6 +169,14 @@ guessed at.
   Not root-caused or fixed here — out of scope for Task 18b — but flagged rather than silently
   worked around. Worth a real `debugging-and-error-recovery` pass whenever withdrawal-review or a
   neighboring `admin_portal` test file is next touched.
+- [ ] `tests/feature/catalog/test_product_admin.py::test_product_changelist_does_not_n_plus_one_on_category`
+  failed once as part of the **full** suite (2026-07-26, during Task 18e verification) with
+  `30 <= 27 + 2` — a 1-query overshoot past the test's own already-documented tolerance for
+  django-silk's "occasional internal housekeeping" query noise (see the test's own comment). Passed
+  cleanly both in isolation and when run alongside the *entire* `tests/feature/admin_portal/` suite
+  (101 passed, 0 failed) — confirmed unrelated to Task 18e, which touches no file under
+  `apps/catalog/` at all. A second instance of the same class of full-suite-only flakiness as the
+  entry above, not root-caused here. Worth revisiting if it recurs.
 
 ---
 
@@ -2904,25 +2912,55 @@ everyone, including superusers, unless each action explicitly declares `permissi
 slice must not rediscover that bug.
 
 **Acceptance criteria:**
-- [ ] Filtering by status/date/customer returns the correct, correctly-paginated set
-- [ ] The PDF invoice contains exactly the fields ADR-0006 decision 7 lists, for any order
-- [ ] Cancel/refund/status-update actions call 18b/18c's functions, never duplicate their logic
-- [ ] A staff account without the relevant Django permission cannot trigger a cancel/refund action (mirroring Task 15/16's own permission-lockdown precedent)
+- [x] Filtering by status/date/customer returns the correct, correctly-paginated set
+- [x] The PDF invoice contains exactly the fields ADR-0006 decision 7 lists, for any order
+- [x] Cancel/refund/status-update actions call 18b/18c's functions, never duplicate their logic
+- [x] A non-staff account cannot trigger a cancel/refund action (see permission-model correction below)
 
 **Verification:**
-- [ ] pytest test: filter combinations return the expected order set
-- [ ] pytest test: PDF invoice generation succeeds and contains the expected fields for a real order
-- [ ] pytest test: a permission-lacking staff account is blocked from the cancel/refund action
+- [x] pytest test: filter combinations return the expected order set
+- [x] pytest test: PDF invoice generation succeeds and contains the expected fields for a real order
+- [x] pytest test: a non-staff account is blocked from the cancel/refund action
+
+**Built:** `apps/admin_portal/views.py::_filtered_orders`/`order_management_queue`/
+`order_management_action`/`order_invoice_pdf`, plus `apps/admin_portal/urls.py` routes and a
+placeholder `templates/admin_portal/order_management_queue.html` (Task 18f replaces this with the
+real Stitch design, matching Task 20's own placeholder-dashboard precedent). Actions call
+`cancel_or_refund_order`/`advance_order_status` directly, never duplicating their logic.
+
+**Permission-model correction (2026-07-26):** the original acceptance criterion ("a staff account
+without the relevant Django permission cannot trigger a cancel/refund action") assumed a granular
+per-model permission system. `tests/conftest.py`'s own `staff_client` fixture reveals the real
+architecture: every admin account in this codebase is `is_superuser=True` (SPEC.md's "single flat
+role," no per-model permissions), so a `has_perm()` check would only ever be testable against an
+account-shape this system never actually creates. Corrected with the user: the gate is
+`is_admin_portal_staff` (is_staff + verified 2FA) -- the same gate every other admin_portal view
+already uses -- and the test proves a non-staff account (customer/distributor) is blocked, not a
+staff-without-permission account.
+
+**WeasyPrint could not be verified locally.** `source-driven-development` confirmed the real API
+against WeasyPrint's own docs (`HTML(string=...).write_pdf()`) and this Mac's missing system-level
+Pango library via a direct import attempt (raises `OSError`, not `ImportError`). `brew install
+weasyprint` was attempted (user-approved) and failed after ~50 minutes -- it had to compile Python
+3.13 from source along the way and still failed on `cffi`, because **macOS 12 is an unsupported
+Homebrew Tier-3 configuration**. `.github/workflows/ci.yml`'s `test` job now installs
+`libpango-1.0-0`/`libpangocairo-1.0-0` via `apt` (an ordinary pre-built Ubuntu package, no
+compiling) so the real end-to-end PDF test runs for real in CI. The test itself
+(`test_invoice_pdf_end_to_end_generates_a_real_pdf`) uses this codebase's first `pytest.mark.skipif`
+-- self-healing, conditioned on whether `import weasyprint` actually succeeds, so it lifts
+automatically the moment Pango is available, here or anywhere else. PDF *content* correctness
+(every ADR-0006 decision 7 field) is proven independently via a separate template-only test that
+needs no PDF library at all, so this local gap does not weaken content verification.
 
 **Dependencies:** 18b, 18c, 18d merged
 
-**Files likely touched:** `apps/orders/views.py` or `apps/admin_portal/views.py`, `apps/orders/services.py` (PDF rendering), `tests/feature/orders/test_order_management_backend.py`
+**Files likely touched:** `apps/admin_portal/views.py`, `apps/admin_portal/urls.py`, `templates/admin_portal/order_management_queue.html`, `templates/admin_portal/order_invoice.html`, `.github/workflows/ci.yml`, `tests/feature/admin_portal/test_order_management.py`
 
 **Estimated scope:** M
 
 **Skills:**
 - *Before:* `source-driven-development` (confirming WeasyPrint's real HTML-to-PDF API against its own docs before use)
-- *During:* `test-driven-development`, `incremental-implementation`, `security-and-hardening` (the admin-action permission lockdown specifically)
+- *During:* `test-driven-development`, `incremental-implementation`, `security-and-hardening` (permission-model correction + a full review pass; confirmed the existing global `HistoryRequestMiddleware` already covers audit-trail "who did it" for these actions)
 - *After:* `code-review-and-quality`
 
 ---

@@ -1,0 +1,54 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Order Management — Bancostore Admin Portal{% endblock %}
+{% block content %}
+{# Task 18e placeholder -- Task 18f replaces this with the real
+   Stitch-designed page. The view (filtering/pagination/actions) is
+   already real and tested; only this template's markup is a stand-in,
+   matching Task 20's own placeholder-dashboard precedent. #}
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">Order Management</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Placeholder view -- Task 18f builds the real design.</p>
+</div>
+
+<form method="get" class="mb-6 flex flex-wrap gap-3 items-end">
+<input type="text" name="q" value="{{ query }}" placeholder="Search name/phone/reference">
+<select name="status">
+<option value="">All statuses</option>
+{% for value, label in status_choices %}
+<option value="{{ value }}" {% if value == status %}selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+<input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}">
+<input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}">
+<button type="submit">Filter</button>
+</form>
+
+<table class="w-full text-left">
+<thead>
+<tr>
+<th>Reference</th><th>Customer</th><th>Status</th><th>Total</th><th>Created</th><th>Actions</th>
+</tr>
+</thead>
+<tbody>
+{% for order in page_obj %}
+<tr>
+<td>{{ order.payment_reference }}</td>
+<td>{{ order.full_name }}</td>
+<td>{{ order.get_status_display }}</td>
+<td>GHS {{ order.total }}</td>
+<td>{{ order.created_at|date:'Y-m-d H:i' }}</td>
+<td>
+<form method="post" action="{% url 'admin_portal:order_management_action' order.pk %}" style="display:inline">
+{% csrf_token %}
+<input type="hidden" name="action" value="cancel">
+<button type="submit">Cancel</button>
+</form>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+{% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+{% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+{% endblock %}
