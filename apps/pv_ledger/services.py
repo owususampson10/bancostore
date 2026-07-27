@@ -9,6 +9,7 @@ from django.utils import timezone
 from constance import config
 
 from apps.binary_tree.models import BinaryTreeEdge
+from apps.distributors.models import Distributor
 from bancostore.concurrency import (
     RETRY_BACKOFF_SECONDS,
     select_for_update_nowait_if_supported,
@@ -280,6 +281,152 @@ def record_personal_pv(distributor, pv_amount, today=None) -> None:
         distributor=distributor, period=period
     )
     MonthlyPersonalPv.objects.filter(pk=row.pk).update(pv=F("pv") + pv_amount)
+
+
+def reverse_ancestor_pv(distributor, pv_amount, purchase_date) -> None:
+    """Reverses `pv_amount` (originally credited via `record_purchase_pv`/
+    `record_personal_pv`) across `PvLedger`, `PvDailyBucket`, and
+    `MonthlyPersonalPv` for `distributor`'s ancestors (and, for
+    `MonthlyPersonalPv`, `distributor` themselves).
+
+    Extracted from `apps.orders.services.cancel_or_refund_order` (Task
+    18b) for Task 19's cooling-off refund reversal -- generalized to take
+    a resolved `distributor` and explicit `pv_amount`/`purchase_date`
+    directly rather than an `Order`, so both callers share one
+    implementation instead of two independently-maintained copies.
+    `apps.orders.services._reverse_ancestor_pv` is now a thin wrapper
+    that resolves an Order's purchasing distributor (handling its own
+    null-customer/deleted-distributor edge cases) and delegates here.
+
+    Precondition, same "no self-retry" contract as
+    `apps.wallet.services.debit()`: must be called from inside an
+    already-open `transaction.atomic()` block, itself wrapped in
+    `retry_on_lock_contention` by the caller -- this function does no
+    locking/retry setup of its own. Every existing caller already
+    satisfies this; a new caller must too.
+
+    `purchase_date` MUST be the exact date `record_purchase_pv`'s own
+    `today` argument resolved to at credit time -- never independently
+    recomputed via `timezone.now().date()` at reversal time, which could
+    drift by a day at a UTC-midnight boundary between the two calls and
+    silently miss the `PvDailyBucket` row the credit actually landed in.
+    `record_purchase_pv`/`record_personal_pv`'s own `today` parameter
+    (Task 18b) exists for exactly this reason."""
+    if pv_amount <= 0:
+        raise ValueError(
+            f"reverse_ancestor_pv: pv_amount must be positive, got {pv_amount}"
+        )
+
+    # CodeRabbit finding, PR #35 (real bug, confirmed): this used to be an
+    # early `return` when a distributor has no ancestors (root distributor,
+    # or not yet placed under a sponsor) -- which skipped the
+    # MonthlyPersonalPv reversal below entirely, since that block runs
+    # after the ancestor-leg loop. A root distributor's OWN personal PV
+    # was therefore never reversed on cancellation/refund, leaving it
+    # permanently inflated. Fixed by scoping the ancestor-only work to
+    # `if edges:` so the no-ancestors case still falls through to the
+    # unconditional MonthlyPersonalPv reversal at the end of this function.
+    edges = list(BinaryTreeEdge.objects.filter(descendant=distributor))
+
+    if edges:
+        left_ids = sorted(
+            {e.ancestor_id for e in edges if e.leg == BinaryTreeEdge.Leg.LEFT}
+        )
+        right_ids = sorted(
+            {e.ancestor_id for e in edges if e.leg == BinaryTreeEdge.Leg.RIGHT}
+        )
+        all_ancestor_ids = sorted(set(left_ids) | set(right_ids))
+
+        # Locked one at a time, in sorted-pk order -- mirrors
+        # apps.binary_tree.services.BinaryTree.place_distributor's own
+        # "fixed, PK-ascending order" convention, needed so this reversal
+        # actually serializes against a concurrent Binary Bonus cycle for
+        # any of these ancestors (apps.commissions.services.
+        # process_binary_bonus_for_distributor locks the exact same
+        # Distributor row before its own read-then-write PvDailyBucket
+        # consumption).
+        for pk in all_ancestor_ids:
+            select_for_update_nowait_if_supported(
+                Distributor.objects.filter(pk=pk)
+            ).get()
+
+        for field, leg, ancestor_ids in (
+            ("left_leg_pv", BinaryTreeEdge.Leg.LEFT, left_ids),
+            ("right_leg_pv", BinaryTreeEdge.Leg.RIGHT, right_ids),
+        ):
+            if not ancestor_ids:
+                continue
+
+            # PvLedger: nothing else has ever decremented it (append-only
+            # until this function), so a shortfall here is a real bug (a
+            # double reversal, or a pv_amount/ledger mismatch elsewhere) --
+            # logged at ERROR, unlike the two expected-gap cases below.
+            sufficient_ids = set(
+                PvLedger.objects.filter(
+                    distributor_id__in=ancestor_ids, **{f"{field}__gte": pv_amount}
+                ).values_list("distributor_id", flat=True)
+            )
+            PvLedger.objects.filter(distributor_id__in=sufficient_ids).update(
+                **{field: F(field) - pv_amount}
+            )
+            short_ids = set(ancestor_ids) - sufficient_ids
+            if short_ids:
+                logger.error(
+                    "reverse_ancestor_pv: distributor=%s pv_amount=%s could "
+                    "not fully reverse PvLedger.%s (%s leg) for "
+                    "ancestor(s)=%s -- ledger already below pv_amount. Needs "
+                    "manual investigation.",
+                    distributor.pk,
+                    pv_amount,
+                    field,
+                    leg,
+                    sorted(short_ids),
+                )
+
+            # PvDailyBucket: a shortfall here IS an expected, accepted gap
+            # (ADR-0006/ADR-0007) -- the PV may have already been consumed
+            # by a completed Binary Bonus cycle, or expired past
+            # PV_CARRY_FORWARD_EXPIRY_DAYS. Logged at WARNING, not raised.
+            sufficient_ids = set(
+                PvDailyBucket.objects.filter(
+                    distributor_id__in=ancestor_ids,
+                    leg=leg,
+                    date=purchase_date,
+                    pv__gte=pv_amount,
+                ).values_list("distributor_id", flat=True)
+            )
+            PvDailyBucket.objects.filter(
+                distributor_id__in=sufficient_ids, leg=leg, date=purchase_date
+            ).update(pv=F("pv") - pv_amount)
+            short_ids = set(ancestor_ids) - sufficient_ids
+            if short_ids:
+                logger.warning(
+                    "reverse_ancestor_pv: distributor=%s pv_amount=%s only "
+                    "reversed PvDailyBucket for %s/%s %s-leg ancestor(s) -- "
+                    "%s already short (PV already consumed/expired) -- "
+                    "accepted gap, ADR-0006/ADR-0007.",
+                    distributor.pk,
+                    pv_amount,
+                    len(sufficient_ids),
+                    len(ancestor_ids),
+                    leg,
+                    sorted(short_ids),
+                )
+
+    period = purchase_date.replace(day=1)
+    personal_affected = MonthlyPersonalPv.objects.filter(
+        distributor=distributor, period=period, pv__gte=pv_amount
+    ).update(pv=F("pv") - pv_amount)
+    if not personal_affected:
+        logger.warning(
+            "reverse_ancestor_pv: distributor=%s pv_amount=%s "
+            "MonthlyPersonalPv reversal for period=%s was a no-op "
+            "(already below pv_amount) -- accepted gap, "
+            "ADR-0006/ADR-0007.",
+            distributor.pk,
+            pv_amount,
+            period,
+        )
 
 
 def is_eligible_for_binary_bonus(distributor, now=None) -> bool:

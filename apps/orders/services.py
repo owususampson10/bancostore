@@ -4,7 +4,6 @@ from decimal import Decimal
 
 from django.core.mail import send_mail
 from django.db import transaction
-from django.db.models import F
 from django.utils import timezone
 
 from constance import config
@@ -19,8 +18,11 @@ from apps.catalog.services import (
 from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError, verify_transaction
 from apps.notifications.sms import send_sms
-from apps.pv_ledger.models import MonthlyPersonalPv, PvDailyBucket, PvLedger
-from apps.pv_ledger.services import record_personal_pv, record_purchase_pv
+from apps.pv_ledger.services import (
+    record_personal_pv,
+    record_purchase_pv,
+    reverse_ancestor_pv,
+)
 from bancostore.concurrency import (
     retry_on_lock_contention,
     select_for_update_nowait_if_supported,
@@ -732,11 +734,13 @@ def cancel_or_refund_order(order_id, to_status, tracking_note="", restock=None) 
 
 
 def _reverse_ancestor_pv(locked_order: Order, order_id) -> None:
-    """Reverses `locked_order.pv_earned` across `PvLedger`,
-    `PvDailyBucket`, and `MonthlyPersonalPv` for the purchasing
-    distributor's ancestors (and, for `MonthlyPersonalPv`, the
-    purchasing distributor themselves) -- called from inside
-    `cancel_or_refund_order`'s own lock, before stock reversal."""
+    """Resolves `locked_order`'s purchasing distributor -- handling the
+    Order-specific null-customer/deleted-distributor edge cases, which
+    have no equivalent once a caller already holds a real `Distributor`
+    -- then delegates to `apps.pv_ledger.services.reverse_ancestor_pv`,
+    the shared PV-reversal implementation Task 19's cooling-off refund
+    also uses. See that function's own docstring for the full reversal
+    behavior (Task 18b originally, extracted for reuse in Task 19)."""
     if locked_order.customer_id is None:
         logger.warning(
             "cancel_or_refund_order: order pk=%s has pv_earned=%s but "
@@ -760,111 +764,9 @@ def _reverse_ancestor_pv(locked_order: Order, order_id) -> None:
         )
         return
 
-    edges = list(BinaryTreeEdge.objects.filter(descendant=distributor))
-    if not edges:
-        return
-
-    left_ids = sorted(
-        {e.ancestor_id for e in edges if e.leg == BinaryTreeEdge.Leg.LEFT}
+    reverse_ancestor_pv(
+        distributor, locked_order.pv_earned, locked_order.confirmed_at.date()
     )
-    right_ids = sorted(
-        {e.ancestor_id for e in edges if e.leg == BinaryTreeEdge.Leg.RIGHT}
-    )
-    all_ancestor_ids = sorted(set(left_ids) | set(right_ids))
-
-    # Locked one at a time, in sorted-pk order -- deliberately mirrors
-    # apps.binary_tree.services.BinaryTree.place_distributor's own
-    # "fixed, PK-ascending order" convention (a bulk multi-row NOWAIT
-    # statement's internal lock-acquisition order isn't a fact this
-    # codebase has verified against real InnoDB docs, so this reuses the
-    # pattern it HAS already established and proven instead). Needed so
-    # this reversal actually serializes against a concurrent Binary Bonus
-    # cycle for any of these ancestors -- apps.commissions.services.
-    # process_binary_bonus_for_distributor locks the exact same row
-    # (Distributor, not PvDailyBucket) before its own read-then-write
-    # PvDailyBucket consumption.
-    for pk in all_ancestor_ids:
-        select_for_update_nowait_if_supported(Distributor.objects.filter(pk=pk)).get()
-
-    pv_amount = locked_order.pv_earned
-    purchase_date = locked_order.confirmed_at.date()
-
-    for field, leg, ancestor_ids in (
-        ("left_leg_pv", BinaryTreeEdge.Leg.LEFT, left_ids),
-        ("right_leg_pv", BinaryTreeEdge.Leg.RIGHT, right_ids),
-    ):
-        if not ancestor_ids:
-            continue
-
-        # PvLedger: nothing else has ever decremented it (append-only
-        # until this function), so a shortfall here is a real bug (a
-        # double reversal, or a pv_earned/ledger mismatch elsewhere) --
-        # logged at ERROR, unlike the two expected-gap cases below.
-        sufficient_ids = set(
-            PvLedger.objects.filter(
-                distributor_id__in=ancestor_ids, **{f"{field}__gte": pv_amount}
-            ).values_list("distributor_id", flat=True)
-        )
-        PvLedger.objects.filter(distributor_id__in=sufficient_ids).update(
-            **{field: F(field) - pv_amount}
-        )
-        short_ids = set(ancestor_ids) - sufficient_ids
-        if short_ids:
-            logger.error(
-                "cancel_or_refund_order: order pk=%s could not fully "
-                "reverse PvLedger.%s (%s leg) for ancestor(s)=%s -- "
-                "ledger already below pv_amount=%s. Needs manual "
-                "investigation.",
-                order_id,
-                field,
-                leg,
-                sorted(short_ids),
-                pv_amount,
-            )
-
-        # PvDailyBucket: a shortfall here IS an expected, accepted gap
-        # (ADR-0006) -- the PV may have already been consumed by a
-        # completed Binary Bonus cycle, or expired past
-        # PV_CARRY_FORWARD_EXPIRY_DAYS. Logged at WARNING, not raised.
-        sufficient_ids = set(
-            PvDailyBucket.objects.filter(
-                distributor_id__in=ancestor_ids,
-                leg=leg,
-                date=purchase_date,
-                pv__gte=pv_amount,
-            ).values_list("distributor_id", flat=True)
-        )
-        PvDailyBucket.objects.filter(
-            distributor_id__in=sufficient_ids, leg=leg, date=purchase_date
-        ).update(pv=F("pv") - pv_amount)
-        short_ids = set(ancestor_ids) - sufficient_ids
-        if short_ids:
-            logger.warning(
-                "cancel_or_refund_order: order pk=%s only reversed "
-                "PvDailyBucket for %s/%s %s-leg ancestor(s) -- %s already "
-                "short (PV already consumed/expired) -- accepted gap, "
-                "ADR-0006.",
-                order_id,
-                len(sufficient_ids),
-                len(ancestor_ids),
-                leg,
-                sorted(short_ids),
-            )
-
-    period = purchase_date.replace(day=1)
-    personal_affected = MonthlyPersonalPv.objects.filter(
-        distributor=distributor, period=period, pv__gte=pv_amount
-    ).update(pv=F("pv") - pv_amount)
-    if not personal_affected:
-        logger.warning(
-            "cancel_or_refund_order: order pk=%s MonthlyPersonalPv "
-            "reversal for distributor=%s period=%s was a no-op (already "
-            "below pv_amount=%s) -- accepted gap, ADR-0006.",
-            order_id,
-            distributor.pk,
-            period,
-            pv_amount,
-        )
 
 
 def _send_order_status_notification(order: Order) -> None:
