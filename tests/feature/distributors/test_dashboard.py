@@ -8,6 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 import pytest
+from constance import config
 
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.distributors.models import Distributor
@@ -62,8 +63,13 @@ def test_authenticated_non_distributor_gets_403_not_a_crash(client):
 
 @pytest.mark.django_db
 def test_all_stats_render_correctly_for_a_seeded_distributor(client):
+    # Code review finding: Distributor.rank is set verbatim from
+    # STARTER_PACK_A_RANK/STARTER_PACK_B_RANK (apps/platform_settings/
+    # config.py), whose real seeded values are lowercase "bronze"/
+    # "silver" -- a capitalized fixture here would mask a template bug
+    # that compares against the wrong casing.
     distributor = _make_distributor(
-        ir_id="IR-00001", rank="Silver", full_name="Ama Mensah"
+        ir_id="IR-00001", rank="silver", full_name="Ama Mensah"
     )
 
     # Earnings: only the three bonus types count (Section 6.1: "from all
@@ -125,6 +131,30 @@ def test_all_stats_render_correctly_for_a_seeded_distributor(client):
     assert response.context["team_size"] == 2
     assert "IR-00001" in body
     assert "Silver" in body
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "real_rank,expected_display",
+    [("bronze", "Bronze"), ("silver", "Silver")],
+)
+def test_rank_badge_matches_the_real_lowercase_stored_value(
+    client, real_rank, expected_display
+):
+    """Regression guard: the badge previously compared against
+    capitalized "Silver"/"Bronze" while every real Distributor.rank
+    value (set from STARTER_PACK_A_RANK/STARTER_PACK_B_RANK) is
+    lowercase -- every real distributor would silently show as
+    "Unranked". Proves both real values render the correct title-cased
+    badge text, and neither falls through to "Unranked"."""
+    distributor = _make_distributor(rank=real_rank)
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:dashboard"))
+
+    body = response.content.decode()
+    assert expected_display in body
+    assert "UNRANKED" not in body.upper()
 
 
 @pytest.mark.django_db
@@ -283,3 +313,62 @@ def test_no_referral_link_for_a_distributor_without_an_ir_id_yet(client):
 
     assert response.context["referral_url"] is None
     assert "https://wa.me/" not in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_personal_pv_at_or_above_the_threshold_is_marked_eligible(client):
+    """Task 20c: the Monthly Personal PV card must reflect the real,
+    admin-editable MIN_MONTHLY_PERSONAL_PV threshold (constance), not a
+    hardcoded 100 -- and must be dynamic, not always show the mockup's
+    happy-path "eligible" state regardless of the real number.
+
+    References config.MIN_MONTHLY_PERSONAL_PV directly rather than a
+    hardcoded 100, matching the established convention elsewhere in this
+    codebase (tests/unit/pv_ledger/test_personal_pv.py,
+    tests/unit/commissions/test_binary_bonus_task.py) -- stays correct
+    if the seeded default ever changes."""
+    distributor = _make_distributor()
+    MonthlyPersonalPv.objects.create(
+        distributor=distributor,
+        period=timezone.now().date().replace(day=1),
+        pv=config.MIN_MONTHLY_PERSONAL_PV,
+    )
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:dashboard"))
+
+    assert response.context["is_pv_eligible"] is True
+    assert response.context["personal_pv_shortfall"] == 0
+
+
+@pytest.mark.django_db
+def test_personal_pv_below_the_threshold_is_marked_not_yet_eligible(client):
+    distributor = _make_distributor()
+    shortfall = 65
+    MonthlyPersonalPv.objects.create(
+        distributor=distributor,
+        period=timezone.now().date().replace(day=1),
+        pv=config.MIN_MONTHLY_PERSONAL_PV - shortfall,
+    )
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:dashboard"))
+
+    assert response.context["is_pv_eligible"] is False
+    assert response.context["personal_pv_shortfall"] == shortfall
+
+
+@pytest.mark.django_db
+def test_days_until_week_reset_is_computed_from_the_real_week_boundary(client):
+    """The mockup's "Resetting in 3 days" line must be real, derived from
+    the same Monday-00:00 boundary the earnings split already uses, not a
+    hardcoded/fabricated number."""
+    distributor = _make_distributor()
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:dashboard"))
+
+    now = timezone.now()
+    expected = 7 - now.weekday()
+    assert response.context["days_until_week_reset"] == expected
+    assert 1 <= response.context["days_until_week_reset"] <= 7
