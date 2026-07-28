@@ -156,7 +156,7 @@ distributor as "Unranked". |title only affects the display text.
 <div class="bg-white border border-outline-variant rounded-xl overflow-hidden flex items-stretch mb-6">
 <div class="bg-primary w-2 shrink-0"></div>
 <div class="p-6 flex-1">
-<div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+<div class="flex flex-col lg:flex-row lg:flex-wrap lg:items-center justify-between gap-6">
 <div class="min-w-0">
 <h4 class="font-bold text-on-surface text-lg">Grow Your Network</h4>
 <p class="text-secondary text-sm mt-1">Share your unique referral link to earn commissions on every sale made by your team.</p>
@@ -170,7 +170,7 @@ distributor as "Unranked". |title only affects the display text.
 {% endif %}
 </div>
 {% if referral_url %}
-<div class="flex flex-row flex-wrap sm:flex-nowrap gap-3 flex-shrink-0" x-data="{ copied: false }">
+<div class="flex flex-row flex-wrap gap-3" x-data="{ copied: false }">
 <button type="button" class="px-6 py-3 bg-primary text-on-primary rounded-lg font-button flex items-center justify-center gap-2 hover:opacity-90 transition-all active:scale-95 whitespace-nowrap" x-on:click="navigator.clipboard.writeText(JSON.parse(document.getElementById('dashboard-referral-url').textContent)); copied = true; setTimeout(() => copied = false, 2000)">
 <span class="material-symbols-outlined !text-lg" aria-hidden="true" x-text="copied ? 'check' : 'content_copy'">content_copy</span>
 <span x-text="copied ? 'Copied!' : 'Copy Link'">Copy Link</span>
