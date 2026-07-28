@@ -1,23 +1,100 @@
 {% extends "distributors/base_dashboard.html" %}
+{% load humanize %}
 {% block title %}Bancostore | Dashboard{% endblock %}
 {% block content %}
-<div class="w-full max-w-md mx-auto bg-white rounded-xl auth-card p-stack-xl text-center">
-<div class="mb-stack-lg flex justify-center">
-<div class="w-20 h-20 bg-primary-container/10 rounded-full flex items-center justify-center">
-<span class="material-symbols-outlined text-[48px] text-primary" style="font-variation-settings: 'FILL' 1;">
-check_circle
-</span>
+
+{% comment %}
+Task 20a: backend-correctness interim template -- renders every real
+stat from Section 6.1 against real data, but not yet the Stitch-designed
+layout (that's Task 20c, per this project's own "never ship a placeholder
+template" convention -- this is a real, correct stopgap, not a stub).
+Referral link/copy buttons and live wallet updates are 20b/20d.
+{% endcomment %}
+
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Wallet Balance</p>
+<p class="font-headline-lg text-headline-lg text-on-surface">GHS {{ wallet_balance|floatformat:2|intcomma }}</p>
+</div>
+
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Total Earnings</p>
+<p class="font-headline-lg text-headline-lg text-on-surface">GHS {{ total_earnings|floatformat:2|intcomma }}</p>
+</div>
+
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">This Week's Earnings</p>
+<p class="font-headline-lg text-headline-lg text-on-surface">GHS {{ this_week_earnings|floatformat:2|intcomma }}</p>
+</div>
+
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Team Size</p>
+<p class="font-headline-lg text-headline-lg text-on-surface">{{ team_size }}</p>
+</div>
+
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Left Leg PV</p>
+<p class="font-headline-lg text-headline-lg text-on-surface">{{ left_leg_pv }}</p>
+</div>
+
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Right Leg PV</p>
+<p class="font-headline-lg text-headline-lg text-on-surface">{{ right_leg_pv }}</p>
+</div>
+
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Monthly Personal PV</p>
+<p class="font-headline-lg text-headline-lg text-on-surface">{{ monthly_personal_pv }}</p>
+</div>
+
+{# security-and-hardening (code review finding): ir_id/referral_url are #}
+{# read via JSON.parse from json_script blocks below, never interpolated #}
+{# directly into an x-on JS string -- ir_id is built from the admin- #}
+{# editable, unvalidated IR_ID_PREFIX constance setting #}
+{# (apps/distributors/services.py), so a raw interpolation here would be #}
+{# the same JS-string-breakout XSS payout_settings.html/checkout.html #}
+{# already found and fixed twice. HTML-attribute escaping doesn't protect #}
+{# a value Alpine then evaluates as JS. #}
+{{ ir_id|default:""|json_script:"dashboard-ir-id" }}
+{{ referral_url|default:""|json_script:"dashboard-referral-url" }}
+
+<div class="bg-white border border-outline-variant rounded-xl p-6" x-data="{ copied: false, irId: JSON.parse(document.getElementById('dashboard-ir-id').textContent) }">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">IR ID Number</p>
+{% if ir_id %}
+<div class="flex items-center justify-between gap-2">
+<p class="font-headline-lg text-headline-lg text-on-surface">{{ ir_id }}</p>
+<button type="button" class="text-xs font-semibold text-primary hover:underline" x-on:click="navigator.clipboard.writeText(irId); copied = true; setTimeout(() => copied = false, 2000)" x-text="copied ? 'Copied!' : 'Copy'">Copy</button>
+</div>
+{% else %}
+<p class="font-headline-lg text-headline-lg text-on-surface">Not assigned yet</p>
+{% endif %}
+</div>
+
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Rank</p>
+<p class="font-headline-lg text-headline-lg text-on-surface">{{ rank|default:"Unranked" }}</p>
+</div>
+
+<div class="bg-white border border-outline-variant rounded-xl p-6 sm:col-span-2 lg:col-span-3" x-data="{ copied: false, referralUrl: JSON.parse(document.getElementById('dashboard-referral-url').textContent) }">
+<p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Referral Link</p>
+{% if referral_url %}
+<div class="flex flex-col sm:flex-row sm:items-center gap-3">
+<p class="font-body-sm text-body-sm text-on-surface break-all flex-grow">{{ referral_url }}</p>
+<div class="flex items-center gap-3 flex-shrink-0">
+<button type="button" class="text-xs font-semibold text-primary hover:underline" x-on:click="navigator.clipboard.writeText(referralUrl); copied = true; setTimeout(() => copied = false, 2000)" x-text="copied ? 'Copied!' : 'Copy Link'">Copy Link</button>
+<a class="text-xs font-semibold text-primary hover:underline" target="_blank" rel="noopener" href="https://wa.me/?text={{ referral_message|urlencode }}">Share on WhatsApp</a>
 </div>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-sm">
-You're logged in
-</h1>
-<p class="font-body-md text-body-md text-gray-muted mb-stack-xl">
-Welcome, {{ request.user.distributor.phone_number }}. Your earnings history is
-available now — the full dashboard overview (team, binary tree) is coming in a
-later build.
-</p>
-<a class="inline-block w-full py-4 px-8 bg-primary hover:opacity-90 text-white font-label-lg text-label-lg rounded-lg transition-all active:scale-95 shadow-sm" href="{% url 'distributors:earnings_history' %}">
+{% else %}
+<p class="font-body-md text-body-md text-gray-muted">Your recruitment link will be available once your KYC is approved and you have an IR ID.</p>
+{% endif %}
+</div>
+
+</div>
+
+<div class="mt-6">
+<a class="inline-block py-4 px-8 bg-primary hover:opacity-90 text-white font-label-lg text-label-lg rounded-lg transition-all active:scale-95 shadow-sm" href="{% url 'distributors:earnings_history' %}">
 View Earnings History
 </a>
 </div>

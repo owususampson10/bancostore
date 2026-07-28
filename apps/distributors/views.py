@@ -24,6 +24,7 @@ from constance import config
 from django_ratelimit.decorators import ratelimit
 
 from apps.accounts.permissions import is_distributor
+from apps.binary_tree.models import BinaryTreeEdge
 from apps.distributors.cooling_off_services import (
     CoolingOffPeriodExpired,
     NoRefundableStarterPackPurchase,
@@ -32,6 +33,7 @@ from apps.distributors.cooling_off_services import (
 )
 from apps.notifications.otp import generate_otp, verify_otp
 from apps.orders.services import confirm_order_payment
+from apps.pv_ledger.models import MonthlyPersonalPv
 from apps.wallet.models import WalletTransaction
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
@@ -632,13 +634,130 @@ def didit_webhook(request):
 @login_required(login_url="distributors:login")
 @_redirect_if_cooling_off_cancelled
 def dashboard(request):
-    """Placeholder landing page after a successful login/registration — the
-    real dashboard is Task 20. Exists so login has somewhere honest to send
-    a distributor, instead of back to the login page itself (which looked
-    exactly like the login had silently failed). Extends the same sidebar
-    shell as earnings_history (Task 15d) so navigating between them doesn't
-    drop the sidebar."""
-    return render(request, "distributors/dashboard.html", {"active_nav": "dashboard"})
+    """Task 20a: the real dashboard core stats (Section 6.1 of the primary
+    source doc), computed against real, already-aggregated data sources --
+    never a tree walk (CLAUDE.md's standing Scale Architecture warning).
+
+    Same three-account-types gap earnings_history already guards against
+    (Task 15d/security review 2026-07-22): @login_required alone doesn't
+    distinguish a customer account from a distributor, so an unguarded
+    request.user.distributor would raise an unhandled 500 for a logged-in
+    customer instead of a clean 403.
+
+    "Earnings" (total and this-week) is the three bonus-type
+    WalletTransactions only (direct_referral_bonus/binary_bonus/
+    matching_bonus) -- Section 6.1 says This Week's Earnings is
+    "from all bonus types", and Total Earnings uses the same metric
+    accumulated since joining for consistency. This mirrors
+    apps/admin_portal/views.py's own existing platform-wide earnings
+    aggregate (Task 23) exactly, including its single-conditional-
+    aggregate-query shape rather than one query per bonus type -- that
+    view already went through its own code-review pass establishing this
+    as the right pattern.
+
+    "This week" is the current ISO calendar week (Monday 00:00), not a
+    rolling window like Matching Bonus's own MATCHING_BONUS_INTERVAL_DAYS
+    -- confirmed against Section 6.1's own wording ("in the current
+    week"), not assumed.
+
+    Wallet balance / left-right leg PV are read via a single `.values()`
+    projection across the (possibly-missing) Wallet/PvLedger OneToOne
+    rows, not attribute access (`distributor.wallet`/`distributor.
+    pv_ledger`) -- both are created lazily on first credit, so a
+    brand-new distributor legitimately has neither yet, and naive
+    attribute access would raise DoesNotExist instead of a safe 0. This
+    is the exact same failure mode apps/binary_tree/services.py::
+    get_ancestor_pv_aggregates already documents and avoids the same way.
+
+    Team size counts the entire downline, both legs combined (Section
+    6.1's own wording), via BinaryTreeEdge's closure table -- O(number of
+    descendants) through the existing (ancestor, leg) index, not a
+    recursive walk."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+
+    distributor = request.user.distributor
+
+    row = (
+        Distributor.objects.filter(pk=distributor.pk)
+        .values("wallet__balance", "pv_ledger__left_leg_pv", "pv_ledger__right_leg_pv")
+        .first()
+    )
+    wallet_balance = row["wallet__balance"] or Decimal("0")
+    left_leg_pv = row["pv_ledger__left_leg_pv"] or 0
+    right_leg_pv = row["pv_ledger__right_leg_pv"] or 0
+
+    earnings_filter = Q(
+        transaction_type__in=[
+            WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+            WalletTransaction.TransactionType.BINARY_BONUS,
+            WalletTransaction.TransactionType.MATCHING_BONUS,
+        ]
+    )
+    # Code review: computed straight off timezone.now() (UTC), not
+    # timezone.localtime() -- correct today only because TIME_ZONE is
+    # "UTC" (bancostore/settings.py) and Ghana has no offset from UTC.
+    # Would need timezone.localtime(now) first if TIME_ZONE is ever
+    # changed to something with a real offset.
+    now = timezone.now()
+    week_start = now - timedelta(days=now.weekday())
+    week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    earnings = WalletTransaction.objects.filter(
+        wallet__distributor=distributor
+    ).aggregate(
+        total_earnings=Sum("amount", filter=earnings_filter),
+        this_week_earnings=Sum(
+            "amount", filter=earnings_filter & Q(created_at__gte=week_start)
+        ),
+    )
+    total_earnings = earnings["total_earnings"] or Decimal("0")
+    this_week_earnings = earnings["this_week_earnings"] or Decimal("0")
+
+    monthly_personal_pv = (
+        MonthlyPersonalPv.objects.filter(
+            distributor=distributor, period=now.date().replace(day=1)
+        )
+        .values_list("pv", flat=True)
+        .first()
+        or 0
+    )
+
+    team_size = BinaryTreeEdge.objects.filter(ancestor=distributor).count()
+
+    # Task 20b: Section 6.1's "personal recruitment link" -- distributors:
+    # register's GET handler already reads ?ref=<IR ID> and prefills
+    # sponsor_ir_id (pre-existing, found untested while building this
+    # slice). None until ir_id exists (KYC not yet approved) -- nothing
+    # to share yet, so the template must not render a broken link.
+    referral_url = None
+    referral_message = None
+    if distributor.ir_id:
+        referral_url = (
+            request.build_absolute_uri(reverse("distributors:register"))
+            + f"?ref={distributor.ir_id}"
+        )
+        referral_message = (
+            f"Join Bancostore as a distributor using my referral link: {referral_url}"
+        )
+
+    return render(
+        request,
+        "distributors/dashboard.html",
+        {
+            "active_nav": "dashboard",
+            "wallet_balance": wallet_balance,
+            "total_earnings": total_earnings,
+            "this_week_earnings": this_week_earnings,
+            "left_leg_pv": left_leg_pv,
+            "right_leg_pv": right_leg_pv,
+            "monthly_personal_pv": monthly_personal_pv,
+            "team_size": team_size,
+            "ir_id": distributor.ir_id,
+            "rank": distributor.rank,
+            "referral_url": referral_url,
+            "referral_message": referral_message,
+        },
+    )
 
 
 @login_required(login_url="distributors:login")

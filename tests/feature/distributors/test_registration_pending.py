@@ -148,3 +148,30 @@ def test_registration_is_rate_limited_per_ip(client):
         )
 
     assert any(r.status_code == 429 for r in responses)
+
+
+@pytest.mark.django_db
+def test_an_unknown_ref_value_does_not_crash_the_registration_page(client):
+    """An invalid/unknown ?ref= value must not 500 -- it prefills the text
+    field with the literal (auto-escaped) value, exactly like a distributor
+    who typed a wrong IR ID by hand; clean_sponsor_ir_id's own
+    ValidationError only fires on submit, not on this GET render."""
+    response = client.get(reverse("distributors:register"), {"ref": "not-a-real-ir-id"})
+
+    assert response.status_code == 200
+    assert 'value="not-a-real-ir-id"' in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_no_ref_query_param_leaves_the_sponsor_field_blank(client):
+    response = client.get(reverse("distributors:register"))
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    start = content.find("<input", content.find('name="sponsor_ir_id"') - 100)
+    end = content.find(">", start)
+    sponsor_field_tag = content[start : end + 1]
+    # Django's Input.format_value() treats an explicitly-empty initial
+    # value the same as no value at all -- no `value=` attribute renders,
+    # distinguishing "no referral link used" from a broken/empty one.
+    assert "value=" not in sponsor_field_tag
