@@ -1,3 +1,4 @@
+from collections import deque
 from typing import NamedTuple
 
 from django.db import transaction
@@ -228,7 +229,6 @@ def get_downline_tree(distributor):
     descendant_rows = list(
         BinaryTreeEdge.objects.filter(ancestor=distributor).values(
             "descendant_id",
-            "leg",
             "descendant__full_name",
             "descendant__ir_id",
             "descendant__rank",
@@ -270,21 +270,36 @@ def get_downline_tree(distributor):
     for edge in direct_edges:
         children_by_parent.setdefault(edge["ancestor_id"], []).append(edge)
 
-    def _build(node_id, leg):
+    # Iterative, not recursive (CodeRabbit finding on PR #44): a pathologically
+    # deep single-line downline (every distributor sponsoring exactly one
+    # next distributor, never spilling over) could in principle exceed
+    # Python's default recursion limit. A BFS visit order guarantees every
+    # node appears before its own children (they're exactly one level
+    # deeper), so building DownlineNode tuples in *reverse* visit order
+    # guarantees each node's children are already built by the time it's
+    # its own turn -- without ever recursing.
+    visit_order = []
+    queue = deque([(distributor.pk, "")])
+    while queue:
+        node_id, leg = queue.popleft()
+        visit_order.append((node_id, leg))
+        for edge in sorted(children_by_parent.get(node_id, []), key=lambda e: e["leg"]):
+            queue.append((edge["descendant_id"], edge["leg"]))
+
+    built: dict = {}
+    for node_id, leg in reversed(visit_order):
         data = node_data[node_id]
         child_edges = sorted(
             children_by_parent.get(node_id, []), key=lambda e: e["leg"]
         )
-        return DownlineNode(
+        built[node_id] = DownlineNode(
             distributor_id=node_id,
             full_name=data["full_name"],
             ir_id=data["ir_id"],
             rank=data["rank"],
             pv=data["pv"],
             leg=leg,
-            children=[
-                _build(edge["descendant_id"], edge["leg"]) for edge in child_edges
-            ],
+            children=[built[edge["descendant_id"]] for edge in child_edges],
         )
 
-    return _build(distributor.pk, leg="")
+    return built[distributor.pk]

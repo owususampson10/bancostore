@@ -872,7 +872,17 @@ def binary_tree_view(request):
     tree = get_downline_tree(distributor)
 
     def _count_subtree(node):
-        return 1 + sum(_count_subtree(child) for child in node.children)
+        """Iterative, not recursive (CodeRabbit finding on PR #44) -- same
+        pathologically-deep-single-chain concern as get_downline_tree's own
+        _build, avoided here with an explicit stack instead of Python
+        call-stack recursion."""
+        total = 0
+        stack = [node]
+        while stack:
+            current = stack.pop()
+            total += 1
+            stack.extend(current.children)
+        return total
 
     left_root = next(
         (c for c in tree.children if c.leg == BinaryTreeEdge.Leg.LEFT), None
