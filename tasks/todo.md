@@ -3719,23 +3719,155 @@ task's Channels-consumer precedent for its own notification bell).
 
 ### Task 21: Binary tree view, earnings history, carry-forward tracker, notifications
 
-**Description:** Visual binary tree diagram (name, IR ID, rank, PV per node), earnings history
-list (Task 15 data), carry-forward PV tracker with expiry date, and a live notification bell
-(new downline join, bonus credited, withdrawal approved, KYC status change, PV nearing expiry).
+**Re-scoped 2026-07-28 via `source-driven-development` + `planning-and-task-breakdown`, before this
+task's own acceptance criteria were incomplete** (only covered the tree view and notification
+bell — earnings history and the carry-forward tracker had zero acceptance criteria or tests
+listed, despite being in the description). Read Section 6.2/6.3/6.5/6.6 of the primary source doc
+directly rather than trusting this entry's own prior paraphrase, and checked the real codebase
+before slicing:
+- `Distributor.full_name` already exists for the tree view's "name" field.
+- `PvDailyBucket` (`distributor`, `leg`, `date`, `pv`) is the real data source for the
+  carry-forward tracker, with expiry via the already-seeded `PV_CARRY_FORWARD_EXPIRY_DAYS`/
+  `PV_EXPIRY_WARNING_DAYS` constance settings — no new backend concept needed, just a new read
+  path over data Task 13 already produces.
+- Section 6.3 (Earnings History) is likely **already fully satisfied** by Task 15's dedicated
+  `earnings_history` page plus Task 20c's dashboard link to it — 21c below is a verification pass,
+  not a rebuild.
+- `apps/notifications/models.py` currently has only `OTPCode` — the notification bell needs a
+  genuinely new `Notification` model, not a reuse of anything existing.
+- Section 6.6's own notification list does **not** include the matching bonus — only binary bonus
+  and referral bonus are named. Wiring a matching-bonus notification would be scope not asked for.
+
+Broken into four sub-tasks (21a-21d), following the same pattern as Task 16a-h/Task 20a-d.
+
+#### Task 21a: Binary tree visual view
+
+**Description:** A new view rendering the distributor's own downline as a visual tree (name, IR
+ID, rank, PV per node), querying `BinaryTreeEdge.objects.filter(ancestor=request.user.distributor)
+.select_related("descendant")` — the same direction Task 20a's "Team size" stat already uses, just
+reconstructed into a hierarchy instead of a flat count. O(number of descendants) via the existing
+index, never a recursive walk (this project's standing Scale Architecture rule).
 
 **Acceptance criteria:**
-- [ ] Tree view renders the distributor's downline correctly using Task 9a's closure table
-- [ ] Notification bell updates live via Django Channels for each event type listed in `SPEC.md` 6.6
+- [ ] Tree view renders every descendant with name, IR ID, rank, and PV, correctly split by leg
+- [ ] A distributor with no downline yet sees an honest empty state, not a broken/blank page
+- [ ] A distributor can never see another distributor's tree, even by manipulating any parameter
+      (there should be none to manipulate — scoped unconditionally to `request.user.distributor`,
+      same IDOR-safe-by-construction pattern as every other distributor-scoped view)
 
 **Verification:**
-- [ ] pytest test: tree view shows correct nodes for a seeded downline
-- [ ] pytest test: each notification type is dispatched on its triggering event
+- [ ] pytest test: a seeded multi-level downline renders the correct nodes and leg placement
+- [ ] pytest test: empty-downline state renders cleanly
+- [ ] pytest test: query count doesn't grow per-node (one query, not N+1 per descendant)
+- [ ] Live browser check against a real seeded downline
 
-**Dependencies:** Task 9a, Task 20
+**Dependencies:** Task 9a/9c (closure table), Task 20
 
-**Files likely touched:** `apps/distributors/views.py` (tree view), `apps/notifications/models.py`, `tests/feature/distributors/test_notifications.py`
+**Files likely touched:** `apps/distributors/views.py`, `templates/distributors/binary_tree.html`, `tests/feature/distributors/test_binary_tree_view.py`
 
 **Estimated scope:** M
+
+---
+
+#### Task 21b: Carry-forward PV tracker
+
+**Description:** Reads `PvDailyBucket` for the distributor's current non-expired buckets, sums
+remaining PV, and surfaces the earliest expiry date (oldest bucket's `date` +
+`PV_CARRY_FORWARD_EXPIRY_DAYS`) so the distributor can act before losing it — using the existing
+`PV_EXPIRY_WARNING_DAYS` setting to flag when a batch is close to expiring.
+
+**Acceptance criteria:**
+- [ ] Shows total carried-forward PV and the nearest expiry date, computed from real `PvDailyBucket`
+      rows, not a static placeholder
+- [ ] Already-expired buckets are excluded from the total
+- [ ] A distributor with no carried-forward PV sees an honest zero-state
+
+**Verification:**
+- [ ] pytest test: total and nearest-expiry-date match a seeded set of buckets at different ages
+- [ ] pytest test: expired buckets are correctly excluded
+- [ ] Live browser check
+
+**Dependencies:** Task 13 (PvDailyBucket), Task 20
+
+**Files likely touched:** `apps/distributors/views.py`, `templates/distributors/dashboard.html` or a new template, `tests/feature/distributors/test_carry_forward_tracker.py`
+
+**Estimated scope:** S-M
+
+---
+
+#### Task 21c: Confirm Earnings History satisfies Section 6.3 (verification only)
+
+**Description:** Section 6.3 asks for date/time, bonus type, and amount credited per entry —
+Task 15's `earnings_history` page plus Task 20c's dashboard link were very likely already
+sufficient. Verify directly against the source doc's three bullet points rather than assuming;
+scope a small fix only if a real gap is found (e.g., bonus *type* not distinguishable in the
+current UI).
+
+**Acceptance criteria:**
+- [ ] Every one of Section 6.3's three bullet points is confirmed present in the existing page,
+      or a specific, named gap is fixed
+
+**Verification:**
+- [ ] Live browser check against a seeded distributor with mixed bonus-type earnings
+
+**Dependencies:** Task 15, Task 20c
+
+**Estimated scope:** XS (verification) — only grows if a real gap turns up
+
+---
+
+#### Task 21d: Live notification bell
+
+**Description:** The second real Channels consumer in this codebase (first was Task 20d's wallet
+balance, which set the auth/group-scoping precedent this one must follow exactly). A new
+`Notification` model (`apps/notifications/models.py`) plus a consumer wired into
+`bancostore/asgi.py`'s existing websocket router, notifying on exactly the events Section 6.6
+names — no more, no less:
+- Someone new joined under them (on `BinaryTree.place_distributor` success)
+- A binary bonus was calculated and credited
+- A referral bonus was paid instantly
+- Their withdrawal was approved and sent
+- Their KYC was approved or rejected
+- A PV batch is approaching expiry (via the existing `PV_EXPIRY_WARNING_DAYS` setting — likely a
+  scheduled check, same Celery Beat pattern as the Binary Bonus batch driver)
+
+**`doubt-driven-development` runs before any consumer code is written**, same as Task 20d — the
+same class of risk (a distributor must never receive another distributor's notifications) plus a
+new one specific to this task: 6 different trigger points across 5+ existing service functions
+means 6 separate chances to get the group-scoping or event-payload shape wrong. Likely needs
+further sub-slicing once the design is reviewed (e.g. 21d-i model + consumer, 21d-ii the 5
+immediate-event triggers, 21d-iii the PV-expiry scheduled check) rather than building all of it in
+one sitting — decide after the doubt-driven-development pass, not before.
+
+**Acceptance criteria:**
+- [ ] A notification appears live (no page refresh) for each of the 6 event types above, and only
+      to the distributor it belongs to
+- [ ] A distributor never receives another distributor's notifications, even by a guessed ID
+- [ ] Notifications persist (a `Notification` row exists) so they're visible on next login, not
+      only while connected
+
+**Verification:**
+- [ ] pytest tests using `WebsocketCommunicator`, mirroring Task 20d's pattern exactly: auth
+      rejection, cross-distributor isolation
+- [ ] One pytest test per trigger point, proving a `Notification` row is created and pushed on the
+      real event (not simulated)
+- [ ] Live browser check: trigger at least 2 of the 6 events for real, confirm the bell updates live
+
+**Dependencies:** Task 20d (Channels/auth precedent), Task 9 (placement), Task 13/14 (bonus
+credits), Task 16 (withdrawal approval), Task 11 (KYC decision)
+
+**Files likely touched:** `apps/notifications/models.py`, `apps/distributors/consumers.py`,
+`apps/distributors/signals.py`, `bancostore/asgi.py`, `templates/distributors/base_dashboard.html`
+(bell UI — currently a disabled placeholder per its own "coming soon" convention),
+`tests/feature/distributors/test_notifications.py`
+
+**Estimated scope:** L — will very likely need further sub-slicing once
+`doubt-driven-development` has run
+
+---
+
+**Checkpoint H:** dashboard, tree view, and notification bell all update live (no page refresh)
+when a triggering event happens in another session.
 
 ---
 

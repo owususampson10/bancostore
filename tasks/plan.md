@@ -209,7 +209,13 @@ UI.
   balance with no page refresh. Also found and fixed, via that same real-browser check, an
   unrelated pre-existing gap — `daphne` doesn't auto-serve static files in DEBUG mode the way
   `runserver` does — documented in `CLAUDE.md`.
-- [ ] Task 21: Binary tree visual view, earnings history, carry-forward tracker, notification bell
+- [ ] Task 21: Binary tree visual view, earnings history, carry-forward tracker, notification bell.
+  Re-scoped 2026-07-28 via `source-driven-development` + `planning-and-task-breakdown` — the
+  existing entry's acceptance criteria were incomplete (earnings history and the carry-forward
+  tracker had none at all). Sliced into 21a (tree view), 21b (carry-forward tracker), 21c (confirm
+  earnings history is already satisfied by Task 15/20c — verification only), 21d (notification
+  bell — the biggest piece, a second Channels consumer needing its own `doubt-driven-development`
+  pass, same as Task 20d). See `tasks/todo.md` for the full breakdown.
 
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
 another session — proves Django Channels real-time wiring works.
