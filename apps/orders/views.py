@@ -282,7 +282,15 @@ def order_history(request):
     )
     paginator = Paginator(orders, 20)
     page_obj = paginator.get_page(request.GET.get("page"))
-    return render(request, "orders/order_history.html", {"page_obj": page_obj})
+    # Elided range (CodeRabbit): page_obj.paginator.page_range alone renders
+    # every page number with no truncation -- fine at today's order volumes,
+    # but unbounded for a customer with dozens of pages of history.
+    page_range = paginator.get_elided_page_range(page_obj.number)
+    return render(
+        request,
+        "orders/order_history.html",
+        {"page_obj": page_obj, "page_range": page_range},
+    )
 
 
 @login_required(login_url="account_login")

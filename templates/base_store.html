@@ -41,7 +41,7 @@
 <a href="#" title="Coming soon" class="text-on-surface-variant hover:text-primary text-xs font-bold uppercase tracking-widest transition-colors duration-200">Contact</a>
 </div>
 <div class="flex items-center gap-4">
-<div class="hidden lg:flex items-center gap-4">
+<div class="hidden md:flex items-center gap-4">
 {% if user.is_authenticated %}
 {# Task 25: the header previously had no logged-in state at all -- a #}
 {# logged-in customer saw the identical Log In/Become a Distributor #}
@@ -50,7 +50,7 @@
 <a href="{% url 'orders:order_history' %}" class="px-6 py-2 rounded-full border border-primary text-primary text-sm font-semibold hover:bg-primary/10 transition-all active:scale-95">My Orders</a>
 {% comment %}
 Task 25 code review: allauth's LOGOUT_ON_GET defaults to False and this
-project never overrides it, so a plain <a href> to account_logout doesn't
+project never overrides it, so a plain account_logout link doesn't
 log anyone out -- it lands on allauth's own unstyled confirmation page
 instead. A POST form is the correct, CSRF-safe way to trigger it.
 {% endcomment %}

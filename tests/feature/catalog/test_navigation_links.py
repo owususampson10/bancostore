@@ -63,7 +63,12 @@ def test_logged_in_user_sees_my_orders_and_log_out_instead(client):
     # LOGOUT_ON_GET defaults to False and this project never overrides it,
     # so a plain link would land on allauth's own confirmation page
     # instead of actually logging anyone out (caught in code review).
-    assert f'action="{reverse("account_logout")}"' in content
+    # Assert method="post" and a CSRF token specifically, not just the
+    # action URL -- a default-GET form pointed at the same URL would
+    # still pass an action-only check while remaining broken (CodeRabbit).
+    logout_url = reverse("account_logout")
+    assert f'<form method="post" action="{logout_url}"' in content
+    assert 'name="csrfmiddlewaretoken"' in content
     # Other "Become a Distributor" links (footer, hero/CTA band) are
     # standing marketing links, unrelated to auth state -- only the two
     # header instances (desktop + mobile) should disappear when logged in.

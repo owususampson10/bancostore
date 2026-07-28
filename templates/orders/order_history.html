@@ -89,8 +89,16 @@ choices -- the mockups happened to already define CSS for all 7 values.
 <span></span>
 {% endif %}
 <div class="hidden sm:flex items-center gap-2">
-{% for num in page_obj.paginator.page_range %}
-{% if num == page_obj.number %}
+{% comment %}
+CodeRabbit: page_obj.paginator.page_range alone renders every page number
+with no truncation -- unbounded for a customer with dozens of pages of
+history. page_range (an elided range from the view) inserts
+paginator.ELLIPSIS in place of skipped runs.
+{% endcomment %}
+{% for num in page_range %}
+{% if num == page_obj.paginator.ELLIPSIS %}
+<span class="w-8 h-8 flex items-center justify-center text-gray-muted text-sm">{{ num }}</span>
+{% elif num == page_obj.number %}
 <span class="w-8 h-8 flex items-center justify-center rounded-full bg-primary text-on-primary font-bold text-sm">{{ num }}</span>
 {% else %}
 <a href="?page={{ num }}" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-low text-gray-muted text-sm transition-colors">{{ num }}</a>
