@@ -1,11 +1,12 @@
 from decimal import Decimal
 from itertools import count
 
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser, Group
+
 import pytest
 from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
-from django.contrib.auth import get_user_model
-from django.contrib.auth.models import AnonymousUser, Group
 
 from apps.distributors.consumers import WalletBalanceConsumer
 from apps.distributors.models import Distributor
