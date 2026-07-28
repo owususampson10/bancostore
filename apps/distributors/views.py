@@ -725,6 +725,15 @@ def dashboard(request):
 
     team_size = BinaryTreeEdge.objects.filter(ancestor=distributor).count()
 
+    # Task 20c: real, not the mockup's hardcoded always-eligible state --
+    # against the actual admin-editable MIN_MONTHLY_PERSONAL_PV setting.
+    is_pv_eligible = monthly_personal_pv >= config.MIN_MONTHLY_PERSONAL_PV
+    personal_pv_shortfall = max(0, config.MIN_MONTHLY_PERSONAL_PV - monthly_personal_pv)
+
+    # Task 20c: real "resets in N days" derived from the same Monday-00:00
+    # boundary this_week_earnings already uses, not a fabricated number.
+    days_until_week_reset = 7 - now.weekday()
+
     # Task 20b: Section 6.1's "personal recruitment link" -- distributors:
     # register's GET handler already reads ?ref=<IR ID> and prefills
     # sponsor_ir_id (pre-existing, found untested while building this
@@ -760,8 +769,13 @@ def dashboard(request):
             "team_size": team_size,
             "ir_id": distributor.ir_id,
             "rank": distributor.rank,
+            "full_name": distributor.full_name,
             "referral_url": referral_url,
             "referral_message": referral_message,
+            "is_pv_eligible": is_pv_eligible,
+            "personal_pv_shortfall": personal_pv_shortfall,
+            "min_monthly_personal_pv": config.MIN_MONTHLY_PERSONAL_PV,
+            "days_until_week_reset": days_until_week_reset,
         },
     )
 

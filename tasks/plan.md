@@ -200,6 +200,11 @@ UI.
   `bancostore/asgi.py`'s websocket router has always been empty), plus a small, deliberate touch to
   Task 10a's registration form (a real "recruitment link" per Section 6.1 needs `?ref=` prefill
   support, not just a bare IR ID to type in). See `tasks/todo.md` for the full 20a-20d breakdown.
+  **20a+20b done** (PR #39, merged). **20c done** (PR #40, merged 2026-07-28) — real
+  Stitch-designed frontend, verified live at 1440/1024/768/500px. **20d (live wallet updates via
+  Channels) still open** — the first real Channels consumer in this codebase; needs a
+  `doubt-driven-development` pass on the group-membership auth invariant before any consumer code
+  is written.
 - [ ] Task 21: Binary tree visual view, earnings history, carry-forward tracker, notification bell
 
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
