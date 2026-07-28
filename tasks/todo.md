@@ -3484,22 +3484,175 @@ delivery-status values shown)
 **Description:** Django view + HTMX dashboard showing wallet balance, total earnings, this week's
 earnings, team size, left/right leg PV, monthly personal PV, IR ID with copy button, referral
 link with WhatsApp share, rank badge — updating live via Django Channels when underlying data
-changes.
+changes. Broken into five vertical slices (20a-20e) per `planning-and-task-breakdown`, since this
+is the first real-time Channels consumer ever built in this codebase (Channels/Redis has been
+configured since Task 1-3, but `bancostore/asgi.py`'s websocket `URLRouter` has always been
+empty) and touches a genuinely unguarded existing view.
+
+**Grounded directly against Section 6.1 of the primary source doc** (not just `tasks/todo.md`'s own
+paraphrase, `source-driven-development`), which resolved two real ambiguities before planning:
+"This Week's Earnings" is explicitly "earned in the **current week**" (a calendar week, not a
+rolling 7-day window like Matching Bonus's own `MATCHING_BONUS_INTERVAL_DAYS`), and "Referral
+Link" is explicitly "a **personal recruitment link** with a WhatsApp share button" — not just the
+bare IR ID text a distributor already has, meaning `distributors:register` needs to actually accept
+and prefill a sponsor from a query param, which today it does not (the form only takes a typed-in
+`sponsor_ir_id`). "Earnings" (total and this-week) means the three bonus-type `WalletTransaction`s
+only (`direct_referral_bonus`/`binary_bonus`/`matching_bonus`) — confirmed by mirroring
+`apps/admin_portal/views.py`'s own existing platform-wide earnings aggregate (Task 23), which
+already established this exact transaction-type filter and the single-conditional-aggregate-query
+pattern (not three separate queries) after its own code-review pass.
+
+**Known pre-existing gap this task finally touches:** `apps/distributors/views.py::dashboard` is
+currently a `login_required`-only placeholder with zero `request.user.distributor` scoping — Task
+15's own notes flagged this exact view as needing the same `is_distributor`-guard fix
+`earnings_history` already got. 20a fixes it as part of building the view for real, not as separate
+scope creep.
+
+#### Task 20a: Stats aggregation backend (no Channels yet)
+
+**Description:** Rewrite `apps/distributors/views.py::dashboard` to compute and render every stat
+from Section 6.1 against real seeded data, reusing existing O(1)/O(log n) aggregate sources —
+never walking the tree or recomputing PV live (`CLAUDE.md`'s standing Scale Architecture warning).
+Guard with `apps.accounts.permissions.is_distributor`, matching `earnings_history`'s own
+convention (closes the pre-existing gap above). No live-update wiring in this slice — verify the
+static values are correct first, then add Channels in 20d, matching this project's own "one slice
+at a time" convention.
+
+- Wallet balance: `distributor.wallet.balance` if a `Wallet` row exists, else `0` (a `Wallet` is
+  created lazily on first credit per `apps/wallet/models.py`'s own docstring — a brand-new
+  distributor legitimately has none yet).
+- Total / this-week earnings: one conditional-aggregate `WalletTransaction` query per stat (three
+  `Sum(..., filter=Q(transaction_type=...))` terms each, mirroring `admin_portal`'s pattern
+  exactly), scoped to `wallet__distributor=distributor`; this-week additionally filtered to
+  `created_at__gte=<start of the current ISO calendar week>`.
+- Team size: `BinaryTreeEdge.objects.filter(ancestor=distributor).count()` (all descendants, both
+  legs combined, per Section 6.1's own wording) — O(number of descendants) via the existing
+  `(ancestor, leg)` index, not a tree walk.
+- Left/right leg PV: `distributor.pv_ledger.left_leg_pv` / `.right_leg_pv` if a `PvLedger` row
+  exists, else `0` (also lazily created, same reasoning as `Wallet`).
+- Monthly personal PV: `MonthlyPersonalPv` row for the current calendar-month `period`, else `0`.
+- IR ID / rank: `distributor.ir_id` / `distributor.rank`, direct fields, no query needed.
 
 **Acceptance criteria:**
-- [ ] All stats listed above render correctly for a seeded distributor
-- [ ] Wallet balance updates without a page refresh when a commission is credited (Channels)
+- [ ] All stats above render correctly for a seeded distributor with real wallet/PV/team data
+- [ ] A brand-new distributor with no `Wallet`/`PvLedger` row yet sees `0`s, not a 500
+- [ ] A non-distributor authenticated user gets a clean 403, not a 500 (`AttributeError` on
+  `request.user.distributor`)
 
 **Verification:**
-- [ ] pytest test: dashboard view renders correct values from seeded data
-- [ ] Manual check: credit a commission via the Django shell while dashboard is open, confirm live update
+- [ ] pytest test: dashboard view renders correct values from seeded data (every stat, not just
+  wallet balance)
+- [ ] pytest test: zero-state (no Wallet/PvLedger rows) renders `0`s cleanly
+- [ ] pytest test: a logged-in customer (non-distributor) gets 403
 
-**Dependencies:** Task 15, Task 13, Task 25 (dashboard links to My Orders — built first despite the
-higher number, see Task 25's own note)
+**Dependencies:** Task 15, Task 13, Task 25
 
-**Files likely touched:** `apps/distributors/views.py` (dashboard), `templates/distributors/dashboard.html`, `apps/distributors/consumers.py` (Channels), `tests/feature/distributors/test_dashboard.py`
+**Files likely touched:** `apps/distributors/views.py`, `tests/feature/distributors/test_dashboard.py`
+
+**Estimated scope:** S-M
+
+#### Task 20b: Referral link + registration prefill
+
+**Description:** Section 6.1 explicitly calls this a "personal recruitment link," not just the
+bare IR ID — so `distributors:register` needs to accept a sponsor via a query param and prefill
+the existing `sponsor_ir_id` field, closing the gap between "here's my ID, type it in" and an
+actual one-click link. Small, deliberate touch to already-shipped Task 10a registration code, not
+silent scope creep.
+
+- Referral URL: `{registration URL}?ref={distributor.ir_id}`.
+- `distributors:register`'s view/form reads `?ref=` (if present) and prefills `sponsor_ir_id` —
+  still editable, never silently overriding a distributor's own typed choice if they change it.
+- Dashboard renders the full referral URL, a copy button (matches the IR ID copy-button pattern,
+  same Alpine.js clipboard approach), and a `https://wa.me/?text=<url-encoded message + link>`
+  WhatsApp share button.
+- A distributor with no `ir_id` yet (KYC not approved) sees no referral link — an unapproved
+  distributor has no IR ID to share, so nothing to generate a link from yet.
+
+**Acceptance criteria:**
+- [ ] Referral link on the dashboard resolves to the registration page with the distributor's own
+  IR ID prefilled in the sponsor field
+- [ ] A distributor without an IR ID yet sees an honest "not available yet" state, not a broken link
+- [ ] WhatsApp share button opens `wa.me` with the link correctly URL-encoded
+
+**Verification:**
+- [ ] pytest test: `?ref=<ir_id>` on the registration page prefills `sponsor_ir_id`
+- [ ] pytest test: an invalid/unknown `?ref=` value doesn't crash the registration page (falls back
+  to blank, same as today)
+- [ ] pytest test: dashboard referral link/copy button/WhatsApp link only render once `ir_id` exists
+
+**Dependencies:** 20a
+
+**Files likely touched:** `apps/distributors/views.py` (register), `apps/distributors/forms.py`,
+`tests/feature/distributors/test_registration_pending.py`, `tests/feature/distributors/test_dashboard.py`
+
+**Estimated scope:** S
+
+#### Task 20c: Real Stitch-based frontend
+
+**Description:** Replace `templates/distributors/dashboard.html`'s placeholder with the real
+stats layout — fetched from Stitch (desktop + mobile prompts, same established workflow as Tasks
+15/17/18/19/25), reconciled against `base_dashboard.html`'s real shell and design tokens rather
+than the mockup's own fabricated chrome. Rank badge (Bronze/Silver, two-value), IR ID + referral
+link copy buttons (Alpine.js clipboard, matching `payout_settings.html`'s existing pattern), stat
+cards for wallet balance/earnings/team size/leg PV/personal PV.
+
+**Acceptance criteria:**
+- [ ] Every 20a/20b stat has a real, Stitch-designed presentation (not the interim placeholder)
+- [ ] Verified in a real browser at desktop and mobile widths (this project's standing convention
+  — a green test suite doesn't prove a UI change)
+- [ ] Copy buttons and WhatsApp share verified working live, not just present in markup
+
+**Verification:**
+- [ ] `npm run build` + real-browser check at 1440/1024/768/500px
+- [ ] Manual check: copy-to-clipboard actually copies; WhatsApp link actually opens with the
+  correct pre-filled text
+
+**Dependencies:** 20a, 20b
+
+**Files likely touched:** `templates/distributors/dashboard.html`
+
+**Estimated scope:** S-M
+
+#### Task 20d: Live wallet-balance updates via Channels
+
+**Description:** The first real Channels consumer in this codebase. `doubt-driven-development`
+runs before any consumer code is written — this is exactly the "authorization invariant a type
+system can't verify" case the skill targets: a per-distributor group that only that distributor's
+own connection ever joins. `apps/distributors/consumers.py` (new), wired into
+`bancostore/asgi.py`'s currently-empty websocket `URLRouter`. Connection is rejected unless
+`request.user` is authenticated AND owns the `Distributor` matching the requested group — never
+trusting a client-supplied distributor ID for group membership. `apps/wallet/services.py::credit()`
+(and `debit()`) sends a group message on every balance change; the dashboard's JS patches the
+wallet-balance DOM element on receipt, matching this project's existing Alpine.js conventions
+rather than introducing a new frontend pattern. A short design note (ADR or equivalent, per
+`documentation-and-adrs`) records the auth/scoping decision, since this is the first real-time
+financial-data-over-WebSocket feature in the codebase and the precedent every future notification
+(Task 21's bell) will follow.
+
+**Acceptance criteria:**
+- [ ] A distributor's dashboard wallet balance updates without a page refresh when their own wallet
+  is credited
+- [ ] A distributor never receives another distributor's group messages, even if they knew or
+  guessed the other distributor's ID
+- [ ] An unauthenticated or wrong-user WebSocket connection attempt is rejected at `connect()`
+
+**Verification:**
+- [ ] pytest test using Channels' `WebsocketCommunicator`: proves group-scoping (own updates
+  received, another distributor's are not)
+- [ ] pytest test: connection rejected for an unauthenticated/mismatched user
+- [ ] Manual check (this task's own original acceptance criterion): credit a commission via the
+  Django shell while the dashboard is open in a real browser, confirm the balance updates live
+
+**Dependencies:** 20a, 20c
+
+**Files likely touched:** `apps/distributors/consumers.py` (new), `bancostore/asgi.py`,
+`apps/wallet/services.py`, `templates/distributors/dashboard.html` (JS), `tests/feature/distributors/test_dashboard_live_updates.py`
 
 **Estimated scope:** M
+
+**Checkpoint (after 20a-20d):** full suite green, real-browser check of the complete dashboard
+(static stats + live wallet update) before Task 21 (which depends on Task 20 and reuses this
+task's Channels-consumer precedent for its own notification bell).
 
 ---
 

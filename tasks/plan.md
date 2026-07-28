@@ -194,7 +194,12 @@ UI.
   breakdown and the reasoning behind the non-sequential numbering. Shipped 2026-07-28 via PR #38,
   merged to `main`; full suite green throughout (1009 passed, 1 skipped), real MySQL CI green,
   CodeRabbit clean on the final commit.
-- [ ] Task 20: Dashboard core stats (wallet, earnings, team size, leg PV, rank, referral link)
+- [ ] Task 20: Dashboard core stats (wallet, earnings, team size, leg PV, rank, referral link).
+  Broken into vertical slices 20a-20d 2026-07-28 (`planning-and-task-breakdown`) — first Channels
+  consumer this codebase has ever built (Channels/Redis configured since Task 1-3, but
+  `bancostore/asgi.py`'s websocket router has always been empty), plus a small, deliberate touch to
+  Task 10a's registration form (a real "recruitment link" per Section 6.1 needs `?ref=` prefill
+  support, not just a bare IR ID to type in). See `tasks/todo.md` for the full 20a-20d breakdown.
 - [ ] Task 21: Binary tree visual view, earnings history, carry-forward tracker, notification bell
 
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
