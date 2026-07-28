@@ -216,6 +216,11 @@ UI.
   earnings history is already satisfied by Task 15/20c — verification only), 21d (notification
   bell — the biggest piece, a second Channels consumer needing its own `doubt-driven-development`
   pass, same as Task 20d). See `tasks/todo.md` for the full breakdown.
+  - [x] **21a done (PR #44, merged 2026-07-28):** `apps/binary_tree/services.py::get_downline_tree`,
+    a flat 3-query downline fetch (never a recursive DB walk) assembled into an in-memory tree, plus
+    the IDOR-safe `binary_tree_view` and its templates. CodeRabbit caught two real recursive-Python
+    functions (tree assembly and node counting) that could theoretically hit Python's recursion
+    limit on a pathologically deep single-line downline — both converted to iterative before merge.
 
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
 another session — proves Django Channels real-time wiring works.

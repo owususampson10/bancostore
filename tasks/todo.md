@@ -3749,23 +3749,39 @@ reconstructed into a hierarchy instead of a flat count. O(number of descendants)
 index, never a recursive walk (this project's standing Scale Architecture rule).
 
 **Acceptance criteria:**
-- [ ] Tree view renders every descendant with name, IR ID, rank, and PV, correctly split by leg
-- [ ] A distributor with no downline yet sees an honest empty state, not a broken/blank page
-- [ ] A distributor can never see another distributor's tree, even by manipulating any parameter
+- [x] Tree view renders every descendant with name, IR ID, rank, and PV, correctly split by leg
+- [x] A distributor with no downline yet sees an honest empty state, not a broken/blank page
+- [x] A distributor can never see another distributor's tree, even by manipulating any parameter
       (there should be none to manipulate — scoped unconditionally to `request.user.distributor`,
       same IDOR-safe-by-construction pattern as every other distributor-scoped view)
 
 **Verification:**
-- [ ] pytest test: a seeded multi-level downline renders the correct nodes and leg placement
-- [ ] pytest test: empty-downline state renders cleanly
-- [ ] pytest test: query count doesn't grow per-node (one query, not N+1 per descendant)
-- [ ] Live browser check against a real seeded downline
+- [x] pytest test: a seeded multi-level downline renders the correct nodes and leg placement
+- [x] pytest test: empty-downline state renders cleanly
+- [x] pytest test: query count doesn't grow per-node (one query, not N+1 per descendant)
+- [x] Live browser check against a real seeded downline
 
 **Dependencies:** Task 9a/9c (closure table), Task 20
 
 **Files likely touched:** `apps/distributors/views.py`, `templates/distributors/binary_tree.html`, `tests/feature/distributors/test_binary_tree_view.py`
 
 **Estimated scope:** M
+
+**Status: Done (PR #44, merged 2026-07-28).** Built as `apps/binary_tree/services.py::get_downline_tree`
+(3 flat queries regardless of downline size/depth, verified by a query-count-invariance test) plus
+`binary_tree_view`/`binary_tree.html`/`_binary_tree_node.html`. CodeRabbit's review flagged the tree
+assembly (`_build`) and the view's node-counting helper (`_count_subtree`) as recursive Python
+functions that could in principle hit Python's default recursion limit on a pathologically deep
+single-line downline (every distributor sponsoring exactly one next distributor, never spilling
+over) — both fixed pre-merge to be iterative (BFS + reverse-visit-order build for the tree, an
+explicit stack for counting), matching this project's standing "never a recursive walk" rule.
+**Deferred, not silently skipped:** two lower-priority CodeRabbit nitpicks were left as-is —
+`_binary_tree_node.html`'s own recursive `{% include %}` has the same theoretical deep-chain limit
+(flattening template rendering to an iterative pre-order list is a heavier structural change than
+this task's scope, and in practice tree depth stays ~log2(n) under the current auto-balance-only
+placement algorithm — see `project_binary_tree_placement_spillover_rule` memory); and the rank-badge
+pill markup is duplicated between `dashboard.html` and `_binary_tree_node.html` rather than
+extracted into a shared partial. Both are candidates for a future pass, not correctness bugs.
 
 ---
 
