@@ -1,3 +1,5 @@
+import re
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password
 from django.urls import reverse
@@ -168,9 +170,13 @@ def test_no_ref_query_param_leaves_the_sponsor_field_blank(client):
 
     assert response.status_code == 200
     content = response.content.decode()
-    start = content.find("<input", content.find('name="sponsor_ir_id"') - 100)
-    end = content.find(">", start)
-    sponsor_field_tag = content[start : end + 1]
+    # CodeRabbit: a fixed 100-char backward offset assumes the opening
+    # <input is within that window -- fragile against markup changes
+    # (extra attrs/classes before name=). A regex captures the whole tag
+    # regardless of what precedes name= within it.
+    match = re.search(r'<input[^>]*name="sponsor_ir_id"[^>]*>', content)
+    assert match is not None
+    sponsor_field_tag = match.group(0)
     # Django's Input.format_value() treats an explicitly-empty initial
     # value the same as no value at all -- no `value=` attribute renders,
     # distinguishing "no referral link used" from a broken/empty one.

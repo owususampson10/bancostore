@@ -4,6 +4,7 @@ import math
 from datetime import timedelta
 from decimal import Decimal
 from functools import wraps
+from urllib.parse import quote
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth import login as auth_login
@@ -732,9 +733,14 @@ def dashboard(request):
     referral_url = None
     referral_message = None
     if distributor.ir_id:
+        # CodeRabbit: ir_id is built from IR_ID_PREFIX, an unvalidated
+        # free-text constance setting (same reasoning as the json_script
+        # fix in dashboard.html) -- url-encode it rather than
+        # concatenating raw, so a prefix containing &/#/%/whitespace
+        # can't break the query string structure.
         referral_url = (
             request.build_absolute_uri(reverse("distributors:register"))
-            + f"?ref={distributor.ir_id}"
+            + f"?ref={quote(distributor.ir_id, safe='')}"
         )
         referral_message = (
             f"Join Bancostore as a distributor using my referral link: {referral_url}"

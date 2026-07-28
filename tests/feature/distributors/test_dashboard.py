@@ -118,7 +118,11 @@ def test_all_stats_render_correctly_for_a_seeded_distributor(client):
     assert "340" in body  # left leg PV
     assert "210" in body  # right leg PV
     assert "150" in body  # monthly personal PV
-    assert "2" in body  # team size (2 descendants)
+    # CodeRabbit: "2" in body is trivially satisfied by unrelated markup
+    # (e.g. sm:grid-cols-2, sm:col-span-2), so it wouldn't catch a broken
+    # team_size -- assert against context instead, matching this file's
+    # own test_team_size_counts_the_entire_downline_both_legs_combined.
+    assert response.context["team_size"] == 2
     assert "IR-00001" in body
     assert "Silver" in body
 
