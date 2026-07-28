@@ -3769,18 +3769,22 @@ the existing `apps.distributors.services.approve_kyc`/`reject_kyc` directly — 
 changes, presentation only.
 
 **Acceptance criteria:**
-- [ ] Admin sees a queue of pending-KYC distributors with Didit's verification result summary
+- [x] Admin sees a queue of pending-KYC distributors with Didit's verification result summary
       (status, face-match/liveness scores, extracted name/document number, warnings, the three
       images) — same data `DiditVerificationInline` already shows, restyled
-- [ ] Approve/reject work per-distributor (reject requires a reason, matching the existing
+- [x] Approve/reject work per-distributor (reject requires a reason, matching the existing
       Django-Admin confirmation-page pattern's requirement)
-- [ ] Django Admin's own KYC screen keeps working unchanged (not removed, just no longer the
+- [x] Django Admin's own KYC screen keeps working unchanged (not removed, just no longer the
       admin's primary path)
 
 **Verification:**
-- [ ] pytest test: approve/reject from the new screen produce identical `Distributor.kyc_status`/
+- [x] pytest test: approve/reject from the new screen produce identical `Distributor.kyc_status`/
       `kyc_rejection_reason` results as the existing Django-Admin action (same service call)
-- [ ] Live browser check: full approve and full reject flow against a real pending KYC record
+- [x] Live browser check: full approve and full reject flow against a real pending KYC record
+
+**Shipped 2026-07-23 via PR #12.** Correction 2026-07-28: this checklist was never updated when
+the work landed — found stale while investigating "what's next" and corrected against the real
+`apps/admin_portal/` code and `tests/feature/admin_portal/test_kyc_review.py`, not assumed.
 
 **Dependencies:** Task 11 (KYC backend), admin login/2FA (Task 6)
 
@@ -3794,12 +3798,24 @@ changes, presentation only.
 
 **Description:** Absorbs the original Task 22/23 scope (distributor search/profile/suspend,
 commission oversight) plus a Stitch-designed withdrawal approval screen fronting Task 16d's
-already-built `approve_withdrawal_request`/`reject_withdrawal_request`. To be sliced into
-23a/23b/23c (mirroring Task 16a-16h) when started.
+already-built `approve_withdrawal_request`/`reject_withdrawal_request`.
+
+**Shipped 2026-07-23, same day as Task 22** (correction added 2026-07-28 — this task had no
+sub-slice breakdown recorded and showed as not started, despite being fully built; verified against
+the real codebase, not assumed):
+- Withdrawal review queue + detail (approve/reject fronting Task 16d's service functions) — PR #14
+- Distributor directory + profile screens — PR #15
+- Real-time search/filter, CSV export, and real stats added to the directory — PR #16
+- Commission oversight + commission cycle detail — PR #17
+- Polish follow-ups: mobile table/typography fixes across 6 admin_portal pages — PR #23; shared
+  flash-message component — PR #34
+
+Full test coverage: `tests/feature/admin_portal/test_withdrawal_review.py`,
+`test_distributor_directory.py`, `test_commission_oversight.py`.
 
 **Dependencies:** Task 22 (shared `apps/admin_portal/` shell), Task 16d (withdrawal backend), Task 13 (commission data)
 
-**Estimated scope:** L — slice before starting
+**Estimated scope:** L
 
 ---
 

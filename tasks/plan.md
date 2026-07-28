@@ -214,16 +214,23 @@ UI.
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
 another session — proves Django Channels real-time wiring works.
 
-### Phase 9: Admin Portal — custom Stitch-designed dashboard (redefined 2026-07-23)
+### Phase 9: Admin Portal — custom Stitch-designed dashboard (redefined 2026-07-23) — COMPLETE
 **Scope change from Django Admin to a full custom dashboard, decided 2026-07-23:** the admin user
 is not software-literate — every screen an admin touches routinely needs to feel like part of the
-Bancostore application, not Django's generic admin panel. This plan reflects that decision, but
-`SPEC.md`'s "Admin panel | Django Admin (customized)" tech-stack line is **still the authoritative
-record and has not been updated to match** — that edit is intentionally held pending explicit
-confirmation (per this project's own convention of asking before editing `SPEC.md`/`CLAUDE.md`),
-not silently assumed. Treat this phase's scope as tentative, not adopted, until that update lands.
-Folds the original Task 22/23 scope into this initiative rather than building them as raw Django
-Admin.
+Bancostore application, not Django's generic admin panel. **Shipped in full the same day** (PRs
+#12, #14, #15, #16, #17), with two follow-up polish passes (#23: mobile table/typography fixes
+across 6 pages; #34: shared flash-message component). **Correction 2026-07-28: this checklist had
+gone stale — Task 22 and 23 were both fully built, tested, and merged back on 2026-07-23, but
+never marked done here.** Verified against the real `apps/admin_portal/` codebase (`urls.py`,
+`views.py`) and its full test suite (`tests/feature/admin_portal/`: KYC review, withdrawal review,
+distributor directory, commission oversight, order management, dashboard — all present and
+passing) before correcting this doc, not assumed from memory.
+
+**Outstanding, not yet done:** `SPEC.md`'s "Admin panel | Django Admin (customized)" tech-stack
+line still doesn't match this shipped reality (a custom Stitch-designed portal fronting Django
+Admin's service functions, with Django Admin as a technical fallback for archival views only) —
+flagged to the user 2026-07-28, held pending explicit confirmation before editing `SPEC.md` per
+this project's own convention.
 
 **Design principle:** Django Admin's `ModelAdmin` classes (KYC review — Task 11, wallet/commission
 audit — Tasks 13-15, withdrawal approval — Task 16d) stay exactly as-is underneath — same
@@ -238,18 +245,18 @@ layer changes. Django Admin stays reachable underneath as a technical fallback.
 admin-facing views across each domain app. Reuses the existing admin login/2FA flow (Task 6,
 already Stitch-styled) — only changes where login lands and what nav the admin sees.
 
-**Sequencing:** start with the two screens an admin operates routinely — KYC review and withdrawal
-approval (both already have proven backends, only the UI is new) — then broaden to distributor
-search/management and commission oversight (absorbing the original Task 22/23 scope). Purely
-archival views (raw wallet ledger, commission cycle logs) stay on Django Admin unless later
-decided otherwise.
+**Sequencing:** started with the two screens an admin operates routinely — KYC review and
+withdrawal approval (both already had proven backends, only the UI was new) — then broadened to
+distributor search/management and commission oversight (absorbing the original Task 22/23 scope).
+Purely archival views (raw wallet ledger, commission cycle logs) stay on Django Admin.
 
-- [ ] Task 22: Admin Portal — KYC review screen (first slice)
-- [ ] Task 23: Admin Portal — withdrawal approval, distributor search/management, commission
-  oversight (absorbs the original Task 22/23 scope; broken into 23a/23b/23c sub-slices when
-  started, same pattern as Task 16a-16h — kept as one task number, not new top-level numbers, so
-  Task 24's existing "deploy pipeline" references elsewhere in `tasks/todo.md`/`CLAUDE.md` don't
-  need renumbering)
+- [x] Task 22: Admin Portal — KYC review screen (first slice) — PR #12
+- [x] Task 23: Admin Portal — withdrawal approval, distributor search/management, commission
+  oversight (absorbed the original Task 22/23 scope) — withdrawal review PR #14, distributor
+  directory + profile PR #15, real-time search/filter + CSV export PR #16, commission oversight +
+  cycle detail PR #17, all merged 2026-07-23; polish follow-ups PR #23 (mobile table/typography)
+  and PR #34 (shared flash-message component). Full test coverage in
+  `tests/feature/admin_portal/`.
 
 **Checkpoint I (final MVP checkpoint):** the full Section 14 distributor journey works end to end
 through the UI. All pytest tests pass, `black`/`ruff` clean. Verify against `SPEC.md` Success
