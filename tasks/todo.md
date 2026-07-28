@@ -3508,7 +3508,11 @@ currently a `login_required`-only placeholder with zero `request.user.distributo
 `earnings_history` already got. 20a fixes it as part of building the view for real, not as separate
 scope creep.
 
-#### Task 20a: Stats aggregation backend (no Channels yet)
+#### Task 20a: Stats aggregation backend (no Channels yet) — DONE
+
+**Shipped 2026-07-28.** Real-browser verified (desktop and 500px mobile) with a seeded distributor
+(wallet balance, earnings, PV, team size all real, non-zero values) — dashboard sidebar collapses
+to a hamburger correctly on mobile, matching `base_dashboard.html`'s existing convention.
 
 **Description:** Rewrite `apps/distributors/views.py::dashboard` to compute and render every stat
 from Section 6.1 against real seeded data, reusing existing O(1)/O(log n) aggregate sources —
@@ -3534,16 +3538,16 @@ at a time" convention.
 - IR ID / rank: `distributor.ir_id` / `distributor.rank`, direct fields, no query needed.
 
 **Acceptance criteria:**
-- [ ] All stats above render correctly for a seeded distributor with real wallet/PV/team data
-- [ ] A brand-new distributor with no `Wallet`/`PvLedger` row yet sees `0`s, not a 500
-- [ ] A non-distributor authenticated user gets a clean 403, not a 500 (`AttributeError` on
+- [x] All stats above render correctly for a seeded distributor with real wallet/PV/team data
+- [x] A brand-new distributor with no `Wallet`/`PvLedger` row yet sees `0`s, not a 500
+- [x] A non-distributor authenticated user gets a clean 403, not a 500 (`AttributeError` on
   `request.user.distributor`)
 
 **Verification:**
-- [ ] pytest test: dashboard view renders correct values from seeded data (every stat, not just
+- [x] pytest test: dashboard view renders correct values from seeded data (every stat, not just
   wallet balance)
-- [ ] pytest test: zero-state (no Wallet/PvLedger rows) renders `0`s cleanly
-- [ ] pytest test: a logged-in customer (non-distributor) gets 403
+- [x] pytest test: zero-state (no Wallet/PvLedger rows) renders `0`s cleanly
+- [x] pytest test: a logged-in customer (non-distributor) gets 403
 
 **Dependencies:** Task 15, Task 13, Task 25
 
@@ -3551,34 +3555,47 @@ at a time" convention.
 
 **Estimated scope:** S-M
 
-#### Task 20b: Referral link + registration prefill
+#### Task 20b: Referral link + registration prefill — DONE
 
-**Description:** Section 6.1 explicitly calls this a "personal recruitment link," not just the
-bare IR ID — so `distributors:register` needs to accept a sponsor via a query param and prefill
-the existing `sponsor_ir_id` field, closing the gap between "here's my ID, type it in" and an
-actual one-click link. Small, deliberate touch to already-shipped Task 10a registration code, not
-silent scope creep.
+**Shipped 2026-07-28 as part of PR for Task 20 (branch `task-20a-dashboard-stats`).** Section 6.1
+explicitly calls this a "personal recruitment link," not just the bare IR ID.
 
-- Referral URL: `{registration URL}?ref={distributor.ir_id}`.
-- `distributors:register`'s view/form reads `?ref=` (if present) and prefills `sponsor_ir_id` —
-  still editable, never silently overriding a distributor's own typed choice if they change it.
-- Dashboard renders the full referral URL, a copy button (matches the IR ID copy-button pattern,
-  same Alpine.js clipboard approach), and a `https://wa.me/?text=<url-encoded message + link>`
-  WhatsApp share button.
-- A distributor with no `ir_id` yet (KYC not approved) sees no referral link — an unapproved
-  distributor has no IR ID to share, so nothing to generate a link from yet.
+**Two corrections found while implementing** (both wrong assumptions in the original plan below,
+fixed before writing new code): (1) `distributors:register`'s GET branch already read
+`request.GET.get("ref", "")` and prefilled `DistributorRegistrationForm`'s `sponsor_ir_id` field —
+present in `main` before this task touched the file, so it did not need to be built from scratch.
+(2) It was **not** untested either, on a second look — `test_registration_pending.py::
+test_referral_link_prefills_the_sponsor_field` already covered the context-level prefill; a
+duplicate HTML-level test was written, then removed once the existing coverage was found, keeping
+only the two genuinely new cases (invalid `?ref=`, no `?ref=`). (3) No existing Alpine.js
+copy-to-clipboard pattern exists anywhere in this codebase (`payout_settings.html` was assumed to
+have one; it doesn't) — this is the first one, a plain `x-data="{ copied: false }"` +
+`navigator.clipboard.writeText(...)` button, not a reuse of a prior pattern. An invalid `?ref=`
+value does **not** "fall back to blank" as originally assumed — Django's `Input.format_value()`
+renders it as a literal, auto-escaped prefilled value (same as a distributor who mistyped an IR ID
+by hand); `clean_sponsor_ir_id`'s `ValidationError` only fires on submit, not on this GET render.
+
+- Referral URL: `{registration URL}?ref={distributor.ir_id}` (mechanism already existed).
+- Dashboard renders the full referral URL, a Copy Link button, and a
+  `https://wa.me/?text=<urlencoded message + link>` WhatsApp share link — `None` (no card content
+  beyond an honest "not available yet" message) for a distributor with no `ir_id` yet (KYC not
+  approved, nothing to share).
+- IR ID card also got its own copy button in the same pass (Section 6.1 calls for one there too).
 
 **Acceptance criteria:**
-- [ ] Referral link on the dashboard resolves to the registration page with the distributor's own
+- [x] Referral link on the dashboard resolves to the registration page with the distributor's own
   IR ID prefilled in the sponsor field
-- [ ] A distributor without an IR ID yet sees an honest "not available yet" state, not a broken link
-- [ ] WhatsApp share button opens `wa.me` with the link correctly URL-encoded
+- [x] A distributor without an IR ID yet sees an honest "not available yet" state, not a broken link
+- [x] WhatsApp share button opens `wa.me` with the link correctly URL-encoded
 
 **Verification:**
-- [ ] pytest test: `?ref=<ir_id>` on the registration page prefills `sponsor_ir_id`
-- [ ] pytest test: an invalid/unknown `?ref=` value doesn't crash the registration page (falls back
-  to blank, same as today)
-- [ ] pytest test: dashboard referral link/copy button/WhatsApp link only render once `ir_id` exists
+- [x] pytest: dashboard referral link/copy button/WhatsApp link only render once `ir_id` exists
+  (`test_referral_link_points_to_registration_with_ir_id_prefilled`,
+  `test_no_referral_link_for_a_distributor_without_an_ir_id_yet`)
+- [x] pytest: an invalid/unknown `?ref=` value doesn't crash the registration page
+  (`test_an_unknown_ref_value_does_not_crash_the_registration_page`)
+- [x] pytest: no `?ref=` leaves the field genuinely blank, not a stray `value=""`
+  (`test_no_ref_query_param_leaves_the_sponsor_field_blank`)
 
 **Dependencies:** 20a
 
