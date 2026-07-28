@@ -1,21 +1,16 @@
-{% load static %}<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{% block title %}Bancostore{% endblock %}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="{% static 'assets/main.css' %}">
-{# No site header/footer here on purpose — those come from a shared base.html #}
-{# once the landing page (with its own Stitch design) is built. #}
-</head>
-<body class="bg-surface text-on-surface font-body-md min-h-screen flex flex-col kinetic-bg">
-<main class="flex-grow flex items-center justify-center px-margin-mobile py-stack-xl">
+{% extends "base_store.html" %}
+{# Auth/onboarding pages (customer + distributor login, register, password #}
+{# reset, KYC, starter pack, etc.) now share the real site header/footer #}
+{# from base_store.html instead of a bare shell -- fixes a real dead-end: #}
+{# a visitor on any of these ~19 pages previously had no way back to the #}
+{# homepage. Admin login and the two dashboard app shells (distributor, #}
+{# admin) are deliberately NOT part of this -- confirmed with the user -- #}
+{# admin login stays on its own base_admin_auth.html, and the dashboards #}
+{# are a logged-in app experience, not the public site journey. #}
+{% block content %}
+<div class="flex items-center justify-center px-margin-mobile py-stack-xl kinetic-bg">
 <div class="w-full max-w-md">
-{% block content %}{% endblock %}
+{% block auth_content %}{% endblock %}
 </div>
-</main>
-</body>
-</html>
+</div>
+{% endblock %}
