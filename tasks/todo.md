@@ -3657,18 +3657,52 @@ financial-data-over-WebSocket feature in the codebase and the precedent every fu
 (Task 21's bell) will follow.
 
 **Acceptance criteria:**
-- [ ] A distributor's dashboard wallet balance updates without a page refresh when their own wallet
+- [x] A distributor's dashboard wallet balance updates without a page refresh when their own wallet
   is credited
-- [ ] A distributor never receives another distributor's group messages, even if they knew or
+- [x] A distributor never receives another distributor's group messages, even if they knew or
   guessed the other distributor's ID
-- [ ] An unauthenticated or wrong-user WebSocket connection attempt is rejected at `connect()`
+- [x] An unauthenticated or wrong-user WebSocket connection attempt is rejected at `connect()`
 
 **Verification:**
-- [ ] pytest test using Channels' `WebsocketCommunicator`: proves group-scoping (own updates
+- [x] pytest test using Channels' `WebsocketCommunicator`: proves group-scoping (own updates
   received, another distributor's are not)
-- [ ] pytest test: connection rejected for an unauthenticated/mismatched user
-- [ ] Manual check (this task's own original acceptance criterion): credit a commission via the
+- [x] pytest test: connection rejected for an unauthenticated/mismatched user
+- [x] Manual check (this task's own original acceptance criterion): credit a commission via the
   Django shell while the dashboard is open in a real browser, confirm the balance updates live
+
+**Shipped 2026-07-28.** Went through a full `doubt-driven-development` cycle before any code was
+written: a single-model fresh-context review, then the user ran the same artifact through both
+ChatGPT and Gemini independently. Across all three, real issues surfaced that changed the design
+from its first draft — see `docs/decisions/0008-wallet-live-updates-channels-design.md` for the
+full reasoning. Two deliberate deviations from this task's own original description, both judged
+safer: (1) **no client-supplied distributor ID at all**, anywhere — the route takes no parameter,
+group membership is derived purely from `scope["user"]`, eliminating the entire class of
+"validate the requested group" bugs a parameterized version would need to keep getting right; (2)
+**`apps/wallet/services.py::credit()`/`debit()` were not touched** — a `post_save` signal on
+`WalletTransaction` (`apps/distributors/signals.py`) reacts instead, keeping the wallet app fully
+decoupled from Channels, with the trade-off (documented, not silently accepted) that a future
+`bulk_create()` path would silently skip live updates.
+
+Real bugs the reviews actually caught before implementation, all fixed: reading a stale
+in-memory balance instead of querying fresh at `on_commit` time; no `AllowedHostsOriginValidator`
+(a real CSWSH gap for financial data); a synchronous ORM call inside async `connect()`; no
+initial-balance push on connect (would leave a stale value after any reconnect); `disconnect()`
+crashing on an early-rejected connection. One reviewer claim was checked against Django's own docs
+and found incorrect (`on_commit` firing prematurely on a nested-transaction rollback — Django
+already discards those callbacks correctly) and dropped rather than "fixed" for a non-issue.
+
+A second, unrelated real bug was found via the real-browser verification step itself (not by any
+review): `daphne` returns 503 for every static asset in local dev, since `runserver`'s
+DEBUG-mode static-file auto-serving is that command's own special behavior, not something any
+ASGI server gets for free. Fixed with `ASGIStaticFilesHandler` in `bancostore/asgi.py`, gated on
+`settings.DEBUG` (production is unaffected either way — Nginx serves static files there). No
+pytest run could ever have caught this, same class of gap as the already-documented `MEDIA_URL`
+issue (`CLAUDE.md`), since Django's test runner always forces `DEBUG=False`.
+
+Verified end-to-end in a real browser via `daphne` (not `runserver` — see the new `CLAUDE.md`
+gotcha): logged in as a seeded distributor, credited their wallet from a completely separate
+`manage.py shell` process, watched the dashboard's wallet balance update from GHS 0.00 to
+GHS 123.45 with no page refresh.
 
 **Dependencies:** 20a, 20c
 

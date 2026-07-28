@@ -525,6 +525,15 @@ runner always forces `DEBUG=False` regardless of `.env`, so that `if DEBUG:` blo
 under pytest. Verify media serving by curling a real file against the live `runserver` — a green
 test suite proves nothing here.
 
+**Any feature using Channels/WebSockets only works locally through `daphne`, not `runserver`
+(Task 20d gotcha).** `python manage.py runserver` does not route through `bancostore/asgi.py`'s
+websocket `URLRouter` — it's a WSGI-only dev server. A page served on `runserver`'s port 8000
+whose JS opens a relative `ws://.../` connection has nothing to connect to on port 8000; the
+Channels stack only actually runs behind `daphne -p 8001 bancostore.asgi:application`. To exercise
+a live-update feature (e.g. the dashboard's live wallet balance, Task 20d) in a real browser
+locally, load the page via `http://localhost:8001/...` (daphne), not 8000. See ADR-0008 for the
+full design.
+
 ## Architecture
 
 **Stack**: Django 5 / Python 3.13 (whatever's already on this Mac — no `pyenv` needed), Django

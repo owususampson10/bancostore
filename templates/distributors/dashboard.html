@@ -74,7 +74,7 @@ distributor as "Unranked". |title only affects the display text.
 <div class="bg-white border border-outline-variant rounded-xl p-6 flex flex-col justify-between">
 <div>
 <span class="text-xs font-bold uppercase tracking-widest text-secondary opacity-60">Wallet Balance</span>
-<h3 class="font-headline-md text-headline-md text-on-surface mt-2">GHS {{ wallet_balance|floatformat:2|intcomma }}</h3>
+<h3 id="wallet-balance" class="font-headline-md text-headline-md text-on-surface mt-2">GHS {{ wallet_balance|floatformat:2|intcomma }}</h3>
 </div>
 <div class="flex justify-between items-center mt-4">
 <a href="{% url 'distributors:withdrawal_request' %}" class="text-xs text-primary font-bold hover:opacity-80">Withdraw funds</a>
@@ -190,4 +190,64 @@ View Earnings History
 <span class="material-symbols-outlined group-hover:translate-x-1 transition-transform" aria-hidden="true">arrow_forward</span>
 </a>
 </div>
+
+{% comment %}
+Task 20d: live wallet-balance updates over Channels. Deliberately plain
+JS (no Alpine), matching this codebase's existing convention of small,
+targeted DOM patches for one specific feature rather than reaching for
+a framework. Reconnects with exponential backoff (capped at 30s) since
+a fresh-context review flagged that a dropped connection would otherwise
+leave the balance stale until the next unrelated wallet event.
+
+Local dev note: this only works when the page itself is served by
+daphne (port 8001), not `runserver` (port 8000) -- see CLAUDE.md.
+{% endcomment %}
+<script>
+(function () {
+  const balanceEl = document.getElementById("wallet-balance");
+  if (!balanceEl) return; // defensive: element may be absent on a partial render
+
+  function formatGhs(balanceStr) {
+    const num = parseFloat(balanceStr);
+    if (Number.isNaN(num)) return null;
+    return "GHS " + num.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  let reconnectDelay = 1000;
+  const maxReconnectDelay = 30000;
+
+  function connect() {
+    const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+    const socket = new WebSocket(protocol + window.location.host + "/ws/distributors/wallet/");
+
+    socket.onopen = function () {
+      reconnectDelay = 1000; // reset backoff after a successful connection
+    };
+
+    socket.onmessage = function (event) {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch (e) {
+        return; // malformed payload -- ignore rather than crash the page
+      }
+      if (!data || typeof data.balance !== "string") return;
+      const formatted = formatGhs(data.balance);
+      if (formatted !== null) {
+        balanceEl.textContent = formatted;
+      }
+    };
+
+    socket.onclose = function () {
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
+    };
+  }
+
+  connect();
+})();
+</script>
 {% endblock %}
