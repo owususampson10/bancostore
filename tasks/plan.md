@@ -185,6 +185,13 @@ UI.
   throughout, 986 passed, 1 skipped as of merge.
 
 ### Phase 8: Distributor Dashboard (real-time)
+- [ ] Task 25: My Orders — self-service order history. Added 2026-07-27, found by reading Section
+  6.4 of the primary source doc directly while scoping Task 20 below (`source-driven-development`)
+  — no task anywhere in this plan built a self-service order-history page for either a customer or
+  a distributor. Numbered 25 (not slotted in as 20) since Task 20-24 are all already real,
+  shipped-code-referenced numbers (20/21 here, 22-24 in Phase 9/Deploy) — none of them move; this
+  task just builds *before* Task 20 despite the higher number. See `tasks/todo.md` for the full
+  breakdown and the reasoning behind the non-sequential numbering.
 - [ ] Task 20: Dashboard core stats (wallet, earnings, team size, leg PV, rank, referral link)
 - [ ] Task 21: Binary tree visual view, earnings history, carry-forward tracker, notification bell
 

@@ -4,8 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–19 are done — Phase 7's 7-day cooling-off refund is complete.** What exists and
-is verified working:
+**Tasks 1–19 are done — Phase 7's 7-day cooling-off refund is complete; Task 25 (My Orders,
+built ahead of Phase 8) is next.** Task 25 didn't exist in the original plan — added 2026-07-27
+after a `source-driven-development` read of the primary source doc's Section 6.4 found no task
+anywhere had ever scoped a self-service order-history page for a customer or distributor, needed
+before Task 20 (Dashboard core stats) links to it. Numbered 25, not inserted as 20, despite
+building first: 20/21 (Phase 8) and 22-24 (Phase 9's Admin Portal / Task 24 Deploy) are already
+real, in places already-shipped-code-referenced numbers — renumbering any of those would mean
+rewriting history across already-built admin_portal code, so this task took the next free integer
+instead and is simply sequenced earlier than its number suggests. What exists and is verified
+working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,

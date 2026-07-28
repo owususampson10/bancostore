@@ -3386,6 +3386,74 @@ previously-unnoticed defects across the three PRs, both fixed before merge:
 
 ## Phase 8: Distributor Dashboard (real-time)
 
+### Task 25: My Orders — self-service order history (build before Task 20)
+
+**Description:** Added 2026-07-27 — a real, previously-unnoticed gap in this plan, found by reading
+Section 6.4 of the primary source doc directly (`source-driven-development`) while scoping Task 20
+(Dashboard core stats): *"Order History (as a Customer): Distributors can also view their own
+product purchase history from their dashboard. Each purchase shows order ID, products, date,
+amount, PV generated, and delivery status."* No task anywhere in this plan built a self-service
+order-history page for either a regular customer or a distributor — `apps/orders/urls.py` has
+cart/checkout/confirmation routes only, nothing to list a user's own past orders. Section 6.3's
+Earnings History is already covered by Task 15's `earnings_history` page; this is the separate,
+still-missing product-purchase counterpart. User-confirmed 2026-07-27: build it now, before the
+dashboard (Task 20) that's meant to link to it.
+
+**Numbered 25, not 20, despite building first:** the first attempt at this inserted it as Task 20
+and renumbered Task 20→21 and Task 21→22 to make room — which silently collided with the real,
+already-code-referenced Task 22 (Admin Portal — KYC review, Phase 9) and would have cascaded into
+Task 23/24 too. Task 20/21 (Phase 8) and 22-24 (Phase 9's Admin Portal, Task 24 Deploy) are all
+real numbers with existing shipped-code references; none of them move. This task takes the next
+free integer instead and is simply sequenced earlier than its number suggests — a real limitation
+of pure sequential numbering once later phases have already claimed numbers, not a pattern to
+repeat carelessly next time either (check the *entire* plan's existing numbers before assuming an
+insertion point is free, not just the immediately-adjacent phase).
+
+A single view/template does double duty: `Order.customer` is a plain FK to `settings.
+AUTH_USER_MODEL` (not `Distributor`-specific), so `Order.objects.filter(customer=request.user)`
+already works identically for a regular customer or a distributor-as-customer — no new model, no
+role branching needed. `Order`/`OrderItem` (Task 17a) already snapshot every field Section 6.4
+asks for (`total`, `pv_earned`, `status`, `created_at`, `OrderItem.product_name`/`quantity`/
+`unit_price`) at order-creation time, so this is a read-only query + template page, not new
+data-model work.
+
+**Acceptance criteria:**
+- [ ] A logged-in user (customer or distributor) sees a paginated list of their own past orders:
+  order ID, product(s), date, amount, PV generated, delivery status
+- [ ] Never shows another user's orders (no id/param IDOR surface — always `request.user`, matching
+  `earnings_history`/`payout_settings`'s own established convention)
+- [ ] Each row links to the existing order-detail view (confirm exact URL name/reachability for a
+  self-service, non-admin viewer — `order_confirmation` is payment-reference-keyed and built for
+  the checkout flow, not a general history page; may need its own detail route or reuse of that
+  one's template)
+- [ ] Guest checkout orders (`customer=None`) are correctly excluded (nothing to list for an
+  anonymous shopper)
+
+**Verification:**
+- [ ] pytest test: a customer sees their own orders, not another customer's or a guest order
+- [ ] pytest test: a distributor sees their own orders (proves the shared-view, no-role-branching
+  design actually holds)
+- [ ] pytest test: pagination stable ordering (`-created_at`, `-pk` tie-breaker — Task 15d's own
+  pagination bug is the precedent not to repeat)
+- [ ] Manual check in a real browser: place a real order, confirm it appears correctly
+
+**Dependencies:** Task 17a (Order/OrderItem models), Task 18 (order status lifecycle, for the
+delivery-status values shown)
+
+**Files likely touched:** `apps/orders/views.py` (new view), `apps/orders/urls.py` (new route),
+`templates/orders/order_history.html` (new — customer-facing, extends `base_store.html`),
+`templates/distributors/*.html` (dashboard link, once Task 20 exists to link from),
+`tests/feature/orders/test_order_history.py`
+
+**Estimated scope:** S–M
+
+**Skills:**
+- *Before:* `source-driven-development` (already done — this task's own existence is the finding)
+- *During:* `test-driven-development`, `incremental-implementation`
+- *After:* `code-review-and-quality`, `security-and-hardening` (IDOR check is the main risk here)
+
+---
+
 ### Task 20: Dashboard core stats
 
 **Description:** Django view + HTMX dashboard showing wallet balance, total earnings, this week's
@@ -3401,7 +3469,8 @@ changes.
 - [ ] pytest test: dashboard view renders correct values from seeded data
 - [ ] Manual check: credit a commission via the Django shell while dashboard is open, confirm live update
 
-**Dependencies:** Task 15, Task 13
+**Dependencies:** Task 15, Task 13, Task 25 (dashboard links to My Orders — built first despite the
+higher number, see Task 25's own note)
 
 **Files likely touched:** `apps/distributors/views.py` (dashboard), `templates/distributors/dashboard.html`, `apps/distributors/consumers.py` (Channels), `tests/feature/distributors/test_dashboard.py`
 
