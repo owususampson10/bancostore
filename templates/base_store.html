@@ -42,8 +42,26 @@
 </div>
 <div class="flex items-center gap-4">
 <div class="hidden lg:flex items-center gap-4">
+{% if user.is_authenticated %}
+{# Task 25: the header previously had no logged-in state at all -- a #}
+{# logged-in customer saw the identical Log In/Become a Distributor #}
+{# buttons as a guest, with no way to reach My Orders or log out except #}
+{# by typing a URL directly. #}
+<a href="{% url 'orders:order_history' %}" class="px-6 py-2 rounded-full border border-primary text-primary text-sm font-semibold hover:bg-primary/10 transition-all active:scale-95">My Orders</a>
+{% comment %}
+Task 25 code review: allauth's LOGOUT_ON_GET defaults to False and this
+project never overrides it, so a plain <a href> to account_logout doesn't
+log anyone out -- it lands on allauth's own unstyled confirmation page
+instead. A POST form is the correct, CSRF-safe way to trigger it.
+{% endcomment %}
+<form method="post" action="{% url 'account_logout' %}" class="inline">
+{% csrf_token %}
+<button type="submit" class="px-6 py-2 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Log Out</button>
+</form>
+{% else %}
 <a href="{% url 'account_login' %}" class="px-6 py-2 rounded-full border border-primary text-primary text-sm font-semibold hover:bg-primary/10 transition-all active:scale-95">Log In</a>
 <a href="{% url 'distributors:register' %}" class="px-6 py-2 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Become a Distributor</a>
+{% endif %}
 <a href="{% url 'catalog:product_list' %}" class="material-symbols-outlined hover:text-primary transition-colors ml-2" title="Search products">search</a>
 </div>
 <a href="{% url 'orders:cart' %}" class="relative material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors" title="Cart" aria-label="Cart{% if cart_count %}, {{ cart_count }} item{{ cart_count|pluralize }}{% endif %}">
@@ -66,8 +84,16 @@ shopping_cart
 <a href="#" title="Coming soon" class="py-3 text-sm font-bold uppercase tracking-widest text-on-surface-variant hover:text-primary transition-colors">About</a>
 <a href="#" title="Coming soon" class="py-3 text-sm font-bold uppercase tracking-widest text-on-surface-variant hover:text-primary transition-colors">Contact</a>
 <div class="flex flex-col gap-3 mt-3 pt-4 border-t border-outline-variant">
+{% if user.is_authenticated %}
+<a href="{% url 'orders:order_history' %}" class="w-full text-center px-6 py-3 rounded-full border border-primary text-primary text-sm font-semibold hover:bg-primary/10 transition-all active:scale-95">My Orders</a>
+<form method="post" action="{% url 'account_logout' %}" class="w-full">
+{% csrf_token %}
+<button type="submit" class="w-full text-center px-6 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Log Out</button>
+</form>
+{% else %}
 <a href="{% url 'account_login' %}" class="w-full text-center px-6 py-3 rounded-full border border-primary text-primary text-sm font-semibold hover:bg-primary/10 transition-all active:scale-95">Log In</a>
 <a href="{% url 'distributors:register' %}" class="w-full text-center px-6 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Become a Distributor</a>
+{% endif %}
 </div>
 </div>
 </div>
