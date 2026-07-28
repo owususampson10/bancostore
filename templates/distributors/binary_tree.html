@@ -38,6 +38,8 @@
     startY: 0,
     startOffsetX: 0,
     startOffsetY: 0,
+    pinchStartDistance: 0,
+    pinchStartScale: 1,
     setScale(next) {
       this.scale = Math.min(this.maxScale, Math.max(this.minScale, Math.round(next * 100) / 100));
     },
@@ -49,6 +51,11 @@
       this.offsetX = 0;
       this.offsetY = 0;
     },
+    touchDistance(touches) {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    },
     startDrag(event) {
       if (!event.touches) {
         // preventDefault() stops the native text-selection drag, but it
@@ -59,6 +66,14 @@
         this.$el.focus();
       }
       this.dragging = true;
+      if (event.touches && event.touches.length === 2) {
+        // Two fingers down -- this is the start of a pinch, not a pan.
+        // touch-action: none disables the browser's own pinch handling,
+        // so this is the only place scale changes from a touch gesture.
+        this.pinchStartDistance = this.touchDistance(event.touches);
+        this.pinchStartScale = this.scale;
+        return;
+      }
       const point = event.touches ? event.touches[0] : event;
       this.startX = point.clientX;
       this.startY = point.clientY;
@@ -67,6 +82,11 @@
     },
     onDrag(event) {
       if (!this.dragging) return;
+      if (event.touches && event.touches.length === 2) {
+        const distance = this.touchDistance(event.touches);
+        this.setScale(this.pinchStartScale * (distance / this.pinchStartDistance));
+        return;
+      }
       const point = event.touches ? event.touches[0] : event;
       this.offsetX = this.startOffsetX + (point.clientX - this.startX);
       this.offsetY = this.startOffsetY + (point.clientY - this.startY);
