@@ -1,3 +1,4 @@
+from collections import deque
 from typing import NamedTuple
 
 from django.db import transaction
@@ -189,3 +190,116 @@ def get_ancestor_pv_aggregates(distributor):
         )
         for row in rows
     ]
+
+
+class DownlineNode(NamedTuple):
+    distributor_id: int
+    full_name: str
+    ir_id: str
+    rank: str
+    pv: int
+    leg: str
+    children: list
+
+
+def get_downline_tree(distributor):
+    """Task 21a: `distributor`'s entire downline as a nested tree (name, IR
+    ID, rank, PV per node), for the dashboard's visual binary tree view.
+
+    Exactly three queries regardless of downline size or depth -- never a
+    recursive walk (SPEC.md Scale Architecture):
+
+    1. `distributor`'s own left/right leg PV (it has no incoming
+       BinaryTreeEdge as its own ancestor, so it can't be picked up by the
+       descendant query below).
+    2. Every descendant with the data a node needs to render, in one
+       `.values()` LEFT OUTER JOIN (same "row['x__pv_ledger__y'] or 0"
+       pattern as get_ancestor_pv_aggregates above, for the same reason:
+       attribute access would raise PvLedger.DoesNotExist for any
+       descendant who hasn't purchased anything yet).
+    3. Every *direct* (depth=1) parent-child edge among `distributor`
+       itself plus all of its descendants -- this reconstructs the whole
+       subtree's adjacency in one shot, since a depth=1 edge is exactly a
+       direct parent-child pair, at any level of the tree, not just
+       `distributor`'s own direct children.
+
+    The tree itself is then assembled in memory (O(n) in Python, not the
+    database) from those three already-fetched result sets.
+    """
+    descendant_rows = list(
+        BinaryTreeEdge.objects.filter(ancestor=distributor).values(
+            "descendant_id",
+            "descendant__full_name",
+            "descendant__ir_id",
+            "descendant__rank",
+            "descendant__pv_ledger__left_leg_pv",
+            "descendant__pv_ledger__right_leg_pv",
+        )
+    )
+
+    root_pv = (
+        Distributor.objects.filter(pk=distributor.pk)
+        .values("pv_ledger__left_leg_pv", "pv_ledger__right_leg_pv")
+        .first()
+    )
+
+    node_data = {
+        distributor.pk: {
+            "full_name": distributor.full_name,
+            "ir_id": distributor.ir_id or "",
+            "rank": distributor.rank,
+            "pv": (root_pv["pv_ledger__left_leg_pv"] or 0)
+            + (root_pv["pv_ledger__right_leg_pv"] or 0),
+        }
+    }
+    for row in descendant_rows:
+        node_data[row["descendant_id"]] = {
+            "full_name": row["descendant__full_name"],
+            "ir_id": row["descendant__ir_id"] or "",
+            "rank": row["descendant__rank"],
+            "pv": (row["descendant__pv_ledger__left_leg_pv"] or 0)
+            + (row["descendant__pv_ledger__right_leg_pv"] or 0),
+        }
+
+    descendant_ids = list(node_data.keys())
+    direct_edges = BinaryTreeEdge.objects.filter(
+        ancestor_id__in=descendant_ids, depth=1
+    ).values("ancestor_id", "descendant_id", "leg")
+
+    children_by_parent: dict = {}
+    for edge in direct_edges:
+        children_by_parent.setdefault(edge["ancestor_id"], []).append(edge)
+
+    # Iterative, not recursive (CodeRabbit finding on PR #44): a pathologically
+    # deep single-line downline (every distributor sponsoring exactly one
+    # next distributor, never spilling over) could in principle exceed
+    # Python's default recursion limit. A BFS visit order guarantees every
+    # node appears before its own children (they're exactly one level
+    # deeper), so building DownlineNode tuples in *reverse* visit order
+    # guarantees each node's children are already built by the time it's
+    # its own turn -- without ever recursing.
+    visit_order = []
+    queue = deque([(distributor.pk, "")])
+    while queue:
+        node_id, leg = queue.popleft()
+        visit_order.append((node_id, leg))
+        for edge in sorted(children_by_parent.get(node_id, []), key=lambda e: e["leg"]):
+            queue.append((edge["descendant_id"], edge["leg"]))
+
+    built: dict = {}
+    for node_id, leg in reversed(visit_order):
+        data = node_data[node_id]
+        child_edges = sorted(
+            children_by_parent.get(node_id, []), key=lambda e: e["leg"]
+        )
+        built[node_id] = DownlineNode(
+            distributor_id=node_id,
+            full_name=data["full_name"],
+            ir_id=data["ir_id"],
+            rank=data["rank"],
+            pv=data["pv"],
+            leg=leg,
+            children=[built[edge["descendant_id"]] for edge in child_edges],
+        )
+
+    return built[distributor.pk]
