@@ -237,9 +237,11 @@ def get_downline_tree(distributor):
         )
     )
 
-    root_pv = Distributor.objects.filter(pk=distributor.pk).values(
-        "pv_ledger__left_leg_pv", "pv_ledger__right_leg_pv"
-    ).first()
+    root_pv = (
+        Distributor.objects.filter(pk=distributor.pk)
+        .values("pv_ledger__left_leg_pv", "pv_ledger__right_leg_pv")
+        .first()
+    )
 
     node_data = {
         distributor.pk: {

@@ -26,7 +26,9 @@ def _make_distributor(name, **overrides):
 
 @pytest.mark.django_db
 def test_a_distributor_with_no_downline_returns_just_themselves_with_no_children():
-    root = _make_distributor("root1", full_name="Root One", ir_id="IR00001", rank="bronze")
+    root = _make_distributor(
+        "root1", full_name="Root One", ir_id="IR00001", rank="bronze"
+    )
 
     tree = get_downline_tree(root)
 
@@ -40,7 +42,9 @@ def test_a_distributor_with_no_downline_returns_just_themselves_with_no_children
 
 @pytest.mark.django_db
 def test_direct_children_appear_with_correct_leg_and_data():
-    root = _make_distributor("root2", full_name="Root Two", ir_id="IR00002", rank="silver")
+    root = _make_distributor(
+        "root2", full_name="Root Two", ir_id="IR00002", rank="silver"
+    )
     left_child = _make_distributor(
         "left2", full_name="Left Child", ir_id="IR00003", rank="bronze"
     )
@@ -115,7 +119,9 @@ def test_query_count_does_not_grow_with_downline_size():
     current_leg = BinaryTreeEdge.Leg.LEFT
     parent = root2
     for i in range(20):
-        node = _make_distributor(f"chain{i}", full_name=f"Chain {i}", ir_id=f"IR{20000+i}")
+        node = _make_distributor(
+            f"chain{i}", full_name=f"Chain {i}", ir_id=f"IR{20000+i}"
+        )
         BinaryTree.place_distributor(parent, node, leg=current_leg)
         parent = node
 
