@@ -17,9 +17,95 @@
 {# just duplicate Task 20b's existing Copy Link/WhatsApp share card on   #}
 {# the main dashboard, so this links back there instead of rebuilding    #}
 {# the same UI a second time.                                            #}
-<div class="mb-8">
+{# Follow-up: the fetched design's tree area is a draggable/zoomable      #}
+{# canvas (drag to pan in any direction, a "Zoom In" button, scroll/pinch #}
+{# to zoom out, and a "Recenter" button resetting both) -- initially      #}
+{# built as a plain overflow-x-auto box, missing that whole interaction.  #}
+{# Added here with a small inline Alpine.js component (translate+scale    #}
+{# transform), matching this project's existing inline-x-data convention  #}
+{# (e.g. base_dashboard.html's sidebar collapse) instead of a new pan/zoom #}
+{# JS dependency -- CLAUDE.md's Boundaries require asking first before    #}
+{# adding one, and this is a small, well-understood amount of vanilla JS. #}
+<div
+  x-data="{
+    scale: 1,
+    minScale: 0.5,
+    maxScale: 2,
+    offsetX: 0,
+    offsetY: 0,
+    dragging: false,
+    startX: 0,
+    startY: 0,
+    startOffsetX: 0,
+    startOffsetY: 0,
+    setScale(next) {
+      this.scale = Math.min(this.maxScale, Math.max(this.minScale, Math.round(next * 100) / 100));
+    },
+    zoomIn() {
+      this.setScale(this.scale + 0.2);
+    },
+    recenter() {
+      this.scale = 1;
+      this.offsetX = 0;
+      this.offsetY = 0;
+    },
+    startDrag(event) {
+      if (!event.touches) {
+        // preventDefault() stops the native text-selection drag, but it
+        // also suppresses the browser's own implicit focus-on-click --
+        // restore that explicitly so the canvas stays keyboard-operable
+        // after a mouse drag.
+        event.preventDefault();
+        this.$el.focus();
+      }
+      this.dragging = true;
+      const point = event.touches ? event.touches[0] : event;
+      this.startX = point.clientX;
+      this.startY = point.clientY;
+      this.startOffsetX = this.offsetX;
+      this.startOffsetY = this.offsetY;
+    },
+    onDrag(event) {
+      if (!this.dragging) return;
+      const point = event.touches ? event.touches[0] : event;
+      this.offsetX = this.startOffsetX + (point.clientX - this.startX);
+      this.offsetY = this.startOffsetY + (point.clientY - this.startY);
+    },
+    stopDrag() {
+      this.dragging = false;
+    },
+    onWheel(event) {
+      this.setScale(this.scale + (event.deltaY < 0 ? 0.1 : -0.1));
+    },
+    onKeydown(event) {
+      const panStep = 40;
+      if (event.key === 'ArrowLeft') { this.offsetX += panStep; event.preventDefault(); }
+      else if (event.key === 'ArrowRight') { this.offsetX -= panStep; event.preventDefault(); }
+      else if (event.key === 'ArrowUp') { this.offsetY += panStep; event.preventDefault(); }
+      else if (event.key === 'ArrowDown') { this.offsetY -= panStep; event.preventDefault(); }
+      else if (event.key === '+' || event.key === '=') { this.setScale(this.scale + 0.2); event.preventDefault(); }
+      else if (event.key === '-' || event.key === '_') { this.setScale(this.scale - 0.2); event.preventDefault(); }
+      else if (event.key === '0') { this.recenter(); event.preventDefault(); }
+    },
+  }"
+>
+<div class="mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+<div>
 <h2 class="font-headline-lg text-headline-lg text-on-surface mb-1">Binary Tree</h2>
 <p class="font-body-md text-body-md text-gray-muted">Visualize your distributor network and see where your team is growing.</p>
+</div>
+{% if tree.children %}
+<div class="flex gap-3">
+<button type="button" @click="zoomIn()" class="flex items-center gap-2 px-4 py-2 border border-outline-variant rounded-lg font-button text-sm text-on-surface hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined !text-lg" aria-hidden="true">zoom_in</span>
+Zoom In
+</button>
+<button type="button" @click="recenter()" class="flex items-center gap-2 px-4 py-2 border border-outline-variant rounded-lg font-button text-sm text-on-surface hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined !text-lg" aria-hidden="true">center_focus_strong</span>
+Recenter
+</button>
+</div>
+{% endif %}
 </div>
 
 {% if tree.children %}
@@ -36,12 +122,32 @@
 
 <p class="sm:hidden text-xs text-gray-muted text-center mb-2 flex items-center justify-center gap-1">
 <span class="material-symbols-outlined !text-sm" aria-hidden="true">swipe</span>
-Swipe to explore your network
+Drag to explore your network, pinch to zoom
 </p>
-<div class="bg-surface-container-low rounded-xl border border-outline-variant p-6 sm:p-8 overflow-x-auto">
+<div
+  class="tree-canvas bg-surface-container-low rounded-xl border border-outline-variant h-[500px] md:h-[600px] flex justify-center"
+  :class="{ 'cursor-grabbing': dragging, 'cursor-grab': !dragging }"
+  tabindex="0"
+  role="group"
+  aria-label="Binary tree diagram. Drag to pan, scroll or pinch to zoom, use the Zoom In and Recenter buttons above, or arrow keys, plus/minus, and 0 to navigate with the keyboard."
+  @mousedown="startDrag($event)"
+  @mousemove.window="onDrag($event)"
+  @mouseup.window="stopDrag()"
+  @touchstart="startDrag($event)"
+  @touchmove.prevent="onDrag($event)"
+  @touchend="stopDrag()"
+  @wheel.prevent="onWheel($event)"
+  @keydown="onKeydown($event)"
+>
+<div
+  class="tree-canvas-inner p-6 sm:p-8"
+  :class="{ 'transition-transform duration-150 ease-out': !dragging }"
+  :style="`transform: translate(${offsetX}px, ${offsetY}px) scale(${scale});`"
+>
 <ul class="tree-diagram">
 {% include "distributors/_binary_tree_node.html" with node=tree %}
 </ul>
+</div>
 </div>
 {% else %}
 <div class="bg-surface-container-low rounded-xl border border-outline-variant p-12 text-center max-w-lg mx-auto">
@@ -54,4 +160,5 @@ Share Your Referral Link
 </a>
 </div>
 {% endif %}
+</div>
 {% endblock %}

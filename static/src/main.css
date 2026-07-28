@@ -250,3 +250,21 @@
 .tree-diagram > li::after {
   display: none;
 }
+
+/* Task 21a follow-up: draggable/zoomable canvas wrapping the tree diagram,
+   matching the fetched Stitch design. touch-action: none hands touch
+   gestures entirely to the Alpine drag/zoom handlers instead of the
+   browser's native scroll/pinch-zoom, which would otherwise fight them. */
+.tree-canvas {
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tree-canvas:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.tree-canvas-inner {
+  transform-origin: top center;
+}
