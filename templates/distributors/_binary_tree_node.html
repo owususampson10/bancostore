@@ -1,0 +1,26 @@
+{# Task 21a: recursive partial rendering one tree node + its children.    #}
+{# Built from the fetched "Binary Tree - Bancostore" Stitch screens,      #}
+{# reconciled against this app's real design tokens and rank-badge       #}
+{# convention (dashboard.html's silver/bronze/unranked pill markup),     #}
+{# not the mockup's own fabricated ID format or stat chrome.             #}
+<li>
+<div class="inline-flex flex-col items-center gap-1.5 px-4 py-3 bg-white border border-outline-variant rounded-xl min-w-[150px] shadow-sm">
+<span class="font-bold text-on-surface text-sm text-center">{{ node.full_name|default:"No name yet" }}</span>
+<span class="text-xs text-gray-muted font-mono-sm">{{ node.ir_id|default:"No IR ID yet" }}</span>
+{% if node.rank == "silver" %}
+<span class="px-2.5 py-0.5 bg-[#6b4fa3] text-white text-[10px] font-bold tracking-widest uppercase rounded-full">{{ node.rank|title }}</span>
+{% elif node.rank == "bronze" %}
+<span class="px-2.5 py-0.5 bg-[#8a5a2e] text-white text-[10px] font-bold tracking-widest uppercase rounded-full">{{ node.rank|title }}</span>
+{% else %}
+<span class="px-2.5 py-0.5 bg-surface-container text-gray-muted text-[10px] font-bold tracking-widest uppercase rounded-full">Unranked</span>
+{% endif %}
+<span class="text-xs text-primary font-bold">{{ node.pv }} PV</span>
+</div>
+{% if node.children %}
+<ul>
+{% for child in node.children %}
+{% include "distributors/_binary_tree_node.html" with node=child %}
+{% endfor %}
+</ul>
+{% endif %}
+</li>

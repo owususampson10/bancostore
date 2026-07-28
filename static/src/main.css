@@ -195,3 +195,58 @@
     animation: float 5s ease-in-out infinite 1s;
   }
 }
+
+/* Task 21a: binary tree connector lines. A standard pure-CSS nested-list
+   tree technique (each node's parent-line drawn via ::before/::after on
+   the <li>) so connecting lines work at any depth automatically, with no
+   JS or SVG needed. */
+.tree-diagram,
+.tree-diagram ul {
+  display: flex;
+  justify-content: center;
+  position: relative;
+}
+.tree-diagram ul {
+  padding-top: 20px;
+}
+.tree-diagram li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  list-style: none;
+  position: relative;
+  padding: 20px 10px 0 10px;
+}
+/* Vertical line from a node down to its children's horizontal connector. */
+.tree-diagram li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  border-left: 1px solid var(--color-outline-variant);
+  width: 0;
+  height: 20px;
+}
+.tree-diagram > li::before {
+  display: none;
+}
+/* Horizontal connector joining a row of siblings. */
+.tree-diagram li::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--color-outline-variant);
+  height: 0;
+}
+.tree-diagram li:first-child::after {
+  left: 50%;
+}
+.tree-diagram li:last-child::after {
+  right: 50%;
+}
+.tree-diagram li:only-child::after,
+.tree-diagram > li::after {
+  display: none;
+}

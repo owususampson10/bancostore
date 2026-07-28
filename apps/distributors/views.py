@@ -26,6 +26,7 @@ from django_ratelimit.decorators import ratelimit
 
 from apps.accounts.permissions import is_distributor
 from apps.binary_tree.models import BinaryTreeEdge
+from apps.binary_tree.services import get_downline_tree
 from apps.distributors.cooling_off_services import (
     CoolingOffPeriodExpired,
     NoRefundableStarterPackPurchase,
@@ -845,6 +846,49 @@ def earnings_history(request):
             "total_withdrawn": total_withdrawn,
             "last_withdrawal_at": last_withdrawal_at,
             "active_nav": "earnings_history",
+        },
+    )
+
+
+@login_required(login_url="distributors:login")
+@_redirect_if_cooling_off_cancelled
+def binary_tree_view(request):
+    """Task 21a: a distributor's own downline as a visual tree (Section 6.2
+    of the primary source doc). Always scoped to request.user.distributor --
+    no distributor id is ever accepted from the URL or query params, so
+    there is no IDOR surface to guard against, same as earnings_history.
+
+    Same three-account-types gap earnings_history/dashboard already guard
+    against: is_distributor() first, since @login_required alone doesn't
+    distinguish a customer account from a distributor.
+
+    The tree itself is built by apps.binary_tree.services.get_downline_tree,
+    which is exactly three queries regardless of downline size or depth --
+    never a recursive walk (SPEC.md Scale Architecture)."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+
+    distributor = request.user.distributor
+    tree = get_downline_tree(distributor)
+
+    def _count_subtree(node):
+        return 1 + sum(_count_subtree(child) for child in node.children)
+
+    left_root = next(
+        (c for c in tree.children if c.leg == BinaryTreeEdge.Leg.LEFT), None
+    )
+    right_root = next(
+        (c for c in tree.children if c.leg == BinaryTreeEdge.Leg.RIGHT), None
+    )
+
+    return render(
+        request,
+        "distributors/binary_tree.html",
+        {
+            "tree": tree,
+            "left_team_count": _count_subtree(left_root) if left_root else 0,
+            "right_team_count": _count_subtree(right_root) if right_root else 0,
+            "active_nav": "binary_tree",
         },
     )
 

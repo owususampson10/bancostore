@@ -1,0 +1,57 @@
+{% extends "distributors/base_dashboard.html" %}
+{% block title %}Bancostore | Binary Tree{% endblock %}
+{% block content %}
+{# Task 21a: built from the fetched "Binary Tree - Bancostore" Stitch     #}
+{# screens (Populated, Empty State, Mobile, Mobile Empty State),          #}
+{# reconciled against this app's real scope. Dropped, all deliberately:   #}
+{# the mockups' fabricated ID format (real IR IDs used instead), stat     #}
+{# cards duplicating what the main dashboard already shows plus a        #}
+{# "Next Rank Goal: Diamond Executive" tier that doesn't exist in this    #}
+{# platform's real Bronze/Silver rank system, "VACANT"/"ADD NEW" slots    #}
+{# implying recruitment happens by clicking an empty tree slot (it       #}
+{# doesn't -- only via the referral link), the mobile bottom tab bar     #}
+{# (already rejected once before in Task 20c for the same reason: no     #}
+{# real routes behind most of those destinations), and avatar photos     #}
+{# (no photo-upload feature exists anywhere in this app). The empty      #}
+{# state's own "Share Referral Link" button was dropped too -- it would  #}
+{# just duplicate Task 20b's existing Copy Link/WhatsApp share card on   #}
+{# the main dashboard, so this links back there instead of rebuilding    #}
+{# the same UI a second time.                                            #}
+<div class="mb-8">
+<h2 class="font-headline-lg text-headline-lg text-on-surface mb-1">Binary Tree</h2>
+<p class="font-body-md text-body-md text-gray-muted">Visualize your distributor network and see where your team is growing.</p>
+</div>
+
+{% if tree.children %}
+<div class="grid grid-cols-2 gap-4 mb-6 max-w-sm">
+<div class="bg-surface-container-low border border-outline-variant rounded-xl p-4 text-center">
+<span class="text-xs font-bold uppercase tracking-widest text-gray-muted">Left Team</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mt-1">{{ left_team_count }}</h3>
+</div>
+<div class="bg-surface-container-low border border-outline-variant rounded-xl p-4 text-center">
+<span class="text-xs font-bold uppercase tracking-widest text-gray-muted">Right Team</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mt-1">{{ right_team_count }}</h3>
+</div>
+</div>
+
+<p class="sm:hidden text-xs text-gray-muted text-center mb-2 flex items-center justify-center gap-1">
+<span class="material-symbols-outlined !text-sm" aria-hidden="true">swipe</span>
+Swipe to explore your network
+</p>
+<div class="bg-surface-container-low rounded-xl border border-outline-variant p-6 sm:p-8 overflow-x-auto">
+<ul class="tree-diagram">
+{% include "distributors/_binary_tree_node.html" with node=tree %}
+</ul>
+</div>
+{% else %}
+<div class="bg-surface-container-low rounded-xl border border-outline-variant p-12 text-center max-w-lg mx-auto">
+<span class="material-symbols-outlined text-[48px] text-gray-muted" aria-hidden="true">account_tree</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mt-4 mb-2">Your team starts here</h3>
+<p class="font-body-md text-body-md text-gray-muted mb-6">No one has joined your team yet. Share your referral link to bring in your first left and right leg members.</p>
+<a href="{% url 'distributors:dashboard' %}" class="inline-flex items-center gap-2 px-6 py-3 bg-primary text-on-primary rounded-lg font-button hover:opacity-90 transition-all active:scale-95">
+<span class="material-symbols-outlined !text-lg" aria-hidden="true">share</span>
+Share Your Referral Link
+</a>
+</div>
+{% endif %}
+{% endblock %}

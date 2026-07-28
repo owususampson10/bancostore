@@ -47,6 +47,7 @@ urlpatterns = [
     path("password/reset-success/", views.reset_success, name="reset_success"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("earnings-history/", views.earnings_history, name="earnings_history"),
+    path("binary-tree/", views.binary_tree_view, name="binary_tree"),
     path("payout-settings/", views.payout_settings, name="payout_settings"),
     path("withdraw/", views.withdrawal_request, name="withdrawal_request"),
     path("withdrawals/", views.withdrawal_history, name="withdrawal_history"),
