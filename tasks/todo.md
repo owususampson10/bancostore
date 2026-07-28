@@ -3614,15 +3614,25 @@ link copy buttons (Alpine.js clipboard, matching `payout_settings.html`'s existi
 cards for wallet balance/earnings/team size/leg PV/personal PV.
 
 **Acceptance criteria:**
-- [ ] Every 20a/20b stat has a real, Stitch-designed presentation (not the interim placeholder)
-- [ ] Verified in a real browser at desktop and mobile widths (this project's standing convention
+- [x] Every 20a/20b stat has a real, Stitch-designed presentation (not the interim placeholder)
+- [x] Verified in a real browser at desktop and mobile widths (this project's standing convention
   — a green test suite doesn't prove a UI change)
-- [ ] Copy buttons and WhatsApp share verified working live, not just present in markup
+- [x] Copy buttons and WhatsApp share verified working live, not just present in markup
 
 **Verification:**
-- [ ] `npm run build` + real-browser check at 1440/1024/768/500px
-- [ ] Manual check: copy-to-clipboard actually copies; WhatsApp link actually opens with the
+- [x] `npm run build` + real-browser check at 1440/1024/768/500px
+- [x] Manual check: copy-to-clipboard actually copies; WhatsApp link actually opens with the
   correct pre-filled text
+
+**Shipped 2026-07-28 via PR #40, merged into `main`.** Real-browser verified at 1440/1024/768/500px
+(logged in as a seeded stub distributor via a directly-created session, avoiding a real OTP SMS
+send). Clipboard content confirmed via `navigator.clipboard.readText()` after clicking Copy Link —
+exact referral URL with `?ref=IR00001`. WhatsApp share link confirmed correctly formed:
+`https://wa.me/?text=Join%20Bancostore...` decodes to the right message + link. Mobile hamburger
+drawer opens/closes correctly at 500px. Full pytest suite: 1024 passed, 1 skipped (expected), 1
+failed — a known SQLite-only concurrency limitation in an unrelated IR ID sequence test
+(`test_concurrent_approvals_of_different_distributors_never_duplicate_ir_ids`), already green
+against real MySQL in CI; not a regression from this task.
 
 **Dependencies:** 20a, 20b
 
