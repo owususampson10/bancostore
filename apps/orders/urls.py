@@ -20,4 +20,6 @@ urlpatterns = [
         views.order_payment_callback,
         name="order_payment_callback",
     ),
+    path("my-orders/", views.order_history, name="order_history"),
+    path("my-orders/<int:pk>/", views.order_detail, name="order_detail"),
 ]

@@ -1,6 +1,6 @@
 {% extends "base_store.html" %}
 {% load humanize %}
-{% block title %}Bancostore | {% if order.status == "confirmed" %}Order Confirmed{% elif order.status == "cancelled" %}Order Unavailable{% else %}Order Placed{% endif %}{% endblock %}
+{% block title %}Bancostore | {% if order.status == "confirmed" %}Order Confirmed{% elif order.status == "cancelled" %}Order Cancelled{% elif order.status == "processing" %}Order Processing{% elif order.status == "dispatched" %}Order Dispatched{% elif order.status == "delivered" %}Order Delivered{% elif order.status == "refunded" %}Order Refunded{% else %}Order Placed{% endif %}{% endblock %}
 {% block content %}
 <div class="max-w-[720px] mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-24 text-center">
 
@@ -29,11 +29,22 @@ something the backend cannot yet do.
 <p class="text-secondary mb-8 max-w-md mx-auto">Thank you for your purchase. We've received your order and it's being prepared.</p>
 
 {% elif order.status == "cancelled" %}
+{% comment %}
+Task 25 code review: this copy originally assumed the ONLY way an order
+reaches "cancelled" is Task 17d's own insufficient-stock auto-cancel
+(_cancel_order_for_insufficient_stock). That was true when this page was
+reachable only via the one-time post-checkout redirect. Task 18b's
+cancel_or_refund_order lets an admin cancel an order for any reason, and
+order_detail now makes every order permanently reachable regardless of
+cause -- asserting "an item became unavailable" on an order actually
+cancelled for, say, a customer request would be misinformation. Kept
+deliberately cause-agnostic instead.
+{% endcomment %}
 <div class="w-20 h-20 rounded-full bg-surface-container flex items-center justify-center mx-auto mb-6">
 <span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true">inventory_2</span>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Item No Longer Available</h1>
-<p class="text-secondary mb-8 max-w-md mx-auto">Your payment was received, but an item in your order became unavailable before we could process it. Our team will contact you about a refund.</p>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Cancelled</h1>
+<p class="text-secondary mb-8 max-w-md mx-auto">This order was cancelled. If you were charged, our team will process any applicable refund.</p>
 
 {% elif order.status == "pending" %}
 <div class="w-20 h-20 rounded-full bg-surface-container flex items-center justify-center mx-auto mb-6">
@@ -42,14 +53,39 @@ something the backend cannot yet do.
 <h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Awaiting Payment Confirmation</h1>
 <p class="text-secondary mb-8 max-w-md mx-auto">We haven't received confirmation of your payment yet. If you just completed payment on Paystack, refresh this page in a moment.</p>
 
+{% elif order.status == "processing" %}
+<div class="w-20 h-20 rounded-full bg-primary-fixed flex items-center justify-center mx-auto mb-6">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true">inventory_2</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Processing</h1>
+<p class="text-secondary mb-8 max-w-md mx-auto">We're preparing your order for dispatch.</p>
+
+{% elif order.status == "dispatched" %}
+<div class="w-20 h-20 rounded-full bg-primary-fixed flex items-center justify-center mx-auto mb-6">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true">local_shipping</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Dispatched</h1>
+<p class="text-secondary mb-8 max-w-md mx-auto">Your order is on its way to you.</p>
+
+{% elif order.status == "delivered" %}
+<div class="w-20 h-20 rounded-full bg-primary-fixed flex items-center justify-center mx-auto mb-6">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Delivered</h1>
+<p class="text-secondary mb-8 max-w-md mx-auto">Your order has been delivered. We hope you enjoy it!</p>
+
+{% elif order.status == "refunded" %}
+<div class="w-20 h-20 rounded-full bg-surface-container flex items-center justify-center mx-auto mb-6">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true">currency_exchange</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Refunded</h1>
+<p class="text-secondary mb-8 max-w-md mx-auto">This order has been refunded. Contact support if you have any questions.</p>
+
 {% else %}
 {% comment %}
-CodeRabbit (PR #27): Order.Status also has processing/dispatched/
-delivered/refunded (Task 18's scope) -- this page is reachable by
-reference at any time, so lumping every non-pending, non-cancelled
-status into the "Awaiting Payment Confirmation" copy would have told a
-customer whose order was already dispatched that their payment isn't
-confirmed yet. Neutral fallback for any status past confirmation.
+Defensive fallback only -- every Order.Status value (apps/orders/models.py)
+has its own branch above. Reachable only if that enum ever grows a new
+value this template hasn't been updated for.
 {% endcomment %}
 <div class="w-20 h-20 rounded-full bg-primary-fixed flex items-center justify-center mx-auto mb-6">
 <span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true">receipt_long</span>
@@ -69,7 +105,15 @@ confirmed yet. Neutral fallback for any status past confirmation.
 </div>
 </div>
 
-{% if order.status == "confirmed" %}
+{% if order.status != "pending" %}
+{% comment %}
+Task 25: broadened from `== "confirmed"` -- this template is now also
+reused by order_detail (a permanent, all-statuses history page), and the
+original condition meant a processing/dispatched/delivered/refunded
+order (where an order spends most of its life) showed no items and no
+delivery info at all, just the bare "Order Placed" header above. Only
+"pending" (no confirmed payment yet, nothing to show) is excluded.
+{% endcomment %}
 <div class="grid grid-cols-1 md:grid-cols-12 gap-6 text-left mb-8">
 <div class="md:col-span-7 bg-surface-container-low border border-outline-variant rounded-lg p-6">
 <h3 class="text-xs font-bold uppercase tracking-widest text-secondary mb-4">Order Summary</h3>

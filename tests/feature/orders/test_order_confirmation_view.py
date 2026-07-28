@@ -65,9 +65,15 @@ def test_confirmed_order_shows_the_confirmed_state(client):
 
 
 @pytest.mark.django_db
-def test_cancelled_order_shows_the_unavailable_state_with_no_fake_refund_promise(
+def test_cancelled_order_shows_a_cause_agnostic_state_with_no_fake_refund_promise(
     client,
 ):
+    """Task 25 code review: the original copy assumed cancellation could
+    only mean Task 17d's own insufficient-stock auto-cancel ("an item
+    became unavailable"), which stopped being true once Task 18b's
+    cancel_or_refund_order let an admin cancel an order for any reason --
+    asserting a specific cause the code can't actually know would be
+    misinformation on the customer's own order page."""
     order = _make_order(status=Order.Status.CANCELLED)
 
     response = client.get(
@@ -75,7 +81,8 @@ def test_cancelled_order_shows_the_unavailable_state_with_no_fake_refund_promise
     )
 
     content = response.content.decode()
-    assert "Item No Longer Available" in content
+    assert "Order Cancelled" in content
+    assert "item in your order became unavailable" not in content
     assert "Order Confirmed" not in content
     # The Stitch mockup this was built from claimed an automated refund
     # ("typically processed within 3-5 business days") and a fake

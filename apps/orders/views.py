@@ -1,6 +1,8 @@
 import logging
 from decimal import Decimal
 
+from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
@@ -244,3 +246,74 @@ def order_payment_callback(request):
     if order.status == Order.Status.CONFIRMED:
         Cart(request).clear()
     return redirect("orders:order_confirmation", reference)
+
+
+@login_required(login_url="account_login")
+def order_history(request):
+    """Task 25: a logged-in user's own paginated purchase history --
+    identically reachable for a regular customer or a distributor-as-
+    customer, since Order.customer is a plain FK to settings.
+    AUTH_USER_MODEL, not Distributor-specific. No id/param IDOR surface:
+    always scoped to request.user, matching apps.distributors.views.
+    earnings_history/payout_settings's own established convention.
+
+    `customer=request.user` alone is sufficient to exclude guest-checkout
+    orders (`customer=NULL`) -- SQL equality can never match NULL, so an
+    additional `.exclude(customer__isnull=True)` would be dead code that
+    only creates a false impression of a second defense layer (doubt-
+    driven-development finding, pre-implementation review).
+
+    `-created_at, -pk` ordering mirrors Task 15d's own pagination-
+    stability fix (a timestamp collision with no tie-breaker could skip/
+    duplicate a row across a page boundary). `get_page()`, not `.page()`
+    -- clamps an invalid/out-of-range `?page=` value instead of raising,
+    matching apps.distributors.views.earnings_history/withdrawal_history's
+    own convention exactly.
+
+    Prefetches `items__product__images` for the same reason
+    order_confirmation_view already documents: Product.primary_image
+    requires it to avoid a query per item, and without prefetching
+    `items__product` too, `item.product` itself would be a query per
+    item."""
+    orders = (
+        Order.objects.filter(customer=request.user)
+        .prefetch_related("items__product__images")
+        .order_by("-created_at", "-pk")
+    )
+    paginator = Paginator(orders, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    # Elided range (CodeRabbit): page_obj.paginator.page_range alone renders
+    # every page number with no truncation -- fine at today's order volumes,
+    # but unbounded for a customer with dozens of pages of history.
+    page_range = paginator.get_elided_page_range(page_obj.number)
+    return render(
+        request,
+        "orders/order_history.html",
+        {"page_obj": page_obj, "page_range": page_range},
+    )
+
+
+@login_required(login_url="account_login")
+def order_detail(request, pk):
+    """Task 25: a NEW, ownership-scoped detail view -- deliberately not a
+    reuse of order_confirmation_view. That view's "no ownership check,
+    unguessable payment_reference token" design is safe only because
+    it's reachable solely via a one-time post-checkout redirect, never
+    rendered as a durable, revisitable link. Embedding that same token
+    into every row of this permanent, bookmarkable history page would
+    silently make the token the sole, forever-standing protection for a
+    customer's name/phone/address -- a materially different threat model
+    nobody actually decided to accept (doubt-driven-development finding,
+    pre-implementation review). `pk=pk, customer=request.user` is IDOR-
+    safe by construction and also correctly 404s a guest order's pk
+    (customer=NULL can never match request.user).
+
+    Reuses order_created.html -- already proven to never render
+    Order.tracking_note (admin-only free text) or any other field this
+    self-service page shouldn't show."""
+    order = get_object_or_404(
+        Order.objects.prefetch_related("items__product__images"),
+        pk=pk,
+        customer=request.user,
+    )
+    return render(request, "orders/order_created.html", {"order": order})

@@ -1,0 +1,133 @@
+{% extends "base_store.html" %}
+{% load humanize %}
+{% block title %}Bancostore | My Orders{% endblock %}
+{% block content %}
+
+{% comment %}
+Task 25: built from the fetched Stitch screens ("My Orders - Bancostore" /
+"(Mobile)"), reconciled against this project's real header/footer
+(base_store.html) and design tokens rather than the mockups' own
+standalone ones (dropped: their fabricated nav links, footer, and
+numbered-pagination JS toggle demo). One responsive template, not
+separate mobile/desktop templates -- the two mockups' card layouts were
+merged with Tailwind breakpoints, matching this codebase's own
+established convention (cart.html/checkout.html/order_created.html all
+do this). Status pill color classes below map 1:1 to Order.Status's own
+choices -- the mockups happened to already define CSS for all 7 values.
+{% endcomment %}
+
+<style>
+.status-pending { background-color: #fef3c7; color: #92400e; }
+.status-confirmed { background-color: #dbeafe; color: #1e40af; }
+.status-processing { background-color: #f3e8ff; color: #6b21a8; }
+.status-dispatched { background-color: #ffedd5; color: #9a3412; }
+.status-delivered { background-color: #dcfce7; color: #166534; }
+.status-cancelled { background-color: #fee2e2; color: #991b1b; }
+.status-refunded { background-color: #f3f4f6; color: #374151; }
+</style>
+
+<div class="min-h-screen bg-[#f9f9f9] py-8 md:py-12 px-margin-mobile md:px-margin-desktop">
+<div class="max-w-4xl mx-auto">
+<div class="mb-6 md:mb-8">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-1">My Orders</h1>
+<p class="font-body-md text-body-md text-gray-muted">Track and manage your recent purchases.</p>
+</div>
+
+{% if page_obj.object_list %}
+<div class="space-y-4">
+{% for order in page_obj.object_list %}
+<a href="{% url 'orders:order_detail' order.pk %}" class="block bg-white border border-outline-variant rounded-xl p-4 md:p-6 transition-colors hover:border-primary">
+
+{# Top row: reference + status pill, date below -- same on every breakpoint #}
+<div class="flex flex-wrap items-start justify-between gap-2 mb-4">
+<div>
+<div class="flex items-center gap-3 flex-wrap">
+<span class="font-body-sm text-body-sm font-semibold text-on-surface">{{ order.payment_reference }}</span>
+<span class="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider status-{{ order.status }}">{{ order.get_status_display }}</span>
+</div>
+<p class="text-gray-muted text-sm mt-1">{{ order.created_at|date:"M j, Y" }}</p>
+</div>
+<span class="material-symbols-outlined text-outline hidden md:block" aria-hidden="true">chevron_right</span>
+</div>
+
+{# Product row: thumbnail + name(s), price + PV -- stacks on mobile, #}
+{# sits side-by-side on desktop via the sm:flex-row switch. #}
+<div class="flex flex-col sm:flex-row sm:items-center gap-4 border-t border-outline-variant/50 pt-4">
+{% with first_item=order.items.all.0 item_count=order.items.all|length %}
+<div class="flex items-center gap-4 flex-grow min-w-0">
+<div class="w-16 h-16 bg-surface-container-low rounded-lg flex-shrink-0 overflow-hidden flex items-center justify-center">
+{% if first_item.product.primary_image %}
+<img class="w-full h-full object-cover" src="{{ first_item.product.primary_image.image.url }}" alt="{{ first_item.product_name }}">
+{% else %}
+<span class="material-symbols-outlined text-gray-400" aria-hidden="true">image</span>
+{% endif %}
+</div>
+<div class="min-w-0">
+<h3 class="font-body-md text-body-md font-bold text-on-surface truncate">
+{{ first_item.product_name }}{% if item_count > 1 %} and {{ item_count|add:"-1" }} more{% endif %}
+</h3>
+<div class="flex items-center gap-1 mt-1 text-gray-muted">
+<span class="material-symbols-outlined text-[16px]" aria-hidden="true">stars</span>
+<span class="font-body-sm text-body-sm">{{ order.pv_earned }} PV earned</span>
+</div>
+</div>
+</div>
+{% endwith %}
+<p class="font-headline-md text-headline-md text-on-surface flex-shrink-0">GHS {{ order.total|floatformat:2|intcomma }}</p>
+</div>
+</a>
+{% endfor %}
+</div>
+
+{% if page_obj.has_other_pages %}
+<div class="flex items-center justify-between pt-8">
+{% if page_obj.has_previous %}
+<a href="?page={{ page_obj.previous_page_number }}" class="flex items-center gap-1 font-label-lg text-label-lg text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>Previous
+</a>
+{% else %}
+<span></span>
+{% endif %}
+<div class="hidden sm:flex items-center gap-2">
+{% comment %}
+CodeRabbit: page_obj.paginator.page_range alone renders every page number
+with no truncation -- unbounded for a customer with dozens of pages of
+history. page_range (an elided range from the view) inserts
+paginator.ELLIPSIS in place of skipped runs.
+{% endcomment %}
+{% for num in page_range %}
+{% if num == page_obj.paginator.ELLIPSIS %}
+<span class="w-8 h-8 flex items-center justify-center text-gray-muted text-sm">{{ num }}</span>
+{% elif num == page_obj.number %}
+<span class="w-8 h-8 flex items-center justify-center rounded-full bg-primary text-on-primary font-bold text-sm">{{ num }}</span>
+{% else %}
+<a href="?page={{ num }}" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-low text-gray-muted text-sm transition-colors">{{ num }}</a>
+{% endif %}
+{% endfor %}
+</div>
+<span class="sm:hidden font-body-sm text-body-sm text-gray-muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+{% if page_obj.has_next %}
+<a href="?page={{ page_obj.next_page_number }}" class="flex items-center gap-1 font-label-lg text-label-lg text-secondary hover:text-primary transition-colors">
+Next<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
+</a>
+{% else %}
+<span></span>
+{% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="bg-white border border-dashed border-outline-variant rounded-xl p-12 flex flex-col items-center text-center">
+<div class="w-16 h-16 bg-surface-container-low rounded-full flex items-center justify-center text-primary mb-6">
+<span class="material-symbols-outlined text-[40px]" aria-hidden="true">shopping_bag</span>
+</div>
+<h2 class="font-headline-md text-headline-md text-on-surface mb-2">You haven't placed any orders yet</h2>
+<p class="text-gray-muted max-w-sm mb-6">Explore our curated selection of quality lifestyle and wellness products.</p>
+<a href="{% url 'catalog:home' %}" class="bg-primary text-on-primary px-6 py-3 rounded-lg font-button hover:opacity-90 transition-all inline-flex items-center gap-2">
+Start Shopping<span class="material-symbols-outlined text-sm" aria-hidden="true">arrow_forward</span>
+</a>
+</div>
+{% endif %}
+</div>
+</div>
+{% endblock %}
