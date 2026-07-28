@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–19 are done — Phase 7's 7-day cooling-off refund is complete; Task 25 (My Orders,
-built ahead of Phase 8) is next.** Task 25 didn't exist in the original plan — added 2026-07-27
-after a `source-driven-development` read of the primary source doc's Section 6.4 found no task
-anywhere had ever scoped a self-service order-history page for a customer or distributor, needed
-before Task 20 (Dashboard core stats) links to it. Numbered 25, not inserted as 20, despite
+**Tasks 1–19 and 25 are done — Task 25 (My Orders, built ahead of Phase 8) closed 2026-07-28;
+Task 20 (Dashboard core stats) is next.** Task 25 didn't exist in the original plan — added
+2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found
+no task anywhere had ever scoped a self-service order-history page for a customer or distributor,
+needed before Task 20 (Dashboard core stats) links to it. Numbered 25, not inserted as 20, despite
 building first: 20/21 (Phase 8) and 22-24 (Phase 9's Admin Portal / Task 24 Deploy) are already
 real, in places already-shipped-code-referenced numbers — renumbering any of those would mean
 rewriting history across already-built admin_portal code, so this task took the next free integer
@@ -390,6 +390,37 @@ working:
   redirecting to the login page despite `authenticate()` succeeding. Shipped via PR #35 (19a), #36
   (19b), #37 (19c), each stacked on the previous and merged into `main` in order 2026-07-27; full
   suite green throughout, 986 passed, 1 skipped as of merge.
+- **My Orders — self-service order history (Task 25), built ahead of Phase 8:** a self-service
+  purchase-history page for both customers and distributors (`Order.customer` is a plain FK to
+  `settings.AUTH_USER_MODEL`, not `Distributor`-specific, so one view/template serves both roles
+  with no branching), found by reading Section 6.4 of the primary source doc directly — no task
+  anywhere in the original plan had ever scoped this page. `apps/orders/views.py::order_history`
+  (paginated, `request.user`-scoped, `-created_at`/`-pk` stable ordering matching Task 15d's own
+  precedent, `prefetch_related("items__product__images")` to avoid N+1, Django's elided page range
+  so a customer with many orders doesn't get thousands of pagination links) and `order_detail` — a
+  **new** view, deliberately not a reuse of `order_confirmation_view`: that view's "no ownership
+  check, unguessable UUID token" design is safe only because it's reachable solely via a one-time
+  post-checkout redirect, never a durable bookmarkable link — a `doubt-driven-development` finding
+  before any code was written. `pk=pk, customer=request.user` is IDOR-safe by construction. UI
+  built from two fetched Stitch screens (desktop + mobile), reconciled into one responsive template
+  matching `cart.html`/`checkout.html`/`order_created.html`'s own established convention. Two real
+  bugs caught via real-browser verification (not just pytest) and a follow-up code-review pass, both
+  fixed with regression tests: `order_created.html` (reused for `order_detail`) only rendered the
+  item/delivery-info block for `status == "confirmed"`, so a processing/dispatched/delivered/
+  refunded order — most of an order's real life — showed a bare "Order Placed" message with no
+  items at all; broadened to any non-"pending" status, and every one of the 7 `Order.Status` values
+  got its own accurate header copy (the cancelled copy no longer assumes the cause was always the
+  insufficient-stock auto-cancel path, since Task 18b's admin `cancel_or_refund_order` can cancel
+  for any reason). `base_store.html`'s header had no logged-in state at all (a logged-in user saw
+  the same Log In/Become a Distributor buttons as a guest) — fixed with My Orders/Log Out links,
+  and a follow-up code-review pass caught that the Log Out link didn't actually work (`allauth`'s
+  `LOGOUT_ON_GET` defaults to `False` and this project never overrides it), fixed with a CSRF-safe
+  POST form. CodeRabbit's own pass on the pushed fix caught one more real bug: the authenticated nav
+  controls were `hidden lg:flex` while the mobile hamburger menu is `md:hidden`, leaving a genuine
+  gap between `md` and `lg` (roughly 768-1024px) where a logged-in user could reach neither control
+  — fixed to `hidden md:flex` and verified live at 900px. Shipped via PR #38, merged into `main`
+  2026-07-28; full suite green throughout, 1009 passed, 1 skipped as of merge, real MySQL CI green,
+  CodeRabbit clean on the final commit.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,

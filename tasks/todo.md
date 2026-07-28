@@ -3386,9 +3386,33 @@ previously-unnoticed defects across the three PRs, both fixed before merge:
 
 ## Phase 8: Distributor Dashboard (real-time)
 
-### Task 25: My Orders — self-service order history (build before Task 20)
+### Task 25: My Orders — self-service order history (build before Task 20) — DONE
 
-**Description:** Added 2026-07-27 — a real, previously-unnoticed gap in this plan, found by reading
+**Shipped 2026-07-28 via PR #38 (branch `task-25-my-orders`), merged to `main`.** All acceptance
+criteria met: `apps/orders/views.py::order_history` (paginated, `request.user`-scoped, prefetches
+`items__product__images`, `-created_at`/`-pk` stable ordering, elided page range) and
+`order_detail` — a **new**, deliberately separate view from `order_confirmation_view`, since that
+view's unguessable-token-only protection is safe only for a one-time post-checkout redirect, not a
+durable bookmarkable link (`doubt-driven-development` finding before any code was written).
+`pk=pk, customer=request.user` is IDOR-safe by construction. Real template built from two fetched
+Stitch screens (desktop + mobile), one responsive file matching this codebase's convention. Two
+real bugs found via real-browser verification and caught fixing along the way, both with regression
+tests: `order_created.html` (reused for `order_detail`) only showed the item/delivery-info block for
+`status == "confirmed"`, so a processing/dispatched/delivered/refunded order — most of an order's
+real life — showed a bare "Order Placed" message with no items; broadened to any non-"pending"
+status, and every one of the 7 `Order.Status` values got its own accurate header copy (the cancelled
+copy no longer assumes the cause was always insufficient-stock auto-cancel, since Task 18b's admin
+`cancel_or_refund_order` can cancel for any reason). `base_store.html`'s header had no logged-in
+state at all (My Orders/Log Out links added) — and a follow-up code-review pass caught that the Log
+Out link didn't actually work (`allauth`'s `LOGOUT_ON_GET` defaults to `False`), fixed with a
+CSRF-safe POST form. CodeRabbit's own pass on the pushed fix caught one more real bug — the
+authenticated nav controls were `hidden lg:flex` while the mobile hamburger is `md:hidden`, leaving
+a genuine gap between `md` and `lg` (~768–1024px) where a user could reach neither; fixed to
+`hidden md:flex` and verified live at 900px. Full local suite green throughout (1009 passed, 1
+skipped), real MySQL CI green, CodeRabbit clean on the final commit. See git history on `main` for
+the full PR #38 diff.
+
+**Original description (2026-07-27):** a real, previously-unnoticed gap in this plan, found by reading — a real, previously-unnoticed gap in this plan, found by reading
 Section 6.4 of the primary source doc directly (`source-driven-development`) while scoping Task 20
 (Dashboard core stats): *"Order History (as a Customer): Distributors can also view their own
 product purchase history from their dashboard. Each purchase shows order ID, products, date,
@@ -3418,24 +3442,25 @@ asks for (`total`, `pv_earned`, `status`, `created_at`, `OrderItem.product_name`
 data-model work.
 
 **Acceptance criteria:**
-- [ ] A logged-in user (customer or distributor) sees a paginated list of their own past orders:
+- [x] A logged-in user (customer or distributor) sees a paginated list of their own past orders:
   order ID, product(s), date, amount, PV generated, delivery status
-- [ ] Never shows another user's orders (no id/param IDOR surface — always `request.user`, matching
+- [x] Never shows another user's orders (no id/param IDOR surface — always `request.user`, matching
   `earnings_history`/`payout_settings`'s own established convention)
-- [ ] Each row links to the existing order-detail view (confirm exact URL name/reachability for a
+- [x] Each row links to the existing order-detail view (confirm exact URL name/reachability for a
   self-service, non-admin viewer — `order_confirmation` is payment-reference-keyed and built for
   the checkout flow, not a general history page; may need its own detail route or reuse of that
-  one's template)
-- [ ] Guest checkout orders (`customer=None`) are correctly excluded (nothing to list for an
+  one's template) — resolved as a new `order_detail` route, not a reuse of `order_confirmation`'s
+  token-only protection (see build summary above)
+- [x] Guest checkout orders (`customer=None`) are correctly excluded (nothing to list for an
   anonymous shopper)
 
 **Verification:**
-- [ ] pytest test: a customer sees their own orders, not another customer's or a guest order
-- [ ] pytest test: a distributor sees their own orders (proves the shared-view, no-role-branching
+- [x] pytest test: a customer sees their own orders, not another customer's or a guest order
+- [x] pytest test: a distributor sees their own orders (proves the shared-view, no-role-branching
   design actually holds)
-- [ ] pytest test: pagination stable ordering (`-created_at`, `-pk` tie-breaker — Task 15d's own
+- [x] pytest test: pagination stable ordering (`-created_at`, `-pk` tie-breaker — Task 15d's own
   pagination bug is the precedent not to repeat)
-- [ ] Manual check in a real browser: place a real order, confirm it appears correctly
+- [x] Manual check in a real browser: place a real order, confirm it appears correctly
 
 **Dependencies:** Task 17a (Order/OrderItem models), Task 18 (order status lifecycle, for the
 delivery-status values shown)
