@@ -194,17 +194,21 @@ UI.
   breakdown and the reasoning behind the non-sequential numbering. Shipped 2026-07-28 via PR #38,
   merged to `main`; full suite green throughout (1009 passed, 1 skipped), real MySQL CI green,
   CodeRabbit clean on the final commit.
-- [ ] Task 20: Dashboard core stats (wallet, earnings, team size, leg PV, rank, referral link).
+- [x] Task 20: Dashboard core stats (wallet, earnings, team size, leg PV, rank, referral link).
   Broken into vertical slices 20a-20d 2026-07-28 (`planning-and-task-breakdown`) — first Channels
   consumer this codebase has ever built (Channels/Redis configured since Task 1-3, but
   `bancostore/asgi.py`'s websocket router has always been empty), plus a small, deliberate touch to
   Task 10a's registration form (a real "recruitment link" per Section 6.1 needs `?ref=` prefill
   support, not just a bare IR ID to type in). See `tasks/todo.md` for the full 20a-20d breakdown.
   **20a+20b done** (PR #39, merged). **20c done** (PR #40, merged 2026-07-28) — real
-  Stitch-designed frontend, verified live at 1440/1024/768/500px. **20d (live wallet updates via
-  Channels) still open** — the first real Channels consumer in this codebase; needs a
-  `doubt-driven-development` pass on the group-membership auth invariant before any consumer code
-  is written.
+  Stitch-designed frontend, verified live at 1440/1024/768/500px. **20d done** (live wallet
+  updates via Channels) — a `doubt-driven-development` cycle (single-model + two independent
+  external reviews, ChatGPT and Gemini) ran before any consumer code was written and materially
+  changed the design; see `docs/decisions/0008-wallet-live-updates-channels-design.md`. Verified
+  live in a real browser: crediting a wallet from a separate shell process updated the dashboard's
+  balance with no page refresh. Also found and fixed, via that same real-browser check, an
+  unrelated pre-existing gap — `daphne` doesn't auto-serve static files in DEBUG mode the way
+  `runserver` does — documented in `CLAUDE.md`.
 - [ ] Task 21: Binary tree visual view, earnings history, carry-forward tracker, notification bell
 
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
