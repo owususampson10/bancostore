@@ -3997,17 +3997,17 @@ NotificationConsumer`, mirroring `WalletBalanceConsumer`'s `connect()`/auth logi
 on_commit-wrapped, doubly-try/excepted design above.
 
 **Acceptance criteria:**
-- [ ] `send_notification` persists a `Notification` row and pushes it live to a connected client,
+- [x] `send_notification` persists a `Notification` row and pushes it live to a connected client,
       and does so only after the caller's transaction commits (verified with
       `@pytest.mark.django_db(transaction=True)`, matching Task 20d's own convention)
-- [ ] A `Notification.objects.create()` failure never propagates to the caller
-- [ ] A `group_send()` failure never propagates to the caller
-- [ ] The new consumer rejects an unauthenticated connection and a non-distributor account, and a
+- [x] A `Notification.objects.create()` failure never propagates to the caller
+- [x] A `group_send()` failure never propagates to the caller
+- [x] The new consumer rejects an unauthenticated connection and a non-distributor account, and a
       distributor connecting to their own group never receives another distributor's group's pushes
 
 **Verification:**
-- [ ] `WebsocketCommunicator` tests mirroring Task 20d's test file structure exactly
-- [ ] Unit tests for `send_notification`'s failure-isolation behavior (mock/force each failure mode)
+- [x] `WebsocketCommunicator` tests mirroring Task 20d's test file structure exactly
+- [x] Unit tests for `send_notification`'s failure-isolation behavior (mock/force each failure mode)
 
 **Dependencies:** Task 20d (Channels/auth precedent)
 
@@ -4017,6 +4017,10 @@ on_commit-wrapped, doubly-try/excepted design above.
 `tests/feature/distributors/test_notification_consumer.py`
 
 **Estimated scope:** M
+
+**Status: Done (PR #48, merged 2026-07-29).** 10 new tests, all passing, no regression to the
+existing wallet-balance consumer. See the doubt-driven-development writeup above this sub-task for
+the two Critical bugs caught and fixed before any code was written.
 
 ---
 
