@@ -128,6 +128,33 @@ distributor as "Unranked". |title only affects the display text.
 </div>
 </div>
 
+<div class="bg-white border border-outline-variant rounded-xl p-6 {% if carry_forward.nearing_expiry %}border-l-4 border-l-primary{% endif %}">
+{# Task 21b: Section 6.5's Carry-Forward PV Tracker -- PV currently held #}
+{# on the distributor's strong leg (not a combined left+right total, #}
+{# per the source doc's own wording), read from real PvDailyBucket rows #}
+{# via apps.pv_ledger.services.get_carry_forward_summary. #}
+<div class="flex justify-between items-start">
+<div>
+<span class="text-xs font-bold uppercase tracking-widest text-secondary opacity-60">Carry-Forward PV</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mt-1">{{ carry_forward.pv }}</h3>
+</div>
+{% if carry_forward.nearing_expiry %}
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;" aria-hidden="true">warning</span>
+{% else %}
+<span class="material-symbols-outlined text-outline" aria-hidden="true">schedule</span>
+{% endif %}
+</div>
+{% if carry_forward_leg_label %}
+<div class="mt-2 text-[11px] px-2 py-1 rounded inline-block font-bold {% if carry_forward.nearing_expiry %}bg-primary text-on-primary{% else %}bg-surface-container text-secondary{% endif %}">
+{{ carry_forward_leg_label }} leg &middot; expires {{ carry_forward.nearest_expiry_date|date:"M j, Y" }}
+</div>
+{% else %}
+<div class="mt-2 text-[11px] px-2 py-1 rounded inline-block font-bold bg-surface-container text-secondary">
+No PV carried forward yet
+</div>
+{% endif %}
+</div>
+
 <div class="bg-white border border-outline-variant rounded-xl p-6 {% if is_pv_eligible %}border-l-4 border-l-primary{% endif %}">
 <div class="flex justify-between items-start">
 <div>

@@ -36,6 +36,7 @@ from apps.distributors.cooling_off_services import (
 from apps.notifications.otp import generate_otp, verify_otp
 from apps.orders.services import confirm_order_payment
 from apps.pv_ledger.models import MonthlyPersonalPv
+from apps.pv_ledger.services import get_carry_forward_summary
 from apps.wallet.models import WalletTransaction
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
@@ -735,6 +736,16 @@ def dashboard(request):
     # boundary this_week_earnings already uses, not a fabricated number.
     days_until_week_reset = 7 - now.weekday()
 
+    # Task 21b: Section 6.5's Carry-Forward PV Tracker. `now` is the same
+    # value already computed above -- passed through explicitly rather
+    # than letting get_carry_forward_summary call timezone.now() a second
+    # time, so this view's own notion of "today" can't drift from it.
+    carry_forward = get_carry_forward_summary(distributor, now=now)
+    carry_forward_leg_label = {
+        BinaryTreeEdge.Leg.LEFT: "Left",
+        BinaryTreeEdge.Leg.RIGHT: "Right",
+    }.get(carry_forward.leg)
+
     # Task 20b: Section 6.1's "personal recruitment link" -- distributors:
     # register's GET handler already reads ?ref=<IR ID> and prefills
     # sponsor_ir_id (pre-existing, found untested while building this
@@ -777,6 +788,8 @@ def dashboard(request):
             "personal_pv_shortfall": personal_pv_shortfall,
             "min_monthly_personal_pv": config.MIN_MONTHLY_PERSONAL_PV,
             "days_until_week_reset": days_until_week_reset,
+            "carry_forward": carry_forward,
+            "carry_forward_leg_label": carry_forward_leg_label,
         },
     )
 

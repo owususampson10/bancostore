@@ -1,5 +1,7 @@
 import logging
 import time
+from datetime import date, timedelta
+from typing import NamedTuple, Optional
 
 from django.db import IntegrityError, transaction
 from django.db.models import Case, F, PositiveIntegerField, Sum, When
@@ -574,4 +576,96 @@ def distributor_ids_with_pending_pv():
         PvDailyBucket.objects.filter(pv__gt=0)
         .values_list("distributor_id", flat=True)
         .distinct()
+    )
+
+
+class CarryForwardSummary(NamedTuple):
+    pv: int
+    leg: Optional[str]
+    nearest_expiry_date: Optional[date]
+    nearing_expiry: bool
+
+
+def get_carry_forward_summary(distributor, now=None) -> CarryForwardSummary:
+    """Task 21b: how much PV `distributor` currently has carried forward,
+    and when the oldest of it expires (Section 6.5 of the primary source
+    doc).
+
+    Section 6.5 asks for PV "carried forward on the strong leg"
+    specifically, not a combined total -- this mirrors exactly how
+    apps.commissions.services's real Binary Bonus cycle already
+    identifies weak/strong legs (`weak_leg_pv = min(left_pv, right_pv)`,
+    both read via this same module's `sum_leg_pv`), rather than
+    reimplementing that comparison differently. After any bonus cycle
+    consumes the SAME amount from both legs (Section 7.2's own worked
+    example: "600 PV is removed from BOTH legs. The remaining 900 PV on
+    the left leg is carried forward"), only the leg that started with
+    more PV can have anything left over -- so "whichever leg currently
+    has the higher non-expired total" is the strong leg, matching the
+    real payout logic's own definition rather than a separate one that
+    could silently drift out of sync with it.
+
+    A tie (equal, including both-zero) deterministically resolves to
+    LEFT -- an arbitrary but stable choice for this read-only display,
+    not a payout decision.
+
+    Returns pv=0, leg=None, nearest_expiry_date=None, nearing_expiry=False
+    for a distributor with no surviving carried-forward PV at all.
+
+    Not wrapped in a lock or transaction.atomic() -- a concurrently-running
+    Binary Bonus cycle for the same distributor could in principle read as
+    a torn snapshot (matching the same trade-off every other read-only
+    dashboard stat in this codebase already accepts, e.g.
+    get_ancestor_pv_aggregates and the dashboard's own wallet/PV reads):
+    this is a value refreshed on next page load, not something the
+    distributor acts on with money-moving consequences, so eventual
+    consistency is an accepted trade-off, not a defect.
+    """
+    today = (now or timezone.now()).date()
+    expiry_days = config.PV_CARRY_FORWARD_EXPIRY_DAYS
+    cutoff_date = today - timedelta(days=expiry_days)
+
+    left_pv = sum_leg_pv(distributor, BinaryTreeEdge.Leg.LEFT, cutoff_date)
+    right_pv = sum_leg_pv(distributor, BinaryTreeEdge.Leg.RIGHT, cutoff_date)
+
+    if left_pv <= 0 and right_pv <= 0:
+        return CarryForwardSummary(
+            pv=0, leg=None, nearest_expiry_date=None, nearing_expiry=False
+        )
+
+    strong_leg = (
+        BinaryTreeEdge.Leg.LEFT if left_pv >= right_pv else BinaryTreeEdge.Leg.RIGHT
+    )
+    strong_pv = max(left_pv, right_pv)
+
+    oldest = (
+        PvDailyBucket.objects.filter(
+            distributor=distributor,
+            leg=strong_leg,
+            date__gte=cutoff_date,
+            pv__gt=0,
+        )
+        .order_by("date")
+        .first()
+    )
+    # Reuses expiry_days (read once above) rather than reading the live
+    # constance setting a second time -- config.PV_CARRY_FORWARD_EXPIRY_DAYS
+    # is admin-editable at any moment, and computing cutoff_date and
+    # nearest_expiry_date from two independent reads could silently use two
+    # different windows if a change landed mid-call. This codebase has
+    # already paid for this exact bug shape twice (a hardcoded interval
+    # drifting from its own admin-editable setting in Task 14; three
+    # independent timezone.now() calls straddling a UTC-midnight boundary
+    # in Task 19a) -- reusing the single local value here is the fix both
+    # of those cases eventually converged on.
+    nearest_expiry_date = oldest.date + timedelta(days=expiry_days) if oldest else None
+    nearing_expiry = nearest_expiry_date is not None and (
+        nearest_expiry_date - today
+    ) <= timedelta(days=config.PV_EXPIRY_WARNING_DAYS)
+
+    return CarryForwardSummary(
+        pv=strong_pv,
+        leg=strong_leg,
+        nearest_expiry_date=nearest_expiry_date,
+        nearing_expiry=nearing_expiry,
     )

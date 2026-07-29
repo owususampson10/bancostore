@@ -12,7 +12,7 @@ from constance import config
 
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.distributors.models import Distributor
-from apps.pv_ledger.models import MonthlyPersonalPv, PvLedger
+from apps.pv_ledger.models import MonthlyPersonalPv, PvDailyBucket, PvLedger
 from apps.wallet.models import WalletTransaction
 from apps.wallet.services import credit
 
@@ -372,3 +372,50 @@ def test_days_until_week_reset_is_computed_from_the_real_week_boundary(client):
     expected = 7 - now.weekday()
     assert response.context["days_until_week_reset"] == expected
     assert 1 <= response.context["days_until_week_reset"] <= 7
+
+
+@pytest.mark.django_db
+def test_carry_forward_pv_shows_the_strong_legs_total_and_expiry(client):
+    """Task 21b: the dashboard's Carry-Forward PV card must read real
+    PvDailyBucket rows, not a static placeholder, and must show the
+    STRONG leg specifically (Section 6.5 of the primary source doc),
+    matching apps.pv_ledger.services.get_carry_forward_summary."""
+    distributor = _make_distributor()
+    today = timezone.now().date()
+    PvDailyBucket.objects.create(
+        distributor=distributor,
+        leg=BinaryTreeEdge.Leg.LEFT,
+        date=today - timedelta(days=10),
+        pv=900,
+    )
+    PvDailyBucket.objects.create(
+        distributor=distributor,
+        leg=BinaryTreeEdge.Leg.RIGHT,
+        date=today - timedelta(days=10),
+        pv=300,
+    )
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:dashboard"))
+
+    carry_forward = response.context["carry_forward"]
+    assert carry_forward.pv == 900
+    assert carry_forward.leg == BinaryTreeEdge.Leg.LEFT
+    assert carry_forward.nearest_expiry_date is not None
+    content = response.content.decode()
+    assert "900" in content
+    assert "Left" in content
+
+
+@pytest.mark.django_db
+def test_a_distributor_with_no_carried_forward_pv_sees_an_honest_zero_state(client):
+    distributor = _make_distributor()
+    _login(client, distributor)
+
+    response = client.get(reverse("distributors:dashboard"))
+
+    carry_forward = response.context["carry_forward"]
+    assert carry_forward.pv == 0
+    assert carry_forward.leg is None
+    content = response.content.decode()
+    assert "No PV carried forward yet" in content
