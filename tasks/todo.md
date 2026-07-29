@@ -4034,15 +4034,15 @@ call site is wrapped in the caller's own `transaction.on_commit(...)` (or relies
 written) so the call is always deferred past the existing locked block, per the design fix above.
 
 **Acceptance criteria:**
-- [ ] Each of the 5 triggers creates exactly one `Notification` with the correct `event_type` and a
+- [x] Each of the 5 triggers creates exactly one `Notification` with the correct `event_type` and a
       human-readable `message`, only for the distributor the event belongs to
-- [ ] A `MATCHING_BONUS` credit never creates a `Notification` (explicit regression test — Section
+- [x] A `MATCHING_BONUS` credit never creates a `Notification` (explicit regression test — Section
       6.6 does not name the matching bonus)
 
 **Verification:**
-- [ ] One pytest test per trigger point exercising the *real* underlying function (not a simulated
+- [x] One pytest test per trigger point exercising the *real* underlying function (not a simulated
       call to `send_notification` directly) — proving the wiring, not just the primitive
-- [ ] The matching-bonus-exclusion regression test above
+- [x] The matching-bonus-exclusion regression test above
 
 **Dependencies:** 21d-i
 
@@ -4052,6 +4052,16 @@ written) so the call is always deferred past the existing locked block, per the 
 `tests/unit/.../test_*_notification.py` per trigger
 
 **Estimated scope:** M
+
+**Status: Done (PR #49, merged 2026-07-29).** `approve_kyc`/`reject_kyc` changed from a bare
+`return`/no return value to `return True`/`return False` so the caller can distinguish a real
+transition from the existing idempotent no-op path — necessary so re-approving an already-approved
+distributor never double-notifies. 10 new tests, all passing; 573 broader regression tests across
+binary_tree/commissions/distributors/withdrawal/notifications/KYC-review, no regressions.
+CodeRabbit flagged a possible live-SMS risk in the referral-bonus test (since
+`_credit_direct_referral_bonus` calls `send_sms`) — verified empirically as noise: an existing
+autouse `tests/conftest.py::_force_fake_sms_sender` fixture already forces `MNOTIFY_API_KEY=""` for
+every test in the suite, so a real SMS is structurally impossible regardless of `.env`.
 
 ---
 
