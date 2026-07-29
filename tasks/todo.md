@@ -3797,6 +3797,16 @@ distance-based scaling, verified by driving `startDrag`/`onDrag` with synthetic 
 CodeRabbit's other finding on the same PR (`this.$el` allegedly focusing the outer wrapper instead of
 the canvas) did not hold up under empirical verification and was left as-is.
 
+**Follow-up fix (PR #46, merged 2026-07-29):** user reported that just moving the mouse/trackpad over
+the canvas zoomed it instead of letting the page scroll, making that section impossible to scroll
+past. Root cause: `@wheel.prevent` unconditionally called `preventDefault()` on every wheel event over
+the canvas regardless of focus state. Verified against Alpine.js's own docs before fixing (`.prevent`
+is unconditional; wheel listeners are passive by default unless `.passive.false` is set). Fixed with
+`@wheel.passive.false` plus a `document.activeElement !== this.$el` check in `onWheel()` so scroll-to-
+zoom only activates once the canvas has been clicked/focused — otherwise the page scrolls normally,
+matching how embedded map/canvas widgets avoid trapping scroll. Touch pinch, mouse drag, and keyboard
+pan/zoom needed no equivalent change since they're already inherently explicit gestures.
+
 ---
 
 #### Task 21b: Carry-forward PV tracker
