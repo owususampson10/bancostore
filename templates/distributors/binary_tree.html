@@ -95,6 +95,14 @@
       this.dragging = false;
     },
     onWheel(event) {
+      // Only hijack scroll-to-zoom once the canvas has been explicitly
+      // clicked/focused -- otherwise a visitor scrolling the page past
+      // this section (mouse wheel or a trackpad's two-finger scroll)
+      // would get trapped zooming the tree instead of scrolling the page,
+      // which is exactly the frustrating behavior real map/canvas embeds
+      // avoid by requiring a click first.
+      if (document.activeElement !== this.$el) return;
+      event.preventDefault();
       this.setScale(this.scale + (event.deltaY < 0 ? 0.1 : -0.1));
     },
     onKeydown(event) {
@@ -144,19 +152,23 @@ Recenter
 <span class="material-symbols-outlined !text-sm" aria-hidden="true">swipe</span>
 Drag to explore your network, pinch to zoom
 </p>
+<p class="hidden sm:flex text-xs text-gray-muted text-center mb-2 items-center justify-center gap-1">
+<span class="material-symbols-outlined !text-sm" aria-hidden="true">ads_click</span>
+Click the diagram, then scroll to zoom
+</p>
 <div
   class="tree-canvas bg-surface-container-low rounded-xl border border-outline-variant h-[500px] md:h-[600px] flex justify-center"
   :class="{ 'cursor-grabbing': dragging, 'cursor-grab': !dragging }"
   tabindex="0"
   role="group"
-  aria-label="Binary tree diagram. Drag to pan, scroll or pinch to zoom, use the Zoom In and Recenter buttons above, or arrow keys, plus/minus, and 0 to navigate with the keyboard."
+  aria-label="Binary tree diagram. Drag to pan. Click the diagram first, then scroll to zoom -- otherwise the page scrolls normally. Pinch to zoom on touch devices. Zoom In and Recenter buttons above, or arrow keys, plus/minus, and 0 once focused, are also available."
   @mousedown="startDrag($event)"
   @mousemove.window="onDrag($event)"
   @mouseup.window="stopDrag()"
   @touchstart="startDrag($event)"
   @touchmove.prevent="onDrag($event)"
   @touchend="stopDrag()"
-  @wheel.prevent="onWheel($event)"
+  @wheel.passive.false="onWheel($event)"
   @keydown="onKeydown($event)"
 >
 <div
