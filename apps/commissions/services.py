@@ -11,6 +11,8 @@ from constance import config
 
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.distributors.models import Distributor
+from apps.notifications.models import Notification
+from apps.notifications.services import send_notification
 from apps.pv_ledger.services import (
     consume_leg_pv_fifo,
     expire_old_pv,
@@ -269,6 +271,14 @@ def process_binary_bonus_for_distributor(distributor, run_at) -> Decimal:
                 cutoff_date,
                 pv_to_consume,
                 reference,
+            )
+            # Task 21d-ii: Section 6.6's "a binary bonus was calculated
+            # and credited". Matching bonus deliberately has no
+            # equivalent call anywhere -- Section 6.6 never names it.
+            send_notification(
+                distributor,
+                Notification.EventType.BINARY_BONUS_CREDITED,
+                f"You earned GHS {actual_bonus} Binary Bonus!",
             )
 
             return actual_bonus

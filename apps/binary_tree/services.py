@@ -4,6 +4,8 @@ from typing import NamedTuple
 from django.db import transaction
 
 from apps.distributors.models import Distributor
+from apps.notifications.models import Notification
+from apps.notifications.services import send_notification
 from apps.pv_ledger.models import PvLedger
 from bancostore.concurrency import (
     retry_on_lock_contention,
@@ -87,6 +89,20 @@ class BinaryTree:
                 chosen_leg = leg or BinaryTree._weaker_leg(sponsor_ledger)
                 parent, local_leg = BinaryTree._find_open_slot(sponsor, chosen_leg)
                 BinaryTree._attach(parent, local_leg, new_distributor)
+
+                # Task 21d-ii: Section 6.6's "someone new joined under
+                # them" -- notifies the SPONSOR (who directly referred
+                # this person), not `parent` (the tree-placement parent,
+                # which spillover can make a different, deeper node with
+                # no real relationship to the new distributor).
+                new_distributor_name = new_distributor.full_name or str(
+                    new_distributor.phone_number
+                )
+                send_notification(
+                    sponsor,
+                    Notification.EventType.DOWNLINE_JOINED,
+                    f"{new_distributor_name} just joined your team!",
+                )
 
         retry_on_lock_contention(_attempt)
 
