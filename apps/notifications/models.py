@@ -16,3 +16,52 @@ class OTPCode(models.Model):
 
     def __str__(self):
         return f"OTPCode<{self.phone_number}, {self.purpose}>"
+
+
+class Notification(models.Model):
+    """A distributor-facing notification (Task 21d, Section 6.6 of the
+    primary source doc) -- persisted so it survives to the next login,
+    not only visible while a WebSocket happens to be connected. Created
+    exclusively via apps.notifications.services.send_notification, never
+    directly, so the create-then-push behavior stays in one place.
+
+    Exactly 6 event types exist because Section 6.6 names exactly 6 --
+    notably not the matching bonus (unlike the binary and referral
+    bonuses), a deliberate exclusion, not an oversight."""
+
+    class EventType(models.TextChoices):
+        DOWNLINE_JOINED = "downline_joined", "New downline member"
+        BINARY_BONUS_CREDITED = "binary_bonus_credited", "Binary bonus credited"
+        REFERRAL_BONUS_PAID = "referral_bonus_paid", "Referral bonus paid"
+        WITHDRAWAL_APPROVED = "withdrawal_approved", "Withdrawal approved"
+        KYC_DECIDED = "kyc_decided", "KYC decision"
+        PV_EXPIRING = "pv_expiring", "PV approaching expiry"
+
+    distributor = models.ForeignKey(
+        "distributors.Distributor",
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    event_type = models.CharField(max_length=32, choices=EventType.choices)
+    # Pre-rendered at creation time with full context from the call site
+    # (e.g. "Your KYC was approved" vs "...rejected: <reason>") rather
+    # than reconstructed from event_type client-side -- generous
+    # max_length so a real-world message is very unlikely to ever
+    # overflow it.
+    message = models.CharField(max_length=500)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            # The bell's notification list, newest first.
+            models.Index(fields=["distributor", "-created_at"]),
+            # The bell's unread-count badge -- a separate index since it
+            # filters on is_read rather than ordering by created_at.
+            models.Index(fields=["distributor", "is_read"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"Notification<{self.distributor_id} {self.event_type} read={self.is_read}>"
+        )

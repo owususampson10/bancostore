@@ -6,3 +6,13 @@ def wallet_group_name(distributor_id: int) -> str:
     duplicated-string risk of defining this independently in both places.
     """
     return f"wallet_{distributor_id}"
+
+
+def notification_group_name(distributor_id: int) -> str:
+    """Channels group name for a distributor's live notification-bell
+    updates (Task 21d). Distinct prefix from wallet_group_name's
+    "wallet_{id}" -- verified during doubt-driven-development before this
+    was written that the two names can never collide for the same
+    distributor.
+    """
+    return f"notifications_{distributor_id}"
