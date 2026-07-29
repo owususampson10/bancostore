@@ -16,6 +16,8 @@ from apps.distributors.paystack import (
     initiate_transfer,
     verify_transfer,
 )
+from apps.notifications.models import Notification
+from apps.notifications.services import send_notification
 from apps.notifications.sms import send_sms
 from apps.wallet.models import WalletTransaction
 from apps.wallet.services import InsufficientBalanceError, credit, debit
@@ -428,6 +430,12 @@ def approve_withdrawal_request(withdrawal_request, *, reviewed_by) -> Withdrawal
         f"approved. Payout processes on {config.WITHDRAWAL_DAY.title()} -- "
         f"we'll notify you once it's paid.",
         context="approve_withdrawal_request",
+    )
+    # Task 21d-ii: Section 6.6's "their withdrawal was approved and sent".
+    send_notification(
+        approved.distributor,
+        Notification.EventType.WITHDRAWAL_APPROVED,
+        f"Your withdrawal of GHS {approved.net_amount} has been approved.",
     )
     return approved
 

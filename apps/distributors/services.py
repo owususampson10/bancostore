@@ -17,6 +17,8 @@ from constance import config
 
 from apps.binary_tree.services import AlreadyPlacedError, BinaryTree
 from apps.commissions.services import calculate_direct_referral_bonus
+from apps.notifications.models import Notification
+from apps.notifications.services import send_notification
 from apps.notifications.sms import send_sms
 from apps.pv_ledger.services import record_personal_pv, record_purchase_pv
 from apps.wallet.models import WalletTransaction
@@ -524,6 +526,14 @@ def _credit_direct_referral_bonus(distributor, reference: str) -> None:
             bonus,
         )
 
+    # Task 21d-ii: Section 6.6's "a referral bonus was paid instantly".
+    send_notification(
+        distributor.sponsor,
+        Notification.EventType.REFERRAL_BONUS_PAID,
+        f"You earned GHS {bonus} Direct Referral Bonus from "
+        f"{referred_name}'s purchase!",
+    )
+
 
 # Didit's own overall session status -> our Status choices. Any other value
 # (e.g. "Not Started"/"In Progress") means the hosted flow isn't finished
@@ -779,13 +789,13 @@ def approve_kyc(distributor) -> None:
                     "cannot approve. Needs manual investigation.",
                     distributor.pk,
                 )
-                return
+                return False
 
             if (
                 locked.kyc_status == Distributor.KycStatus.APPROVED
                 or locked.ir_id is not None
             ):
-                return  # Already approved -- idempotent no-op.
+                return False  # Already approved -- idempotent no-op.
 
             try:
                 sequence = select_for_update_nowait_if_supported(
@@ -799,7 +809,7 @@ def approve_kyc(distributor) -> None:
                     "investigation.",
                     distributor.pk,
                 )
-                return
+                return False
             number = sequence.next_number
             max_number = 10**config.IR_ID_NUMBER_OF_DIGITS - 1
             if number > max_number:
@@ -840,8 +850,18 @@ def approve_kyc(distributor) -> None:
                 locked.pk,
                 locked.ir_id,
             )
+            return True
 
-    retry_on_lock_contention(_attempt)
+    approved_now = retry_on_lock_contention(_attempt)
+    if approved_now:
+        # Task 21d-ii: Section 6.6's "their KYC was approved or rejected".
+        # Guarded on the real transition, not just a successful call --
+        # the idempotent no-op case above must never double-notify.
+        send_notification(
+            distributor,
+            Notification.EventType.KYC_DECIDED,
+            "Your KYC verification has been approved!",
+        )
 
 
 def reject_kyc(distributor, reason: str) -> None:
@@ -864,7 +884,7 @@ def reject_kyc(distributor, reason: str) -> None:
                     "cannot reject. Needs manual investigation.",
                     distributor.pk,
                 )
-                return
+                return False
 
             if locked.kyc_status == Distributor.KycStatus.APPROVED:
                 logger.warning(
@@ -872,7 +892,7 @@ def reject_kyc(distributor, reason: str) -> None:
                     "refusing to reject an approved distributor.",
                     locked.pk,
                 )
-                return
+                return False
 
             locked.kyc_status = Distributor.KycStatus.REJECTED
             locked.kyc_rejection_reason = reason
@@ -882,5 +902,13 @@ def reject_kyc(distributor, reason: str) -> None:
             # log-based searching/alerting, so it deliberately omits the
             # reason text itself.
             logger.info("reject_kyc: distributor pk=%s rejected", locked.pk)
+            return True
 
-    retry_on_lock_contention(_attempt)
+    rejected_now = retry_on_lock_contention(_attempt)
+    if rejected_now:
+        # Task 21d-ii: Section 6.6's "their KYC was approved or rejected".
+        send_notification(
+            distributor,
+            Notification.EventType.KYC_DECIDED,
+            f"Your KYC verification was rejected: {reason}",
+        )
