@@ -3929,6 +3929,185 @@ credits), Task 16 (withdrawal approval), Task 11 (KYC decision)
 **Estimated scope:** L — will very likely need further sub-slicing once
 `doubt-driven-development` has run
 
+**2026-07-29: `doubt-driven-development` ran before any code was written** (fresh-context
+adversarial review against a concrete proposed design, not just the description above) and found
+two real Critical-severity design bugs, plus several real Medium/Low findings, all reconciled below.
+Sliced into four sub-tasks as a result (21d-i through 21d-iv), matching this task's own
+"will very likely need further sub-slicing" prediction.
+
+**Design findings from the review, all folded into the design before any code was written:**
+- **Critical, fixed:** the original design only wrapped the Channels `group_send()` call in
+  try/except, leaving `Notification.objects.create()` itself unguarded — if that DB write ever
+  raised (e.g. a message-length overflow under MySQL strict mode), the exception would propagate
+  into the caller's *existing* locked transaction (binary bonus credit, placement, referral bonus)
+  and roll back an already-succeeded business event. Fixed: `send_notification` now wraps both the
+  create and the push in their own try/except, and the whole thing runs inside
+  `transaction.on_commit(...)` (safe to call even outside an active transaction — Django runs
+  on_commit callables immediately in that case) so a notification failure can *never* affect the
+  triggering event, matching this codebase's own established "SMS send happens after the locked
+  block returns, never inside it" convention (Task 16).
+- **Critical, fixed:** the original design did the DB write + WebSocket push synchronously inside
+  the caller's lock (no `on_commit` deferral), unlike `WalletBalanceConsumer`'s own established
+  signal+`on_commit` pattern — this held locks open across a Redis round trip and could push a
+  notification for a row that then got rolled back. Fixed by the same `on_commit` change above.
+- **High, fixed:** verified the new `notification_group_name(distributor_id)` helper (mirroring
+  `apps/distributors/realtime.py::wallet_group_name`) returns a distinct prefix
+  (`"notifications_{id}"` vs. the existing `"wallet_{id}"`) — no group-name collision risk between
+  the two consumers for the same distributor.
+- **High, fixed:** the PV-expiry scheduled check (21d-iii) will reuse the existing generalized
+  `CommissionCycleRun`/`CommissionCycleFailure` `job_name`-discriminated audit-trail model (Task
+  14's own generalization) plus its established per-iteration-renewed Redis lock convention,
+  instead of inventing a third audit-trail model or skipping the lock entirely.
+- **Medium, fixed:** the PV-expiry check needs a dedup guard — without one, a distributor whose
+  oldest bucket sits inside the warning window for several consecutive days (a daily scheduled
+  check) would get a duplicate notification every single day until it actually expires. 21d-iii
+  must only notify once per (distributor, nearest_expiry_date) pair.
+- **Medium, fixed:** added a second index, `(distributor, is_read)`, alongside `(distributor,
+  -created_at)` — the bell's unread-count badge needs an efficient filtered count, not just an
+  efficient ordered list.
+- **Medium, assessed as noise (matches existing convention, not a new gap):** the reviewer flagged
+  `on_delete=CASCADE` on the `distributor` FK as inconsistent with an "audit-preservation" pattern —
+  checked against `PvDailyBucket` (also FK'd to `Distributor` with `CASCADE`) and confirmed CASCADE
+  is this codebase's actual existing convention for distributor-owned rows, not something new being
+  introduced here.
+- **Medium, deferred (documented, not silently skipped):** no retention/pruning policy for old
+  notifications — matches this codebase's existing lack of a generic retention policy for similar
+  models (`WalletTransaction`, `PvDailyBucket` rows aren't generically pruned either), a reasonable
+  future task if the table grows large, not a blocker now.
+- **Low, fixed:** `Notification.message` bumped to a generous `max_length` (500, not 255) to make a
+  real-world length overflow far less likely, on top of the try/except that already catches one.
+- **Low, fixed:** a regression test asserting a `MATCHING_BONUS` credit never produces a
+  `Notification` row — guarding the explicit, source-doc-confirmed scope boundary (Section 6.6 does
+  not name the matching bonus) against future accidental scope creep.
+- **Low, assessed as noise:** the reviewer suggested a structured "outcome" field for the KYC
+  decision event distinct from `event_type`/`message` — unnecessary, since `message` is already
+  free text decided at the call site with full context ("Your KYC was approved" vs. "...rejected:
+  <reason>"), matching how every other event's message is already composed.
+
+#### Task 21d-i: Notification model, Channels consumer, and send_notification service
+
+**Description:** The foundation slice — no event wiring yet, just the pieces every trigger will
+call into. `apps/notifications/models.py::Notification` (`distributor` FK CASCADE, `event_type`
+6-choice `TextChoices` matching Section 6.6 exactly, `message` CharField(500), `is_read`,
+`created_at`, indexes on `(distributor, -created_at)` and `(distributor, is_read)`).
+`apps/distributors/realtime.py::notification_group_name`. `apps/distributors/consumers.py::
+NotificationConsumer`, mirroring `WalletBalanceConsumer`'s `connect()`/auth logic exactly (same
+`is_distributor` + `Distributor.DoesNotExist` handling, same accept-only-after-verification shape).
+`apps/notifications/services.py::send_notification(distributor, event_type, message)` per the
+on_commit-wrapped, doubly-try/excepted design above.
+
+**Acceptance criteria:**
+- [ ] `send_notification` persists a `Notification` row and pushes it live to a connected client,
+      and does so only after the caller's transaction commits (verified with
+      `@pytest.mark.django_db(transaction=True)`, matching Task 20d's own convention)
+- [ ] A `Notification.objects.create()` failure never propagates to the caller
+- [ ] A `group_send()` failure never propagates to the caller
+- [ ] The new consumer rejects an unauthenticated connection and a non-distributor account, and a
+      distributor connecting to their own group never receives another distributor's group's pushes
+
+**Verification:**
+- [ ] `WebsocketCommunicator` tests mirroring Task 20d's test file structure exactly
+- [ ] Unit tests for `send_notification`'s failure-isolation behavior (mock/force each failure mode)
+
+**Dependencies:** Task 20d (Channels/auth precedent)
+
+**Files:** `apps/notifications/models.py`, `apps/notifications/services.py`,
+`apps/distributors/realtime.py`, `apps/distributors/consumers.py`, `bancostore/asgi.py`,
+`tests/unit/notifications/test_send_notification.py`,
+`tests/feature/distributors/test_notification_consumer.py`
+
+**Estimated scope:** M
+
+---
+
+#### Task 21d-ii: Wire the 5 immediate-event triggers
+
+**Description:** Calls `send_notification` from each of the 5 non-scheduled event sites named by
+Section 6.6: binary-tree placement (notifies the *sponsor* of their new downline member), binary
+bonus credited, referral bonus paid, withdrawal approved, KYC decision (approve or reject). Each
+call site is wrapped in the caller's own `transaction.on_commit(...)` (or relies on
+`send_notification`'s own internal `on_commit`, whichever reads more clearly at each site once
+written) so the call is always deferred past the existing locked block, per the design fix above.
+
+**Acceptance criteria:**
+- [ ] Each of the 5 triggers creates exactly one `Notification` with the correct `event_type` and a
+      human-readable `message`, only for the distributor the event belongs to
+- [ ] A `MATCHING_BONUS` credit never creates a `Notification` (explicit regression test — Section
+      6.6 does not name the matching bonus)
+
+**Verification:**
+- [ ] One pytest test per trigger point exercising the *real* underlying function (not a simulated
+      call to `send_notification` directly) — proving the wiring, not just the primitive
+- [ ] The matching-bonus-exclusion regression test above
+
+**Dependencies:** 21d-i
+
+**Files:** `apps/binary_tree/services.py`, `apps/commissions/services.py`,
+`apps/withdrawal/services.py`, wherever the KYC approve/reject action lives (Django Admin action,
+`apps/distributors/admin.py` or similar — confirm exact location before editing),
+`tests/unit/.../test_*_notification.py` per trigger
+
+**Estimated scope:** M
+
+---
+
+#### Task 21d-iii: PV-expiry scheduled notification
+
+**Description:** The 6th event type, and the only scheduled/batch one — a Celery Beat task
+checking which distributors have surviving PV within `PV_EXPIRY_WARNING_DAYS` of expiring (reusing
+a query shaped like `apps.pv_ledger.services.distributor_ids_with_pending_pv`, not a full table
+scan) and notifying each exactly once per (distributor, nearest_expiry_date) pair — not once per
+scheduled run. Reuses the existing generalized `CommissionCycleRun`/`CommissionCycleFailure`
+`job_name`-discriminated audit-trail model and its per-iteration-renewed Redis lock convention
+(Task 13h/14), rather than a new audit model or an unlocked loop.
+
+**Acceptance criteria:**
+- [ ] A distributor with PV inside the warning window is notified once
+- [ ] The same distributor is NOT re-notified on a subsequent run while the same PV batch is still
+      the nearest-expiring one (dedup by (distributor, nearest_expiry_date))
+- [ ] Query cost stays flat regardless of total distributor count (reuses the existing candidate-
+      set-narrowing pattern, never scans every registered user)
+
+**Verification:**
+- [ ] pytest: seeded distributor with a near-expiring bucket gets notified; a second run with no
+      state change does not double-notify
+- [ ] pytest: query-count-invariance test, matching Task 21a's own precedent for this class of claim
+
+**Dependencies:** 21d-i, Task 13 (`CommissionCycleRun`/`Failure`, per-iteration lock convention)
+
+**Files:** `apps/notifications/tasks.py` (new), a new migration seeding the periodic task
+(matching Task 13/14's own migration pattern), `tests/unit/notifications/test_pv_expiry_task.py`
+
+**Estimated scope:** M
+
+---
+
+#### Task 21d-iv: Notification bell UI
+
+**Description:** Wires the existing disabled "coming soon" bell icon (already present in
+`templates/distributors/base_dashboard.html`'s header, per its own established honesty convention)
+to the real consumer -- a live unread-count badge plus a dropdown listing recent notifications,
+mark-as-read on open/click. Needs a real Stitch screen fetched first (this codebase's established
+UI workflow) -- no Stitch screen for this exists yet, unlike the tree/dashboard work which already
+had fetched mockups to reconcile against.
+
+**Acceptance criteria:**
+- [ ] Bell shows a live, accurate unread count with no page refresh
+- [ ] Opening the dropdown shows recent notifications with correct type/message/relative time
+- [ ] Notifications are marked read on open (or per-item click — decide against the fetched design)
+- [ ] Empty state (no notifications yet) is honest, not a blank dropdown
+
+**Verification:**
+- [ ] Live browser check: trigger a real event, confirm the bell updates live with no refresh
+- [ ] Mobile + desktop width check, matching this project's established responsive convention
+
+**Dependencies:** 21d-i, 21d-ii (at least one real trigger to demo against)
+
+**Files:** `templates/distributors/base_dashboard.html`, a new partial for the dropdown, likely a
+small view/endpoint for "mark as read" and/or initial notification list fetch
+
+**Estimated scope:** M — blocked on a Stitch screen not yet fetched
+
 ---
 
 **Checkpoint H:** dashboard, tree view, and notification bell all update live (no page refresh)
