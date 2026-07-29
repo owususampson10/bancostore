@@ -3857,15 +3857,27 @@ scope a small fix only if a real gap is found (e.g., bonus *type* not distinguis
 current UI).
 
 **Acceptance criteria:**
-- [ ] Every one of Section 6.3's three bullet points is confirmed present in the existing page,
+- [x] Every one of Section 6.3's three bullet points is confirmed present in the existing page,
       or a specific, named gap is fixed
 
 **Verification:**
-- [ ] Live browser check against a seeded distributor with mixed bonus-type earnings
+- [x] Live browser check against a seeded distributor with mixed bonus-type earnings
 
 **Dependencies:** Task 15, Task 20c
 
 **Estimated scope:** XS (verification) — only grows if a real gap turns up
+
+**Status: Done (2026-07-29), verification only — no code changed.** Confirmed live against a
+distributor seeded with all three bonus types (Direct Referral, Matching, Binary) plus a
+withdrawal debit: `templates/distributors/earnings_history.html` already shows date+time
+(`txn.created_at|date:"M d, Y | g:i A"`), a distinct label per bonus type (explicit branches for
+`direct_referral_bonus`/`binary_bonus`/`matching_bonus`, not a generic fallback), and the signed
+GHS amount. All three of Section 6.3's bullet points hold with no gap. **FYI, not acted on (no
+functional gap, so out of this task's scope per its own estimate):**
+`tests/feature/distributors/test_earnings_history.py::test_lists_transactions_with_type_signed_amount_and_date`
+only asserts `direct_referral_bonus` and `withdrawal_debit` render correctly, not `binary_bonus`/
+`matching_bonus` — a test-coverage gap, not a feature gap, left for a future pass rather than
+silently expanding this task's scope.
 
 ---
 

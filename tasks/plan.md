@@ -227,6 +227,10 @@ UI.
     the real Binary Bonus cycle already uses, so the display can never drift from the real payout
     logic. A `doubt-driven-development` pass caught and fixed a real double-read of a live
     admin-editable constance setting before it shipped.
+  - [x] **21c done (2026-07-29, verification only, no code changed):** confirmed live against a
+    distributor seeded with all three bonus types that Section 6.3's three requirements (date+time,
+    distinguishable bonus type, amount credited) were already fully satisfied by Task 15's
+    `earnings_history` page — no gap found.
 
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
 another session — proves Django Channels real-time wiring works.
