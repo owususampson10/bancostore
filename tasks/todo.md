@@ -3783,6 +3783,20 @@ placement algorithm — see `project_binary_tree_placement_spillover_rule` memor
 pill markup is duplicated between `dashboard.html` and `_binary_tree_node.html` rather than
 extracted into a shared partial. Both are candidates for a future pass, not correctness bugs.
 
+**Follow-up (PR #45, merged 2026-07-29):** the fetched Stitch design's tree area is a
+draggable/zoomable canvas (drag to pan, a "Zoom In" button, scroll/pinch to zoom out, a "Recenter"
+button) — missed in the original build above, caught by the user after merge. Added a small inline
+Alpine.js component (translate+scale transform, matching this project's existing inline-`x-data`
+convention) plus keyboard pan/zoom/recenter support. Two real bugs found and fixed during live-browser
+verification: mouse-drag triggered native text-selection on node cards (fixed with `user-select: none`
++ `preventDefault()`), and that `preventDefault()` silently broke keyboard focus after a drag (fixed
+with an explicit `this.$el.focus()`). CodeRabbit's review caught one more genuine gap pre-merge — the
+canvas advertised "pinch to zoom" and disabled native pinch (`touch-action: none`) but never actually
+computed scale from two-touch distance, so a pinch just panned — fixed with real two-finger
+distance-based scaling, verified by driving `startDrag`/`onDrag` with synthetic touch objects.
+CodeRabbit's other finding on the same PR (`this.$el` allegedly focusing the outer wrapper instead of
+the canvas) did not hold up under empirical verification and was left as-is.
+
 ---
 
 #### Task 21b: Carry-forward PV tracker
