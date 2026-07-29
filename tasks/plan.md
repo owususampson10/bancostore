@@ -221,6 +221,12 @@ UI.
     the IDOR-safe `binary_tree_view` and its templates. CodeRabbit caught two real recursive-Python
     functions (tree assembly and node counting) that could theoretically hit Python's recursion
     limit on a pathologically deep single-line downline — both converted to iterative before merge.
+  - [x] **21b done (PR #47, merged 2026-07-29):** `apps/pv_ledger/services.py::get_carry_forward_summary`,
+    a new dashboard stat card showing PV carried forward on the distributor's strong leg (per Section
+    6.5's own wording) plus its nearest expiry date. Reuses the exact same weak/strong leg comparison
+    the real Binary Bonus cycle already uses, so the display can never drift from the real payout
+    logic. A `doubt-driven-development` pass caught and fixed a real double-read of a live
+    admin-editable constance setting before it shipped.
 
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
 another session — proves Django Channels real-time wiring works.

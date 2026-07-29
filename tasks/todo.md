@@ -3819,19 +3819,32 @@ remaining PV, and surfaces the earliest expiry date (oldest bucket's `date` +
 **Acceptance criteria:**
 - [ ] Shows total carried-forward PV and the nearest expiry date, computed from real `PvDailyBucket`
       rows, not a static placeholder
-- [ ] Already-expired buckets are excluded from the total
-- [ ] A distributor with no carried-forward PV sees an honest zero-state
+- [x] Already-expired buckets are excluded from the total
+- [x] A distributor with no carried-forward PV sees an honest zero-state
 
 **Verification:**
-- [ ] pytest test: total and nearest-expiry-date match a seeded set of buckets at different ages
-- [ ] pytest test: expired buckets are correctly excluded
-- [ ] Live browser check
+- [x] pytest test: total and nearest-expiry-date match a seeded set of buckets at different ages
+- [x] pytest test: expired buckets are correctly excluded
+- [x] Live browser check
 
 **Dependencies:** Task 13 (PvDailyBucket), Task 20
 
 **Files likely touched:** `apps/distributors/views.py`, `templates/distributors/dashboard.html` or a new template, `tests/feature/distributors/test_carry_forward_tracker.py`
 
 **Estimated scope:** S-M
+
+**Status: Done (PR #47, merged 2026-07-29).** Built as `apps/pv_ledger/services.py::get_carry_forward_summary`,
+wired into the existing dashboard view as a new stat card. `source-driven-development` against Section 6.5
+directly confirmed the tracker must show PV "carried forward on the strong leg" specifically, not a combined
+total — reused the exact same weak/strong leg comparison `apps/commissions/services.py`'s real Binary Bonus
+cycle already uses (`sum_leg_pv` per leg), so the displayed value can never drift out of sync with the real
+payout logic. Built test-first (7 unit tests + 2 feature tests). A `doubt-driven-development` pass caught one
+real bug before it shipped: `config.PV_CARRY_FORWARD_EXPIRY_DAYS` was read twice (risking a mid-call drift if
+the admin changed it between reads) — fixed by reading it once, the same bug shape this codebase already paid
+for twice before (Task 14, Task 19a). The reviewer's other finding (no locking around the read) was accepted
+as a trade-off matching every other read-only dashboard stat in this codebase, documented rather than fixed.
+Verified live in a real browser at desktop and mobile widths, both the nearing-expiry and zero states. Full
+suite green (1050 passed, 1 skipped).
 
 ---
 
