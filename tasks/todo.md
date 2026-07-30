@@ -3905,18 +3905,19 @@ immediate-event triggers, 21d-iii the PV-expiry scheduled check) rather than bui
 one sitting — decide after the doubt-driven-development pass, not before.
 
 **Acceptance criteria:**
-- [ ] A notification appears live (no page refresh) for each of the 6 event types above, and only
+- [x] A notification appears live (no page refresh) for each of the 6 event types above, and only
       to the distributor it belongs to
-- [ ] A distributor never receives another distributor's notifications, even by a guessed ID
-- [ ] Notifications persist (a `Notification` row exists) so they're visible on next login, not
+- [x] A distributor never receives another distributor's notifications, even by a guessed ID
+- [x] Notifications persist (a `Notification` row exists) so they're visible on next login, not
       only while connected
 
 **Verification:**
-- [ ] pytest tests using `WebsocketCommunicator`, mirroring Task 20d's pattern exactly: auth
+- [x] pytest tests using `WebsocketCommunicator`, mirroring Task 20d's pattern exactly: auth
       rejection, cross-distributor isolation
-- [ ] One pytest test per trigger point, proving a `Notification` row is created and pushed on the
+- [x] One pytest test per trigger point, proving a `Notification` row is created and pushed on the
       real event (not simulated)
-- [ ] Live browser check: trigger at least 2 of the 6 events for real, confirm the bell updates live
+- [x] Live browser check: triggered all 6 event types for real via `send_notification` from a
+      shell while a real logged-in browser tab stayed open; confirmed the bell updates live
 
 **Dependencies:** Task 20d (Channels/auth precedent), Task 9 (placement), Task 13/14 (bonus
 credits), Task 16 (withdrawal approval), Task 11 (KYC decision)
@@ -4124,21 +4125,100 @@ UI workflow) -- no Stitch screen for this exists yet, unlike the tree/dashboard 
 had fetched mockups to reconcile against.
 
 **Acceptance criteria:**
-- [ ] Bell shows a live, accurate unread count with no page refresh
-- [ ] Opening the dropdown shows recent notifications with correct type/message/relative time
-- [ ] Notifications are marked read on open (or per-item click — decide against the fetched design)
-- [ ] Empty state (no notifications yet) is honest, not a blank dropdown
+- [x] Bell shows a live, accurate unread count with no page refresh
+- [x] Opening the dropdown shows recent notifications with correct type/message/relative time
+- [x] Notifications are marked read via explicit action (single-item click + "mark all as read" —
+      the fetched Stitch mockup used an explicit button, not read-on-open, so that's what shipped)
+- [x] Empty state (no notifications yet) is honest, not a blank dropdown
 
 **Verification:**
-- [ ] Live browser check: trigger a real event, confirm the bell updates live with no refresh
-- [ ] Mobile + desktop width check, matching this project's established responsive convention
+- [x] Live browser check: triggered real events via `send_notification` from a shell while the
+      dashboard tab stayed open; confirmed the badge updates live with no refresh
+- [x] Mobile + desktop width check (500px macOS floor + 1440px), matching this project's
+      established responsive convention
 
 **Dependencies:** 21d-i, 21d-ii (at least one real trigger to demo against)
 
-**Files:** `templates/distributors/base_dashboard.html`, a new partial for the dropdown, likely a
-small view/endpoint for "mark as read" and/or initial notification list fetch
+**Files:** `templates/distributors/base_dashboard.html` (real bell + WS client JS, replacing the
+disabled placeholder), `templates/distributors/_notification_dropdown.html` (new partial, shared
+by all three of `notification_dropdown`/`notification_mark_read`/`notification_mark_all_read`),
+`templates/distributors/notification_history.html` (new, the dropdown's "View all" destination,
+paginated), `apps/notifications/context_processors.py` (new, powers the header badge site-wide),
+`apps/distributors/views.py`/`urls.py` (4 new views/routes), `apps/notifications/models.py`
+(`icon_name`/`icon_classes` per `EventType`), `apps/notifications/services.py`
+(`push_unread_count_update`, `unread_count` added to `_push_live`'s payload),
+`apps/distributors/consumers.py` (`unread_count_update` handler), `static/src/main.js` (htmx CSRF
+wiring -- the first htmx POST usage anywhere in this codebase).
 
-**Estimated scope:** M — blocked on a Stitch screen not yet fetched
+**Built from 4 fetched Stitch screens** ("Notification Bell - Bancostore" Populated/Empty
+State/Mobile/Mobile Empty State), reconciled against real scope: dropped each mockup's own fake
+surrounding dashboard chrome, illustration artwork, the mobile empty state's settings-gear icon/
+"Refresh Portal" button/category filter chips (all fabricated -- no such features exist), and
+picked ONE canonical icon per `EventType` where the desktop and mobile mockups disagreed with each
+other (withdrawal-approved: `check_circle`/green, not mobile's `account_balance_wallet`/gray). The
+mobile mockup's PV-expiring "urgent/ALERT" red-tinted treatment was kept and applied consistently
+on both desktop and mobile, not just mobile -- a genuinely worthwhile design signal from the
+mockup, not fabricated chrome.
+
+A `doubt-driven-development` pass before implementation caught two real design gaps: (1) the
+context processor must never assume `is_distributor()` (a group-membership check only) implies a
+`Distributor` row exists -- since this processor runs on EVERY page site-wide, that gap (already
+documented elsewhere in this codebase, CLAUDE.md's Task 15 note) would 500 the whole site for such
+a user, not one view; fixed with a `try/except Distributor.DoesNotExist` guard. (2) cross-tab badge
+staleness -- the original design had the client only increment/decrement the badge from a bare "new
+notification" push, which drifts the moment a second tab marks something read. Fixed by making
+every push (`notification_push` and a new `unread_count_update` broadcast fired on mark-read/
+mark-all-read) carry the absolute, server-computed count; the client only ever sets, never
+increments.
+
+**Three real bugs caught only by live-browser verification, none of which any test suite would
+have caught:**
+1. A multi-line Django `{# ... #}` comment (Django's comment tag is single-line only) rendered as
+   literal visible page text in `_notification_dropdown.html` -- the same recurring footgun
+   CLAUDE.md's Task 18f entry already documents, caught and fixed twice in this task alone (once
+   in the original code, once again in the comment written to document a different fix).
+2. The mobile full-screen notification overlay was trapped inside the header's 64px height instead
+   of covering the viewport -- root-caused to `backdrop-blur-sm` (a CSS `backdrop-filter`) on
+   `base_dashboard.html`'s `<header>`, which -- like `transform`/`filter`/`perspective` -- silently
+   establishes a new containing block for any `position: fixed` descendant. Fixed by removing it
+   (`bg-surface/90` alone still gives the same translucent header).
+3. The live badge push had two independent, layered bugs, both invisible to `WebsocketCommunicator`-
+   based automated tests (which bypass the real asyncio Redis client entirely): (a) `channels-redis`
+   4.3.0 doesn't tolerate `redis-py` 8.x's asyncio internals -- a routine idle-long-poll
+   `TimeoutError` escapes instead of being retried, crashing the WebSocket connection (close code
+   1011). Confirmed this pre-existed and ALSO silently affected the already-shipped Task 20d
+   wallet-balance live push, not something this task introduced. User-approved fix: pin
+   `redis<5` in `requirements.txt` (channels-redis's own declared `redis>=4.6` has no upper bound).
+   (b) Layered on top: the header JS cached `document.getElementById("notif-badge")` once at page
+   load, but `_notification_dropdown.html`'s `hx-swap-oob="true"` fragment for that same element
+   defaults to an `outerHTML` swap on every dropdown-open/mark-read/mark-all-read response --
+   detaching the original node. A cached reference silently became a no-op pointing at a removed
+   node the moment a user opened the dropdown once. Fixed by re-querying the element fresh on every
+   WebSocket message instead of caching it.
+
+**A `code-review-and-quality` pass (subagent) caught one more real, 100%-reproducible bug before
+merge:** all four new views had inherited `@_redirect_if_cooling_off_cancelled` (this codebase's
+decorator restricting a cooling-off-cancelled-but-still-logged-in distributor to withdrawal-only
+pages). But `notification_dropdown` is only ever called via `htmx.ajax()` GET targeting the small
+`#notif-panel-content` div -- the decorator's bare page redirect gets followed transparently by
+that GET and swaps an ENTIRE PAGE into the 384px dropdown. Fixed by removing the decorator from all
+four views: viewing/dismissing notification history isn't an earning-related action the decorator
+is meant to guard, and a cancelled distributor may still have a relevant `WITHDRAWAL_APPROVED`
+notification for the refund they're claiming -- matching how `withdrawal_request`/
+`withdrawal_history`/`payout_settings` are already exempted from this same decorator. Regression
+tests added to `tests/feature/distributors/test_post_cancellation_access.py` (not a new file --
+joined the existing suite of "stays reachable for a cancelled distributor" tests for consistency).
+A parallel `security-and-hardening` subagent pass found zero exploitable issues (IDOR, CSRF,
+WebSocket auth, XSS, the global context processor, and the `redis<5` pin's own CVE history all
+checked clean) -- only two Info-level notes (a cosmetic decorator-ordering inconsistency, fixed;
+and a flagged follow-up to un-pin `redis` once `channels-redis` supports a newer redis-py, tracked
+below, not silently accepted as permanent).
+
+**Deferred, not silently skipped:** the `redis<5` pin is a real, currently-inert supply-chain/
+maintenance risk (the 4.x line won't receive further security patches) -- revisit once
+`channels-redis` (or a replacement) is verified compatible with a newer `redis-py`.
+
+**Estimated scope:** M — shipped.
 
 ---
 

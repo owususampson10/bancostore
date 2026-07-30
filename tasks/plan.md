@@ -209,7 +209,7 @@ UI.
   balance with no page refresh. Also found and fixed, via that same real-browser check, an
   unrelated pre-existing gap — `daphne` doesn't auto-serve static files in DEBUG mode the way
   `runserver` does — documented in `CLAUDE.md`.
-- [ ] Task 21: Binary tree visual view, earnings history, carry-forward tracker, notification bell.
+- [x] Task 21: Binary tree visual view, earnings history, carry-forward tracker, notification bell.
   Re-scoped 2026-07-28 via `source-driven-development` + `planning-and-task-breakdown` — the
   existing entry's acceptance criteria were incomplete (earnings history and the carry-forward
   tracker had none at all). Sliced into 21a (tree view), 21b (carry-forward tracker), 21c (confirm
@@ -237,8 +237,25 @@ UI.
     doubt-driven-development pass that caught two Critical bugs in the original design before any
     code was written), all 6 of Section 6.6's event types wired (5 immediate triggers plus the
     PV-expiry scheduled check, which reuses Task 21b's `get_carry_forward_summary` directly so the
-    two can never disagree). **21d-iv (the bell UI) is the only piece left in Task 21** — blocked on
-    a Stitch screen not yet fetched.
+    two can never disagree).
+  - [x] **21d-iv done (2026-07-30), closing out Task 21:** the bell UI itself, built from 4 fetched
+    Stitch screens (desktop populated/empty, mobile populated/empty), reconciled against real scope
+    (dropped fabricated dashboard chrome, illustrations, a mobile-only settings-gear icon/"Refresh
+    Portal" button/category filter chips — none of which are real features). Live-browser
+    verification caught and fixed three real bugs no test suite would have: a multi-line Django
+    `{# #}` comment rendering as literal text (the same recurring footgun from Task 18f, twice in
+    this task alone), `backdrop-blur-sm` on the header silently trapping the mobile full-screen
+    overlay inside the header's own 64px height (a CSS `backdrop-filter` establishes a containing
+    block for `position: fixed`, just like `transform`), and a two-layer live-badge failure — a
+    `channels-redis`/`redis-py` 8.x version incompatibility crashing the WebSocket connection
+    (fixed with a user-approved `redis<5` pin, confirmed to also silently affect the already-shipped
+    Task 20d wallet-balance push) plus a stale cached DOM reference the header JS held past htmx's
+    own oob-swap replacing that node. A code-review pass caught one more real, 100%-reproducible bug
+    pre-merge: the cooling-off-cancelled-distributor redirect decorator, applied to the new
+    htmx-loaded dropdown view, swapped an entire page into the small dropdown panel — fixed by
+    removing it from all 4 new views (viewing notifications isn't earning-related, matching the
+    withdrawal-flow views' existing exemption). A parallel security pass found zero exploitable
+    issues. See `tasks/todo.md` Task 21d-iv for the full breakdown.
 
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
 another session — proves Django Channels real-time wiring works.
