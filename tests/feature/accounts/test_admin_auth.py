@@ -490,6 +490,7 @@ def test_not_checking_remember_still_requires_the_token_step_next_time(
     # Still mid-wizard at the token step -- a 302 straight to the admin
     # portal would mean the token step was wrongly skipped.
     assert second_login.status_code == 200
+    assert second_login.context["wizard"]["steps"].current == "token"
 
 
 @pytest.mark.django_db
@@ -514,6 +515,7 @@ def test_a_devices_remember_cookie_never_trusts_a_different_admin_account(
     second_login = _post_auth_step(client, "second@example.test", "AdminPassw0rd!")
 
     assert second_login.status_code == 200
+    assert second_login.context["wizard"]["steps"].current == "token"
 
 
 @pytest.mark.django_db
@@ -532,6 +534,7 @@ def test_a_removed_device_is_no_longer_trusted_by_an_old_remember_cookie(
     second_login = _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
 
     assert second_login.status_code == 200  # back to the token step
+    assert second_login.context["wizard"]["steps"].current == "token"
 
     result = _post_token_step(client, new_device, remember=False)
     assert result.status_code == 200
@@ -580,6 +583,7 @@ def test_a_remembered_devices_cookie_expires_after_seven_days(client, settings):
         second_login = _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
 
     assert second_login.status_code == 200  # back to requiring the token step
+    assert second_login.context["wizard"]["steps"].current == "token"
 
 
 @pytest.mark.django_db

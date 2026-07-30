@@ -135,8 +135,8 @@ class AdminLoginView(BaseLoginView):
         # is a memoized self.user_cache, stable across the call either way.
         if self.remember_agent:
             logger.info(
-                "Admin login for %s completed via a remembered device "
-                "(no fresh TOTP prompt)",
-                self.get_user().email,
+                "Admin login for user_id=%s completed via a remembered "
+                "device (no fresh TOTP prompt)",
+                self.get_user().pk,
             )
         return super().done(form_list, **kwargs)
