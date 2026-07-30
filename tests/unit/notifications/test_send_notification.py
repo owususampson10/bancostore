@@ -7,7 +7,7 @@ import pytest
 
 from apps.distributors.models import Distributor
 from apps.notifications.models import Notification
-from apps.notifications.services import send_notification
+from apps.notifications.services import push_unread_count_update, send_notification
 
 User = get_user_model()
 _phone_seq = count(1)
@@ -97,3 +97,22 @@ def test_a_distributor_never_sees_another_distributors_notification_row():
     send_notification(distributor_a, Notification.EventType.KYC_DECIDED, "for A only")
 
     assert Notification.objects.filter(distributor=distributor_b).count() == 0
+
+
+@pytest.mark.django_db(transaction=True)
+def test_push_unread_count_update_never_raises_on_a_channels_failure(monkeypatch):
+    """Mirrors send_notification's own failure-isolation convention
+    exactly (test_a_live_push_failure_never_propagates...): a Channels/
+    Redis hiccup while broadcasting the cross-tab unread-count
+    reconciliation must never surface to the caller -- it's a UI
+    staleness problem, not a reason to fail the mark-read/mark-all-read
+    request that triggered it."""
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("forced Channels/Redis failure for this test")
+
+    monkeypatch.setattr("apps.notifications.services.get_channel_layer", _raise)
+    distributor = _make_distributor()
+
+    # Must not raise.
+    push_unread_count_update(distributor)

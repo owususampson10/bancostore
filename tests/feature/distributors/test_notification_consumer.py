@@ -11,7 +11,7 @@ from channels.testing import WebsocketCommunicator
 from apps.distributors.consumers import NotificationConsumer
 from apps.distributors.models import Distributor
 from apps.notifications.models import Notification
-from apps.notifications.services import send_notification
+from apps.notifications.services import push_unread_count_update, send_notification
 
 User = get_user_model()
 _phone_seq = count(1)
@@ -92,6 +92,57 @@ def test_a_notification_sent_after_connecting_pushes_live_to_that_client():
         assert response["type"] == "notification_push"
         assert response["event_type"] == "kyc_decided"
         assert response["message"] == "Your KYC was approved"
+        await communicator.disconnect()
+
+    async_to_sync(run)()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_notification_push_carries_the_current_unread_count():
+    """Task 21d-iv, doubt-driven-development finding: the client must
+    never increment the badge itself from a bare "a notification
+    arrived" signal (that drifts out of sync across two open tabs once
+    one of them marks something read) -- the server computes and pushes
+    the absolute unread count alongside every new notification, and the
+    client always sets, never increments."""
+    distributor = _make_distributor()
+    Notification.objects.create(
+        distributor=distributor,
+        event_type=Notification.EventType.KYC_DECIDED,
+        message="already unread before connecting",
+        is_read=False,
+    )
+
+    async def run():
+        communicator, connected = await _connect_as(distributor.user)
+        assert connected is True
+
+        await database_sync_to_async(send_notification)(
+            distributor, Notification.EventType.KYC_DECIDED, "new one"
+        )
+
+        response = await communicator.receive_json_from()
+        assert response["unread_count"] == 2
+        await communicator.disconnect()
+
+    async_to_sync(run)()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_push_unread_count_update_reaches_a_connected_client():
+    """Task 21d-iv: cross-tab reconciliation -- marking notifications read
+    in one tab must update the badge in every other open tab for that
+    same distributor, not just the tab that performed the action."""
+    distributor = _make_distributor()
+
+    async def run():
+        communicator, connected = await _connect_as(distributor.user)
+        assert connected is True
+
+        await database_sync_to_async(push_unread_count_update)(distributor)
+
+        response = await communicator.receive_json_from()
+        assert response == {"type": "unread_count_update", "unread_count": 0}
         await communicator.disconnect()
 
     async_to_sync(run)()

@@ -1,0 +1,88 @@
+{% extends "distributors/base_dashboard.html" %}
+
+{% block title %}Notifications - Bancostore Distributor{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+<a href="{% url 'distributors:dashboard' %}" class="font-label-lg text-label-lg text-gray-muted hover:text-on-surface transition-colors flex items-center gap-1 mb-2">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>Back to Dashboard
+</a>
+<h1 class="font-headline-lg text-headline-lg text-on-surface">Notifications</h1>
+</div>
+
+<div class="bg-white rounded-xl border border-outline-variant">
+{% if page_obj.object_list %}
+<div>
+{% for notification in page_obj.object_list %}
+{% if notification.event_type == "pv_expiring" %}
+<div class="p-4 md:p-6 border-b border-outline-variant/50 flex gap-4 bg-error-container/30 last:border-b-0">
+<div class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 {{ notification.icon_classes }}">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">{{ notification.icon_name }}</span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="font-body-md text-body-md text-error font-semibold">{{ notification.message }}</p>
+<p class="text-xs font-bold uppercase tracking-wide text-error mt-1">Alert &middot; {{ notification.created_at|date:"M j, Y g:i A" }}</p>
+</div>
+</div>
+{% else %}
+<div class="p-4 md:p-6 border-b border-outline-variant/50 flex gap-4 last:border-b-0 {% if not notification.is_read %}bg-primary-container/10{% endif %}">
+<div class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 {{ notification.icon_classes }}">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">{{ notification.icon_name }}</span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="font-body-md text-body-md text-on-surface">{{ notification.message }}</p>
+<p class="text-xs uppercase tracking-wide text-gray-muted mt-1">{{ notification.created_at|date:"M j, Y g:i A" }}</p>
+</div>
+</div>
+{% endif %}
+{% endfor %}
+</div>
+{% else %}
+<div class="flex flex-col items-center justify-center text-center p-12">
+<div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-[32px] text-gray-muted" aria-hidden="true">notifications_off</span>
+</div>
+<p class="font-label-lg text-label-lg text-on-surface">No notifications yet</p>
+<p class="font-body-md text-body-md text-gray-muted mt-1 max-w-[280px]">We'll let you know when there's an update on your earnings or team activity.</p>
+</div>
+{% endif %}
+</div>
+
+{% if page_obj.has_other_pages %}
+<div class="flex items-center justify-between pt-8">
+{% if page_obj.has_previous %}
+<a href="?page={{ page_obj.previous_page_number }}" class="flex items-center gap-1 font-label-lg text-label-lg text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>Previous
+</a>
+{% else %}
+<span></span>
+{% endif %}
+
+{% comment %}
+CodeRabbit (Task 25): page_obj.paginator.page_range alone renders every
+page number with no truncation. page_range (an elided range from the
+view) inserts paginator.ELLIPSIS in place of skipped runs.
+{% endcomment %}
+<div class="hidden sm:flex items-center gap-1">
+{% for num in page_range %}
+{% if num == page_obj.paginator.ELLIPSIS %}
+<span class="w-8 h-8 flex items-center justify-center text-gray-muted text-sm">{{ num }}</span>
+{% elif num == page_obj.number %}
+<span class="w-8 h-8 flex items-center justify-center rounded-full bg-primary text-on-primary font-bold text-sm">{{ num }}</span>
+{% else %}
+<a href="?page={{ num }}" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-low text-gray-muted text-sm transition-colors">{{ num }}</a>
+{% endif %}
+{% endfor %}
+</div>
+<span class="sm:hidden font-body-sm text-body-sm text-gray-muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+
+{% if page_obj.has_next %}
+<a href="?page={{ page_obj.next_page_number }}" class="flex items-center gap-1 font-label-lg text-label-lg text-secondary hover:text-primary transition-colors">
+Next<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
+</a>
+{% else %}
+<span></span>
+{% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -15,7 +15,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models import Max, Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -33,7 +33,9 @@ from apps.distributors.cooling_off_services import (
     calculate_cooling_off_refund,
     cancel_membership_and_refund,
 )
+from apps.notifications.models import Notification
 from apps.notifications.otp import generate_otp, verify_otp
+from apps.notifications.services import push_unread_count_update
 from apps.orders.services import confirm_order_payment
 from apps.pv_ledger.models import MonthlyPersonalPv
 from apps.pv_ledger.services import get_carry_forward_summary
@@ -1201,3 +1203,138 @@ def cancel_membership(request):
         )
 
     return render(request, "distributors/cancel_membership.html", context)
+
+
+_NOTIFICATION_DROPDOWN_LIMIT = 10
+
+
+def _dropdown_notifications(distributor):
+    """Unread first, then newest first, capped at
+    _NOTIFICATION_DROPDOWN_LIMIT -- an unread item must never be pushed
+    out of the dropdown purely by a burst of newer already-read items,
+    since the header badge would then show a nonzero unread count with
+    nothing actionable visible without going to "View all" (doubt-driven-
+    development finding)."""
+    return list(
+        distributor.notifications.order_by("is_read", "-created_at", "-pk")[
+            :_NOTIFICATION_DROPDOWN_LIMIT
+        ]
+    )
+
+
+@login_required(login_url="distributors:login")
+def notification_dropdown(request):
+    """Task 21d-iv. GET-only, read-only -- opening the dropdown never
+    marks anything read (only the explicit mark-read/mark-all-read
+    actions below do). Always scoped to request.user.distributor, no
+    IDOR surface.
+
+    Deliberately NOT decorated with @_redirect_if_cooling_off_cancelled,
+    unlike most other distributor views -- that decorator returns a bare
+    page redirect, which an htmx.ajax() GET (this view's only caller,
+    targeting the small #notif-panel-content div) follows transparently
+    and swaps whole-page content into a 384px dropdown. A cancelled
+    distributor's own notification history (which can include a still-
+    relevant WITHDRAWAL_APPROVED notification for the refund they're
+    claiming) is also never "nothing left to see" the way starter-pack/
+    team pages are, matching the withdrawal-related views' own
+    established exemption from this same decorator. A code-review pass
+    caught this before merge -- no test had exercised a cooling-off-
+    cancelled distributor against this view."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+    distributor = request.user.distributor
+
+    return render(
+        request,
+        "distributors/_notification_dropdown.html",
+        {
+            "notifications": _dropdown_notifications(distributor),
+            "unread_notification_count": distributor.notifications.filter(
+                is_read=False
+            ).count(),
+        },
+    )
+
+
+@login_required(login_url="distributors:login")
+@require_POST
+@ratelimit(key="user", rate="60/m", method="POST")
+def notification_mark_read(request, pk):
+    """IDOR-safe: get_object_or_404 scoped to request.user.distributor, so
+    a distributor can never mark -- or even discover the existence of --
+    another distributor's notification via a guessed pk. No
+    @_redirect_if_cooling_off_cancelled -- see notification_dropdown's
+    docstring."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+    distributor = request.user.distributor
+
+    notification = get_object_or_404(Notification, pk=pk, distributor=distributor)
+    if not notification.is_read:
+        notification.is_read = True
+        notification.save(update_fields=["is_read"])
+        push_unread_count_update(distributor)
+
+    return render(
+        request,
+        "distributors/_notification_dropdown.html",
+        {
+            "notifications": _dropdown_notifications(distributor),
+            "unread_notification_count": distributor.notifications.filter(
+                is_read=False
+            ).count(),
+        },
+    )
+
+
+@login_required(login_url="distributors:login")
+@require_POST
+@ratelimit(key="user", rate="60/m", method="POST")
+def notification_mark_all_read(request):
+    # No @_redirect_if_cooling_off_cancelled -- see notification_dropdown's
+    # docstring.
+    if not is_distributor(request.user):
+        raise PermissionDenied
+    distributor = request.user.distributor
+
+    updated = distributor.notifications.filter(is_read=False).update(is_read=True)
+    if updated:
+        push_unread_count_update(distributor)
+
+    return render(
+        request,
+        "distributors/_notification_dropdown.html",
+        {
+            "notifications": _dropdown_notifications(distributor),
+            "unread_notification_count": 0,
+        },
+    )
+
+
+@login_required(login_url="distributors:login")
+def notification_history(request):
+    """Task 21d-iv: the dropdown's "View all notifications" destination --
+    full paginated history, mirroring apps.orders.views.order_history's
+    own pagination pattern exactly (-created_at, -pk tie-breaker;
+    Paginator(qs, 20); get_page() to clamp an invalid ?page= instead of
+    raising; an elided page range so a long history doesn't render
+    hundreds of page-number links). No @_redirect_if_cooling_off_cancelled
+    -- see notification_dropdown's docstring."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+    distributor = request.user.distributor
+
+    notifications = distributor.notifications.order_by("-created_at", "-pk")
+    paginator = Paginator(notifications, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    page_range = page_obj.paginator.get_elided_page_range(page_obj.number)
+
+    return render(
+        request,
+        "distributors/notification_history.html",
+        {
+            "page_obj": page_obj,
+            "page_range": page_range,
+        },
+    )

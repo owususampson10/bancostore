@@ -37,6 +37,31 @@ class Notification(models.Model):
         KYC_DECIDED = "kyc_decided", "KYC decision"
         PV_EXPIRING = "pv_expiring", "PV approaching expiry"
 
+    # Task 21d-iv: one canonical icon/color per event type, not a
+    # per-device choice -- reconciling the fetched Stitch mockups, whose
+    # desktop and mobile screens disagreed with each other on the
+    # withdrawal-approved icon (check_circle/green vs.
+    # account_balance_wallet/gray). Kept in Python (not duplicated as a
+    # long Django-template if/elif chain) so it's one source of truth and
+    # a test can assert every EventType has an entry.
+    _ICON_BY_EVENT_TYPE = {
+        EventType.DOWNLINE_JOINED: ("person", "bg-primary-container/10 text-primary"),
+        EventType.BINARY_BONUS_CREDITED: ("payments", "bg-primary/10 text-primary"),
+        EventType.REFERRAL_BONUS_PAID: (
+            "redeem",
+            "bg-secondary-container text-secondary",
+        ),
+        EventType.WITHDRAWAL_APPROVED: (
+            "check_circle",
+            "bg-success/10 text-success",
+        ),
+        EventType.KYC_DECIDED: (
+            "verified_user",
+            "bg-secondary-container text-secondary",
+        ),
+        EventType.PV_EXPIRING: ("warning", "bg-error-container/30 text-error"),
+    }
+
     distributor = models.ForeignKey(
         "distributors.Distributor",
         on_delete=models.CASCADE,
@@ -65,6 +90,14 @@ class Notification(models.Model):
         return (
             f"Notification<{self.distributor_id} {self.event_type} read={self.is_read}>"
         )
+
+    @property
+    def icon_name(self) -> str:
+        return self._ICON_BY_EVENT_TYPE[self.event_type][0]
+
+    @property
+    def icon_classes(self) -> str:
+        return self._ICON_BY_EVENT_TYPE[self.event_type][1]
 
 
 class NotificationCycleRun(models.Model):

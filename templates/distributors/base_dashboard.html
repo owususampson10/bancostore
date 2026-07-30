@@ -119,19 +119,61 @@
 
 <!-- Main content -->
 <div class="flex-1 min-w-0 flex flex-col">
-<header class="sticky top-0 z-30 bg-surface/90 backdrop-blur-sm flex items-center gap-4 h-16 px-margin-mobile md:px-margin-desktop border-b border-outline-variant/50">
+{% comment %}
+Task 21d-iv: backdrop-blur-sm (a CSS backdrop-filter) used to sit here --
+removed because it establishes a new containing block for any
+`position: fixed` descendant (a real, easy-to-miss CSS rule shared by
+transform/filter/backdrop-filter/perspective), which silently confined
+the notification bell's mobile full-screen overlay to this header's own
+64px height instead of the viewport, a bug only visible via a real
+browser check. bg-surface/90 alone still gives the same translucent
+header background, just without the blur.
+{% endcomment %}
+<header class="sticky top-0 z-30 bg-surface/90 flex items-center gap-4 h-16 px-margin-mobile md:px-margin-desktop border-b border-outline-variant/50">
 <button type="button" class="p-2 hover:bg-surface-container-low rounded-full md:hidden" x-on:click="mobileOpen = !mobileOpen" aria-label="Open menu">
 <span class="material-symbols-outlined">menu</span>
 </button>
 <p class="font-label-lg text-label-lg text-gray-muted">Bancostore Distributor Portal</p>
 <div class="flex-1"></div>
-{# disabled, not just styled to look disabled -- Task 21 is what wires up #}
-{# real notifications via Channels; a permanent unread dot here would be #}
-{# misleading for a feature that doesn't exist yet, matching CodeRabbit's #}
-{# finding that this button claimed to be inert but wasn't. #}
-<button type="button" disabled class="p-2 rounded-full text-gray-muted relative cursor-not-allowed" title="Notifications — coming soon">
+{# Task 21d-iv: the real notification bell. notifOpen is scoped to this #}
+{# div (not the body-level x-data above) since nothing else on the page #}
+{# needs it. The dropdown's actual list content is fetched fresh via #}
+{# htmx.ajax() every time the bell is OPENED (not on every click -- a #}
+{# plain hx-get on the button would also re-fire on the click that #}
+{# CLOSES it) -- there is deliberately no client-side caching of #}
+{# notification state; mark-read/mark-all-read always re-render this #}
+{# same partial server-side. #}
+{# notifOpen lives on this static wrapper, never touched by the htmx- #}
+{# swapped #notif-panel-content below -- Alpine only binds directives #}
+{# present at initial page load, so any @click inside content htmx #}
+{# injects later would silently never fire. The mobile close button #}
+{# rendered by _notification_dropdown.html therefore uses a plain #}
+{# bubbling CustomEvent ("notif-close") instead of an Alpine @click, #}
+{# caught by a doubt-driven-development review before this shipped. #}
+<div class="relative" x-data="{ notifOpen: false }" @keydown.escape.window="notifOpen = false" @notif-close="notifOpen = false">
+<button type="button"
+        class="p-2 hover:bg-surface-container-low rounded-full text-gray-muted relative"
+        aria-label="Notifications"
+        aria-haspopup="true"
+        :aria-expanded="notifOpen.toString()"
+        @click="notifOpen = !notifOpen; if (notifOpen) { htmx.ajax('GET', '{% url 'distributors:notification_dropdown' %}', {target: '#notif-panel-content', swap: 'innerHTML'}) }">
 <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
+<span id="notif-badge"
+      class="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-surface {% if not unread_notification_count %}hidden{% endif %}"
+      aria-hidden="true"></span>
 </button>
+
+{# Full-screen overlay on mobile (matching the sidebar drawer's own #}
+{# z-40/z-50 convention -- this sits above the sidebar but below the #}
+{# logout-confirm modal at z-[70]), a corner dropdown from md: up. #}
+<div class="fixed inset-0 bg-black/40 z-[59] md:hidden" x-show="notifOpen" x-cloak @click="notifOpen = false"></div>
+<div x-show="notifOpen"
+     x-cloak
+     @click.outside="notifOpen = false"
+     class="fixed inset-0 z-[60] md:absolute md:inset-auto md:right-0 md:top-full md:mt-2 md:w-96 bg-surface md:rounded-xl md:border md:border-outline-variant md:shadow-lg flex flex-col md:max-h-[32rem]">
+<div id="notif-panel-content" class="flex-1 overflow-y-auto flex flex-col"></div>
+</div>
+</div>
 </header>
 <main class="flex-1 p-margin-mobile md:p-margin-desktop max-w-[1200px] w-full mx-auto">
 {% block content %}{% endblock %}
@@ -159,5 +201,72 @@
 </div>
 </div>
 </div>
+
+{% comment %}
+Task 21d-iv: live header-badge updates over Channels, on every dashboard
+page (unlike Task 20d's wallet-balance socket, which only connects on
+dashboard.html itself since the balance is only displayed there). Only
+ever SETS the badge to the server-computed absolute unread_count carried
+by both notification_push and unread_count_update -- never increments/
+decrements client-side, since that drifts the moment a second tab is
+open and marks something read (a doubt-driven-development finding
+before this shipped). The dropdown's own list content is never patched
+by this socket; it's only ever refreshed by the next real htmx fetch
+(the next time the bell is opened).
+
+Only actually connects locally via daphne (port 8001), not runserver
+(port 8000) -- see CLAUDE.md.
+{% endcomment %}
+<script>
+(function () {
+  // Re-queried on every call, not cached once -- _notification_dropdown.html's
+  // hx-swap-oob fragment for this same element defaults to an outerHTML
+  // swap on every dropdown/mark-read/mark-all-read response, which
+  // DETACHES the original node and inserts a new one. A reference
+  // captured once at page load would silently point at a removed node
+  // after the first such swap, making every subsequent live push a
+  // no-op with no visible effect and no error (caught via a real
+  // browser check: a raw WebSocket test confirmed the push itself
+  // arrived correctly while the badge stayed stuck).
+  function setUnreadCount(count) {
+    if (typeof count !== "number") return;
+    const badgeEl = document.getElementById("notif-badge");
+    if (!badgeEl) return; // defensive: element may be absent on a partial render
+    badgeEl.classList.toggle("hidden", count <= 0);
+  }
+
+  let reconnectDelay = 1000;
+  const maxReconnectDelay = 30000;
+
+  function connect() {
+    const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+    const socket = new WebSocket(protocol + window.location.host + "/ws/distributors/notifications/");
+
+    socket.onopen = function () {
+      reconnectDelay = 1000;
+    };
+
+    socket.onmessage = function (event) {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch (e) {
+        return; // malformed payload -- ignore rather than crash the page
+      }
+      if (!data || (data.type !== "notification_push" && data.type !== "unread_count_update")) {
+        return;
+      }
+      setUnreadCount(data.unread_count);
+    };
+
+    socket.onclose = function () {
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
+    };
+  }
+
+  connect();
+})();
+</script>
 </body>
 </html>

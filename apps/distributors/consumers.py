@@ -121,6 +121,21 @@ class NotificationConsumer(AsyncWebsocketConsumer):
                     "event_type": event["event_type"],
                     "message": event["message"],
                     "created_at": event["created_at"],
+                    "unread_count": event["unread_count"],
+                }
+            )
+        )
+
+    async def unread_count_update(self, event):
+        """Cross-tab badge reconciliation (Task 21d-iv) -- fired by
+        push_unread_count_update() whenever a mark-read/mark-all-read
+        action happens in ANY tab for this distributor, so every other
+        open tab's badge stays correct without a full page reload."""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "unread_count_update",
+                    "unread_count": event["unread_count"],
                 }
             )
         )
