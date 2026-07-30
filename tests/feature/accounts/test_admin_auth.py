@@ -20,7 +20,7 @@ ADMIN_URL = "/admin/"
 
 def _create_admin(email="admin@example.test", password="AdminPassw0rd!"):
     return User.objects.create_user(
-        username="admin_user", email=email, password=password, is_staff=True
+        username=email, email=email, password=password, is_staff=True
     )
 
 
@@ -404,3 +404,221 @@ def test_email_backend_does_not_check_lock_state_before_the_password():
         backend.authenticate(
             request=None, username="admin@example.test", password="AdminPassw0rd!"
         )
+
+
+def _post_auth_step(client, email, password):
+    return client.post(
+        "/account/login/",
+        {
+            "admin_login_view-current_step": "auth",
+            "auth-username": email,
+            "auth-password": password,
+        },
+    )
+
+
+def _post_token_step(client, device, remember=False):
+    from django_otp.oath import totp
+
+    data = {
+        "admin_login_view-current_step": "token",
+        "token-otp_token": f"{totp(device.bin_key):06d}",
+    }
+    if remember:
+        data["token-remember"] = "on"
+    return client.post("/account/login/", data, follow=True)
+
+
+@pytest.mark.django_db
+def test_checking_remember_device_sets_a_remember_cookie(client, settings):
+    """Task: "remember this device for 7 days" (user-approved, 2026-07-30)
+    -- completing the wizard with the remember checkbox checked must set
+    a signed remember-cookie so a later login from the same browser can
+    skip the token step. Without TWO_FACTOR_REMEMBER_COOKIE_AGE set, the
+    library's AuthenticationTokenForm never even adds the 'remember'
+    field, so this also proves the setting itself is wired up."""
+    settings.TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+    user = _create_admin()
+    device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+
+    _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+    _post_token_step(client, device, remember=True)
+
+    remember_cookies = [
+        name for name in client.cookies if name.startswith("remember-cookie_")
+    ]
+    assert len(remember_cookies) == 1
+
+
+@pytest.mark.django_db
+def test_a_remembered_device_skips_the_token_step_on_the_next_login(client, settings):
+    settings.TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+    user = _create_admin()
+    device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+
+    _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+    _post_token_step(client, device, remember=True)
+
+    # A second, fresh login attempt -- only the auth step, no token this
+    # time -- must go straight through, since this exact browser (the
+    # same `client`, which persists cookies across requests like a real
+    # browser session) already proved it has the device.
+    second_login = _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+
+    assert second_login.status_code == 302
+    assert second_login.url == "/admin-portal/"
+
+
+@pytest.mark.django_db
+def test_not_checking_remember_still_requires_the_token_step_next_time(
+    client, settings
+):
+    """Regression guard distinguishing this feature from
+    test_2fa_requirement_cannot_be_bypassed_via_settings_toggle's own
+    guarantee: a browser that has NEVER been remembered (or explicitly
+    declined) must always be asked for a fresh code -- remembering is
+    opt-in per login, never a standing bypass."""
+    settings.TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+    user = _create_admin()
+    device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+
+    _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+    _post_token_step(client, device, remember=False)
+
+    second_login = _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+
+    # Still mid-wizard at the token step -- a 302 straight to the admin
+    # portal would mean the token step was wrongly skipped.
+    assert second_login.status_code == 200
+    assert second_login.context["wizard"]["steps"].current == "token"
+
+
+@pytest.mark.django_db
+def test_a_devices_remember_cookie_never_trusts_a_different_admin_account(
+    client, settings
+):
+    """A remember-cookie is scoped to the specific (user, device) pair
+    that set it (django-two-factor-auth's own get_remember_device_cookie
+    signs both in). A second admin logging in from the same physical
+    browser/cookie-jar must still be asked for a fresh code."""
+    settings.TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+    first_admin = _create_admin(email="first@example.test")
+    first_device = TOTPDevice.objects.create(
+        user=first_admin, name="default", confirmed=True
+    )
+    _post_auth_step(client, "first@example.test", "AdminPassw0rd!")
+    _post_token_step(client, first_device, remember=True)
+
+    second_admin = _create_admin(email="second@example.test")
+    TOTPDevice.objects.create(user=second_admin, name="default", confirmed=True)
+
+    second_login = _post_auth_step(client, "second@example.test", "AdminPassw0rd!")
+
+    assert second_login.status_code == 200
+    assert second_login.context["wizard"]["steps"].current == "token"
+
+
+@pytest.mark.django_db
+def test_a_removed_device_is_no_longer_trusted_by_an_old_remember_cookie(
+    client, settings
+):
+    settings.TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+    user = _create_admin()
+    device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+    _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+    _post_token_step(client, device, remember=True)
+
+    device.delete()
+    new_device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+
+    second_login = _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+
+    assert second_login.status_code == 200  # back to the token step
+    assert second_login.context["wizard"]["steps"].current == "token"
+
+    result = _post_token_step(client, new_device, remember=False)
+    assert result.status_code == 200
+    assert result.redirect_chain[-1][0] == "/admin-portal/"
+
+
+@pytest.mark.django_db
+def test_the_remember_checkbox_is_unchecked_by_default(client, settings):
+    """Security finding (code-review pass): django-two-factor-auth's own
+    AuthenticationTokenForm defines 'remember' with initial=True, which
+    would render the checkbox pre-checked -- an opt-OUT 7-day 2FA skip
+    on the highest-value account type in this system, not the opt-in
+    the feature is meant to be. An admin who doesn't notice and uncheck
+    it would get remembered without deciding to."""
+    user = _create_admin()
+    TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+    settings.TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+
+    response = _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+
+    assert response.status_code == 200
+    assert not response.context["wizard"]["form"].fields["remember"].initial
+
+
+@pytest.mark.django_db
+def test_a_remembered_devices_cookie_expires_after_seven_days(client, settings):
+    """The entire point of this feature -- confirm the 7-day boundary is
+    real, not just that the mechanism exists. two_factor.views.utils
+    calls a module-level time.time() (confirmed by reading its source),
+    so a plain stdlib mock.patch simulates time passing without needing
+    a third-party time-travel library."""
+    import time
+    from unittest.mock import patch
+
+    settings.TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+    user = _create_admin()
+    device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+
+    now = time.time()
+    with patch("two_factor.views.utils.time.time", return_value=now):
+        _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+        _post_token_step(client, device, remember=True)
+
+    eight_days_later = now + 60 * 60 * 24 * 8
+    with patch("two_factor.views.utils.time.time", return_value=eight_days_later):
+        second_login = _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+
+    assert second_login.status_code == 200  # back to requiring the token step
+    assert second_login.context["wizard"]["steps"].current == "token"
+
+
+@pytest.mark.django_db
+def test_a_remembered_device_login_is_logged_for_the_audit_trail(
+    client, settings, caplog
+):
+    """Matches this codebase's established convention of logging/
+    auditing security-relevant admin events -- a login that skipped the
+    OTP prompt via a remembered device is exactly that kind of event."""
+    import logging
+
+    settings.TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+    user = _create_admin()
+    device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+    _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+    _post_token_step(client, device, remember=True)
+
+    with caplog.at_level(logging.INFO, logger="apps.accounts.views"):
+        _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+
+    assert any("remembered device" in record.message for record in caplog.records)
+
+
+@pytest.mark.django_db
+def test_a_fresh_token_entry_login_is_not_logged_as_a_remembered_device(
+    client, settings, caplog
+):
+    import logging
+
+    settings.TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+    user = _create_admin()
+    device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+
+    with caplog.at_level(logging.INFO, logger="apps.accounts.views"):
+        _post_auth_step(client, "admin@example.test", "AdminPassw0rd!")
+        _post_token_step(client, device, remember=False)
+
+    assert not any("remembered device" in record.message for record in caplog.records)

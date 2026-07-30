@@ -1,3 +1,5 @@
+import logging
+
 from django.http import HttpResponse
 from django.urls import reverse
 
@@ -6,6 +8,8 @@ from two_factor.forms import AuthenticationTokenForm, BackupTokenForm
 from two_factor.views import LoginView as BaseLoginView
 
 from .forms import AdminAuthenticationForm
+
+logger = logging.getLogger(__name__)
 
 
 class AdminLoginView(BaseLoginView):
@@ -88,3 +92,51 @@ class AdminLoginView(BaseLoginView):
         if self.steps.current in (self.TOKEN_STEP, self.BACKUP_STEP):
             return ["two_factor/core/login_token.html"]
         return [self.template_name]
+
+    def get_form(self, step=None, data=None, files=None):
+        # Security finding (code-review pass, 2026-07-30): "remember this
+        # device" must default to UNCHECKED -- admin is the highest-value
+        # account type in this system (approves real money withdrawals),
+        # so a pre-checked 7-day 2FA skip would be an opt-out, not the
+        # opt-in this feature is meant to be.
+        #
+        # This can't be fixed by subclassing AuthenticationTokenForm and
+        # swapping it into form_list -- confirmed via a doubt-driven-
+        # development-style investigation that two_factor's own
+        # LoginView.get_form() unconditionally overwrites
+        # self.form_list[self.TOKEN_STEP] with
+        # registry.method_from_device(...).get_token_form_class() on
+        # every single call for the token step. self.form_list is the
+        # SAME shared OrderedDict object across every request for the
+        # whole process lifetime (frozen once by formtools' as_view(),
+        # never copied per-request), so that overwrite permanently
+        # replaces whatever form class is configured here with the
+        # library's own AuthenticationTokenForm the first time any
+        # token-step form is built, for every subsequent admin login
+        # until the process restarts. Mutating the already-constructed
+        # form INSTANCE here instead sidesteps that entirely -- it works
+        # no matter which form class the library decided to use.
+        form = super().get_form(step=step, data=data, files=files)
+        if "remember" in form.fields:
+            form.fields["remember"].initial = False
+        return form
+
+    def done(self, form_list, **kwargs):
+        # Audit trail for "remember this device" (doubt-driven-development
+        # finding, 2026-07-30): self.remember_agent (BaseLoginView's own
+        # cached_property) is only ever True for a device that has ALREADY
+        # completed a real TOTP proof once and was explicitly opted into
+        # being remembered -- this log line does not gate anything, it
+        # just distinguishes that path from a fresh code entry, matching
+        # this codebase's existing convention of auditing security-
+        # relevant admin events (KYC/IR ID history, commission cycle
+        # runs). Read before delegating to super().done() purely to keep
+        # this check next to the condition it logs about; self.get_user()
+        # is a memoized self.user_cache, stable across the call either way.
+        if self.remember_agent:
+            logger.info(
+                "Admin login for user_id=%s completed via a remembered "
+                "device (no fresh TOTP prompt)",
+                self.get_user().pk,
+            )
+        return super().done(form_list, **kwargs)
