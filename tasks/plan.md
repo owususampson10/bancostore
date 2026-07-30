@@ -231,6 +231,14 @@ UI.
     distributor seeded with all three bonus types that Section 6.3's three requirements (date+time,
     distinguishable bonus type, amount credited) were already fully satisfied by Task 15's
     `earnings_history` page — no gap found.
+  - [x] **21d-i, 21d-ii, 21d-iii done (PRs #48/#49/#50, merged 2026-07-29/30):** the notification
+    bell's backend is complete — `Notification` model, the second real Channels consumer
+    (`NotificationConsumer`), `send_notification` (on_commit-deferred, doubly-try/excepted per a
+    doubt-driven-development pass that caught two Critical bugs in the original design before any
+    code was written), all 6 of Section 6.6's event types wired (5 immediate triggers plus the
+    PV-expiry scheduled check, which reuses Task 21b's `get_carry_forward_summary` directly so the
+    two can never disagree). **21d-iv (the bell UI) is the only piece left in Task 21** — blocked on
+    a Stitch screen not yet fetched.
 
 **Checkpoint H:** dashboard values update live (no page refresh) when a commission is credited in
 another session — proves Django Channels real-time wiring works.

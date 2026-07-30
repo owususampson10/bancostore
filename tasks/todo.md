@@ -4076,16 +4076,18 @@ scheduled run. Reuses the existing generalized `CommissionCycleRun`/`CommissionC
 (Task 13h/14), rather than a new audit model or an unlocked loop.
 
 **Acceptance criteria:**
-- [ ] A distributor with PV inside the warning window is notified once
-- [ ] The same distributor is NOT re-notified on a subsequent run while the same PV batch is still
+- [x] A distributor with PV inside the warning window is notified once
+- [x] The same distributor is NOT re-notified on a subsequent run while the same PV batch is still
       the nearest-expiring one (dedup by (distributor, nearest_expiry_date))
-- [ ] Query cost stays flat regardless of total distributor count (reuses the existing candidate-
+- [x] Query cost stays flat regardless of total distributor count (reuses the existing candidate-
       set-narrowing pattern, never scans every registered user)
 
 **Verification:**
-- [ ] pytest: seeded distributor with a near-expiring bucket gets notified; a second run with no
+- [x] pytest: seeded distributor with a near-expiring bucket gets notified; a second run with no
       state change does not double-notify
 - [ ] pytest: query-count-invariance test, matching Task 21a's own precedent for this class of claim
+      — **not built** (see Status note below); the flat-cost claim rests on the candidate query's
+      own already-proven shape, not a measurement of this task specifically
 
 **Dependencies:** 21d-i, Task 13 (`CommissionCycleRun`/`Failure`, per-iteration lock convention)
 
@@ -4093,6 +4095,22 @@ scheduled run. Reuses the existing generalized `CommissionCycleRun`/`CommissionC
 (matching Task 13/14's own migration pattern), `tests/unit/notifications/test_pv_expiry_task.py`
 
 **Estimated scope:** M
+
+**Status: Done (PR #50, merged 2026-07-30).** Built as its own `NotificationCycleRun`/
+`NotificationCycleFailure` audit model (mirroring `OrderCycleRun`/`Failure`), not the
+`CommissionCycleRun`/`Failure` reuse originally planned above — investigating the real precedent
+during implementation found Task 18d had already established "one audit model per owning app" (its
+own `OrderCycleRun`, not a third consumer of `CommissionCycleRun`) since this job moves no money and
+isn't order-shaped either; matching that precedent instead of the plan as originally written.
+Reuses `get_carry_forward_summary` (Task 21b) directly for the nearing-expiry/amount/date logic, so
+the dashboard's Carry-Forward PV card and this notification can never disagree. **Deferred, not
+silently skipped:** no dedicated query-count-invariance test was written (unlike Task 21a's own
+precedent for this class of claim) — the "flat regardless of distributor count" property rests on
+`distributor_ids_with_pending_pv`'s already-proven query shape (used unmodified, not re-derived)
+plus `get_carry_forward_summary`'s own already-proven 3-query-per-call shape, not a fresh
+measurement of this specific task. Full regression check (307 tests across notifications/pv_ledger/
+orders/commissions) green; one unrelated pre-existing flaky timing test confirmed as a flake, not a
+regression, in a file this task never touched.
 
 ---
 
