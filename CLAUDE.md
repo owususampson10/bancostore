@@ -4,8 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–19 and 25 are done — Task 25 (My Orders, built ahead of Phase 8) closed 2026-07-28;
-Task 20 (Dashboard core stats) is next.** Task 25 didn't exist in the original plan — added
+**Tasks 1–25 are all done — Task 21 (dashboard extras: binary tree view, earnings history
+verification, carry-forward tracker, notification bell) closed 2026-07-30, the last piece of the
+MVP scope before deployment. Task 24 (deploy to Hostinger VPS) is next — a production action
+requiring user confirmation before any step touches the real VPS/domain, per `SPEC.md` Boundaries.**
+Task 25 didn't exist in the original plan — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found
 no task anywhere had ever scoped a self-service order-history page for a customer or distributor,
 needed before Task 20 (Dashboard core stats) links to it. Numbered 25, not inserted as 20, despite
@@ -421,6 +424,58 @@ working:
   — fixed to `hidden md:flex` and verified live at 900px. Shipped via PR #38, merged into `main`
   2026-07-28; full suite green throughout, 1009 passed, 1 skipped as of merge, real MySQL CI green,
   CodeRabbit clean on the final commit.
+- **Dashboard core stats (Task 20), opening Phase 8:** built as four vertically-sliced sub-tasks
+  (20a-20d). `templates/distributors/dashboard.html` (20a+20b, PR #39) shows wallet balance, total
+  earnings, this-week's earnings, team size, left/right leg PV, rank, and monthly personal PV, plus
+  the distributor's own referral link. 20c (PR #40) replaced the placeholder with the real
+  Stitch-designed frontend. **Task 20d (PR #41), the first real Django Channels consumer in this
+  codebase:** `WalletBalanceConsumer` pushes a distributor's own live wallet balance over a
+  WebSocket (`ws/distributors/wallet/`), group membership derived only from the authenticated
+  session, never client input — the auth/group-scoping pattern every later consumer (Task 21d)
+  follows exactly. A `doubt-driven-development` cycle (two independent external reviews) ran before
+  any consumer code was written. Verified live in a real browser: crediting a wallet from a
+  separate shell process updated the dashboard with no page refresh. Also caught, via that same
+  live check: `daphne` doesn't auto-serve static files in DEBUG mode the way `runserver` does, and
+  Channels/WebSockets only actually route through `daphne` locally, not `runserver` — both
+  documented in this file's own gotcha sections above.
+- **Binary tree view, earnings-history verification, carry-forward tracker, and the notification
+  bell (Task 21), closing out the dashboard/Phase 8 scope:** re-scoped 2026-07-28 via
+  `source-driven-development` (the original plan's acceptance criteria for earnings history and the
+  carry-forward tracker were incomplete) into four sub-tasks. **21a (PR #44):**
+  `apps/binary_tree/services.py::get_downline_tree`, a flat 3-query downline fetch (never a
+  recursive DB walk) rendered as a pure-CSS nested-list tree with connector lines; two follow-up UI
+  fixes shipped after real user feedback (pan/zoom canvas support, then a wheel-zoom bug that
+  trapped page scroll near the canvas — fixed with `@wheel.passive.false` plus a click-to-focus
+  gate, since `.prevent` unconditionally calls `preventDefault()` while wheel listeners are
+  passive-by-default unless explicitly opted out). **21b (PR #47):**
+  `apps/pv_ledger/services.py::get_carry_forward_summary`, a dashboard stat card showing PV carried
+  forward on the distributor's strong leg plus its nearest expiry date, reusing the exact same
+  weak/strong-leg comparison the real Binary Bonus cycle uses so the two can never drift apart.
+  **21c:** verification only — confirmed Task 15's `earnings_history` page already fully satisfies
+  Section 6.3, no code changed. **21d, the notification bell (PRs #48/#49/#50/#51):** the second
+  real Channels consumer, `NotificationConsumer`, notifying on exactly Section 6.6's 6 event types
+  (downline joined, binary bonus credited, referral bonus paid, withdrawal approved, KYC decided,
+  PV approaching expiry — deliberately not the matching bonus, a source-doc-confirmed exclusion). A
+  `doubt-driven-development` pass before any code was written caught two Critical bugs in the
+  original design (an unguarded DB write that could roll back an already-succeeded business
+  transaction; a synchronous push inside a caller's lock instead of `transaction.on_commit`-
+  deferred). The UI (21d-iv) was built from 4 fetched Stitch screens, reconciled against real scope
+  (dropped fabricated dashboard chrome, illustrations, and a mobile-only settings-icon/"Refresh
+  Portal"/category-filter-chips that don't correspond to any real feature). Live-browser
+  verification caught three real bugs no test suite would have: a multi-line Django `{# #}` comment
+  rendering as literal page text (the same recurring footgun as Task 18f, twice in this task
+  alone — see "Frontend edit-verify loop" gotcha below); `backdrop-blur-sm` (a CSS
+  `backdrop-filter`) on the dashboard header silently establishing a new containing block for the
+  mobile full-screen overlay's `position: fixed`, trapping it inside the header's own 64px height;
+  and a two-layer live-badge failure — `channels-redis` 4.3.0 doesn't tolerate `redis-py` 8.x's
+  asyncio internals (a routine idle-timeout crashed the WebSocket connection with close code 1011,
+  confirmed to also silently affect the already-shipped Task 20d wallet-balance push, fixed with a
+  user-approved `redis<5` pin in `requirements.txt`), layered under a stale cached DOM reference
+  that survived past htmx's own `hx-swap-oob` replacing that same node. A code-review pass caught a
+  fourth, 100%-reproducible bug pre-merge: `@_redirect_if_cooling_off_cancelled` on the htmx-loaded
+  dropdown view swapped an entire page into the small panel for a cancelled-but-still-logged-in
+  distributor — removed from all 4 new views, matching the withdrawal-flow views' existing
+  exemption from that same decorator. A parallel security pass found zero exploitable issues.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
