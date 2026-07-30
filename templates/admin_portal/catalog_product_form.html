@@ -196,11 +196,11 @@ Add Variant
 {% if variant_form.value.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ variant_form.value.errors|striptags }}</p>{% endif %}
 </div>
 <div class="flex flex-col items-end gap-1">
-<label class="mt-5 flex items-center gap-1 text-on-surface-variant hover:text-admin-error transition-colors cursor-pointer" title="Remove">
+<label class="mt-5 flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors cursor-pointer" title="Remove">
 {{ variant_form.DELETE }}
 <span class="material-symbols-outlined" aria-hidden="true">delete</span>
 </label>
-<p class="delete-note hidden font-label-md text-label-md text-admin-error font-bold whitespace-nowrap">Will be removed</p>
+<p class="delete-note hidden font-label-md text-label-md text-primary font-bold whitespace-nowrap">Will be removed</p>
 </div>
 </div>
 {% endfor %}
@@ -216,11 +216,11 @@ Add Variant
 {{ variant_formset.empty_form.value }}
 </div>
 <div class="flex flex-col items-end gap-1">
-<label class="mt-5 flex items-center gap-1 text-on-surface-variant hover:text-admin-error transition-colors cursor-pointer" title="Remove">
+<label class="mt-5 flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors cursor-pointer" title="Remove">
 {{ variant_formset.empty_form.DELETE }}
 <span class="material-symbols-outlined" aria-hidden="true">delete</span>
 </label>
-<p class="delete-note hidden font-label-md text-label-md text-admin-error font-bold whitespace-nowrap">Will be removed</p>
+<p class="delete-note hidden font-label-md text-label-md text-primary font-bold whitespace-nowrap">Will be removed</p>
 </div>
 </div>
 </template>
@@ -252,7 +252,7 @@ Add Variant
 Primary
 </div>
 </div>
-<p class="delete-note hidden font-label-md text-label-md text-admin-error font-bold mb-2">This image will be removed when you save.</p>
+<p class="delete-note hidden font-label-md text-label-md text-primary font-bold mb-2">This image will be removed when you save.</p>
 <div class="flex items-center justify-between gap-3 flex-wrap">
 {{ image_form.image }}
 <label class="flex items-center gap-1 text-label-md font-label-md text-on-surface-variant cursor-pointer">
@@ -270,7 +270,7 @@ Primary
 </button>
 <span class="order-input-wrapper">{{ image_form.order }}</span>
 </div>
-<label class="flex items-center gap-1 text-label-md font-label-md text-admin-error cursor-pointer" title="Remove">
+<label class="flex items-center gap-1 text-label-md font-label-md text-primary cursor-pointer" title="Remove">
 {{ image_form.DELETE }}
 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
 </label>
@@ -390,10 +390,10 @@ Primary
   function markRowForDeletion(row, checked) {
     var note = row.querySelector('.delete-note');
     if (checked) {
-      row.classList.add('opacity-40', 'border-admin-error');
+      row.classList.add('opacity-40', 'border-primary');
       if (note) note.classList.remove('hidden');
     } else {
-      row.classList.remove('opacity-40', 'border-admin-error');
+      row.classList.remove('opacity-40', 'border-primary');
       if (note) note.classList.add('hidden');
     }
   }
