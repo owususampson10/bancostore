@@ -71,6 +71,9 @@ def _push_live(notification):
     channel_layer = get_channel_layer()
     if channel_layer is None:
         return
+    unread_count = Notification.objects.filter(
+        distributor_id=notification.distributor_id, is_read=False
+    ).count()
     async_to_sync(channel_layer.group_send)(
         notification_group_name(notification.distributor_id),
         {
@@ -79,5 +82,35 @@ def _push_live(notification):
             "event_type": notification.event_type,
             "message": notification.message,
             "created_at": notification.created_at.isoformat(),
+            "unread_count": unread_count,
         },
     )
+
+
+def push_unread_count_update(distributor):
+    """Task 21d-iv, doubt-driven-development finding: mark-read/mark-all-
+    read only ever changed the DB and the acting tab's own view of the
+    badge -- a second open tab for the same distributor never learned
+    the count changed until its next full page load. Broadcasts the
+    fresh absolute count (never a client-side increment/decrement,
+    which would drift the moment two tabs are open) to every connected
+    client for this distributor. Same failure-isolation shape as
+    _push_live: a Channels/Redis hiccup here is a UI-staleness problem,
+    never a reason to fail the mark-read/mark-all-read request that
+    triggered it."""
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+        unread_count = Notification.objects.filter(
+            distributor_id=distributor.pk, is_read=False
+        ).count()
+        async_to_sync(channel_layer.group_send)(
+            notification_group_name(distributor.pk),
+            {"type": "unread_count_update", "unread_count": unread_count},
+        )
+    except Exception:
+        logger.exception(
+            "push_unread_count_update: failed to push for distributor=%s",
+            distributor.pk,
+        )

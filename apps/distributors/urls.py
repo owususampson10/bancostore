@@ -52,4 +52,24 @@ urlpatterns = [
     path("withdraw/", views.withdrawal_request, name="withdrawal_request"),
     path("withdrawals/", views.withdrawal_history, name="withdrawal_history"),
     path("cancel-membership/", views.cancel_membership, name="cancel_membership"),
+    path(
+        "notifications/",
+        views.notification_history,
+        name="notification_history",
+    ),
+    path(
+        "notifications/dropdown/",
+        views.notification_dropdown,
+        name="notification_dropdown",
+    ),
+    path(
+        "notifications/<int:pk>/read/",
+        views.notification_mark_read,
+        name="notification_mark_read",
+    ),
+    path(
+        "notifications/mark-all-read/",
+        views.notification_mark_all_read,
+        name="notification_mark_all_read",
+    ),
 ]

@@ -1,0 +1,96 @@
+{# Task 21d-iv. Rendered by notification_dropdown/notification_mark_read/ #}
+{# notification_mark_all_read -- all three return this exact partial so #}
+{# the dropdown's visible read/unread state and the header badge (via the #}
+{# hx-swap-oob fragment below) always reflect the current DB state after #}
+{# any of the three actions, not just the one that was called. #}
+<div class="flex items-center gap-3 p-4 border-b border-outline-variant">
+{% comment %}
+Mobile-only close button: plain vanilla JS, not an Alpine @click -- this
+HTML is injected via an htmx innerHTML swap, so Alpine never binds
+directives written directly on it. Dispatching a bubbling CustomEvent
+lets the STATIC ancestor's Alpine @notif-close listener (in
+base_dashboard.html, present since initial page load) still catch it
+via normal DOM event bubbling.
+{% endcomment %}
+<button type="button"
+        class="p-2 -ml-2 rounded-full hover:bg-surface-container-low md:hidden"
+        aria-label="Close"
+        onclick="this.dispatchEvent(new CustomEvent('notif-close', {bubbles: true}))">
+<span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+</button>
+<h2 class="font-headline-md text-headline-md text-on-surface flex-1">Notifications</h2>
+{% if unread_notification_count %}
+<button type="button"
+        class="font-button text-button text-primary hover:opacity-80 transition-opacity"
+        hx-post="{% url 'distributors:notification_mark_all_read' %}"
+        hx-target="#notif-panel-content"
+        hx-swap="innerHTML">
+    Mark all as read
+</button>
+{% else %}
+<span class="font-button text-button text-gray-muted cursor-not-allowed opacity-50">Mark all as read</span>
+{% endif %}
+</div>
+
+{% if notifications %}
+<div class="flex-1 overflow-y-auto">
+{% for notification in notifications %}
+{% if notification.event_type == "pv_expiring" %}
+<div class="p-4 border-b border-outline-variant/50 flex gap-4 bg-error-container/30">
+<div class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 {{ notification.icon_classes }}">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">{{ notification.icon_name }}</span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="font-body-md text-body-md text-error font-semibold">{{ notification.message }}</p>
+<p class="text-xs font-bold uppercase tracking-wide text-error mt-1">Alert</p>
+</div>
+{% if not notification.is_read %}
+<button type="button"
+        class="self-start text-xs text-gray-muted hover:text-on-surface underline flex-shrink-0"
+        hx-post="{% url 'distributors:notification_mark_read' notification.pk %}"
+        hx-target="#notif-panel-content"
+        hx-swap="innerHTML">
+    Mark read
+</button>
+{% endif %}
+</div>
+{% else %}
+<div class="p-4 border-b border-outline-variant/50 flex gap-4 {% if not notification.is_read %}bg-primary-container/10{% endif %}">
+<div class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 {{ notification.icon_classes }}">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">{{ notification.icon_name }}</span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="font-body-md text-body-md text-on-surface">{{ notification.message }}</p>
+<p class="text-xs uppercase tracking-wide text-gray-muted mt-1">{{ notification.created_at|timesince }} ago</p>
+</div>
+{% if not notification.is_read %}
+<button type="button"
+        class="self-start w-2 h-2 rounded-full bg-primary flex-shrink-0 mt-1.5"
+        aria-label="Mark as read"
+        hx-post="{% url 'distributors:notification_mark_read' notification.pk %}"
+        hx-target="#notif-panel-content"
+        hx-swap="innerHTML">
+</button>
+{% endif %}
+</div>
+{% endif %}
+{% endfor %}
+</div>
+{% else %}
+<div class="flex-1 flex flex-col items-center justify-center text-center p-8">
+<div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-[32px] text-gray-muted" aria-hidden="true">notifications_off</span>
+</div>
+<p class="font-label-lg text-label-lg text-on-surface">No notifications yet</p>
+<p class="font-body-md text-body-md text-gray-muted mt-1 max-w-[220px]">We'll let you know when there's an update on your earnings or team activity.</p>
+</div>
+{% endif %}
+
+<div class="p-3 border-t border-outline-variant text-center">
+<a href="{% url 'distributors:notification_history' %}" class="font-button text-button text-primary hover:opacity-80 transition-opacity">View all notifications</a>
+</div>
+
+<span id="notif-badge"
+      hx-swap-oob="true"
+      class="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-surface {% if not unread_notification_count %}hidden{% endif %}"
+      aria-hidden="true"></span>

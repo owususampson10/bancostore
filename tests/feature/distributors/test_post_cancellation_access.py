@@ -9,6 +9,7 @@ from constance import config
 
 from apps.distributors.cooling_off_services import cancel_membership_and_refund
 from apps.distributors.models import Distributor
+from apps.notifications.models import Notification
 
 User = get_user_model()
 
@@ -176,6 +177,67 @@ def test_payout_settings_stays_reachable_for_a_cancelled_distributor(client):
     client.login(phone_number=str(distributor.phone_number), password="Passw0rd!")
 
     response = client.get(reverse("distributors:payout_settings"))
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_notification_dropdown_stays_reachable_for_a_cancelled_distributor(client):
+    """Task 21d-iv, caught by a code-review pass before merge:
+    notification_dropdown is only ever called via htmx.ajax() GET
+    targeting a small #notif-panel-content div -- a bare page redirect
+    (which @_redirect_if_cooling_off_cancelled would have issued here)
+    gets followed transparently by that GET and swaps whole-page content
+    into the tiny dropdown. A cancelled distributor's own notification
+    history (which can include a still-relevant WITHDRAWAL_APPROVED
+    notification for the refund they're claiming) is also never
+    "nothing left to see" the way starter-pack/team pages are."""
+    distributor = _cancelled_distributor()
+    client.login(phone_number=str(distributor.phone_number), password="Passw0rd!")
+
+    response = client.get(reverse("distributors:notification_dropdown"))
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_notification_history_stays_reachable_for_a_cancelled_distributor(client):
+    distributor = _cancelled_distributor()
+    client.login(phone_number=str(distributor.phone_number), password="Passw0rd!")
+
+    response = client.get(reverse("distributors:notification_history"))
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_notification_mark_read_stays_reachable_for_a_cancelled_distributor(client):
+    distributor = _cancelled_distributor()
+    notification = Notification.objects.create(
+        distributor=distributor,
+        event_type=Notification.EventType.WITHDRAWAL_APPROVED,
+        message="Your withdrawal was approved",
+        is_read=False,
+    )
+    client.login(phone_number=str(distributor.phone_number), password="Passw0rd!")
+
+    response = client.post(
+        reverse("distributors:notification_mark_read", args=[notification.pk])
+    )
+
+    assert response.status_code == 200
+    notification.refresh_from_db()
+    assert notification.is_read is True
+
+
+@pytest.mark.django_db
+def test_notification_mark_all_read_stays_reachable_for_a_cancelled_distributor(
+    client,
+):
+    distributor = _cancelled_distributor()
+    client.login(phone_number=str(distributor.phone_number), password="Passw0rd!")
+
+    response = client.post(reverse("distributors:notification_mark_all_read"))
 
     assert response.status_code == 200
 

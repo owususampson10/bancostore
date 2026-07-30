@@ -11,6 +11,17 @@ django-htmx>=1.19,<2
 channels>=4,<5
 channels-redis>=4,<5
 daphne>=4,<5
+# channels-redis 4.3.0 declares redis>=4.6 with no upper bound, but its
+# async idle-long-poll timeout handling doesn't tolerate redis-py 8.x's
+# asyncio internals: a routine idle-timeout TimeoutError escapes instead
+# of being retried internally, crashing the WebSocket connection with
+# close code 1011. Caught live (Task 21d-iv) via a real browser check --
+# the notification bell's live badge push, and the already-shipped Task
+# 20d wallet-balance live push, both silently stopped delivering because
+# of this, well before any pytest suite could catch it (WebsocketCommunicator
+# tests bypass the real asyncio Redis client entirely). Pin below the
+# version channels-redis 4.3.0 was actually built against.
+redis<5
 # daphne -> autobahn requires cbor2, whose current release needs a Rust compiler to build
 # (not available on this Mac, same class of issue as the PHP/MySQL native-build failures
 # documented in SPEC.md). Pin to the last pure-Python cbor2 wheel to avoid that entirely.
