@@ -1,7 +1,7 @@
 {% extends "admin_portal/base_dashboard.html" %}
 {% block title %}Products — Bancostore Admin Portal{% endblock %}
 {% block content %}
-<div x-data="{ deleteOpen: false, deleteName: '', deleteUrl: '', deleteKind: 'product' }">
+<div x-data="{ deleteOpen: false, deleteName: '', deleteUrl: '', deleteKind: 'product', deleteTrigger: null }">
 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
 <div>
 <h2 class="font-headline-md text-headline-md text-on-surface">Product Catalog</h2>
@@ -25,7 +25,7 @@ Add Product
   hx-target="#product-results"
   hx-swap="outerHTML"
   hx-push-url="true"
-  hx-trigger="change, keyup changed delay:300ms from:#product-search-input"
+  hx-trigger="change, search, keyup changed delay:300ms from:#product-search-input"
   class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant mb-6"
 >
 <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">

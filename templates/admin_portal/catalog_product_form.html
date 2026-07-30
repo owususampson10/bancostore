@@ -178,27 +178,35 @@ Add Variant
 </button>
 </div>
 {{ variant_formset.management_form }}
+{% if variant_formset.non_form_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md mb-4">{{ variant_formset.non_form_errors }}</div>
+{% endif %}
 <div id="variant-rows" class="space-y-4">
 {% for variant_form in variant_formset %}
-<div class="variant-row flex items-center gap-4 bg-surface rounded-lg p-4 border border-outline-variant/50">
+<div class="variant-row flex items-center gap-4 bg-surface rounded-lg p-4 border border-outline-variant/50 transition-opacity">
 {% for hidden in variant_form.hidden_fields %}{{ hidden }}{% endfor %}
 <div class="flex-1">
 <label class="block font-label-md text-label-md text-on-surface-variant mb-1">Attribute</label>
 {{ variant_form.name }}
+{% if variant_form.name.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ variant_form.name.errors|striptags }}</p>{% endif %}
 </div>
 <div class="flex-1">
 <label class="block font-label-md text-label-md text-on-surface-variant mb-1">Value</label>
 {{ variant_form.value }}
+{% if variant_form.value.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ variant_form.value.errors|striptags }}</p>{% endif %}
 </div>
+<div class="flex flex-col items-end gap-1">
 <label class="mt-5 flex items-center gap-1 text-on-surface-variant hover:text-admin-error transition-colors cursor-pointer" title="Remove">
 {{ variant_form.DELETE }}
 <span class="material-symbols-outlined" aria-hidden="true">delete</span>
 </label>
+<p class="delete-note hidden font-label-md text-label-md text-admin-error font-bold whitespace-nowrap">Will be removed</p>
+</div>
 </div>
 {% endfor %}
 </div>
 <template id="variant-empty-form">
-<div class="variant-row flex items-center gap-4 bg-surface rounded-lg p-4 border border-outline-variant/50">
+<div class="variant-row flex items-center gap-4 bg-surface rounded-lg p-4 border border-outline-variant/50 transition-opacity">
 <div class="flex-1">
 <label class="block font-label-md text-label-md text-on-surface-variant mb-1">Attribute</label>
 {{ variant_formset.empty_form.name }}
@@ -207,10 +215,13 @@ Add Variant
 <label class="block font-label-md text-label-md text-on-surface-variant mb-1">Value</label>
 {{ variant_formset.empty_form.value }}
 </div>
+<div class="flex flex-col items-end gap-1">
 <label class="mt-5 flex items-center gap-1 text-on-surface-variant hover:text-admin-error transition-colors cursor-pointer" title="Remove">
 {{ variant_formset.empty_form.DELETE }}
 <span class="material-symbols-outlined" aria-hidden="true">delete</span>
 </label>
+<p class="delete-note hidden font-label-md text-label-md text-admin-error font-bold whitespace-nowrap">Will be removed</p>
+</div>
 </div>
 </template>
 </section>
@@ -227,6 +238,9 @@ Add Variant
 <span class="font-label-md text-label-md text-on-surface-variant">Max 5</span>
 </div>
 {{ image_formset.management_form }}
+{% if image_formset.non_form_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md mb-4">{{ image_formset.non_form_errors }}</div>
+{% endif %}
 <div id="image-rows" class="space-y-4">
 {% for image_form in image_formset %}
 <div class="image-row border border-outline-variant/50 rounded-lg p-4 bg-surface transition-opacity">
@@ -364,20 +378,30 @@ Primary
       }
     }
 
-    // Visually mark a row for removal -- previously checking Delete gave
-    // no feedback at all beyond a tiny checkbox, which read as "delete
-    // doesn't work" even though the deletion itself was always applied
-    // correctly on save.
     if (event.target.name && event.target.name.endsWith('-DELETE')) {
-      var note = row.querySelector('.delete-note');
-      if (event.target.checked) {
-        row.classList.add('opacity-40', 'border-admin-error');
-        note.classList.remove('hidden');
-      } else {
-        row.classList.remove('opacity-40', 'border-admin-error');
-        note.classList.add('hidden');
-      }
+      markRowForDeletion(row, event.target.checked);
     }
+  });
+
+  // Shared by both the image and variant rows: previously checking
+  // Delete gave no feedback at all beyond a tiny checkbox, which read as
+  // "delete doesn't work" even though the deletion itself was always
+  // applied correctly on save.
+  function markRowForDeletion(row, checked) {
+    var note = row.querySelector('.delete-note');
+    if (checked) {
+      row.classList.add('opacity-40', 'border-admin-error');
+      if (note) note.classList.remove('hidden');
+    } else {
+      row.classList.remove('opacity-40', 'border-admin-error');
+      if (note) note.classList.add('hidden');
+    }
+  }
+
+  document.getElementById('variant-rows').addEventListener('change', function (event) {
+    if (!event.target.name || !event.target.name.endsWith('-DELETE')) return;
+    var row = event.target.closest('.variant-row');
+    if (row) markRowForDeletion(row, event.target.checked);
   });
 })();
 </script>

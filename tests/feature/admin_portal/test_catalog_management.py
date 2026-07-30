@@ -9,6 +9,7 @@ import pytest
 from PIL import Image
 
 from apps.catalog.models import Category, Product, ProductImage, ProductVariant
+from apps.orders.models import Order, OrderItem
 
 User = get_user_model()
 
@@ -636,3 +637,109 @@ def test_submitting_six_images_is_rejected_and_creates_no_product(staff_client):
 
     assert response.status_code == 200
     assert not Product.objects.filter(name="Classic Watch").exists()
+
+
+# ---------------------------------------------------------------------------
+# CodeRabbit findings on PR #53
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_product_list_ignores_a_non_numeric_category_filter_instead_of_500(
+    staff_client,
+):
+    """A crafted/stale ?category=abc must not 500 -- category_id is only
+    ever a real pk in the rendered listbox, but the querystring is fully
+    attacker-controlled."""
+    response = staff_client.get(_product_list_url(), {"category": "not-a-number"})
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_deleting_a_product_that_has_been_ordered_shows_an_error_instead_of_500(
+    staff_client,
+):
+    """OrderItem.product is on_delete=PROTECT (apps/orders/models.py) --
+    order history must never be destroyed by deleting the product it
+    references, mirroring the same protection already proven for
+    Category delete."""
+    category = _make_category()
+    product = Product.objects.create(
+        name="Once Ordered", category=category, price=Decimal("100.00")
+    )
+    order = Order.objects.create(
+        full_name="Ama Mensah",
+        phone_number="+233241234567",
+        delivery_method=Order.DeliveryMethod.HOME_DELIVERY,
+        delivery_zone=Order.DeliveryZone.ACCRA,
+        address="12 High St",
+        area="Osu",
+        subtotal=Decimal("100.00"),
+        delivery_fee=Decimal("50.00"),
+        total=Decimal("150.00"),
+        pv_earned=0,
+        payment_reference="protected-delete-test",
+        status=Order.Status.CONFIRMED,
+    )
+    OrderItem.objects.create(
+        order=order,
+        product=product,
+        product_name=product.name,
+        quantity=1,
+        unit_price=product.price,
+        unit_pv=0,
+    )
+
+    response = staff_client.post(_product_delete_url(product), follow=True)
+
+    assert response.status_code == 200
+    assert Product.objects.filter(pk=product.pk).exists()
+
+
+@pytest.mark.django_db
+def test_product_thumbnail_alt_text_uses_the_product_name(staff_client):
+    category = _make_category()
+    product = Product.objects.create(
+        name="Classic Watch", category=category, price=Decimal("100.00")
+    )
+    ProductImage.objects.create(
+        product=product, image=_make_uploaded_image(), is_primary=True
+    )
+
+    response = staff_client.get(_product_list_url())
+
+    assert b'alt="Classic Watch"' in response.content
+
+
+@pytest.mark.django_db
+def test_submitting_too_many_images_shows_the_formset_max_error(staff_client):
+    """validate_max=True on the image formset (Task 26) silently rejected
+    an over-cap submission with no visible explanation -- an admin who
+    hits it just saw their form "not save" with no reason why."""
+    category = _make_category()
+
+    data = {
+        "name": "Classic Watch",
+        "category": category.pk,
+        "description": "",
+        "price": "150.00",
+        "pv_value": "10",
+        "stock": "5",
+        "images-TOTAL_FORMS": "6",
+        "images-INITIAL_FORMS": "0",
+        "images-MIN_NUM_FORMS": "0",
+        "images-MAX_NUM_FORMS": "1000",
+        "variants-TOTAL_FORMS": "0",
+        "variants-INITIAL_FORMS": "0",
+        "variants-MIN_NUM_FORMS": "0",
+        "variants-MAX_NUM_FORMS": "1000",
+    }
+    for i in range(6):
+        data[f"images-{i}-image"] = _make_uploaded_image(f"{i}.jpg")
+        data[f"images-{i}-order"] = str(i)
+
+    response = staff_client.post(_product_create_url(), data)
+
+    assert response.status_code == 200
+    assert b"Please submit at most 5 forms." in response.content

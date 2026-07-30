@@ -1027,7 +1027,13 @@ def _filtered_products(request):
         products = products.filter(
             Q(name__icontains=query) | Q(description__icontains=query)
         )
-    if category_id:
+    # category_id is fully querystring-controlled -- Product.category_id is
+    # an integer pk, and passing a non-numeric string straight into
+    # .filter(category_id=...) raises ValueError (confirmed directly, not
+    # guessed), an unhandled 500 for a crafted or simply stale link. Not
+    # a real filter selection either way, so it's dropped rather than
+    # surfaced as a form error.
+    if category_id and category_id.isdigit():
         products = products.filter(category_id=category_id)
     if status == "active":
         products = products.filter(is_active=True)
@@ -1182,12 +1188,24 @@ def catalog_product_edit(request, pk):
 
 @login_required(login_url="two_factor:login")
 def catalog_product_delete(request, pk):
+    """POST-only -- OrderItem.product (FK from an order line) is
+    on_delete=PROTECT (apps/orders/models.py: "a Product must not be
+    deletable while order history still references it"), so deleting an
+    already-ordered product raises ProtectedError. Caught here the same
+    way catalog_category_delete already handles it, instead of a 500."""
     if not is_admin_portal_staff(request.user):
         raise PermissionDenied
 
     product = get_object_or_404(Product, pk=pk)
     if request.method == "POST":
-        name = product.name
-        product.delete()
-        messages.success(request, f'Product "{name}" deleted.')
+        try:
+            name = product.name
+            product.delete()
+            messages.success(request, f'Product "{name}" deleted.')
+        except ProtectedError:
+            messages.error(
+                request,
+                f'"{product.name}" has already been ordered and cannot be '
+                "deleted. Mark it inactive instead to hide it from the store.",
+            )
     return redirect("admin_portal:catalog_product_list")
