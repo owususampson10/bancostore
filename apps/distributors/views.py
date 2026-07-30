@@ -1307,7 +1307,14 @@ def notification_mark_all_read(request):
         "distributors/_notification_dropdown.html",
         {
             "notifications": _dropdown_notifications(distributor),
-            "unread_notification_count": 0,
+            # Queried fresh, not assumed 0 (CodeRabbit, PR #51) -- a
+            # notification created in the narrow window between the
+            # update() above and this render (e.g. a concurrent
+            # Celery-driven bonus credit for this same distributor)
+            # must still be reflected in this response.
+            "unread_notification_count": distributor.notifications.filter(
+                is_read=False
+            ).count(),
         },
     )
 

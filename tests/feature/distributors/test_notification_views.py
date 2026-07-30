@@ -204,6 +204,34 @@ def test_mark_all_read_never_touches_another_distributors_notifications(client):
     assert other_notification.is_read is False
 
 
+@pytest.mark.django_db
+def test_mark_all_read_reports_the_true_current_count_not_an_assumed_zero(
+    client, monkeypatch
+):
+    """Regression guard (CodeRabbit, PR #51): the response body must
+    reflect the actual current unread count, not a hard-coded 0 -- a
+    notification created in the narrow window between the mark-all-read
+    update() and this response being rendered (e.g. a concurrent
+    Celery-driven bonus credit for this same distributor) must still be
+    reflected, rather than silently under-reporting until the next
+    fetch or WebSocket push happens to correct it."""
+    distributor = _make_distributor()
+    _login(client, distributor)
+    _make_notification(distributor, is_read=False)
+
+    def _race_in_a_new_notification(*args, **kwargs):
+        _make_notification(distributor, message="raced in mid-request", is_read=False)
+
+    monkeypatch.setattr(
+        "apps.distributors.views.push_unread_count_update",
+        _race_in_a_new_notification,
+    )
+
+    response = client.post(reverse("distributors:notification_mark_all_read"))
+
+    assert response.context["unread_notification_count"] == 1
+
+
 # --- notification_history ------------------------------------------------
 
 

@@ -15,9 +15,23 @@ function getCsrfCookie() {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+// CodeRabbit (PR #51): every htmx call in this codebase today targets a
+// same-origin, relative {% url %} path, so this guard is currently a
+// no-op in practice -- but attaching the token unconditionally would
+// leak it to any future absolute/cross-origin htmx target, so the
+// origin check stays even though nothing exercises the negative case
+// yet.
+function isSameOrigin(path) {
+  try {
+    return new URL(path, window.location.href).origin === window.location.origin;
+  } catch (e) {
+    return false;
+  }
+}
+
 window.htmx.on("htmx:configRequest", (event) => {
   const token = getCsrfCookie();
-  if (token) {
+  if (token && isSameOrigin(event.detail.path)) {
     event.detail.headers["X-CSRFToken"] = token;
   }
 });
