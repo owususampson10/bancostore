@@ -65,3 +65,50 @@ class Notification(models.Model):
         return (
             f"Notification<{self.distributor_id} {self.event_type} read={self.is_read}>"
         )
+
+
+class NotificationCycleRun(models.Model):
+    """Task 21d-iii. Mirrors apps.orders.models.OrderCycleRun's own
+    audit-trail shape and rationale for
+    apps.notifications.tasks.send_pv_expiry_notifications -- its own
+    model, not a third consumer of CommissionCycleRun/OrderCycleRun:
+    this job moves no money and isn't order-shaped either, so neither
+    existing model's domain-specific fields (total_amount / cancelled)
+    fit. `notified` is this job's own domain-appropriate name for what
+    those call `paid`/`cancelled`.
+
+    No job_name discriminator -- exactly one job writes here, matching
+    OrderCycleRun/WithdrawalCycleRun's own reasoning for the same
+    omission. Uniqueness is on run_at alone for the same reason."""
+
+    run_at = models.DateTimeField(unique=True)
+    evaluated = models.PositiveIntegerField()
+    notified = models.PositiveIntegerField()
+    failed = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-run_at"]
+
+    def __str__(self):
+        return f"pv-expiry cycle {self.run_at.isoformat()}"
+
+
+class NotificationCycleFailure(models.Model):
+    """One row per distributor whose per-distributor PV-expiry check
+    raised during a cycle -- not one row per routine "not nearing
+    expiry" or "already notified" skip (see OrderCycleFailure's own
+    docstring for the identical reasoning)."""
+
+    cycle_run = models.ForeignKey(
+        NotificationCycleRun, on_delete=models.CASCADE, related_name="failures"
+    )
+    distributor_id = models.PositiveIntegerField()
+    error = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["distributor_id"]
+
+    def __str__(self):
+        return f"distributor_id={self.distributor_id}"
