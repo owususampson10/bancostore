@@ -28,6 +28,27 @@ working:
   email/phone registration + password reset (Gmail SMTP verified live); distributor phone+password
   with SMS OTP via mNotify (verified end to end with a real SMS) and constance-driven lockout;
   admin login with mandatory TOTP 2FA. All flows verified in a real browser, not just pytest.
+  **2026-07-30 addition, user-approved after a UX discussion (admin was re-entering a TOTP code on
+  every single login):** "remember this device" for 7 days
+  (`TWO_FACTOR_REMEMBER_COOKIE_AGE`, django-two-factor-auth's own built-in mechanism — cookie
+  signing/scoping/expiry all handled by the library, confirmed by reading its source directly, not
+  reinvented here). The checkbox defaults to **unchecked** (a code-review finding: the library's own
+  default is checked, an opt-out 7-day 2FA skip on the highest-value account in the system) —
+  `apps/accounts/views.py::AdminLoginView.get_form()` forces `initial=False` on the already-
+  constructed form instance, not via a form subclass swapped into `form_list`, because
+  `two_factor.views.core.LoginView.get_form()` itself unconditionally overwrites
+  `self.form_list[TOKEN_STEP]` with the OTP method's own hardcoded form class on every call — and
+  since `self.form_list` is one shared object for the whole process lifetime (frozen once at
+  `as_view()` time), a subclass placed there gets silently discarded process-wide the first time
+  any token-step form is built, a genuine library quirk found and root-caused via a doubt-driven-
+  development-style investigation before landing on the correct fix. An audit log line
+  (`apps/accounts/views.py::AdminLoginView.done()`) distinguishes a login that skipped the OTP
+  prompt via a remembered device from one that required a fresh code, matching this codebase's
+  existing convention of auditing security-relevant admin events — this is separate from, and does
+  not weaken, the existing `test_2fa_requirement_cannot_be_bypassed_via_settings_toggle` guarantee
+  (a brand-new device with no remember-cookie always requires a fresh code; remembering only ever
+  applies to a browser that has already completed one real TOTP proof). Verified live in a real
+  browser: checked the box, logged out, logged back in, confirmed the OTP step was skipped.
 - **Catalog (Task 7):** `Category`/`Product`/`ProductImage`/`ProductVariant` models with Django
   Admin CRUD, WebP photo conversion, and a concurrency-safe stock decrement.
 - **Public storefront (Task 8), with real Stitch-designed UI:** home page (featured products,

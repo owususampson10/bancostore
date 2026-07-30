@@ -536,6 +536,49 @@ since this screen has its own standalone layout with no shared header/footer, un
 
 **Estimated scope:** S
 
+**Follow-up, 2026-07-30: "remember this device" for 7 days.** User-approved after a UX
+discussion about login friction (the admin was re-entering a TOTP code on every single login, with
+no way to avoid it). Uses django-two-factor-auth's own built-in `TWO_FACTOR_REMEMBER_COOKIE_AGE`
+mechanism (`bancostore/settings.py`) rather than reinventing cookie signing/scoping/expiry — a
+`doubt-driven-development` pass read the library's source directly and confirmed the cookie is
+bound to (user, OTP device, password) and expires correctly; the pass also caught two real gaps
+folded in before shipping: (1) no audit trail existed for "this login skipped OTP via a remembered
+device" — added via `AdminLoginView.done()` logging, matching this codebase's existing convention
+of auditing security-relevant admin events; (2) needed an explicit regression test proving a
+brand-new device with no remember-cookie always still requires a fresh code (this feature is
+strictly additive, never a way to disable 2FA — distinct from the existing
+`test_2fa_requirement_cannot_be_bypassed_via_settings_toggle` guarantee).
+
+A `code-review-and-quality` pass then caught a real security gap pre-merge: django-two-factor-auth
+defines the "remember" checkbox with `initial=True` — pre-checked, an opt-out 7-day 2FA skip on the
+highest-value account type in this system (approves real Paystack withdrawal payouts). Fixing this
+took two attempts: the first (a form subclass forcing `initial=False`, swapped into
+`AdminLoginView.form_list`) passed in isolation but silently failed under real use — root-caused via
+a `debugging-and-error-recovery` investigation to a genuine library quirk:
+`two_factor.views.core.LoginView.get_form()` unconditionally overwrites
+`self.form_list[TOKEN_STEP]` with `registry.method_from_device(...).get_token_form_class()` on
+every single call for the token step, and `self.form_list` is one shared object across the whole
+process lifetime (frozen once at `as_view()` time, never copied per-request) — so any subclass
+placed there gets silently discarded, process-wide, the first time any token-step form is
+constructed. The correct fix mutates the already-constructed form *instance* in
+`AdminLoginView.get_form()` after calling `super().get_form()`, which works regardless of which
+form class the library's OTP-method registry decides to use.
+
+Also fixed live-browser-testing: the logout-confirmation modal
+(`templates/admin_portal/base_dashboard.html`) unconditionally claimed "You'll need to log in and
+verify with your authenticator again," which is no longer true for a remembered device — corrected
+to a plain "You'll need to log in again."
+
+Shipped test coverage (`tests/feature/accounts/test_admin_auth.py`): checking the box sets a
+cookie; a second login from the same client skips the token step; leaving it unchecked still
+requires the token step next time; a remember-cookie never trusts a different admin account on the
+same browser; a removed/recreated OTP device isn't trusted by an old cookie; the cookie actually
+expires after 7 days (via `unittest.mock.patch` on `two_factor.views.utils.time.time` — no
+third-party time-travel library needed or added); the checkbox itself renders unchecked; and the
+audit log line fires only on the remembered-device path, never on a fresh code entry. Verified live
+in a real browser: checked the box, logged out, logged back in, confirmed the OTP prompt was
+skipped. Full suite green throughout (1123 passed, 1 skipped as of this change).
+
 ---
 
 **Checkpoint B:** all three roles register/login end to end, tests green.
