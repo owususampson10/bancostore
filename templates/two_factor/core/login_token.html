@@ -54,6 +54,18 @@
 <input aria-label="Digit 6" type="text" maxlength="1" inputmode="numeric" pattern="\d*" class="otp-input h-16 w-12 md:w-14 md:h-20 text-center font-headline-md text-headline-md bg-surface-container rounded-lg border-2 border-outline-variant transition-all duration-200">
 </div>
 {% if wizard.form.otp_token.errors %}<p class="text-admin-error text-body-sm text-center">{{ wizard.form.otp_token.errors.0 }}</p>{% endif %}
+{% if wizard.form.remember %}
+{% comment %}
+Only rendered on the 'token' step (this {% else %} branch), never the
+'backup' step -- django-two-factor-auth's own LoginView.done() only
+ever checks for a literal 'token-remember' POST key, so the same field
+on BackupTokenForm could never functionally take effect.
+{% endcomment %}
+<label class="flex items-center gap-2 justify-center cursor-pointer select-none font-body-sm text-body-sm text-on-surface-variant" for="{{ wizard.form.remember.id_for_label }}">
+{{ wizard.form.remember }}
+<span>{{ wizard.form.remember.label }}</span>
+</label>
+{% endif %}
 {% endif %}
 
 <button type="submit" class="w-full h-14 bg-admin-primary text-white font-label-lg text-label-lg rounded-lg shadow-md hover:opacity-90 active:scale-[0.98] transition-all duration-150 flex items-center justify-center gap-2">

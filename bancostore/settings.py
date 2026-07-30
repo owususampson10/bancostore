@@ -213,6 +213,22 @@ ACCOUNT_FORMS = {
 # must point at the 2FA-aware login view (admin requires mandatory 2FA — see SPEC.md).
 LOGIN_URL = "two_factor:login"
 
+# "Remember this device" (user-confirmed, 2026-07-30): an admin who has
+# already completed a real TOTP proof on a given browser isn't re-asked
+# for 7 days on that same browser -- a per-device, per-user, opt-in
+# cookie (django-two-factor-auth's own built-in mechanism), NOT a way to
+# disable 2FA. This is a different guarantee from
+# test_2fa_requirement_cannot_be_bypassed_via_settings_toggle's own
+# regression test (that one proves a config flag can never skip 2FA
+# outright); the two are covered by separate tests in
+# tests/feature/accounts/test_admin_auth.py. TWO_FACTOR_REMEMBER_COOKIE_SECURE
+# is deliberately left at the library's False default -- this repo has no
+# production security headers configured yet (see tasks/todo.md's Known
+# issues), and a Secure-flagged cookie would silently never be sent over
+# local dev's plain http://localhost. Revisit alongside SESSION_COOKIE_SECURE/
+# CSRF_COOKIE_SECURE once Task 24 sets up real HTTPS.
+TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+
 ROOT_URLCONF = "bancostore.urls"
 
 TEMPLATES = [
