@@ -43,4 +43,38 @@ urlpatterns = [
         views.order_invoice_pdf,
         name="order_invoice_pdf",
     ),
+    path(
+        "catalog/categories/", views.catalog_category_list, name="catalog_category_list"
+    ),
+    path(
+        "catalog/categories/add/",
+        views.catalog_category_create,
+        name="catalog_category_create",
+    ),
+    path(
+        "catalog/categories/<int:pk>/edit/",
+        views.catalog_category_edit,
+        name="catalog_category_edit",
+    ),
+    path(
+        "catalog/categories/<int:pk>/delete/",
+        views.catalog_category_delete,
+        name="catalog_category_delete",
+    ),
+    path("catalog/products/", views.catalog_product_list, name="catalog_product_list"),
+    path(
+        "catalog/products/add/",
+        views.catalog_product_create,
+        name="catalog_product_create",
+    ),
+    path(
+        "catalog/products/<int:pk>/edit/",
+        views.catalog_product_edit,
+        name="catalog_product_edit",
+    ),
+    path(
+        "catalog/products/<int:pk>/delete/",
+        views.catalog_product_delete,
+        name="catalog_product_delete",
+    ),
 ]

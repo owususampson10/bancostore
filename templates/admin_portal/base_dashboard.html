@@ -64,6 +64,7 @@
 {% url 'admin_portal:distributor_directory' as distributors_url %}
 {% url 'admin_portal:commission_oversight' as commissions_url %}
 {% url 'admin_portal:order_management_queue' as orders_url %}
+{% url 'admin_portal:catalog_product_list' as catalog_url %}
 {% url 'admin:logout' as logout_url %}
 {% include "distributors/_sidebar_nav_item.html" with href=dashboard_url icon="dashboard" label="Dashboard" nav_key="dashboard" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=kyc_review_url icon="fact_check" label="KYC Review" nav_key="kyc_review" active_nav=active_nav %}
@@ -71,6 +72,7 @@
 {% include "distributors/_sidebar_nav_item.html" with href=distributors_url icon="groups" label="Distributors" nav_key="distributors" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=commissions_url icon="monetization_on" label="Commissions" nav_key="commissions" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=orders_url icon="inventory_2" label="Orders" nav_key="orders" active_nav=active_nav %}
+{% include "distributors/_sidebar_nav_item.html" with href=catalog_url icon="category" label="Catalog" nav_key="catalog" active_nav=active_nav %}
 <div class="pt-4 mt-4 border-t border-outline-variant/50">
 {% include "distributors/_sidebar_nav_item.html" with href=logout_url icon="logout" label="Log Out" danger=True confirm="logoutConfirmOpen = true" %}
 </div>

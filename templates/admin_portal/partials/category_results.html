@@ -1,0 +1,88 @@
+<div id="category-results">
+{% if page_obj.object_list %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="overflow-x-auto">
+<table class="w-full min-w-[700px] text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Thumbnail</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Category Name</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Slug</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Products</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for category in page_obj.object_list %}
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-4">
+<div class="w-12 h-12 rounded-lg bg-surface-container overflow-hidden border border-outline-variant/50 flex items-center justify-center">
+{% if category.image %}
+<img src="{{ category.image.url }}" alt="" class="w-full h-full object-cover">
+{% else %}
+<span class="material-symbols-outlined text-on-surface-variant" aria-hidden="true">category</span>
+{% endif %}
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="font-body-md text-body-md font-bold text-on-surface">{{ category.name }}</span>
+</td>
+<td class="px-6 py-4">
+<code class="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-low rounded px-2 py-1">{{ category.slug }}</code>
+</td>
+<td class="px-6 py-4">
+<span class="font-body-md text-body-md font-bold text-primary">{{ category.product_count }}</span>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex justify-end gap-2">
+<a href="{% url 'admin_portal:catalog_category_edit' category.pk %}" class="p-2 hover:bg-surface-container-high rounded-lg transition-colors text-on-surface-variant" title="Edit" aria-label="Edit {{ category.name }}">
+<span class="material-symbols-outlined" aria-hidden="true">edit</span>
+</a>
+<button type="button"
+        class="p-2 hover:bg-error-container/40 rounded-lg transition-colors text-admin-error"
+        title="Delete"
+        aria-label="Delete {{ category.name }}"
+        @click="deleteOpen = true; deleteName = '{{ category.name|escapejs }}'; deleteUrl = '{% url 'admin_portal:catalog_category_delete' category.pk %}'; deleteKind = 'category'">
+<span class="material-symbols-outlined" aria-hidden="true">delete</span>
+</button>
+</div>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="px-6 py-4 bg-surface-container-low border-t border-outline-variant flex items-center justify-between">
+<span class="font-body-md text-body-md text-on-surface-variant">Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} categories</span>
+<div class="flex items-center gap-2">
+{% if page_obj.has_previous %}
+<a href="?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.previous_page_number }}" hx-get="{% url 'admin_portal:catalog_category_list' %}?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.previous_page_number }}" hx-target="#category-results" hx-swap="outerHTML" hx-push-url="true" aria-label="Previous page" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>
+</a>
+{% endif %}
+<span class="font-label-md text-label-md text-on-surface-variant px-2">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+{% if page_obj.has_next %}
+<a href="?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.next_page_number }}" hx-get="{% url 'admin_portal:catalog_category_list' %}?{{ querystring_no_page }}{% if querystring_no_page %}&{% endif %}page={{ page_obj.next_page_number }}" hx-target="#category-results" hx-swap="outerHTML" hx-push-url="true" aria-label="Next page" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
+</a>
+{% endif %}
+</div>
+</div>
+{% endif %}
+</div>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-12 flex flex-col items-center text-center">
+<div class="w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-4xl text-on-surface-variant" aria-hidden="true">category</span>
+</div>
+{% if query %}
+<p class="font-headline-md text-headline-md text-on-surface">No categories match your search.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Try a different name or slug.</p>
+{% else %}
+<p class="font-headline-md text-headline-md text-on-surface">No categories yet.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Add your first category to start organizing products.</p>
+{% endif %}
+</div>
+{% endif %}
+</div>

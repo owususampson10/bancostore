@@ -1,0 +1,37 @@
+{% comment %}
+Shared by catalog_category_list.html and catalog_product_list.html --
+each row's delete button sets deleteName/deleteUrl/deleteKind on the
+x-data scope that wraps this include (see catalog_category_list.html/
+catalog_product_list.html), so one modal instance serves every row
+instead of rendering one per row. Mirrors base_dashboard.html's own
+logout-confirm modal shape exactly.
+{% endcomment %}
+<div x-show="deleteOpen"
+     x-cloak
+     class="fixed inset-0 z-[70] flex items-center justify-center p-4"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="delete-confirm-title"
+     @keydown.escape.window="deleteOpen = false">
+<div class="fixed inset-0 bg-black/40" @click="deleteOpen = false"></div>
+<div class="relative bg-white rounded-2xl border border-outline-variant shadow-2xl max-w-sm w-full overflow-hidden">
+<div class="p-8 flex flex-col items-center text-center">
+<div class="w-16 h-16 rounded-full bg-error-container flex items-center justify-center mb-6">
+<span class="material-symbols-outlined text-admin-error text-3xl" aria-hidden="true">delete_forever</span>
+</div>
+<h3 id="delete-confirm-title" class="font-headline-md text-headline-md text-on-surface mb-2">
+Delete <span x-text="deleteKind"></span>?
+</h3>
+<p class="font-body-md text-body-md text-on-surface-variant leading-relaxed">
+This action cannot be undone. <span class="font-bold" x-text="deleteName"></span> will be permanently removed.
+</p>
+</div>
+<div class="bg-surface-container-low p-6 flex gap-3 border-t border-outline-variant">
+<button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-high transition-all" @click="deleteOpen = false">Cancel</button>
+<form method="post" :action="deleteUrl" class="flex-1">
+{% csrf_token %}
+<button type="submit" class="w-full bg-admin-error text-on-error py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Delete</button>
+</form>
+</div>
+</div>
+</div>
