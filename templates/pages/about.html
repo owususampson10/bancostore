@@ -1,0 +1,68 @@
+{% extends "base_store.html" %}
+
+{% block title %}Bancostore | About Us{% endblock %}
+{% block meta_description %}Bancostore is a Ghana-based online store and direct-selling opportunity, combining quality lifestyle products with a transparent earning system for distributors.{% endblock %}
+
+{% block content %}
+{% comment %}
+Task 29: content grounded directly in SPEC.md's own Objective section --
+what Bancostore actually is and who it's for -- not an invented company
+history, founder story, or headcount, since none of that exists in any
+project doc. Same storefront-page layout convention as
+templates/orders/order_history.html (max-w container, font-headline-lg
+title, white cards on a light background).
+{% endcomment %}
+<div class="bg-[#f9f9f9] py-12 md:py-20 px-margin-mobile md:px-margin-desktop">
+<div class="max-w-4xl mx-auto">
+<div class="text-center mb-12">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-3">About Bancostore</h1>
+<p class="font-body-lg text-body-lg text-gray-muted max-w-2xl mx-auto">Quality products. Real opportunity. Built for the Ghanaian market.</p>
+</div>
+
+<div class="bg-white border border-outline-variant rounded-xl p-6 md:p-10 mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface mb-4">What we do</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mb-4">
+Bancostore is an online store for Ghana, curating quality lifestyle and wellness products —
+watches, jewellery, and perfumes — for everyday shoppers. Every order is priced in Ghanaian Cedis
+and paid for securely via Paystack, with delivery zones covering Kumasi, Accra, and the rest of
+the country.
+</p>
+<p class="font-body-md text-body-md text-on-surface-variant">
+Alongside the store, Bancostore runs a direct-selling opportunity: Independent Representatives
+(distributors) can build a business selling our products and growing a team, earning commission
+through a transparent binary structure rather than a vague or unverifiable promise.
+</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<div class="w-12 h-12 rounded-full bg-primary-container/10 flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">storefront</span>
+</div>
+<h3 class="font-label-lg text-label-lg text-on-surface mb-2">Customers</h3>
+<p class="font-body-sm text-body-sm text-gray-muted">Shop as a guest or with an account — no commitment, no commissions, just quality products delivered to your door.</p>
+</div>
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<div class="w-12 h-12 rounded-full bg-primary-container/10 flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">groups</span>
+</div>
+<h3 class="font-label-lg text-label-lg text-on-surface mb-2">Distributors</h3>
+<p class="font-body-sm text-body-sm text-gray-muted">Register, get your own Independent Representative (IR) ID, and earn Direct Referral, Binary, and Matching bonuses as your team grows.</p>
+</div>
+<div class="bg-white border border-outline-variant rounded-xl p-6">
+<div class="w-12 h-12 rounded-full bg-primary-container/10 flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">admin_panel_settings</span>
+</div>
+<h3 class="font-label-lg text-label-lg text-on-surface mb-2">Admin</h3>
+<p class="font-body-sm text-body-sm text-gray-muted">Runs the business behind the scenes — KYC review, withdrawal approval, product and order management, and every commission rate, cap, and fee controlled through a settings panel, no code changes needed.</p>
+</div>
+</div>
+
+<div class="bg-white border border-outline-variant rounded-xl p-6 md:p-10 text-center">
+<h2 class="font-headline-md text-headline-md text-on-surface mb-3">Want to build a business with us?</h2>
+<p class="font-body-md text-body-md text-gray-muted mb-6 max-w-xl mx-auto">Becoming a distributor takes a registration fee and a starter pack — after that, your earnings are calculated automatically and paid out via Mobile Money or bank transfer.</p>
+<a href="{% url 'distributors:register' %}" class="inline-block px-8 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Become a Distributor</a>
+</div>
+</div>
+</div>
+{% endblock %}

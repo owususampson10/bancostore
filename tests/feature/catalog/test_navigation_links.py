@@ -76,6 +76,28 @@ def test_logged_in_user_sees_my_orders_and_log_out_instead(client):
 
 
 @pytest.mark.django_db
+def test_about_link_points_to_the_real_about_page(client):
+    """Task 29: base_store.html's About link was a dead href="#" with
+    title="Coming soon" in three places (desktop nav, mobile nav,
+    footer)."""
+    response = client.get(reverse("catalog:home"))
+
+    content = response.content.decode()
+    about_url = reverse("pages:about")
+    # Desktop nav, mobile nav, and footer "About Us" all point here now.
+    assert content.count(f'href="{about_url}"') == 3
+
+
+@pytest.mark.django_db
+def test_contact_link_points_to_the_real_contact_page(client):
+    response = client.get(reverse("catalog:home"))
+
+    content = response.content.decode()
+    contact_url = reverse("pages:contact")
+    assert content.count(f'href="{contact_url}"') == 3
+
+
+@pytest.mark.django_db
 def test_log_out_form_actually_logs_the_user_out(client):
     """The core bug: a plain <a href> to account_logout returns 200 with
     the user still authenticated (allauth's stock confirmation page,

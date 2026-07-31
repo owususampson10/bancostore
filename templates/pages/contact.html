@@ -1,0 +1,99 @@
+{% extends "base_store.html" %}
+
+{% block title %}Bancostore | Contact Us{% endblock %}
+{% block meta_description %}Get in touch with Bancostore — questions about an order, becoming a distributor, or anything else.{% endblock %}
+
+{% block content %}
+{% comment %}
+Task 29: contact channels below are read directly from django-constance
+(apps/platform_settings/config.py -- CONTACT_PHONE_NUMBER/
+CONTACT_EMAIL_ADDRESS/WHATSAPP_SUPPORT_NUMBER/PHYSICAL_ADDRESS), each
+only rendered when the admin has actually set it (view already strips
+whitespace-only values to None) -- never a fabricated phone number or
+address. The form sends real email via the existing Gmail SMTP backend.
+{% endcomment %}
+<div class="bg-[#f9f9f9] py-12 md:py-20 px-margin-mobile md:px-margin-desktop">
+<div class="max-w-4xl mx-auto">
+<div class="text-center mb-12">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-3">Get in Touch</h1>
+<p class="font-body-lg text-body-lg text-gray-muted max-w-2xl mx-auto">Questions about an order, becoming a distributor, or anything else — we'd love to hear from you.</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+<div class="md:col-span-2 bg-white border border-outline-variant rounded-xl p-6 md:p-8">
+<h2 class="font-headline-md text-headline-md text-on-surface mb-6">Send us a message</h2>
+<form method="post" novalidate>
+{% csrf_token %}
+<div class="space-y-4">
+<div>
+<label for="{{ form.name.id_for_label }}" class="block font-label-lg text-label-lg text-on-surface mb-1">Name</label>
+{{ form.name }}
+{% if form.name.errors %}<p class="text-error text-sm mt-1">{{ form.name.errors.0 }}</p>{% endif %}
+</div>
+<div>
+<label for="{{ form.email.id_for_label }}" class="block font-label-lg text-label-lg text-on-surface mb-1">Email</label>
+{{ form.email }}
+{% if form.email.errors %}<p class="text-error text-sm mt-1">{{ form.email.errors.0 }}</p>{% endif %}
+</div>
+<div>
+<label for="{{ form.subject.id_for_label }}" class="block font-label-lg text-label-lg text-on-surface mb-1">Subject</label>
+{{ form.subject }}
+{% if form.subject.errors %}<p class="text-error text-sm mt-1">{{ form.subject.errors.0 }}</p>{% endif %}
+</div>
+<div>
+<label for="{{ form.message.id_for_label }}" class="block font-label-lg text-label-lg text-on-surface mb-1">Message</label>
+{{ form.message }}
+{% if form.message.errors %}<p class="text-error text-sm mt-1">{{ form.message.errors.0 }}</p>{% endif %}
+</div>
+<button type="submit" class="w-full md:w-auto px-8 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Send Message</button>
+</div>
+</form>
+</div>
+
+<div class="space-y-4">
+{% if contact_phone_number %}
+<div class="bg-white border border-outline-variant rounded-xl p-5 flex items-start gap-3">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">call</span>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Phone</p>
+<a href="tel:{{ contact_phone_number }}" class="font-body-sm text-body-sm text-gray-muted hover:text-primary transition-colors">{{ contact_phone_number }}</a>
+</div>
+</div>
+{% endif %}
+{% if contact_email_address %}
+<div class="bg-white border border-outline-variant rounded-xl p-5 flex items-start gap-3">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">mail</span>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Email</p>
+<a href="mailto:{{ contact_email_address }}" class="font-body-sm text-body-sm text-gray-muted hover:text-primary transition-colors break-all">{{ contact_email_address }}</a>
+</div>
+</div>
+{% endif %}
+{% if whatsapp_support_number %}
+<div class="bg-white border border-outline-variant rounded-xl p-5 flex items-start gap-3">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">chat</span>
+<div>
+<p class="font-label-md text-label-md text-on-surface">WhatsApp</p>
+<a href="{{ whatsapp_link }}" class="font-body-sm text-body-sm text-gray-muted hover:text-primary transition-colors">{{ whatsapp_support_number }}</a>
+</div>
+</div>
+{% endif %}
+{% if physical_address %}
+<div class="bg-white border border-outline-variant rounded-xl p-5 flex items-start gap-3">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">location_on</span>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Address</p>
+<p class="font-body-sm text-body-sm text-gray-muted">{{ physical_address }}</p>
+</div>
+</div>
+{% endif %}
+{% if not contact_phone_number and not contact_email_address and not whatsapp_support_number and not physical_address %}
+<div class="bg-white border border-outline-variant rounded-xl p-5">
+<p class="font-body-sm text-body-sm text-gray-muted">Use the form to reach us — we'll get back to you as soon as we can.</p>
+</div>
+{% endif %}
+</div>
+</div>
+</div>
+</div>
+{% endblock %}

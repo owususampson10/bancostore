@@ -4434,6 +4434,91 @@ Criteria before calling the MVP done.
 
 ---
 
+### Task 29: Storefront About & Contact pages
+
+**Description:** `templates/base_store.html`'s header, mobile menu, and footer all have real
+"About"/"Contact" links styled and positioned, but every one of them is a dead `href="#"` with a
+`title="Coming soon"` — 6 occurrences total (desktop nav x2, mobile nav x2, footer x2). This closes
+that gap with two real pages, content grounded in what's actually documented, not invented:
+- **About** narrates `SPEC.md`'s own Objective section (Ghana direct-selling platform, ecommerce +
+  binary-MLM, the three real user roles) in plain customer-facing language — no fabricated company
+  history, founder story, or headcount, since none of that exists in any project doc.
+- **Contact** reads `apps/platform_settings/config.py`'s already-seeded, currently-unused-anywhere
+  `CONTACT_PHONE_NUMBER`/`CONTACT_EMAIL_ADDRESS`/`WHATSAPP_SUPPORT_NUMBER`/`PHYSICAL_ADDRESS`
+  constance settings (each docstring literally says "shown on the contact page") and shows only the
+  channels the admin has actually filled in — never a fabricated phone number/address. Also has a
+  real contact form sending mail via the already-configured, already-verified-working Gmail SMTP
+  backend (Task 4-6's registration/password-reset emails use the same backend).
+
+**Acceptance criteria:**
+- [x] `/about/` renders real, accurate platform content (no invented facts)
+- [x] `/contact/` shows only the contact channels the admin has actually set via constance; an
+      unset channel is omitted entirely, not shown blank or with a placeholder
+- [x] The contact form sends a real email (verified via `django.core.mail.outbox` in tests, and
+      live against the real Gmail SMTP backend) and shows a success message on completion
+- [x] Invalid contact form input re-renders with field errors, sends no email
+- [x] The contact form POST is rate-limited per IP, matching this codebase's established
+      public-form convention (e.g. registration's `@ratelimit`)
+- [x] All 6 dead "About"/"Contact" links across header/mobile-menu/footer point to the real pages;
+      `title="Coming soon"` removed from all of them
+
+**Verification:**
+- [x] pytest: `/about/` returns 200 with expected content
+- [x] pytest: `/contact/` GET returns 200; only-set-channels-shown, tested with a mix of set/unset
+      constance values
+- [x] pytest: valid POST sends exactly one email, redirects with a success message
+- [x] pytest: invalid POST (e.g. empty message) re-renders with errors, sends no email
+- [x] pytest: POST is rejected once the per-IP rate limit is exceeded
+- [x] Live browser check: both pages render correctly at mobile + desktop widths, using the real
+      theme (not the Stitch mockup convention here, since no mockup exists for these two pages —
+      built directly from the existing design tokens/components already established elsewhere in
+      `templates/orders/order_history.html`-style storefront pages)
+
+**Dependencies:** None (constance settings and the email backend both already exist)
+
+**Files likely touched:** new `apps/pages/` app (`views.py`, `forms.py`, `urls.py`), new
+`templates/pages/about.html`/`contact.html`, `templates/base_store.html` (6 link locations),
+`bancostore/urls.py`, `tests/feature/pages/test_about.py`/`test_contact.py`
+
+**Estimated scope:** S
+
+**Closed out 2026-07-31.** Built via the full agent-skills workflow (planning, TDD RED/GREEN per
+slice, frontend-ui-engineering for the two new templates, code-review-and-quality, and a dedicated
+security-and-hardening pass). `apps/pages/` (about + contact views/forms/urls) reads About's
+content straight from `SPEC.md`'s Objective section and Contact's channel display from the
+already-seeded-but-previously-unused `CONTACT_PHONE_NUMBER`/`CONTACT_EMAIL_ADDRESS`/
+`WHATSAPP_SUPPORT_NUMBER`/`PHYSICAL_ADDRESS` constance settings — each rendered only when an admin
+has actually set it (a `_stripped_or_none` helper guards against a whitespace-only value being
+treated as "set"). The contact form sends real mail via the already-configured Gmail SMTP backend,
+rate-limited 5/hour per IP matching `apps/distributors/views.py::register`'s own convention.
+`templates/base_store.html` also gained its first messages/flash-message component (ported from
+`admin_portal/base_dashboard.html`'s, retoned to the storefront's own `border-error/20` token) since
+no storefront view had ever needed one before. A code-review pass found and fixed 3 issues (WhatsApp
+link only stripped `+`/space instead of all non-digits; `message` field had no `max_length` unlike
+its siblings; the fallback-to-`DEFAULT_FROM_EMAIL` path had no logging), each with a RED→GREEN
+regression test. A follow-up `security-and-hardening` pass (a fresh-context security-auditor agent)
+found 2 more Low findings (missing `max_length=254` on `email`, a stale comment claiming `name`
+reaches an email header when it currently only reaches the body) — both fixed the same way — plus
+1 Medium: `@ratelimit(key="ip", ...)` reads `REMOTE_ADDR` directly and has no `RATELIMIT_IP_META_KEY`
+configured, so once Task 24 puts a reverse proxy in front of Django in production, every visitor's
+IP will collapse to the proxy's own address and the 5/hour cap becomes site-wide instead of
+per-visitor — this is the same proxy-aware-rate-limit-key gap already tracked in this file's Known
+Issues, but flagged here specifically because this endpoint's blast radius (a shared Gmail SMTP
+sending quota, also used by registration/password-reset transactional email) makes it worth
+resolving as part of Task 24's own deploy checklist, not assumed-covered by the generic entry.
+Deferred, not silently skipped — no proxy exists yet, so nothing is exploitable today. Full suite
+verified GREEN for every file this task touched (`tests/feature/pages/` — 17 tests — plus
+`tests/feature/catalog/test_navigation_links.py`'s 2 new link-wiring tests); two separate full-suite
+runs surfaced a handful of unrelated, non-reproducing SQLite `"database table is locked"` failures
+(a different set of files failed each run) matching this project's already-documented test-order
+flakiness — confirmed via `git stash`/`git stash pop` isolation that neither reproduces from this
+task's code. Live-browser-verified at 1440px and 500px widths (desktop nav, mobile hamburger menu,
+form submission + success flash message, empty-state contact-channel display all checked against
+the running `runserver`), per this task's own acceptance criteria. Shipped via PR #56 (task branch
+`task-29-about-contact-pages`), merged into `main`.
+
+---
+
 ## Phase 10: Deployment
 
 ### Task 24: Deploy to Hostinger VPS (production)
