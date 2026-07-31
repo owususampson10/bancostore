@@ -381,7 +381,15 @@ Click the star on any image to make it the primary thumbnail shown across the sh
       var toggle = row.querySelector('.primary-toggle');
       var label = row.querySelector('.primary-toggle-label');
       var isPrimary = row === primaryRow;
-      tile.classList.toggle('col-span-2', isPrimary);
+      // col-span-2 only has a grid-placement effect on an actual grid
+      // item -- #image-rows's direct children (.image-row) are the grid
+      // items, .filled-tile is just a nested <div> inside one, so this
+      // must toggle on `row`, not `tile` (a real bug: setting it on
+      // `tile` compiled fine and even reported the right computed style,
+      // it just never affected layout, so the "primary" tile stayed the
+      // same small square as every other tile regardless of which one
+      // was marked primary).
+      row.classList.toggle('col-span-2', isPrimary);
       tile.classList.toggle('aspect-video', isPrimary);
       tile.classList.toggle('aspect-square', !isPrimary);
       tile.classList.toggle('border-primary', isPrimary);
@@ -440,7 +448,16 @@ Click the star on any image to make it the primary thumbnail shown across the sh
     if (!row) return;
 
     if (primaryButton) {
-      row.querySelector('.is-primary-wrapper input').checked = true;
+      // CodeRabbit finding, PR #53: only the clicked row was ever
+      // checked -- every other row's is_primary stayed however it was,
+      // so the *previous* primary tile (e.g. server-rendered on an
+      // edit page) stayed checked too. refreshImageTiles()'s own
+      // `.find()` for the effective primary then kept returning that
+      // stale one, so clicking a different tile's star visibly did
+      // nothing.
+      allImageRows().forEach(function (otherRow) {
+        otherRow.querySelector('.is-primary-wrapper input').checked = (otherRow === row);
+      });
       refreshImageTiles();
     } else if (deleteButton) {
       markImageRowRemoved(row);

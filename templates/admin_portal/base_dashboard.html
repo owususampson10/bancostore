@@ -45,7 +45,7 @@ destructive actions/validation) is unaffected.
     }"
 >
 <div class="mb-8 flex items-center" :class="collapsed ? 'flex-col justify-center gap-3 px-2' : 'flex-row justify-between px-6'">
-<div class="flex items-center gap-3" x-show="!collapsed" x-cloak>
+<a href="{% url 'admin_portal:dashboard' %}" class="flex items-center gap-3" x-show="!collapsed" x-cloak>
 <div class="w-9 h-9 rounded-lg bg-primary flex items-center justify-center text-on-primary flex-shrink-0">
 <span class="material-symbols-outlined text-[20px]" aria-hidden="true">storefront</span>
 </div>
@@ -53,10 +53,10 @@ destructive actions/validation) is unaffected.
 <p class="font-headline-md text-primary font-bold text-base">Bancostore</p>
 <p class="text-[10px] text-on-surface-variant uppercase tracking-wider mt-0.5">Admin Portal</p>
 </div>
-</div>
-<div class="w-9 h-9 rounded-lg bg-primary flex items-center justify-center text-on-primary flex-shrink-0" x-show="collapsed" x-cloak>
+</a>
+<a href="{% url 'admin_portal:dashboard' %}" class="w-9 h-9 rounded-lg bg-primary flex items-center justify-center text-on-primary flex-shrink-0" x-show="collapsed" x-cloak aria-label="Bancostore Admin Portal home">
 <span class="material-symbols-outlined text-[20px]" aria-hidden="true">storefront</span>
-</div>
+</a>
 <button type="button" class="hidden md:flex p-2 rounded-full hover:bg-surface-container-low text-gray-muted" x-on:click="collapsed = !collapsed" aria-label="Toggle sidebar">
 <span class="material-symbols-outlined text-[20px]" x-text="collapsed ? 'chevron_right' : 'chevron_left'"></span>
 </button>

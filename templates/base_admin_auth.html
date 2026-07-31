@@ -13,10 +13,10 @@
 <body class="bg-background text-on-surface font-body-md min-h-screen flex flex-col admin-glow-bg">
 <header class="bg-surface border-b border-outline-variant h-16 flex items-center px-margin-desktop">
 <div class="flex justify-between items-center w-full max-w-container-max mx-auto">
-<div class="flex items-center gap-2">
+<a href="{% url 'two_factor:login' %}" class="flex items-center gap-2">
 <img src="{% static 'bancostore-brand/logo/bancostore-logo-light.svg' %}" alt="Bancostore" class="h-6 w-auto">
 <span class="font-label-md text-label-md font-bold text-primary uppercase tracking-wider border-l border-outline-variant pl-2">Admin</span>
-</div>
+</a>
 <div class="flex items-center gap-stack-md text-on-surface-variant">
 <span class="material-symbols-outlined p-2 rounded-full">security</span>
 <span class="material-symbols-outlined p-2 rounded-full">help_outline</span>
