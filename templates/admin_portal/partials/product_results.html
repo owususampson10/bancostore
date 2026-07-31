@@ -44,7 +44,7 @@
 <div class="flex flex-col leading-tight">
 {% if product.stock == 0 %}
 <span class="font-mono-sm text-mono-sm font-bold text-red-700">{{ product.stock }}</span>
-{% elif product.stock < 10 %}
+{% elif product.stock < low_stock_threshold %}
 <span class="font-mono-sm text-mono-sm font-bold text-amber-700">{{ product.stock }}</span>
 {% else %}
 <span class="font-mono-sm text-mono-sm font-bold text-green-700">{{ product.stock }}</span>

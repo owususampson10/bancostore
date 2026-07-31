@@ -292,6 +292,31 @@ def test_product_featured_filter(staff_client):
 
 
 @pytest.mark.django_db
+def test_product_low_stock_filter_only_matches_products_under_the_threshold(
+    staff_client,
+):
+    category = _make_category()
+    Product.objects.create(
+        name="Low Stock One",
+        category=category,
+        price=Decimal("10.00"),
+        stock=5,
+    )
+    Product.objects.create(
+        name="Well Stocked One",
+        category=category,
+        price=Decimal("10.00"),
+        stock=50,
+    )
+
+    response = staff_client.get(_product_list_url(), {"low_stock": "1"})
+
+    body = response.content.decode()
+    assert "Low Stock One" in body
+    assert "Well Stocked One" not in body
+
+
+@pytest.mark.django_db
 def test_htmx_product_search_returns_only_the_results_partial(staff_client):
     category = _make_category()
     Product.objects.create(

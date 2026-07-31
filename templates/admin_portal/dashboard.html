@@ -29,7 +29,7 @@
 </div>
 <h2 class="font-display-lg text-[40px] text-on-background font-bold mt-2">{{ orders_awaiting_action_count }}</h2>
 </a>
-<a href="{% url 'admin_portal:catalog_product_list' %}?status=active" class="bg-white p-6 rounded-xl border {% if low_stock_count %}border-primary/30{% else %}border-outline-variant{% endif %} shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
+<a href="{% url 'admin_portal:catalog_product_list' %}?status=active&low_stock=1" class="bg-white p-6 rounded-xl border {% if low_stock_count %}border-primary/30{% else %}border-outline-variant{% endif %} shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
 <div class="flex items-start justify-between">
 <p class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wide">Low Stock Products</p>
 <span class="material-symbols-outlined text-xl {% if low_stock_count %}text-primary{% else %}text-on-surface-variant/40{% endif %}" aria-hidden="true">inventory_2</span>

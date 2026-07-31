@@ -148,9 +148,7 @@ def dashboard(request):
         created_at__gte=week_start,
     ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
 
-    recent_orders = Order.objects.select_related("customer").order_by(
-        "-created_at", "-pk"
-    )[:6]
+    recent_orders = Order.objects.order_by("-created_at", "-pk")[:6]
 
     context = {
         "pending_kyc_count": pending_kyc_count,
@@ -1102,6 +1100,7 @@ def _filtered_products(request):
     category_id = request.GET.get("category", "").strip()
     status = request.GET.get("status", "").strip()
     featured = request.GET.get("featured", "").strip()
+    low_stock = request.GET.get("low_stock", "").strip()
 
     products = Product.objects.select_related("category").prefetch_related("images")
     if query:
@@ -1124,8 +1123,21 @@ def _filtered_products(request):
         products = products.filter(is_featured=True)
     elif featured == "no":
         products = products.filter(is_featured=False)
+    # Reached only via the dashboard's Low Stock Products card -- there's no
+    # visible filter widget for this one, matching the "card links straight
+    # to the matching subset" pattern the other 3 action-needed cards
+    # already use (KYC/withdrawal/order queues).
+    if low_stock == "1":
+        products = products.filter(stock__lt=LOW_STOCK_THRESHOLD)
 
-    return products.order_by("-created_at", "-pk"), query, category_id, status, featured
+    return (
+        products.order_by("-created_at", "-pk"),
+        query,
+        category_id,
+        status,
+        featured,
+        low_stock,
+    )
 
 
 @login_required(login_url="two_factor:login")
@@ -1138,7 +1150,9 @@ def catalog_product_list(request):
     if not is_admin_portal_staff(request.user):
         raise PermissionDenied
 
-    products, query, category_id, status, featured = _filtered_products(request)
+    products, query, category_id, status, featured, low_stock = _filtered_products(
+        request
+    )
     paginator = Paginator(products, 20)
     page_obj = paginator.get_page(request.GET.get("page"))
 
@@ -1152,6 +1166,8 @@ def catalog_product_list(request):
         "category_id": category_id,
         "status": status,
         "featured": featured,
+        "low_stock": low_stock,
+        "low_stock_threshold": LOW_STOCK_THRESHOLD,
         "categories": Category.objects.order_by("name"),
         "querystring_no_page": querystring_no_page,
         "active_nav": "catalog",
