@@ -112,6 +112,7 @@ INSTALLED_APPS = [
     "apps.withdrawal",
     "apps.admin_portal",
     "apps.orders",
+    "apps.pages",
 ]
 
 MIDDLEWARE = [

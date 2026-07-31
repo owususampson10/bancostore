@@ -10,8 +10,11 @@ last piece of the MVP scope before deployment — but auditing which already-shi
 still had no real, Stitch-designed frontend (Task 22/23's admin_portal precedent set the
 expectation that every admin-facing screen should look like the rest of the app, not Django Admin)
 surfaced two more: Task 26 (Catalog Management) and Task 27 (Admin Dashboard), both closed
-2026-07-31. Task 24 (deploy to Hostinger VPS) is next — a production action requiring user
-confirmation before any step touches the real VPS/domain, per `SPEC.md` Boundaries.**
+2026-07-31. Task 29 (Storefront About & Contact pages), also closed 2026-07-31, is further ad-hoc
+work in the same vein as Task 25 — replacing 6 dead placeholder links discovered while auditing the
+storefront, not part of the original numbered plan. Task 24 (deploy to Hostinger VPS) is next — a
+production action requiring user confirmation before any step touches the real VPS/domain, per
+`SPEC.md` Boundaries.**
 Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found
 no task anywhere had ever scoped a self-service order-history page for a customer or distributor,
@@ -559,6 +562,37 @@ What exists and is verified working:
   tests cover every count's precise inclusion/exclusion logic (including the 7-day window boundary)
   and the orders count-vs-value distinction. Shipped via PR #54, merged 2026-07-31; full suite
   green throughout (1177 passed, 1 skipped).
+- **Storefront About & Contact pages (Task 29), replacing 6 dead "Coming soon" `href="#"` links**
+  in `templates/base_store.html` (desktop nav, mobile nav, footer): a new `apps/pages/` app whose
+  About content is grounded directly in `SPEC.md`'s Objective section (no invented company history)
+  and whose Contact page reads the already-seeded-but-previously-unused `CONTACT_PHONE_NUMBER`/
+  `CONTACT_EMAIL_ADDRESS`/`WHATSAPP_SUPPORT_NUMBER`/`PHYSICAL_ADDRESS` constance settings, rendering
+  only the channels an admin has actually set (a `_stripped_or_none` helper guards against a
+  whitespace-only value being wrongly treated as "set"). The contact form sends real mail via the
+  already-configured Gmail SMTP backend, rate-limited 5/hour per IP matching
+  `apps/distributors/views.py::register`'s own `@ratelimit` convention; both `name`/`subject`
+  fields reject CRLF header injection at form-validation time. `templates/base_store.html` also
+  gained its first Django-messages flash component (ported from `admin_portal/base_dashboard.html`'s,
+  retoned to the storefront's own `border-error/20` token), since no storefront view had ever needed
+  one before. A code-review pass fixed 3 issues (WhatsApp link only stripped `+`/space instead of
+  all non-digits; `message` had no `max_length` unlike its siblings; the fallback-to-
+  `DEFAULT_FROM_EMAIL` path had no logging); a follow-up `security-and-hardening` pass (a
+  fresh-context security-auditor agent) found 2 more Low fixes (missing `max_length=254` on
+  `email`; a stale comment overclaiming `name` reaches an email header when it currently only
+  reaches the body) plus one Medium, deliberately deferred rather than fixed now: `@ratelimit(key=
+  "ip", ...)` reads `REMOTE_ADDR` directly with no `RATELIMIT_IP_META_KEY` configured, so once Task
+  24 puts a reverse proxy in front of Django in production, every visitor's IP collapses to the
+  proxy's own address and the 5/hour cap becomes site-wide instead of per-visitor — the same
+  proxy-aware-rate-limit-key gap already tracked in `tasks/todo.md`'s Known Issues, flagged here
+  specifically because this endpoint's blast radius (a shared Gmail SMTP sending quota, also used
+  by registration/password-reset transactional email) makes it worth resolving as part of Task 24's
+  own deploy checklist rather than assumed-covered by the generic entry. Live-browser-verified at
+  1440px and 500px (desktop nav, mobile hamburger menu, form submission + success flash message,
+  empty-state contact-channel display). Shipped via PR #56, merged 2026-07-31; full suite green for
+  every file this task touched, 1219 passed as of merge (two unrelated full-suite runs surfaced a
+  handful of non-reproducing SQLite `"database table is locked"` failures — a different set of
+  files each time — matching this project's already-documented test-order flakiness, confirmed via
+  `git stash` isolation to be unrelated to this task's code).
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,

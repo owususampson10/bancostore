@@ -308,6 +308,11 @@ Purely archival views (raw wallet ledger, commission cycle logs) stay on Django 
 through the UI. All pytest tests pass, `black`/`ruff` clean. Verify against `SPEC.md` Success
 Criteria.
 
+- [x] Task 29: Storefront About & Contact pages — replaces the 6 dead "Coming soon" links in
+  `templates/base_store.html` with real pages; content grounded in `SPEC.md`'s Objective section
+  and the already-seeded-but-unused `CONTACT_*`/`PHYSICAL_ADDRESS` constance settings, never
+  fabricated. Closed out 2026-07-31. See `tasks/todo.md` for the full breakdown.
+
 ### Phase 10: Deployment
 - [ ] Task 24: Deploy to Hostinger VPS (production) — **needs Hostinger KVM 2 VPS provisioned
   first, and a CI provider confirmed (Open Question #1) before this task starts**
