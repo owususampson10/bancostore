@@ -2,6 +2,7 @@ import csv
 from datetime import timedelta
 from decimal import Decimal
 
+from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
@@ -15,6 +16,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 
 from constance import config
+from constance.utils import get_values
 
 from apps.catalog.models import Category, Product
 from apps.catalog.services import normalize_primary_image
@@ -28,6 +30,8 @@ from apps.orders.services import (
     cancel_or_refund_order,
     is_legal_order_status_transition,
 )
+from apps.platform_settings.admin import BancostoreConstanceForm
+from apps.platform_settings.config import CONSTANCE_CONFIG, CONSTANCE_CONFIG_FIELDSETS
 from apps.wallet.models import WalletTransaction
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
@@ -42,6 +46,8 @@ from apps.withdrawal.services import (
 )
 
 from .forms import (
+    _INPUT_CLASS,
+    _SELECT_CLASS,
     MAX_PRODUCT_IMAGES,
     CategoryForm,
     ProductForm,
@@ -1306,3 +1312,183 @@ def catalog_product_delete(request, pk):
                 "deleted. Mark it inactive instead to hide it from the store.",
             )
     return redirect("admin_portal:catalog_product_list")
+
+
+# ---------------------------------------------------------------------------
+# Platform Settings (Task 28) -- a Stitch-designed front end for the
+# already-existing django-constance business-rule settings, replacing raw
+# Django Admin as the primary path (same pattern as every other admin_portal
+# screen). Reuses apps.platform_settings.admin.BancostoreConstanceForm
+# directly -- it's a plain forms.Form, not admin-specific -- rather than
+# hand-rolling a parallel form that could drift from its already-tested
+# field types/bounds/cross-field validation (e.g. the MIN/MAX withdrawal
+# amount check, the percentage_field 0-100 bound).
+# ---------------------------------------------------------------------------
+
+
+# These 3 are genuinely long-form copy (legal text), unlike every other
+# str-typed setting here (an email, a phone number, a hex colour) -- given
+# a taller textarea so they're actually usable, not the same cramped
+# 2-row box as a one-line value.
+_LONG_TEXT_SETTINGS = {
+    "TERMS_AND_CONDITIONS_TEXT",
+    "PRIVACY_POLICY_TEXT",
+    "REFUND_RETURN_POLICY_TEXT",
+}
+
+# One icon per CONSTANCE_CONFIG_FIELDSETS group, shown on the vertical-tab
+# sidebar only (desktop, >=lg) -- not on the horizontal scroll strip the
+# same tabs collapse to below that, per explicit user request.
+_GROUP_ICONS = {
+    "Authentication Settings": "lock_open",
+    "Commission & Bonus Settings": "payments",
+    "Registration & Membership Settings": "person_add",
+    "Withdrawal & Payout Settings": "account_balance",
+    "Delivery Settings": "local_shipping",
+    "Order Settings": "receipt_long",
+    "KYC Settings": "fact_check",
+    "IR ID Number Settings": "badge",
+    "Payment Gateway Settings": "point_of_sale",
+    "General Platform Settings": "settings_suggest",
+}
+
+# A plain str.title() on an underscore-joined constant name reads fine for
+# ordinary words ("Distributor Login Method") but mangles the acronyms
+# scattered through this file's own setting names ("Otp", "Kyc", "Pv",
+# "Ir Id" instead of "OTP", "KYC", "PV", "IR ID") -- corrected here rather
+# than leaving the raw constant name on screen, which is what actually
+# prompted this normalization (a bare "DISTRIBUTOR_LOGIN_METHOD" reads as
+# code, not a setting a non-technical admin can recognize).
+_LABEL_WORD_OVERRIDES = {
+    "Otp": "OTP",
+    "Kyc": "KYC",
+    "Pv": "PV",
+    "Ir": "IR",
+    "Id": "ID",
+    "Sms": "SMS",
+    "Whatsapp": "WhatsApp",
+    # str.title() capitalizes only the letter right after the digit --
+    # "ADMIN_2FA_ENABLED".title() comes out "Admin 2Fa Enabled", not "2FA".
+    "2Fa": "2FA",
+}
+
+
+def _humanize_setting_name(name):
+    words = name.replace("_", " ").title().split(" ")
+    return " ".join(_LABEL_WORD_OVERRIDES.get(word, word) for word in words)
+
+
+def _style_constance_form_fields(form):
+    """Constance builds its own field widgets per Python type (BooleanField/
+    IntegerField/DecimalField/CharField, or the bounded custom fields in
+    CONSTANCE_ADDITIONAL_FIELDS) with no Bancostore styling at all -- this
+    applies the same Tailwind classes every other admin_portal form already
+    uses (_INPUT_CLASS/_SELECT_CLASS) and the sr-only-peer checkbox pattern
+    catalog_product_form.html established for is_active/is_featured,
+    without touching constance's own field types, bounds, or validation.
+
+    ADMIN_2FA_ENABLED is force-disabled here, not just styled -- mandatory
+    2FA for admin accounts is a hard SPEC.md Boundary that already doesn't
+    depend on this setting's value at enforcement time (this codebase's
+    own test_2fa_requirement_cannot_be_bypassed_via_settings_toggle proves
+    that), but a settings page that visibly lets an admin *think* they can
+    turn it off is a real footgun in its own right. Django's `disabled`
+    form fields ignore whatever the client actually POSTs and use the
+    field's initial value instead, so this is real tamper-resistance, not
+    just a greyed-out look."""
+    for name, field in form.fields.items():
+        widget = field.widget
+        if isinstance(widget, forms.HiddenInput):
+            continue
+        if isinstance(widget, forms.CheckboxInput):
+            widget.attrs["class"] = "sr-only peer"
+        elif isinstance(widget, forms.Select):
+            widget.attrs["class"] = _SELECT_CLASS
+        elif isinstance(widget, forms.Textarea):
+            widget.attrs["class"] = _INPUT_CLASS
+            widget.attrs["rows"] = 6 if name in _LONG_TEXT_SETTINGS else 2
+        else:
+            widget.attrs["class"] = _INPUT_CLASS
+        if name == "ADMIN_2FA_ENABLED":
+            field.disabled = True
+
+
+def _constance_field_context(name, options, form):
+    """The one piece of constance.admin.ConstanceAdmin.get_config_value this
+    page actually needs: which form field to render and how (checkbox,
+    textarea, or a plain text/number/select input) -- not reimplemented,
+    since that function doesn't use `self` and duplicating its shape here
+    (rather than importing an admin-only method) keeps this view
+    independent of Django Admin internals."""
+    widget = form[name].field.widget
+    return {
+        "name": name,
+        "label": _humanize_setting_name(name),
+        "help_text": options[1],
+        "form_field": form[name],
+        "is_checkbox": isinstance(widget, forms.CheckboxInput),
+        "is_textarea": isinstance(widget, forms.Textarea),
+    }
+
+
+@login_required(login_url="two_factor:login")
+def platform_settings(request):
+    """Task 28. All ~77 business-rule settings on one page, grouped into
+    the same CONSTANCE_CONFIG_FIELDSETS categories admin already uses in
+    Django Admin's constance change list, switched between via vertical
+    tabs (apps/admin_portal/templates -- Alpine.js show/hide, not a page
+    reload) rather than 10 separate pages. Every field stays present in the
+    DOM at once regardless of which tab is visible: BancostoreConstanceForm
+    validates and saves every setting together in one submission (its
+    version-hash staleness check and cross-field WITHDRAWAL_AMOUNT
+    validation both operate over the whole form), so there's no way to
+    save just one group's fields even if the UI only shows one at a time."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    initial = get_values()
+    if request.method == "POST":
+        form = BancostoreConstanceForm(
+            initial=initial, request=request, data=request.POST, files=request.FILES
+        )
+        # Must run before is_valid()/save(), not after -- ADMIN_2FA_ENABLED's
+        # field.disabled=True (set inside this call) is what makes Django's
+        # _clean_fields() read that field from the form's own initial value
+        # instead of the submitted POST data. Calling this after save() (a
+        # real bug caught via a live-browser round-trip test, not just
+        # reasoning about it) left the field a normal, non-disabled
+        # BooleanField at the moment of validation, so a real browser
+        # submission -- which never includes a disabled checkbox's value at
+        # all -- silently saved False, even though the rendered page showed
+        # it locked on.
+        _style_constance_form_fields(form)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Platform settings updated successfully.")
+            return redirect("admin_portal:platform_settings")
+        messages.error(
+            request,
+            "Some settings couldn't be saved. Check the highlighted fields below.",
+        )
+    else:
+        form = BancostoreConstanceForm(initial=initial, request=request)
+        _style_constance_form_fields(form)
+
+    groups = [
+        {
+            "title": title,
+            "icon": _GROUP_ICONS[title],
+            "fields": [
+                _constance_field_context(name, CONSTANCE_CONFIG[name], form)
+                for name in field_names
+            ],
+        }
+        for title, field_names in CONSTANCE_CONFIG_FIELDSETS.items()
+    ]
+
+    context = {
+        "form": form,
+        "groups": groups,
+        "active_nav": "platform_settings",
+    }
+    return render(request, "admin_portal/platform_settings.html", context)
