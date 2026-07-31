@@ -10,10 +10,13 @@ last piece of the MVP scope before deployment — but auditing which already-shi
 still had no real, Stitch-designed frontend (Task 22/23's admin_portal precedent set the
 expectation that every admin-facing screen should look like the rest of the app, not Django Admin)
 surfaced two more: Task 26 (Catalog Management) and Task 27 (Admin Dashboard), both closed
-2026-07-31. Task 29 (Storefront About & Contact pages), also closed 2026-07-31, is further ad-hoc
-work in the same vein as Task 25 — replacing 6 dead placeholder links discovered while auditing the
-storefront, not part of the original numbered plan. Task 24 (deploy to Hostinger VPS) is next — a
-production action requiring user confirmation before any step touches the real VPS/domain, per
+2026-07-31. Task 28 (Platform Settings admin screen), also closed 2026-07-31, replaced raw Django
+Admin as the primary path for all 76 constance business-rule settings, the same reasoning applied
+to its own last remaining raw-Django-Admin surface. Task 29 (Storefront About & Contact pages),
+also closed 2026-07-31, is further ad-hoc work in the same vein as Task 25 — replacing 6 dead
+placeholder links discovered while auditing the storefront, not part of the original numbered
+plan. Task 24 (deploy to Hostinger VPS) is next — a production action requiring user confirmation
+before any step touches the real VPS/domain, per
 `SPEC.md` Boundaries.**
 Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found
@@ -562,6 +565,42 @@ What exists and is verified working:
   tests cover every count's precise inclusion/exclusion logic (including the 7-day window boundary)
   and the orders count-vs-value distinction. Shipped via PR #54, merged 2026-07-31; full suite
   green throughout (1177 passed, 1 skipped).
+- **Platform Settings admin screen (Task 28), replacing raw Django Admin as the primary path for**
+  **all 76 django-constance business-rule settings** (across 10 fieldset groups) — matching every
+  other admin_portal section's own "should look like the rest of the app" precedent from Task
+  22/23. Reuses `apps.platform_settings.admin.BancostoreConstanceForm` directly rather than
+  duplicating its field types/bounds/cross-field validation; every setting name is shown as a
+  human-readable label (e.g. "Distributor Login Method" instead of `DISTRIBUTOR_LOGIN_METHOD`,
+  with acronyms cased correctly — OTP, KYC, 2FA, IR ID, PV, WhatsApp). All 10 groups live on one
+  page via vertical tabs — sticky with icons from `lg`/1024px up, a horizontal icon-less scroll
+  strip below that, per explicit user request. Two real bugs were found and fixed via live-browser
+  round-trip testing before merge: `ADMIN_2FA_ENABLED`'s disable-protection check ran *after*
+  `form.is_valid()`/`form.save()`, so a real save could silently flip this mandatory setting to
+  `False` (fixed the ordering, added a regression test simulating a real browser's disabled-
+  checkbox submission with the key omitted entirely); and a CSS cascade bug where tab icons never
+  actually hid on the mobile/tablet horizontal strip, because Google's Material Symbols stylesheet
+  sets an unlayered `display: inline-block` that always beats a layered Tailwind utility regardless
+  of viewport — fixed by moving the show/hide class to a wrapping element, and the same latent bug
+  was found and fixed in `templates/orders/order_history.html`'s chevron icon (a separate,
+  already-shipped page). CodeRabbit's review on PR #55 caught one Major, real accessibility bug
+  (fixed): the checkbox toggles' real `<input>` is `sr-only` and the visual toggle track had no
+  `peer-focus-visible` styling, so a keyboard user tabbing to a toggle saw no focus indicator
+  anywhere on screen. Also fixed: ARIA tab semantics (`role="tablist"/"tab"/"tabpanel"`,
+  `aria-selected`, `aria-controls`/`aria-labelledby`) so screen readers announce the vertical tabs
+  as a real tab list; and a real functional gap where `_valid_post_data()`'s test helper built every
+  field's payload from `CONSTANCE_CONFIG`'s seeded defaults rather than the live stored values —
+  since `ConstanceForm.save()` writes every submitted field together, a test saving one setting
+  could have silently reset any OTHER already-customized setting back to its default (fixed to
+  source one `get_values()` snapshot for both field values and the version hash, with a regression
+  test proving an unrelated save doesn't clobber a pre-existing custom value). **Deferred, not
+  silently skipped:** CodeRabbit's suggestion to add full roving-`tabindex` keyboard navigation
+  (Left/Right/Home/End arrow-key handling for the tab list, beyond the ARIA semantics already
+  added) was not implemented in this PR. 12 tests in
+  `tests/feature/admin_portal/test_platform_settings.py` cover permissions, every field group
+  rendering, save round-trips for boolean/decimal settings, cross-field withdrawal-amount and
+  percentage-bound validation, label humanization, and the `ADMIN_2FA_ENABLED` tamper-resistance
+  regression. Shipped via PR #55, merged 2026-07-31; full suite green throughout (1205 passed, 1
+  skipped).
 - **Storefront About & Contact pages (Task 29), replacing 6 dead "Coming soon" `href="#"` links**
   in `templates/base_store.html` (desktop nav, mobile nav, footer): a new `apps/pages/` app whose
   About content is grounded directly in `SPEC.md`'s Objective section (no invented company history)
