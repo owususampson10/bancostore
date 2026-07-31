@@ -77,4 +77,5 @@ urlpatterns = [
         views.catalog_product_delete,
         name="catalog_product_delete",
     ),
+    path("settings/", views.platform_settings, name="platform_settings"),
 ]

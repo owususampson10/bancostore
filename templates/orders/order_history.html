@@ -47,7 +47,18 @@ choices -- the mockups happened to already define CSS for all 7 values.
 </div>
 <p class="text-gray-muted text-sm mt-1">{{ order.created_at|date:"M j, Y" }}</p>
 </div>
-<span class="material-symbols-outlined text-outline hidden md:block" aria-hidden="true">chevron_right</span>
+{% comment %}
+hidden/md:block has to live on this wrapper, not the icon span itself:
+Google's Material Symbols stylesheet sets its own unlayered
+"display: inline-block" on .material-symbols-outlined, which -- per the
+CSS Cascade Layers spec -- always beats a layered Tailwind utility
+(hidden/md:* included) regardless of source order or viewport, so the
+chevron never actually hid on mobile. Same bug and fix as
+templates/admin_portal/platform_settings.html's tab icons.
+{% endcomment %}
+<span class="hidden md:block">
+<span class="material-symbols-outlined text-outline" aria-hidden="true">chevron_right</span>
+</span>
 </div>
 
 {# Product row: thumbnail + name(s), price + PV -- stacks on mobile, #}

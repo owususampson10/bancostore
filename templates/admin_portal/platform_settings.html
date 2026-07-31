@@ -1,0 +1,107 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Platform Settings — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div x-data="{ activeGroup: 0 }">
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">Platform Settings</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Control every business rule on the platform — no code changes needed.</p>
+</div>
+
+{% if form.non_field_errors %}
+<div class="mb-6 px-4 py-3 rounded-xl border border-admin-error/20 bg-error-container text-on-error-container font-body-md text-body-md">
+{{ form.non_field_errors|join:" " }}
+</div>
+{% endif %}
+
+<form method="post" novalidate class="flex flex-col lg:flex-row gap-6 items-start">
+{% csrf_token %}
+{{ form.version }}
+
+<!-- Configuration groups: vertical tabs from lg (1024px) up -- side-by-side with
+     the outer app sidebar, this needs real width, so it stacks (tabs as a
+     horizontal scroll strip above full-width content, no icons -- there's
+     no room for them in a single-line scroll strip) on every narrower
+     screen, not just phones. Sticky (not just internally scrollable) from
+     lg up so it stays in view while the content pane on its right scrolls
+     -- top-20 clears the page's own sticky top-0 h-16 header with a small
+     gap, matching that header's own offset convention. -->
+<nav class="w-full lg:w-72 lg:shrink-0 lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-6rem)] bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 overflow-x-auto lg:overflow-y-auto">
+<div class="flex flex-row lg:flex-col gap-1 p-2 min-w-max lg:min-w-0" role="tablist" aria-orientation="vertical">
+{% for group in groups %}
+<button type="button"
+        id="platform-settings-tab-{{ forloop.counter0 }}"
+        role="tab"
+        aria-controls="platform-settings-panel-{{ forloop.counter0 }}"
+        :aria-selected="(activeGroup === {{ forloop.counter0 }}).toString()"
+        @click="activeGroup = {{ forloop.counter0 }}"
+        :class="activeGroup === {{ forloop.counter0 }} ? 'bg-primary/10 text-primary' : 'text-on-surface-variant hover:bg-surface-container-low'"
+        class="flex items-center gap-2 px-4 py-3 rounded-lg font-label-md text-label-md text-left whitespace-nowrap transition-colors">
+{% comment %}
+The hidden/lg:inline-block toggle has to live on this wrapper, not on
+the icon span itself: Google's Material Symbols stylesheet sets its own
+unlayered "display: inline-block" on .material-symbols-outlined, and
+per the CSS Cascade Layers spec, an unlayered style always beats a
+layered one (Tailwind wraps every utility, including hidden/lg:*, in
+@layer) regardless of source order or viewport -- confirmed by testing
+both class combinations in isolation live in the browser. Putting the
+two classes on separate elements sidesteps the conflict entirely.
+{% endcomment %}
+<span class="hidden lg:inline-block">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">{{ group.icon }}</span>
+</span>
+<span>{{ group.title }}</span>
+</button>
+{% endfor %}
+</div>
+</nav>
+
+<!-- Active group's fields -->
+<div class="w-full flex-1 min-w-0 bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 flex flex-col overflow-hidden">
+<div class="px-6 py-4 border-b border-outline-variant/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sticky top-0 bg-surface-container-lowest/95 backdrop-blur-sm z-10">
+<div>
+{% for group in groups %}
+<h3 x-show="activeGroup === {{ forloop.counter0 }}" x-cloak class="font-headline-sm text-headline-sm text-on-surface">{{ group.title }}</h3>
+{% endfor %}
+</div>
+<button type="submit" class="bg-primary text-on-primary px-6 py-2.5 rounded-lg font-label-md text-label-md hover:opacity-90 active:scale-95 transition-all shadow-sm self-start sm:self-auto">
+Save Changes
+</button>
+</div>
+
+<div class="p-6 overflow-y-auto">
+{% for group in groups %}
+<div x-show="activeGroup === {{ forloop.counter0 }}" x-cloak
+     id="platform-settings-panel-{{ forloop.counter0 }}"
+     role="tabpanel"
+     aria-labelledby="platform-settings-tab-{{ forloop.counter0 }}"
+     class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+{% for field in group.fields %}
+{% if field.is_checkbox %}
+<label class="min-w-0 flex items-center justify-between gap-3 p-4 rounded-lg bg-surface border border-outline-variant/40 cursor-pointer">
+<span class="min-w-0">
+<span class="block font-label-md text-label-md text-on-surface break-words">{{ field.label }}</span>
+<span class="block text-[12px] text-on-surface-variant mt-0.5">{{ field.help_text }}</span>
+</span>
+<span class="relative shrink-0">
+{{ field.form_field }}
+<span class="block w-11 h-6 bg-surface-container-highest rounded-full peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full transition-colors"></span>
+</span>
+</label>
+{% else %}
+<div class="min-w-0 {% if field.is_textarea %}lg:col-span-2{% endif %}">
+<label for="{{ field.form_field.id_for_label }}" class="block font-label-md text-label-md text-on-surface mb-1 break-words">{{ field.label }}</label>
+<p class="text-[12px] text-on-surface-variant mb-2">{{ field.help_text }}</p>
+{{ field.form_field }}
+{% if field.form_field.errors %}
+<p class="text-[12px] text-admin-error mt-1">{{ field.form_field.errors|join:", " }}</p>
+{% endif %}
+</div>
+{% endif %}
+{% endfor %}
+</div>
+{% endfor %}
+</div>
+</div>
+</form>
+</div>
+{% endblock %}
