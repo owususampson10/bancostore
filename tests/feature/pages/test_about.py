@@ -32,7 +32,12 @@ def test_about_page_covers_all_three_real_user_roles(client):
     "Verified & secure" marketing card."""
     response = client.get(reverse("pages:about"))
 
+    assert response.status_code == 200
     content = response.content.decode()
     assert "Customers" in content
     assert "Distributors" in content
     assert "Admin" in content
+
+    content_lower = content.lower()
+    for marker in ("kyc", "withdrawal", "product", "order", "settings panel"):
+        assert marker in content_lower
