@@ -235,51 +235,48 @@ Add Variant
 <span class="material-symbols-outlined text-primary" aria-hidden="true">image</span>
 <h3 class="font-headline-sm text-headline-sm text-on-surface">Product Images</h3>
 </div>
-<span class="font-label-md text-label-md text-on-surface-variant">Max 5</span>
+<span id="image-count" class="font-label-md text-label-md text-on-surface-variant">0 / 5</span>
 </div>
 {{ image_formset.management_form }}
 {% if image_formset.non_form_errors %}
 <div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md mb-4">{{ image_formset.non_form_errors }}</div>
 {% endif %}
-<div id="image-rows" class="space-y-4">
+<div id="image-rows" class="grid grid-cols-2 gap-4">
 {% for image_form in image_formset %}
-<div class="image-row border border-outline-variant/50 rounded-lg p-4 bg-surface transition-opacity">
-{% for hidden in image_form.hidden_fields %}{% if hidden.name != 'order' %}{{ hidden }}{% endif %}{% endfor %}
-<div class="preview-wrapper w-full aspect-video rounded-lg overflow-hidden border border-outline-variant mb-3 relative bg-surface-container-low {% if not image_form.instance.image %}hidden{% endif %}">
-<img src="{% if image_form.instance.image %}{{ image_form.instance.image.url }}{% endif %}" alt="" class="preview-img w-full h-full object-cover">
-<div class="primary-badge absolute top-2 left-2 bg-primary text-on-primary px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider items-center gap-1 {% if image_form.instance.is_primary %}flex{% else %}hidden{% endif %}">
-<span class="material-symbols-outlined text-[12px]" style="font-variation-settings: 'FILL' 1;" aria-hidden="true">star</span>
-Primary
+<div class="image-row {% if image_form.instance.image %}has-image{% endif %}" data-has-pk="{% if image_form.instance.pk %}true{% else %}false{% endif %}">
+{% for hidden in image_form.hidden_fields %}{{ hidden }}{% endfor %}
+<span class="order-input-wrapper hidden">{{ image_form.order }}</span>
+<span class="is-primary-wrapper hidden">{{ image_form.is_primary }}</span>
+<span class="delete-wrapper hidden">{{ image_form.DELETE }}</span>
+{% if image_form.errors %}<p class="col-span-2 text-admin-error font-label-md text-label-md">{{ image_form.errors.as_text }}</p>{% endif %}
+
+<!-- Filled tile: shown once this row has an image (existing or just chosen) -->
+<div class="filled-tile {% if not image_form.instance.image %}hidden{% endif %} relative group rounded-lg overflow-hidden border-2 border-outline-variant aspect-square">
+<img src="{% if image_form.instance.image %}{{ image_form.instance.image.url }}{% endif %}" alt="" class="tile-img w-full h-full object-cover">
+<button type="button" class="primary-toggle absolute top-2 left-2 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-lg transition-colors" title="Set as primary image">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;" aria-hidden="true">star</span>
+<span class="primary-toggle-label"></span>
+</button>
+<div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+<button type="button" class="delete-tile w-10 h-10 rounded-full bg-white text-admin-error flex items-center justify-center hover:bg-error-container transition-colors shadow-lg" title="Remove image" aria-label="Remove image">
+<span class="material-symbols-outlined" aria-hidden="true">delete</span>
+</button>
 </div>
 </div>
-<p class="delete-note hidden font-label-md text-label-md text-primary font-bold mb-2">This image will be removed when you save.</p>
-<div class="flex items-center justify-between gap-3 flex-wrap">
+
+<!-- Add-image dropzone: at most one of these is ever visible at a time -->
+<label class="add-tile hidden aspect-square border-2 border-dashed border-outline-variant rounded-lg flex flex-col items-center justify-center gap-2 hover:border-primary hover:bg-primary/5 transition-all text-on-surface-variant cursor-pointer">
 {{ image_form.image }}
-<label class="flex items-center gap-1 text-label-md font-label-md text-on-surface-variant cursor-pointer">
-{{ image_form.is_primary }}
-Primary
+<span class="material-symbols-outlined text-3xl" aria-hidden="true">add_photo_alternate</span>
+<span class="font-label-md text-label-md">Add Image</span>
 </label>
-</div>
-<div class="flex items-center justify-between mt-2">
-<div class="flex items-center gap-1">
-<button type="button" class="move-up p-1 rounded hover:bg-surface-container-high text-on-surface-variant" title="Move up" aria-label="Move image up">
-<span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_upward</span>
-</button>
-<button type="button" class="move-down p-1 rounded hover:bg-surface-container-high text-on-surface-variant" title="Move down" aria-label="Move image down">
-<span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_downward</span>
-</button>
-<span class="order-input-wrapper">{{ image_form.order }}</span>
-</div>
-<label class="flex items-center gap-1 text-label-md font-label-md text-primary cursor-pointer" title="Remove">
-{{ image_form.DELETE }}
-<span class="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
-</label>
-</div>
-{% if image_form.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ image_form.errors.as_text }}</p>{% endif %}
 </div>
 {% endfor %}
 </div>
-<p class="mt-4 font-label-md text-label-md text-on-surface-variant/70">Use the arrows to reorder images. The Primary image is used as the thumbnail across the shop. Up to 5 images total.</p>
+<p class="mt-4 font-label-md text-label-md text-on-surface-variant/70 flex items-start gap-1">
+<span class="material-symbols-outlined text-[16px]" aria-hidden="true">tips_and_updates</span>
+Click the star on any image to make it the primary thumbnail shown across the shop. Up to 5 images total.
+</p>
 </section>
 </div>
 </div>
@@ -316,77 +313,11 @@ Primary
     addRow('variant-rows', 'variant-empty-form', 'variants');
   });
 
-  // Reorder: swap the row's position and renumber every visible order
-  // input 0..n -- the server's normalize_primary_image only cares about
-  // is_primary, but Product/ProductImage's own Meta.ordering is
-  // ["order", "id"], so this is what actually controls storefront
-  // gallery order.
-  function renumberImageOrder() {
-    document.querySelectorAll('#image-rows .image-row').forEach(function (row, index) {
-      var input = row.querySelector('.order-input-wrapper input');
-      if (input) input.value = index;
-    });
-  }
-
-  document.getElementById('image-rows').addEventListener('click', function (event) {
-    var upButton = event.target.closest('.move-up');
-    var downButton = event.target.closest('.move-down');
-    if (!upButton && !downButton) return;
-    var row = event.target.closest('.image-row');
-    if (upButton && row.previousElementSibling) {
-      row.parentNode.insertBefore(row, row.previousElementSibling);
-    } else if (downButton && row.nextElementSibling) {
-      row.parentNode.insertBefore(row.nextElementSibling, row);
-    }
-    renumberImageOrder();
-  });
-
-  document.getElementById('image-rows').addEventListener('change', function (event) {
-    var row = event.target.closest('.image-row');
-    if (!row) return;
-
-    // Live thumbnail preview the moment a file is chosen -- previously
-    // choosing a file gave zero visual feedback beyond the native
-    // "chosen" text, which read as "upload doesn't work" even though the
-    // upload itself was always fine.
-    if (event.target.name && event.target.name.endsWith('-image') && event.target.files.length) {
-      var wrapper = row.querySelector('.preview-wrapper');
-      var img = row.querySelector('.preview-img');
-      img.src = URL.createObjectURL(event.target.files[0]);
-      wrapper.classList.remove('hidden');
-    }
-
-    // "Primary" behaves like a radio button across rows even though each
-    // formset row's checkbox is independently named -- server-side
-    // normalize_primary_image (apps/catalog/services.py) is the real
-    // guarantee regardless, this is just so the form doesn't visibly show
-    // two rows checked at once before it's submitted.
-    if (event.target.name && event.target.name.endsWith('-is_primary')) {
-      document.querySelectorAll('#image-rows .primary-badge').forEach(function (badge) {
-        badge.classList.add('hidden');
-        badge.classList.remove('flex');
-      });
-      if (event.target.checked) {
-        document.querySelectorAll('#image-rows input[name$="-is_primary"]').forEach(function (checkbox) {
-          if (checkbox !== event.target) checkbox.checked = false;
-        });
-        var badge = row.querySelector('.primary-badge');
-        if (badge && !row.querySelector('.preview-wrapper').classList.contains('hidden')) {
-          badge.classList.remove('hidden');
-          badge.classList.add('flex');
-        }
-      }
-    }
-
-    if (event.target.name && event.target.name.endsWith('-DELETE')) {
-      markRowForDeletion(row, event.target.checked);
-    }
-  });
-
-  // Shared by both the image and variant rows: previously checking
-  // Delete gave no feedback at all beyond a tiny checkbox, which read as
-  // "delete doesn't work" even though the deletion itself was always
-  // applied correctly on save.
+  // Shared by variant rows only (image rows are hidden outright on
+  // delete, not dimmed -- see markImageRowRemoved below). Previously
+  // checking Delete gave no feedback at all beyond a tiny checkbox,
+  // which read as "delete doesn't work" even though the deletion itself
+  // was always applied correctly on save.
   function markRowForDeletion(row, checked) {
     var note = row.querySelector('.delete-note');
     if (checked) {
@@ -403,6 +334,120 @@ Primary
     var row = event.target.closest('.variant-row');
     if (row) markRowForDeletion(row, event.target.checked);
   });
+
+  // --- Product Images: reveal-on-demand upload tiles -----------------
+  // Only images that already exist show as photo tiles; exactly one
+  // "Add Image" dropzone is visible at a time (never all 5 slots at
+  // once), matching the fetched Stitch design. Clicking a tile's own
+  // hidden file input (wrapped in the dropzone <label>) opens the
+  // native picker with no "Choose file" text ever shown.
+  var imageRowsContainer = document.getElementById('image-rows');
+  var imageCountLabel = document.getElementById('image-count');
+
+  function allImageRows() {
+    return Array.prototype.slice.call(imageRowsContainer.querySelectorAll('.image-row'));
+  }
+
+  function refreshImageTiles() {
+    var rows = allImageRows().filter(function (row) { return !row.classList.contains('removed'); });
+    var filled = rows.filter(function (row) { return row.classList.contains('has-image'); });
+    var empty = rows.filter(function (row) { return !row.classList.contains('has-image'); });
+
+    imageCountLabel.textContent = filled.length + ' / 5';
+
+    // Hide every row's dropzone first, including filled ones -- a row
+    // that just transitioned empty-to-filled otherwise keeps showing
+    // the dropzone it was revealed as before markImageRowFilled ran,
+    // since it's no longer part of the `empty` set by the time this
+    // runs and so would never get re-hidden.
+    rows.forEach(function (row) {
+      row.querySelector('.add-tile').classList.add('hidden');
+    });
+    if (filled.length < 5 && empty.length > 0) {
+      empty[0].querySelector('.add-tile').classList.remove('hidden');
+    }
+
+    // The primary tile (explicitly marked, or the first filled tile if
+    // none is marked yet -- mirrors normalize_primary_image's own
+    // fallback so the preview matches what actually gets saved) gets
+    // the large featured spot; every other filled tile is a small
+    // gallery square.
+    var primaryRow = filled.find(function (row) {
+      return row.querySelector('.is-primary-wrapper input').checked;
+    }) || filled[0];
+
+    filled.forEach(function (row) {
+      var tile = row.querySelector('.filled-tile');
+      var toggle = row.querySelector('.primary-toggle');
+      var label = row.querySelector('.primary-toggle-label');
+      var isPrimary = row === primaryRow;
+      tile.classList.toggle('col-span-2', isPrimary);
+      tile.classList.toggle('aspect-video', isPrimary);
+      tile.classList.toggle('aspect-square', !isPrimary);
+      tile.classList.toggle('border-primary', isPrimary);
+      tile.classList.toggle('border-outline-variant', !isPrimary);
+      toggle.classList.toggle('bg-primary', isPrimary);
+      toggle.classList.toggle('text-on-primary', isPrimary);
+      toggle.classList.toggle('bg-white/90', !isPrimary);
+      toggle.classList.toggle('text-on-surface-variant', !isPrimary);
+      label.textContent = isPrimary ? 'Primary' : '';
+    });
+  }
+
+  function markImageRowFilled(row, file) {
+    row.classList.add('has-image');
+    row.querySelector('.tile-img').src = URL.createObjectURL(file);
+    row.querySelector('.filled-tile').classList.remove('hidden');
+    refreshImageTiles();
+  }
+
+  function markImageRowRemoved(row) {
+    if (row.dataset.hasPk === 'true') {
+      // A real, already-saved image -- hide it entirely and let the
+      // existing DELETE checkbox (checked below) remove it on save.
+      // Its slot can't come back as a fresh upload dropzone: the
+      // number of blank rows was fixed when the page loaded, and a new
+      // file chosen into a DELETE-marked row would be silently
+      // discarded by Django's formset save (it deletes the instance
+      // instead of applying field changes).
+      row.classList.add('removed', 'hidden');
+      row.querySelector('.delete-wrapper input').checked = true;
+    } else {
+      // Never-saved row -- just undo the choice so the slot is free
+      // to use again, no point leaving a phantom DELETE-marked row.
+      row.classList.remove('has-image');
+      row.querySelector('.filled-tile').classList.add('hidden');
+      var fileInput = row.querySelector('.add-tile input[type="file"]');
+      fileInput.value = '';
+    }
+    refreshImageTiles();
+  }
+
+  imageRowsContainer.addEventListener('change', function (event) {
+    var row = event.target.closest('.image-row');
+    if (!row || row.classList.contains('removed')) return;
+
+    if (event.target.type === 'file' && event.target.files.length) {
+      markImageRowFilled(row, event.target.files[0]);
+    }
+  });
+
+  imageRowsContainer.addEventListener('click', function (event) {
+    var primaryButton = event.target.closest('.primary-toggle');
+    var deleteButton = event.target.closest('.delete-tile');
+    if (!primaryButton && !deleteButton) return;
+    var row = event.target.closest('.image-row');
+    if (!row) return;
+
+    if (primaryButton) {
+      row.querySelector('.is-primary-wrapper input').checked = true;
+      refreshImageTiles();
+    } else if (deleteButton) {
+      markImageRowRemoved(row);
+    }
+  });
+
+  refreshImageTiles();
 })();
 </script>
 {% endblock %}

@@ -65,8 +65,6 @@ class ProductForm(forms.ModelForm):
         }
 
 
-_IMAGE_INPUT_CLASS = "font-body-md text-body-md text-on-surface-variant flex-1 min-w-0"
-
 # A product may have at most 5 images total. No "Add Image" button is
 # needed -- every request renders exactly enough blank rows to reach 5
 # (build_product_image_formset computes that count from how many images
@@ -90,8 +88,15 @@ def build_product_image_formset(extra):
         validate_max=True,
         can_delete=True,
         widgets={
-            "image": forms.ClearableFileInput(attrs={"class": _IMAGE_INPUT_CLASS}),
-            "is_primary": forms.CheckboxInput(attrs={"class": "w-4 h-4"}),
+            # Plain FileInput, not ClearableFileInput -- the template
+            # builds its own photo-tile preview and delete control, so
+            # ClearableFileInput's default "Currently: ... Clear:" text
+            # would be redundant UI fighting the custom one. sr-only
+            # keeps it clickable (wrapped in a <label> the template
+            # styles as the upload dropzone) without ever showing the
+            # native "No file chosen" text.
+            "image": forms.FileInput(attrs={"class": "sr-only"}),
+            "is_primary": forms.CheckboxInput(attrs={"class": "sr-only"}),
             "order": forms.NumberInput(attrs={"class": "sr-only", "tabindex": "-1"}),
         },
     )
