@@ -4434,6 +4434,51 @@ Criteria before calling the MVP done.
 
 ---
 
+### Task 28: Platform Settings admin screen
+
+**Description:** Not in the original plan — found the same way as Task 26/27: this was the last
+remaining admin-facing surface still using raw Django Admin instead of a real, Stitch-designed
+`admin_portal` screen, for all 76 `django-constance` business-rule settings (10 fieldset groups).
+Reuses `apps.platform_settings.admin.BancostoreConstanceForm` directly rather than duplicating its
+field types/bounds/cross-field validation.
+
+**Acceptance criteria:**
+- [x] All 10 setting groups reachable from one page via vertical tabs — sticky with icons from
+      `lg`/1024px up, a horizontal icon-less scroll strip below that
+- [x] Every setting name shown as a human-readable label (acronyms cased correctly: OTP, KYC, 2FA,
+      IR ID, PV, WhatsApp), not the raw `ALL_CAPS` constance key
+- [x] Save round-trips correctly for every field type (boolean, decimal, percentage, withdrawal
+      range), with existing cross-field validation still enforced
+- [x] `ADMIN_2FA_ENABLED` cannot be silently disabled via a normal save (tamper-resistance)
+
+**Verification:**
+- [x] 12 tests in `tests/feature/admin_portal/test_platform_settings.py` — permissions, every field
+      group renders, save round-trip for boolean/decimal settings, cross-field withdrawal-amount
+      validation, percentage-field bound validation, label humanization, `ADMIN_2FA_ENABLED`
+      tamper-resistance regression
+- [x] Live-browser verification at 1440/1024/768/500px: icons, sticky sidebar, normalized labels,
+      save flow (toggled + reverted a real setting)
+- [x] Full suite green throughout: 1205 passed, 1 skipped
+- [x] CodeRabbit review, all findings fixed pre-merge (checkbox keyboard-focus ring, ARIA tab
+      semantics, a test-helper bug that could have silently reset an unrelated already-customized
+      setting) — see `CLAUDE.md`'s Task 28 entry. **Deferred, not silently skipped:** full
+      roving-`tabindex` keyboard navigation (Left/Right/Home/End arrow-key handling) for the tab
+      list was not implemented.
+
+**Shipped via PR #55, merged 2026-07-31.**
+
+**Dependencies:** Task 22/23 (admin_portal shell/patterns this page reuses), the constance settings
+themselves (seeded incrementally across most prior tasks)
+
+**Files touched:** `apps/admin_portal/urls.py`, `apps/admin_portal/views.py`,
+`templates/admin_portal/base_dashboard.html`, `templates/admin_portal/platform_settings.html`,
+`templates/orders/order_history.html` (an unrelated latent CSS bug found and fixed along the way),
+`tests/feature/admin_portal/test_platform_settings.py`
+
+**Estimated scope:** M
+
+---
+
 ### Task 29: Storefront About & Contact pages
 
 **Description:** `templates/base_store.html`'s header, mobile menu, and footer all have real

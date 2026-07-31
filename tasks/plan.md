@@ -308,6 +308,11 @@ Purely archival views (raw wallet ledger, commission cycle logs) stay on Django 
 through the UI. All pytest tests pass, `black`/`ruff` clean. Verify against `SPEC.md` Success
 Criteria.
 
+- [x] Task 28: Platform Settings admin screen — replaces raw Django Admin as the primary path for
+  all 76 `django-constance` business-rule settings (10 fieldset groups), the last remaining
+  admin-facing surface not yet matching the rest of `admin_portal`'s look. Closed out 2026-07-31 —
+  PR #55. See `tasks/todo.md` for the full breakdown.
+
 - [x] Task 29: Storefront About & Contact pages — replaces the 6 dead "Coming soon" links in
   `templates/base_store.html` with real pages; content grounded in `SPEC.md`'s Objective section
   and the already-seeded-but-unused `CONTACT_*`/`PHYSICAL_ADDRESS` constance settings, never
