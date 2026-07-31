@@ -109,7 +109,7 @@
 <div class="w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center mb-4">
 <span class="material-symbols-outlined text-4xl text-on-surface-variant" aria-hidden="true">inventory_2</span>
 </div>
-{% if query or category_id or status or featured %}
+{% if query or category_id or status or featured or low_stock %}
 <p class="font-headline-md text-headline-md text-on-surface">No products match your filters.</p>
 <p class="font-body-md text-body-md text-on-surface-variant mt-1">Try a different search term or clear a filter.</p>
 {% else %}
