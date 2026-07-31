@@ -20,3 +20,19 @@ def test_about_page_describes_the_real_platform(client):
     content = response.content.decode()
     assert "Ghana" in content
     assert "Distributor" in content or "distributor" in content
+
+
+@pytest.mark.django_db
+def test_about_page_covers_all_three_real_user_roles(client):
+    """CodeRabbit finding on PR #56: the page only described Customers
+    and Distributors -- SPEC.md defines a third real role, Admin (runs
+    the business: KYC review, withdrawal approval, product/order
+    management, business-rule settings), and the page's own acceptance
+    criteria call for covering all three, not two plus an unrelated
+    "Verified & secure" marketing card."""
+    response = client.get(reverse("pages:about"))
+
+    content = response.content.decode()
+    assert "Customers" in content
+    assert "Distributors" in content
+    assert "Admin" in content
