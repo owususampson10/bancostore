@@ -1,0 +1,60 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}{% if is_edit %}Edit Category{% else %}Add Category{% endif %} — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
+<div class="bg-white w-full max-w-lg rounded-xl shadow-2xl border border-outline-variant flex flex-col overflow-hidden max-h-[90vh]">
+<div class="px-6 py-6 border-b border-outline-variant flex justify-between items-start">
+<div>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">{% if is_edit %}Edit Category{% else %}Add New Category{% endif %}</h3>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">{% if is_edit %}Update this category's name or image.{% else %}Create a new organizational node for your products.{% endif %}</p>
+</div>
+<a href="{% url 'admin_portal:catalog_category_list' %}" class="p-2 hover:bg-surface-container rounded-full transition-colors text-on-surface-variant" aria-label="Close">
+<span class="material-symbols-outlined" aria-hidden="true">close</span>
+</a>
+</div>
+<form method="post" enctype="multipart/form-data" class="flex-1 overflow-y-auto">
+{% csrf_token %}
+<div class="p-6 space-y-6">
+{% if form.non_field_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md">
+{{ form.non_field_errors }}
+</div>
+{% endif %}
+<div class="space-y-2" x-data="{ name: '{{ form.name.value|default:''|escapejs }}' }">
+<label for="{{ form.name.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Category Name</label>
+<input type="text" name="{{ form.name.html_name }}" id="{{ form.name.id_for_label }}" x-model="name" placeholder="e.g. Home Appliances" value="{{ form.name.value|default:'' }}" class="w-full px-4 py-3 rounded-lg bg-surface border border-outline-variant focus:ring-1 focus:ring-primary focus:border-primary outline-none font-body-md text-body-md transition-all">
+{% if form.name.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.name.errors|striptags }}</p>{% endif %}
+<div class="mt-2 bg-surface-container-low px-4 py-3 rounded-lg border border-outline-variant flex items-center gap-2 flex-wrap">
+<span class="text-on-surface-variant/60 font-mono-sm text-mono-sm">/catalog/</span>
+<span class="font-mono-sm text-mono-sm font-bold text-primary" x-text="name.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, '') || '...'"></span>
+</div>
+<p class="text-xs text-on-surface-variant/70 italic flex items-center gap-1 mt-1">
+<span class="material-symbols-outlined text-[14px]" aria-hidden="true">info</span>
+Slugs are generated automatically from the name.
+</p>
+</div>
+<div class="space-y-2">
+<label for="{{ form.image.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Category Image</label>
+{% if category.image %}
+<div class="mb-2 w-full h-32 rounded-lg overflow-hidden border border-outline-variant">
+<img src="{{ category.image.url }}" alt="" class="w-full h-full object-cover">
+</div>
+{% endif %}
+<div class="border-2 border-dashed border-outline-variant rounded-xl p-6 flex flex-col items-center justify-center bg-surface hover:border-primary/50 transition-colors">
+<span class="material-symbols-outlined text-primary text-[32px] mb-2" aria-hidden="true">cloud_upload</span>
+{{ form.image }}
+</div>
+<p class="text-xs text-on-surface-variant/70">Optional — shown on the storefront's category tile. Categories without one render as a plain text tile.</p>
+{% if form.image.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.image.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+<div class="px-6 py-6 bg-surface-container-low border-t border-outline-variant flex justify-end gap-3">
+<a href="{% url 'admin_portal:catalog_category_list' %}" class="px-6 py-2.5 rounded-lg font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors">Cancel</a>
+<button type="submit" class="px-8 py-2.5 rounded-lg font-bold bg-primary text-on-primary shadow-lg hover:opacity-90 active:scale-95 transition-all">
+{% if is_edit %}Save Changes{% else %}Save Category{% endif %}
+</button>
+</div>
+</form>
+</div>
+</div>
+{% endblock %}

@@ -65,7 +65,7 @@ auto-escaping doesn't protect a JS-string-literal context).
      @click.outside="open = false">
 <label class="font-label-md text-label-md text-on-surface-variant block mb-2" id="{{ initial_id }}-label">{{ label }}</label>
 <button type="button"
-        class="w-full h-[42px] pl-4 pr-3 bg-white border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none transition-all"
+        class="w-full h-[42px] pl-4 pr-3 bg-white border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
         role="combobox"
         aria-haspopup="dialog"
         aria-labelledby="{{ initial_id }}-label"
@@ -97,7 +97,7 @@ auto-escaping doesn't protect a JS-string-literal context).
 <template x-for="(cell, index) in calendarDays" :key="index">
 <button type="button"
         class="h-8 w-8 rounded-full text-body-sm font-body-sm transition-colors"
-        :class="cell.day === '' ? 'invisible' : (cell.iso === selected ? 'bg-admin-primary text-on-primary font-bold' : 'text-on-surface hover:bg-surface-container-low')"
+        :class="cell.day === '' ? 'invisible' : (cell.iso === selected ? 'bg-primary text-on-primary font-bold' : 'text-on-surface hover:bg-surface-container-low')"
         :disabled="cell.day === ''"
         :aria-label="cell.iso"
         x-text="cell.day"
@@ -105,7 +105,7 @@ auto-escaping doesn't protect a JS-string-literal context).
 </button>
 </template>
 </div>
-<button type="button" class="w-full mt-3 pt-3 border-t border-outline-variant text-admin-primary font-label-md text-label-md hover:underline" @click="clearDate()">Clear date</button>
+<button type="button" class="w-full mt-3 pt-3 border-t border-outline-variant text-primary font-label-md text-label-md hover:underline" @click="clearDate()">Clear date</button>
 </div>
 <input type="hidden" name="{{ field_name }}" x-ref="hiddenInput" :value="selected">
 </div>

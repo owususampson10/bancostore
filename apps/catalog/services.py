@@ -41,6 +41,30 @@ def decrement_stock(product: Product, quantity: int = 1) -> Product:
     return retry_on_lock_contention(_attempt)
 
 
+def normalize_primary_image(product: Product) -> None:
+    """Admin Catalog Management: the image formset lets an admin (re)mark
+    any row as primary, or mark none, or mark several at once (unlike a
+    radio button, independent checkboxes give no client-side guarantee).
+    Called once after every product-form save so `Product.primary_image`
+    (which just returns the first `is_primary=True` row it finds) always
+    has exactly one true candidate: promotes the first image by `order`
+    if none is marked, and demotes every image but the first-by-order one
+    if more than one is marked."""
+    images = list(product.images.all())
+    if not images:
+        return
+
+    primary_images = [image for image in images if image.is_primary]
+    if len(primary_images) == 1:
+        return
+
+    for image in images:
+        should_be_primary = image.pk == images[0].pk
+        if image.is_primary != should_be_primary:
+            image.is_primary = should_be_primary
+            image.save(update_fields=["is_primary"])
+
+
 def increment_stock(product: Product, quantity: int = 1) -> Product:
     """Symmetric inverse of decrement_stock, for order cancellation/refund
     reversal (Task 18b). No InsufficientStockError equivalent -- there is

@@ -2,7 +2,7 @@
 {% block title %}{{ display_name|default:"(No name on file)" }} — Bancostore Admin Portal{% endblock %}
 {% block content %}
 <div x-data="{ toggleOpen: false }">
-<a href="{% url 'admin_portal:distributor_directory' %}" class="inline-flex items-center gap-1 text-secondary hover:text-admin-primary transition-colors mb-4">
+<a href="{% url 'admin_portal:distributor_directory' %}" class="inline-flex items-center gap-1 text-secondary hover:text-primary transition-colors mb-4">
 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
 <span class="font-label-md text-label-md">Back to Directory</span>
 </a>
@@ -12,7 +12,7 @@
 <div class="flex items-center gap-3">
 <h2 class="font-headline-md text-headline-md text-on-surface">{{ display_name|default:"(No name on file)" }}</h2>
 {% if distributor.user.is_active %}
-<span class="px-3 py-1 rounded-full text-xs font-bold bg-primary-fixed text-admin-primary">Active</span>
+<span class="px-3 py-1 rounded-full text-xs font-bold bg-primary-fixed text-primary">Active</span>
 {% else %}
 <span class="px-3 py-1 rounded-full text-xs font-bold bg-error-container text-on-error-container">Suspended</span>
 {% endif %}
@@ -34,7 +34,7 @@
 Suspend Account
 </button>
 {% else %}
-<button type="button" @click="toggleOpen = true" class="px-6 py-2.5 rounded-xl bg-admin-primary text-on-primary font-label-md text-label-md shadow-md hover:opacity-90 transition-all flex items-center gap-2 self-start">
+<button type="button" @click="toggleOpen = true" class="px-6 py-2.5 rounded-xl bg-primary text-on-primary font-label-md text-label-md shadow-md hover:opacity-90 transition-all flex items-center gap-2 self-start">
 <span class="material-symbols-outlined text-[20px]" aria-hidden="true">check_circle</span>
 Reactivate Account
 </button>
@@ -82,7 +82,7 @@ Reactivate Account
 </div>
 
 <!-- Wallet -->
-<div class="bg-admin-primary rounded-xl p-6 text-on-primary flex flex-col justify-between">
+<div class="bg-primary rounded-xl p-6 text-on-primary flex flex-col justify-between">
 <div>
 <p class="font-label-md text-label-md text-primary-fixed uppercase">Wallet Balance</p>
 <p class="font-headline-md text-headline-md mt-1">GHS {{ wallet_balance|floatformat:2 }}</p>
@@ -128,7 +128,7 @@ Reactivate Account
 {% if distributor.user.is_active %}
 <button type="submit" class="flex-1 bg-admin-error text-on-error py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Yes, Suspend</button>
 {% else %}
-<button type="submit" class="flex-1 bg-admin-primary text-on-primary py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Yes, Reactivate</button>
+<button type="submit" class="flex-1 bg-primary text-on-primary py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Yes, Reactivate</button>
 {% endif %}
 </div>
 </form>

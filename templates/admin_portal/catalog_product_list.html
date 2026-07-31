@@ -1,0 +1,152 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Products — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div x-data="{ deleteOpen: false, deleteName: '', deleteUrl: '', deleteKind: 'product', deleteTrigger: null }">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface">Product Catalog</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Manage products shown on the storefront and homepage.</p>
+</div>
+<div class="flex items-center gap-3">
+<a href="{% url 'admin_portal:catalog_category_list' %}" class="px-6 py-3 rounded-lg font-bold text-label-md border border-outline-variant text-on-surface-variant flex items-center gap-2 hover:bg-surface-container-low transition-all">
+<span class="material-symbols-outlined" aria-hidden="true">category</span>
+Categories
+</a>
+<a href="{% url 'admin_portal:catalog_product_create' %}" class="bg-primary text-on-primary px-6 py-3 rounded-lg font-bold text-label-md flex items-center gap-2 shadow-sm hover:opacity-90 active:scale-95 transition-all">
+<span class="material-symbols-outlined" aria-hidden="true">add</span>
+Add Product
+</a>
+</div>
+</div>
+
+<form
+  id="product-filter-form"
+  hx-get="{% url 'admin_portal:catalog_product_list' %}"
+  hx-target="#product-results"
+  hx-swap="outerHTML"
+  hx-push-url="true"
+  hx-trigger="change, search, keyup changed delay:300ms from:#product-search-input"
+  class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant mb-6"
+>
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+<div class="md:col-span-6">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Search Products</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-secondary" aria-hidden="true">search</span>
+<input id="product-search-input" type="search" name="q" value="{{ query }}" placeholder="Search by name or description..." class="w-full pl-12 pr-4 py-3 bg-surface-container-low border border-outline-variant rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none font-body-md text-body-md" aria-label="Search products">
+</div>
+</div>
+
+{{ category_id|json_script:"category-filter-selected" }}
+<div class="md:col-span-2 relative"
+     x-data="{
+       open: false,
+       selected: JSON.parse(document.getElementById('category-filter-selected').textContent),
+       highlighted: -1,
+       options: [{value: '', label: 'All Categories'}{% for c in categories %}, {value: '{{ c.pk }}', label: '{{ c.name|escapejs }}'}{% endfor %}],
+       get selectedLabel() {
+         const found = this.options.find(o => o.value === this.selected);
+         return found ? found.label : 'All Categories';
+       },
+       openList() { this.open = true; this.highlighted = Math.max(this.options.findIndex(o => o.value === this.selected), 0); },
+       choose(index) {
+         this.selected = this.options[index].value;
+         this.open = false;
+         $nextTick(() => $refs.categoryInput.dispatchEvent(new Event('change', { bubbles: true })));
+       },
+     }"
+     @click.outside="open = false">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Category</label>
+<button type="button" class="w-full px-4 py-3 bg-surface-container-low border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+        role="combobox" aria-haspopup="listbox" aria-label="Filter by category" :aria-expanded="open.toString()"
+        @click="open ? (open = false) : openList()"
+        @keydown.down.prevent="open ? highlighted = Math.min(highlighted + 1, options.length - 1) : openList()"
+        @keydown.up.prevent="open ? highlighted = Math.max(highlighted - 1, 0) : openList()"
+        @keydown.enter.prevent="if (open && highlighted >= 0) choose(highlighted)"
+        @keydown.escape="open = false">
+<span x-text="selectedLabel" class="truncate"></span>
+<span class="material-symbols-outlined text-secondary transition-transform" :class="open && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<ul x-show="open" x-cloak role="listbox" class="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-outline-variant rounded-xl shadow-lg py-1">
+<template x-for="(option, index) in options" :key="option.value">
+<li role="option" class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors"
+    :class="(highlighted === index) ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    @click="choose(index)" @mouseenter="highlighted = index" x-text="option.label"></li>
+</template>
+</ul>
+<input type="hidden" name="category" x-ref="categoryInput" :value="selected">
+</div>
+
+{{ status|json_script:"status-filter-selected" }}
+<div class="md:col-span-2 relative"
+     x-data="{
+       open: false,
+       selected: JSON.parse(document.getElementById('status-filter-selected').textContent),
+       highlighted: -1,
+       options: [{value: '', label: 'All Statuses'}, {value: 'active', label: 'Active'}, {value: 'inactive', label: 'Inactive'}],
+       get selectedLabel() { const found = this.options.find(o => o.value === this.selected); return found ? found.label : 'All Statuses'; },
+       openList() { this.open = true; this.highlighted = Math.max(this.options.findIndex(o => o.value === this.selected), 0); },
+       choose(index) { this.selected = this.options[index].value; this.open = false; $nextTick(() => $refs.statusInput.dispatchEvent(new Event('change', { bubbles: true }))); },
+     }"
+     @click.outside="open = false">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Status</label>
+<button type="button" class="w-full px-4 py-3 bg-surface-container-low border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+        role="combobox" aria-haspopup="listbox" aria-label="Filter by status" :aria-expanded="open.toString()"
+        @click="open ? (open = false) : openList()"
+        @keydown.down.prevent="open ? highlighted = Math.min(highlighted + 1, options.length - 1) : openList()"
+        @keydown.up.prevent="open ? highlighted = Math.max(highlighted - 1, 0) : openList()"
+        @keydown.enter.prevent="if (open && highlighted >= 0) choose(highlighted)"
+        @keydown.escape="open = false">
+<span x-text="selectedLabel"></span>
+<span class="material-symbols-outlined text-secondary transition-transform" :class="open && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<ul x-show="open" x-cloak role="listbox" class="absolute z-10 mt-1 w-full bg-white border border-outline-variant rounded-xl shadow-lg py-1">
+<template x-for="(option, index) in options" :key="option.value">
+<li role="option" class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors"
+    :class="(highlighted === index) ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    @click="choose(index)" @mouseenter="highlighted = index" x-text="option.label"></li>
+</template>
+</ul>
+<input type="hidden" name="status" x-ref="statusInput" :value="selected">
+</div>
+
+{{ featured|json_script:"featured-filter-selected" }}
+<div class="md:col-span-2 relative"
+     x-data="{
+       open: false,
+       selected: JSON.parse(document.getElementById('featured-filter-selected').textContent),
+       highlighted: -1,
+       options: [{value: '', label: 'All'}, {value: 'yes', label: 'Featured'}, {value: 'no', label: 'Not Featured'}],
+       get selectedLabel() { const found = this.options.find(o => o.value === this.selected); return found ? found.label : 'All'; },
+       openList() { this.open = true; this.highlighted = Math.max(this.options.findIndex(o => o.value === this.selected), 0); },
+       choose(index) { this.selected = this.options[index].value; this.open = false; $nextTick(() => $refs.featuredInput.dispatchEvent(new Event('change', { bubbles: true }))); },
+     }"
+     @click.outside="open = false">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Featured</label>
+<button type="button" class="w-full px-4 py-3 bg-surface-container-low border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+        role="combobox" aria-haspopup="listbox" aria-label="Filter by featured" :aria-expanded="open.toString()"
+        @click="open ? (open = false) : openList()"
+        @keydown.down.prevent="open ? highlighted = Math.min(highlighted + 1, options.length - 1) : openList()"
+        @keydown.up.prevent="open ? highlighted = Math.max(highlighted - 1, 0) : openList()"
+        @keydown.enter.prevent="if (open && highlighted >= 0) choose(highlighted)"
+        @keydown.escape="open = false">
+<span x-text="selectedLabel"></span>
+<span class="material-symbols-outlined text-secondary transition-transform" :class="open && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<ul x-show="open" x-cloak role="listbox" class="absolute z-10 mt-1 w-full bg-white border border-outline-variant rounded-xl shadow-lg py-1">
+<template x-for="(option, index) in options" :key="option.value">
+<li role="option" class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors"
+    :class="(highlighted === index) ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    @click="choose(index)" @mouseenter="highlighted = index" x-text="option.label"></li>
+</template>
+</ul>
+<input type="hidden" name="featured" x-ref="featuredInput" :value="selected">
+</div>
+</div>
+</form>
+
+{% include "admin_portal/partials/product_results.html" %}
+
+{% include "admin_portal/partials/_delete_confirm_modal.html" %}
+</div>
+{% endblock %}

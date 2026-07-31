@@ -25,7 +25,7 @@ templates/admin_portal/partials/directory_results.html).
 <label for="order-search-input" class="font-label-md text-label-md text-on-surface-variant block mb-2">Search Orders</label>
 <div class="relative">
 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60" aria-hidden="true">search</span>
-<input id="order-search-input" type="search" name="q" value="{{ query }}" placeholder="Name, phone, or reference" class="w-full pl-10 pr-4 py-2.5 bg-white border border-outline-variant rounded-xl focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none font-body-md text-body-md" aria-label="Search orders">
+<input id="order-search-input" type="search" name="q" value="{{ query }}" placeholder="Name, phone, or reference" class="w-full pl-10 pr-4 py-2.5 bg-white border border-outline-variant rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none font-body-md text-body-md" aria-label="Search orders">
 </div>
 </div>
 
@@ -67,7 +67,7 @@ templates/admin_portal/partials/directory_results.html).
 {# and payout_settings.html's mobile-money-network field: a native #}
 {# select's open options popup can't be restyled via CSS in any browser. #}
 <button type="button"
-        class="w-full h-[42px] pl-4 pr-3 bg-white border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none transition-all"
+        class="w-full h-[42px] pl-4 pr-3 bg-white border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
         role="combobox"
         aria-haspopup="listbox"
         aria-labelledby="order-status-label"
@@ -92,7 +92,7 @@ templates/admin_portal/partials/directory_results.html).
     role="option"
     :aria-selected="(selected === option.value).toString()"
     class="px-4 py-2.5 font-body-md text-body-md cursor-pointer transition-colors"
-    :class="(highlighted === index) ? 'bg-admin-primary/10 text-admin-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    :class="(highlighted === index) ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'"
     @click="choose(index)"
     @mouseenter="highlighted = index"
     x-text="option.label">

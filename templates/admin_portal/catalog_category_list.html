@@ -1,0 +1,35 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Categories — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div x-data="{ deleteOpen: false, deleteName: '', deleteUrl: '', deleteKind: 'category', deleteTrigger: null }">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface">Product Categories</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Manage the categories products are organized under.</p>
+</div>
+<a href="{% url 'admin_portal:catalog_category_create' %}" class="bg-primary text-on-primary px-6 py-3 rounded-lg font-bold text-label-md flex items-center gap-2 shadow-sm hover:opacity-90 active:scale-95 transition-all">
+<span class="material-symbols-outlined" aria-hidden="true">add_circle</span>
+Add Category
+</a>
+</div>
+
+<form
+  id="category-filter-form"
+  hx-get="{% url 'admin_portal:catalog_category_list' %}"
+  hx-target="#category-results"
+  hx-swap="outerHTML"
+  hx-push-url="true"
+  hx-trigger="search, keyup changed delay:300ms from:#category-search-input"
+  class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant mb-6"
+>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-secondary" aria-hidden="true">search</span>
+<input id="category-search-input" type="search" name="q" value="{{ query }}" placeholder="Search by name or slug..." class="w-full pl-12 pr-4 py-3 bg-surface-container-low border border-outline-variant rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none font-body-md text-body-md" aria-label="Search categories">
+</div>
+</form>
+
+{% include "admin_portal/partials/category_results.html" %}
+
+{% include "admin_portal/partials/_delete_confirm_modal.html" %}
+</div>
+{% endblock %}

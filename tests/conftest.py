@@ -31,6 +31,16 @@ def _clear_fake_sms_outbox():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_media_root(settings, tmp_path):
+    """Any test that creates a real ImageField/FileField (e.g.
+    ProductImage) without this would write into the real project media/
+    directory and never clean up -- CodeRabbit caught this on PR #53
+    after Task 26's catalog tests started uploading real images.
+    tmp_path is unique per test and pytest cleans it up automatically."""
+    settings.MEDIA_ROOT = tmp_path
+
+
+@pytest.fixture(autouse=True)
 def _force_fake_sms_sender(settings):
     """Django's test runner automatically forces EMAIL_BACKEND to locmem
     regardless of what's in .env, so real Gmail sends never happen in tests —

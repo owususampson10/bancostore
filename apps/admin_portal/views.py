@@ -6,7 +6,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db.models import Count, Prefetch, Q, Sum
+from django.db import transaction
+from django.db.models import Count, Prefetch, ProtectedError, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -15,6 +16,8 @@ from django.utils.dateparse import parse_date
 
 from constance import config
 
+from apps.catalog.models import Category, Product
+from apps.catalog.services import normalize_primary_image
 from apps.commissions.models import CommissionCycleRun
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
@@ -38,6 +41,13 @@ from apps.withdrawal.services import (
     reject_withdrawal_request,
 )
 
+from .forms import (
+    MAX_PRODUCT_IMAGES,
+    CategoryForm,
+    ProductForm,
+    ProductVariantFormSet,
+    build_product_image_formset,
+)
 from .permissions import is_admin_portal_staff
 
 # Task 23. Mirrors apps.withdrawal.admin's own _APPROVE_FAILURE_MESSAGES
@@ -889,3 +899,313 @@ def order_invoice_pdf(request, pk):
         f'inline; filename="invoice-{order.payment_reference}.pdf"'
     )
     return response
+
+
+# ---------------------------------------------------------------------------
+# Catalog Management (Task 26) -- Category CRUD
+# ---------------------------------------------------------------------------
+
+
+def _filtered_categories(request):
+    query = request.GET.get("q", "").strip()
+    categories = Category.objects.annotate(product_count=Count("products"))
+    if query:
+        categories = categories.filter(
+            Q(name__icontains=query) | Q(slug__icontains=query)
+        )
+    return categories.order_by("name"), query
+
+
+@login_required(login_url="two_factor:login")
+def catalog_category_list(request):
+    """Branded replacement for Django Admin's CategoryAdmin changelist --
+    presentation only, Category itself is unchanged. Real-time search (no
+    Apply button), mirroring distributor_directory's own htmx pattern."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    categories, query = _filtered_categories(request)
+    paginator = Paginator(categories, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    params = request.GET.copy()
+    params.pop("page", None)
+    querystring_no_page = params.urlencode()
+
+    context = {
+        "page_obj": page_obj,
+        "query": query,
+        "querystring_no_page": querystring_no_page,
+        "active_nav": "catalog",
+    }
+    if request.htmx:
+        return render(request, "admin_portal/partials/category_results.html", context)
+    return render(request, "admin_portal/catalog_category_list.html", context)
+
+
+@login_required(login_url="two_factor:login")
+def catalog_category_create(request):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    if request.method == "POST":
+        form = CategoryForm(request.POST, request.FILES)
+        if form.is_valid():
+            category = form.save()
+            messages.success(request, f'Category "{category.name}" created.')
+            return redirect("admin_portal:catalog_category_list")
+    else:
+        form = CategoryForm()
+
+    return render(
+        request,
+        "admin_portal/catalog_category_form.html",
+        {"form": form, "is_edit": False, "active_nav": "catalog"},
+    )
+
+
+@login_required(login_url="two_factor:login")
+def catalog_category_edit(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    category = get_object_or_404(Category, pk=pk)
+    if request.method == "POST":
+        form = CategoryForm(request.POST, request.FILES, instance=category)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Category "{category.name}" updated.')
+            return redirect("admin_portal:catalog_category_list")
+    else:
+        form = CategoryForm(instance=category)
+
+    return render(
+        request,
+        "admin_portal/catalog_category_form.html",
+        {"form": form, "category": category, "is_edit": True, "active_nav": "catalog"},
+    )
+
+
+@login_required(login_url="two_factor:login")
+def catalog_category_delete(request, pk):
+    """POST-only -- Category.category (FK from Product) is on_delete=PROTECT
+    (apps/catalog/models.py), so deleting a category that still has
+    products raises ProtectedError. Caught here and turned into a plain
+    flash message instead of a 500, the same shape as every other
+    caught-service-exception-to-message pattern in this file."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    category = get_object_or_404(Category, pk=pk)
+    if request.method == "POST":
+        try:
+            name = category.name
+            category.delete()
+            messages.success(request, f'Category "{name}" deleted.')
+        except ProtectedError:
+            messages.error(
+                request,
+                f'"{category.name}" still has products assigned to it and cannot '
+                "be deleted. Move or delete its products first.",
+            )
+    return redirect("admin_portal:catalog_category_list")
+
+
+# ---------------------------------------------------------------------------
+# Catalog Management (Task 26) -- Product CRUD
+# ---------------------------------------------------------------------------
+
+
+def _filtered_products(request):
+    query = request.GET.get("q", "").strip()
+    category_id = request.GET.get("category", "").strip()
+    status = request.GET.get("status", "").strip()
+    featured = request.GET.get("featured", "").strip()
+
+    products = Product.objects.select_related("category").prefetch_related("images")
+    if query:
+        products = products.filter(
+            Q(name__icontains=query) | Q(description__icontains=query)
+        )
+    # category_id is fully querystring-controlled -- Product.category_id is
+    # an integer pk, and passing a non-numeric string straight into
+    # .filter(category_id=...) raises ValueError (confirmed directly, not
+    # guessed), an unhandled 500 for a crafted or simply stale link. Not
+    # a real filter selection either way, so it's dropped rather than
+    # surfaced as a form error.
+    if category_id and category_id.isdigit():
+        products = products.filter(category_id=category_id)
+    if status == "active":
+        products = products.filter(is_active=True)
+    elif status == "inactive":
+        products = products.filter(is_active=False)
+    if featured == "yes":
+        products = products.filter(is_featured=True)
+    elif featured == "no":
+        products = products.filter(is_featured=False)
+
+    return products.order_by("-created_at", "-pk"), query, category_id, status, featured
+
+
+@login_required(login_url="two_factor:login")
+def catalog_product_list(request):
+    """Branded replacement for Django Admin's ProductAdmin changelist.
+    Real-time search + category/status/featured filters (no Apply
+    button), mirroring distributor_directory/order_management_queue's own
+    htmx pattern exactly -- a change-triggered request gets back only the
+    results partial, not the full page shell."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    products, query, category_id, status, featured = _filtered_products(request)
+    paginator = Paginator(products, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    params = request.GET.copy()
+    params.pop("page", None)
+    querystring_no_page = params.urlencode()
+
+    context = {
+        "page_obj": page_obj,
+        "query": query,
+        "category_id": category_id,
+        "status": status,
+        "featured": featured,
+        "categories": Category.objects.order_by("name"),
+        "querystring_no_page": querystring_no_page,
+        "active_nav": "catalog",
+    }
+    if request.htmx:
+        return render(request, "admin_portal/partials/product_results.html", context)
+    return render(request, "admin_portal/catalog_product_list.html", context)
+
+
+def _image_formset_extra(product):
+    """How many blank image upload slots to render so existing + blank
+    never exceeds MAX_PRODUCT_IMAGES -- a brand-new product (no images
+    yet) gets all 5 slots, a product that already has images gets only
+    however many are left."""
+    existing_count = product.images.count() if product and product.pk else 0
+    return max(0, MAX_PRODUCT_IMAGES - existing_count)
+
+
+def _save_product_with_formsets(request, product):
+    """Shared by create/edit: validates the product form plus both inline
+    formsets together before saving anything, so an invalid variant row
+    never leaves behind a half-saved product. Returns the saved product on
+    success, or None (with all three forms left populated with errors for
+    re-rendering) on failure."""
+    form = ProductForm(request.POST, request.FILES, instance=product)
+    # inlineformset_factory requires a real (even if unsaved) parent
+    # instance -- Product() for create, the fetched row for edit.
+    formset_parent = product or Product()
+    image_formset_class = build_product_image_formset(_image_formset_extra(product))
+    image_formset = image_formset_class(
+        request.POST, request.FILES, instance=formset_parent, prefix="images"
+    )
+    variant_formset = ProductVariantFormSet(
+        request.POST, instance=formset_parent, prefix="variants"
+    )
+
+    if form.is_valid() and image_formset.is_valid() and variant_formset.is_valid():
+        with transaction.atomic():
+            saved_product = form.save()
+            image_formset.instance = saved_product
+            image_formset.save()
+            variant_formset.instance = saved_product
+            variant_formset.save()
+            normalize_primary_image(saved_product)
+        return saved_product, form, image_formset, variant_formset
+
+    return None, form, image_formset, variant_formset
+
+
+@login_required(login_url="two_factor:login")
+def catalog_product_create(request):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    if request.method == "POST":
+        saved_product, form, image_formset, variant_formset = (
+            _save_product_with_formsets(request, None)
+        )
+        if saved_product is not None:
+            messages.success(request, f'Product "{saved_product.name}" created.')
+            return redirect("admin_portal:catalog_product_list")
+    else:
+        form = ProductForm()
+        image_formset_class = build_product_image_formset(MAX_PRODUCT_IMAGES)
+        image_formset = image_formset_class(instance=Product(), prefix="images")
+        variant_formset = ProductVariantFormSet(instance=Product(), prefix="variants")
+
+    return render(
+        request,
+        "admin_portal/catalog_product_form.html",
+        {
+            "form": form,
+            "image_formset": image_formset,
+            "variant_formset": variant_formset,
+            "categories": Category.objects.order_by("name"),
+            "is_edit": False,
+            "active_nav": "catalog",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def catalog_product_edit(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    product = get_object_or_404(Product, pk=pk)
+    if request.method == "POST":
+        saved_product, form, image_formset, variant_formset = (
+            _save_product_with_formsets(request, product)
+        )
+        if saved_product is not None:
+            messages.success(request, f'Product "{saved_product.name}" updated.')
+            return redirect("admin_portal:catalog_product_list")
+    else:
+        form = ProductForm(instance=product)
+        image_formset_class = build_product_image_formset(_image_formset_extra(product))
+        image_formset = image_formset_class(instance=product, prefix="images")
+        variant_formset = ProductVariantFormSet(instance=product, prefix="variants")
+
+    return render(
+        request,
+        "admin_portal/catalog_product_form.html",
+        {
+            "form": form,
+            "product": product,
+            "image_formset": image_formset,
+            "variant_formset": variant_formset,
+            "categories": Category.objects.order_by("name"),
+            "is_edit": True,
+            "active_nav": "catalog",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def catalog_product_delete(request, pk):
+    """POST-only -- OrderItem.product (FK from an order line) is
+    on_delete=PROTECT (apps/orders/models.py: "a Product must not be
+    deletable while order history still references it"), so deleting an
+    already-ordered product raises ProtectedError. Caught here the same
+    way catalog_category_delete already handles it, instead of a 500."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    product = get_object_or_404(Product, pk=pk)
+    if request.method == "POST":
+        try:
+            name = product.name
+            product.delete()
+            messages.success(request, f'Product "{name}" deleted.')
+        except ProtectedError:
+            messages.error(
+                request,
+                f'"{product.name}" has already been ordered and cannot be '
+                "deleted. Mark it inactive instead to hide it from the store.",
+            )
+    return redirect("admin_portal:catalog_product_list")

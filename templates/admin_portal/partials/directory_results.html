@@ -37,7 +37,7 @@ Export CSV
 <tr class="hover:bg-surface-container transition-colors">
 <td class="px-6 py-4">
 <div class="flex items-center gap-3">
-<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-admin-primary text-xs flex-shrink-0">
+<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-primary text-xs flex-shrink-0">
 {% if distributor.full_name %}{{ distributor.full_name|slice:":1"|upper }}{% else %}?{% endif %}
 </div>
 <span class="font-body-md text-body-md text-on-surface font-semibold">{{ distributor.full_name|default:"(No name on file)" }}</span>
@@ -63,13 +63,13 @@ Export CSV
 </td>
 <td class="px-6 py-4">
 {% if distributor.user.is_active %}
-<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary-fixed text-admin-primary">Active</span>
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary-fixed text-primary">Active</span>
 {% else %}
 <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-error-container text-on-error-container">Suspended</span>
 {% endif %}
 </td>
 <td class="px-6 py-4 text-right">
-<a href="{% url 'admin_portal:distributor_profile' distributor.pk %}" class="text-admin-primary font-label-md text-label-md hover:underline bg-admin-primary/5 px-4 py-2 rounded-lg transition-colors inline-block">View Profile</a>
+<a href="{% url 'admin_portal:distributor_profile' distributor.pk %}" class="text-primary font-label-md text-label-md hover:underline bg-primary/5 px-4 py-2 rounded-lg transition-colors inline-block">View Profile</a>
 </td>
 </tr>
 {% endfor %}

@@ -56,11 +56,13 @@
   --color-inverse-on-surface: #f1f1f1;
   --color-on-primary-container: #fffbff;
 
-  /* Admin Portal accent — the admin/2FA Stitch screens share every other
-     token above but use a darker maroon primary and darker red error than
-     the rest of the site (deliberate visual distinction for internal/admin
-     tooling). */
-  --color-admin-primary: #a63500;
+  /* admin-primary (the darker maroon previously used as the admin/2FA
+     screens' own accent, distinct from the storefront's primary orange)
+     was retired 2026-07-31 per explicit user request and its token
+     removed -- the whole admin portal + 2FA flow now uses
+     --color-primary like everything else. admin-error is unrelated and
+     still actively used for destructive actions and validation
+     messages. */
   --color-admin-error: #ba1a1a;
 
   /* Border radius */

@@ -20,7 +20,7 @@
 Download Invoice (PDF)
 </a>
 {% if advanceable_statuses %}
-<button type="submit" form="advance-form" class="bg-admin-primary text-on-primary px-6 py-2.5 rounded-xl font-label-md text-label-md flex items-center gap-2 hover:opacity-90 transition-all shadow-md active:scale-95">
+<button type="submit" form="advance-form" class="bg-primary text-on-primary px-6 py-2.5 rounded-xl font-label-md text-label-md flex items-center gap-2 hover:opacity-90 transition-all shadow-md active:scale-95">
 Save Changes
 </button>
 {% endif %}
@@ -33,7 +33,7 @@ Save Changes
 <section class="bg-white rounded-xl p-6 shadow-sm border border-outline-variant/30">
 <div class="flex items-center justify-between mb-6 flex-wrap gap-2">
 <h3 class="font-headline-sm text-headline-sm text-on-surface flex items-center gap-2">
-<span class="material-symbols-outlined text-admin-primary" aria-hidden="true">receipt_long</span>
+<span class="material-symbols-outlined text-primary" aria-hidden="true">receipt_long</span>
 Order Items
 </h3>
 </div>
@@ -84,7 +84,7 @@ Order Items
 </div>
 <div class="flex justify-between w-full max-w-xs pt-2 border-t border-outline-variant/40">
 <span class="font-headline-sm text-headline-sm text-on-surface">Grand Total</span>
-<span class="font-headline-sm text-headline-sm text-admin-primary">GHS {{ order.total|floatformat:2 }}</span>
+<span class="font-headline-sm text-headline-sm text-primary">GHS {{ order.total|floatformat:2 }}</span>
 </div>
 </div>
 </section>
@@ -93,7 +93,7 @@ Order Items
 <section class="bg-white rounded-xl p-6 shadow-sm border border-outline-variant/30">
 <h4 class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest mb-4">Customer Details</h4>
 <div class="flex items-start gap-4">
-<div class="w-12 h-12 bg-primary-fixed text-admin-primary rounded-full flex items-center justify-center font-bold font-headline-sm text-headline-sm flex-shrink-0">
+<div class="w-12 h-12 bg-primary-fixed text-primary rounded-full flex items-center justify-center font-bold font-headline-sm text-headline-sm flex-shrink-0">
 {% if order.full_name %}{{ order.full_name|slice:":1"|upper }}{% else %}?{% endif %}
 </div>
 <div class="min-w-0">
@@ -107,7 +107,7 @@ Order Items
 <h4 class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest mb-4">Delivery Information</h4>
 <div class="flex flex-col gap-3">
 <div class="flex items-center gap-3">
-<span class="material-symbols-outlined text-admin-primary" aria-hidden="true">local_shipping</span>
+<span class="material-symbols-outlined text-primary" aria-hidden="true">local_shipping</span>
 <span class="font-body-md text-body-md font-semibold text-on-surface">{{ order.get_delivery_method_display }}</span>
 </div>
 {% if order.delivery_method == "home_delivery" %}
@@ -148,7 +148,7 @@ as the left column anyway, so sticky adds no real benefit here.
 <legend class="font-label-md text-label-md text-on-surface-variant">Operational State</legend>
 <div class="grid grid-cols-1 gap-2">
 {% for value, label in advanceable_statuses %}
-<label class="flex items-center justify-between w-full p-4 rounded-xl border border-outline-variant hover:border-admin-primary transition-all cursor-pointer has-[:checked]:border-admin-primary has-[:checked]:bg-admin-primary/5">
+<label class="flex items-center justify-between w-full p-4 rounded-xl border border-outline-variant hover:border-primary transition-all cursor-pointer has-[:checked]:border-primary has-[:checked]:bg-primary/5">
 <span class="flex items-center gap-3">
 {% comment %}
 Not required: CodeRabbit (2026-07-27) -- the Save Changes button
@@ -159,7 +159,7 @@ side is_legal_order_status_transition check (advance_order_status,
 apps/orders/services.py) already rejects an empty/blank to_status
 with a clear flash message instead.
 {% endcomment %}
-<input type="radio" name="to_status" value="{{ value }}" class="w-4 h-4 text-admin-primary focus:ring-admin-primary">
+<input type="radio" name="to_status" value="{{ value }}" class="w-4 h-4 text-primary focus:ring-primary">
 <span class="font-body-md text-body-md font-semibold text-on-surface">{{ label }}</span>
 </span>
 </label>
@@ -168,7 +168,7 @@ with a clear flash message instead.
 </fieldset>
 <div class="space-y-2">
 <label for="tracking-note" class="font-label-md text-label-md text-on-surface-variant">Tracking Note</label>
-<textarea id="tracking-note" name="tracking_note" rows="3" placeholder="Enter tracking ID or specific delivery instructions..." class="w-full rounded-xl border border-outline-variant focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none font-body-md text-body-md p-3 placeholder:text-on-surface-variant/50">{{ order.tracking_note }}</textarea>
+<textarea id="tracking-note" name="tracking_note" rows="3" placeholder="Enter tracking ID or specific delivery instructions..." class="w-full rounded-xl border border-outline-variant focus:border-primary focus:ring-1 focus:ring-primary outline-none font-body-md text-body-md p-3 placeholder:text-on-surface-variant/50">{{ order.tracking_note }}</textarea>
 </div>
 {% else %}
 <p class="font-body-md text-body-md text-on-surface-variant">No further status advance is available from "{{ order.get_status_display }}".</p>
@@ -183,15 +183,15 @@ with a clear flash message instead.
 {% csrf_token %}
 <input type="hidden" name="action" value="refund">
 <div class="flex flex-col gap-2 mt-2">
-<label class="relative flex items-center p-4 rounded-xl border border-outline-variant cursor-pointer hover:bg-surface-container-low transition-all has-[:checked]:border-admin-primary has-[:checked]:bg-admin-primary/5">
-<input class="w-4 h-4 text-admin-primary focus:ring-admin-primary" name="restock" type="radio" value="true" required>
+<label class="relative flex items-center p-4 rounded-xl border border-outline-variant cursor-pointer hover:bg-surface-container-low transition-all has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+<input class="w-4 h-4 text-primary focus:ring-primary" name="restock" type="radio" value="true" required>
 <div class="ml-3">
 <p class="font-body-md text-body-md font-semibold text-on-surface">Goods physically returned</p>
 <p class="font-label-md text-label-md text-on-surface-variant">Inventory count will be incremented automatically.</p>
 </div>
 </label>
-<label class="relative flex items-center p-4 rounded-xl border border-outline-variant cursor-pointer hover:bg-surface-container-low transition-all has-[:checked]:border-admin-primary has-[:checked]:bg-admin-primary/5">
-<input class="w-4 h-4 text-admin-primary focus:ring-admin-primary" name="restock" type="radio" value="false" required>
+<label class="relative flex items-center p-4 rounded-xl border border-outline-variant cursor-pointer hover:bg-surface-container-low transition-all has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+<input class="w-4 h-4 text-primary focus:ring-primary" name="restock" type="radio" value="false" required>
 <div class="ml-3">
 <p class="font-body-md text-body-md font-semibold text-on-surface">No return</p>
 <p class="font-label-md text-label-md text-on-surface-variant">Pure financial refund without stock adjustment.</p>
@@ -221,7 +221,7 @@ Cancel Order
 </div>
 </section>
 <div class="p-6 bg-surface-container-highest rounded-xl border border-outline-variant/30">
-<div class="flex items-center gap-2 mb-2 text-admin-primary">
+<div class="flex items-center gap-2 mb-2 text-primary">
 <span class="material-symbols-outlined" aria-hidden="true">info</span>
 <span class="font-semibold font-body-md text-body-md">Admin Note</span>
 </div>

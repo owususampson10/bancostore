@@ -18,7 +18,7 @@
 <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
 <div class="md:col-span-9 relative">
 <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-secondary" aria-hidden="true">search</span>
-<input id="directory-search-input" type="search" name="q" value="{{ query }}" placeholder="Search by name, IR ID, or phone number..." class="w-full pl-12 pr-4 py-3 bg-surface-container-low border border-outline-variant rounded-xl focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none font-body-md text-body-md" aria-label="Search distributors">
+<input id="directory-search-input" type="search" name="q" value="{{ query }}" placeholder="Search by name, IR ID, or phone number..." class="w-full pl-12 pr-4 py-3 bg-surface-container-low border border-outline-variant rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none font-body-md text-body-md" aria-label="Search distributors">
 </div>
 {{ status|json_script:"status-filter-selected" }}
 <div class="md:col-span-3 relative"
@@ -70,7 +70,7 @@
      whole point of this control (2026-07-25, matching
      payout_settings.html's mobile-money-network listbox exactly). -->
 <button type="button"
-        class="w-full h-full pl-4 pr-4 bg-white border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none transition-all"
+        class="w-full h-full pl-4 pr-4 bg-white border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
         role="combobox"
         aria-haspopup="listbox"
         aria-label="Filter by account status"
@@ -95,7 +95,7 @@
     role="option"
     :aria-selected="(selected === option.value).toString()"
     class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors"
-    :class="(highlighted === index) ? 'bg-admin-primary/10 text-admin-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    :class="(highlighted === index) ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'"
     @click="choose(index)"
     @mouseenter="highlighted = index"
     x-text="option.label">
@@ -118,7 +118,7 @@
 </div>
 <div class="w-px h-8 bg-outline-variant self-center"></div>
 <div class="flex flex-col items-center">
-<span class="font-headline-md text-headline-md text-admin-primary">{{ new_this_week }}</span>
+<span class="font-headline-md text-headline-md text-primary">{{ new_this_week }}</span>
 <span class="text-[10px] text-secondary uppercase font-semibold">New This Week</span>
 </div>
 <div class="w-px h-8 bg-outline-variant self-center"></div>

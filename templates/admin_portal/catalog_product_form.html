@@ -1,0 +1,470 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}{% if is_edit %}Edit Product{% else %}Add Product{% endif %} — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<nav class="flex items-center gap-2 text-on-surface-variant font-label-md text-label-md uppercase tracking-wider mb-2">
+<a href="{% url 'admin_portal:catalog_product_list' %}" class="hover:text-primary">Catalog</a>
+<span class="material-symbols-outlined text-[14px]" aria-hidden="true">chevron_right</span>
+<span class="text-on-surface">{% if is_edit %}Edit Product{% else %}Add New Product{% endif %}</span>
+</nav>
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">Product Editor</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Manage inventory details, pricing, and images shown on the shop and homepage.</p>
+</div>
+
+<form method="post" enctype="multipart/form-data" class="pb-28">
+{% csrf_token %}
+{% if form.non_field_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md mb-6">{{ form.non_field_errors }}</div>
+{% endif %}
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+<div class="lg:col-span-8 space-y-8">
+
+<!-- Basic Info -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 shadow-sm">
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">info</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Basic Info</h3>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6"
+     x-data="{
+       name: '{{ form.name.value|default:''|escapejs }}',
+       get slugPreview() {
+         return this.name.toLowerCase().trim()
+           .replace(/[^a-z0-9\s-]/g, '')
+           .replace(/[\s_-]+/g, '-')
+           .replace(/^-+|-+$/g, '') || '...';
+       },
+     }">
+<div class="md:col-span-2">
+<label for="{{ form.name.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">Product Name</label>
+{{ form.name }}
+{% if form.name.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.name.errors|striptags }}</p>{% endif %}
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Category</label>
+{{ form.category.value|default_if_none:""|json_script:"product-category-selected" }}
+<div class="relative"
+     x-data="{
+       open: false,
+       selected: String(JSON.parse(document.getElementById('product-category-selected').textContent) ?? ''),
+       highlighted: -1,
+       options: [{% for c in categories %}{value: '{{ c.pk }}', label: '{{ c.name|escapejs }}'}{% if not forloop.last %}, {% endif %}{% endfor %}],
+       get selectedLabel() {
+         const found = this.options.find(o => o.value === this.selected);
+         return found ? found.label : 'Select a category';
+       },
+       openList() { this.open = true; this.highlighted = Math.max(this.options.findIndex(o => o.value === this.selected), 0); },
+       choose(index) { this.selected = this.options[index].value; this.open = false; },
+     }"
+     @click.outside="open = false">
+<button type="button"
+        class="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 font-body-md text-body-md focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all text-left flex items-center justify-between"
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-label="Category"
+        :aria-expanded="open.toString()"
+        @click="open ? (open = false) : openList()"
+        @keydown.down.prevent="open ? highlighted = Math.min(highlighted + 1, options.length - 1) : openList()"
+        @keydown.up.prevent="open ? highlighted = Math.max(highlighted - 1, 0) : openList()"
+        @keydown.enter.prevent="if (open && highlighted >= 0) choose(highlighted)"
+        @keydown.escape="open = false">
+<span x-text="selectedLabel" class="truncate"></span>
+<span class="material-symbols-outlined text-secondary transition-transform" :class="open && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<ul x-show="open" x-cloak role="listbox" class="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-outline-variant rounded-xl shadow-lg py-1">
+<template x-for="(option, index) in options" :key="option.value">
+<li role="option" class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors"
+    :class="(highlighted === index) ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    @click="choose(index)" @mouseenter="highlighted = index" x-text="option.label"></li>
+</template>
+</ul>
+<input type="hidden" name="{{ form.category.html_name }}" id="{{ form.category.id_for_label }}" :value="selected">
+</div>
+{% if form.category.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.category.errors|striptags }}</p>{% endif %}
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Slug</label>
+<div class="flex items-center">
+<span class="inline-flex items-center px-3 h-[46px] rounded-l-lg border border-r-0 border-outline-variant bg-surface-container-low text-on-surface-variant font-mono-sm text-mono-sm">/products/</span>
+<span class="flex-1 h-[46px] flex items-center px-4 border border-outline-variant rounded-r-lg bg-surface-container-low font-mono-sm text-mono-sm text-primary truncate" x-text="slugPreview"></span>
+</div>
+{% if product %}
+<p class="mt-2 font-label-md text-label-md text-on-surface-variant/70 italic">Currently <span class="font-mono-sm">/products/{{ product.slug }}</span> — stays fixed once set, even if you rename the product, so existing links never break.</p>
+{% else %}
+<p class="mt-2 font-label-md text-label-md text-on-surface-variant/70 italic">Generated automatically from the product name above.</p>
+{% endif %}
+</div>
+<div class="md:col-span-2">
+<label for="{{ form.description.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">Description</label>
+{{ form.description }}
+{% if form.description.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.description.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+</section>
+
+<!-- Pricing & Points -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 shadow-sm">
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">payments</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Pricing &amp; Points</h3>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<div>
+<label for="{{ form.price.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">Price (GHS)</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-on-surface" aria-hidden="true">₵</span>
+{{ form.price }}
+</div>
+{% if form.price.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.price.errors|striptags }}</p>{% endif %}
+</div>
+<div>
+<label for="{{ form.pv_value.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">PV Value</label>
+{{ form.pv_value }}
+<p class="mt-2 font-label-md text-label-md text-on-surface-variant/70 italic">Point Value credited to distributors only — has no effect on regular customer purchases.</p>
+{% if form.pv_value.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.pv_value.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+</section>
+
+<!-- Inventory -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 shadow-sm">
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">inventory_2</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Inventory</h3>
+</div>
+<div class="max-w-xs">
+<label for="{{ form.stock.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">Stock Quantity</label>
+{{ form.stock }}
+{% if form.stock.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.stock.errors|striptags }}</p>{% endif %}
+<p class="mt-2 font-label-md text-label-md text-on-surface-variant/70 italic">Stock is tracked at the product level, not per variant.</p>
+</div>
+</section>
+
+<!-- Visibility -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 shadow-sm">
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">visibility</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Visibility</h3>
+</div>
+<div class="flex flex-col sm:flex-row gap-6 sm:gap-12">
+<label class="flex items-center cursor-pointer gap-3">
+<div class="relative">
+{{ form.is_active }}
+<div class="w-11 h-6 bg-surface-container-highest rounded-full peer-checked:bg-green-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full transition-colors"></div>
+</div>
+<span class="font-body-md text-body-md text-on-surface">Active on Store</span>
+</label>
+<label class="flex items-center cursor-pointer gap-3">
+<div class="relative">
+{{ form.is_featured }}
+<div class="w-11 h-6 bg-surface-container-highest rounded-full peer-checked:bg-primary after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full transition-colors"></div>
+</div>
+<span class="font-body-md text-body-md text-on-surface">Featured Product</span>
+</label>
+</div>
+<p class="mt-4 font-label-md text-label-md text-on-surface-variant/70">Only active products are visible on the storefront. Featured products appear in the homepage's featured section.</p>
+</section>
+
+<!-- Variants -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 shadow-sm">
+<div class="flex justify-between items-center mb-6">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">layers</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Variants</h3>
+</div>
+<button type="button" id="add-variant-row" class="text-primary font-bold font-label-md text-label-md flex items-center gap-1 hover:underline">
+<span class="material-symbols-outlined text-sm" aria-hidden="true">add_circle</span>
+Add Variant
+</button>
+</div>
+{{ variant_formset.management_form }}
+{% if variant_formset.non_form_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md mb-4">{{ variant_formset.non_form_errors }}</div>
+{% endif %}
+<div id="variant-rows" class="space-y-4">
+{% for variant_form in variant_formset %}
+<div class="variant-row flex items-center gap-4 bg-surface rounded-lg p-4 border border-outline-variant/50 transition-opacity">
+{% for hidden in variant_form.hidden_fields %}{{ hidden }}{% endfor %}
+<div class="flex-1">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1">Attribute</label>
+{{ variant_form.name }}
+{% if variant_form.name.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ variant_form.name.errors|striptags }}</p>{% endif %}
+</div>
+<div class="flex-1">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1">Value</label>
+{{ variant_form.value }}
+{% if variant_form.value.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ variant_form.value.errors|striptags }}</p>{% endif %}
+</div>
+<div class="flex flex-col items-end gap-1">
+<label class="mt-5 flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors cursor-pointer" title="Remove">
+{{ variant_form.DELETE }}
+<span class="material-symbols-outlined" aria-hidden="true">delete</span>
+</label>
+<p class="delete-note hidden font-label-md text-label-md text-primary font-bold whitespace-nowrap">Will be removed</p>
+</div>
+</div>
+{% endfor %}
+</div>
+<template id="variant-empty-form">
+<div class="variant-row flex items-center gap-4 bg-surface rounded-lg p-4 border border-outline-variant/50 transition-opacity">
+<div class="flex-1">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1">Attribute</label>
+{{ variant_formset.empty_form.name }}
+</div>
+<div class="flex-1">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1">Value</label>
+{{ variant_formset.empty_form.value }}
+</div>
+<div class="flex flex-col items-end gap-1">
+<label class="mt-5 flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors cursor-pointer" title="Remove">
+{{ variant_formset.empty_form.DELETE }}
+<span class="material-symbols-outlined" aria-hidden="true">delete</span>
+</label>
+<p class="delete-note hidden font-label-md text-label-md text-primary font-bold whitespace-nowrap">Will be removed</p>
+</div>
+</div>
+</template>
+</section>
+</div>
+
+<!-- Right column: Images -->
+<div class="lg:col-span-4 lg:sticky lg:top-24 space-y-6">
+<section class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 shadow-sm">
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">image</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Product Images</h3>
+</div>
+<span id="image-count" class="font-label-md text-label-md text-on-surface-variant">0 / 5</span>
+</div>
+{{ image_formset.management_form }}
+{% if image_formset.non_form_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md mb-4">{{ image_formset.non_form_errors }}</div>
+{% endif %}
+<div id="image-rows" class="grid grid-cols-2 gap-4">
+{% for image_form in image_formset %}
+<div class="image-row {% if image_form.instance.image %}has-image{% endif %}" data-has-pk="{% if image_form.instance.pk %}true{% else %}false{% endif %}">
+{% for hidden in image_form.hidden_fields %}{{ hidden }}{% endfor %}
+<span class="order-input-wrapper hidden">{{ image_form.order }}</span>
+<span class="is-primary-wrapper hidden">{{ image_form.is_primary }}</span>
+<span class="delete-wrapper hidden">{{ image_form.DELETE }}</span>
+{% if image_form.errors %}<p class="col-span-2 text-admin-error font-label-md text-label-md">{{ image_form.errors.as_text }}</p>{% endif %}
+
+<!-- Filled tile: shown once this row has an image (existing or just chosen) -->
+<div class="filled-tile {% if not image_form.instance.image %}hidden{% endif %} relative group rounded-lg overflow-hidden border-2 border-outline-variant aspect-square">
+<img src="{% if image_form.instance.image %}{{ image_form.instance.image.url }}{% endif %}" alt="" class="tile-img w-full h-full object-cover">
+<button type="button" class="primary-toggle absolute top-2 left-2 z-10 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-lg transition-colors" title="Set as primary image">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;" aria-hidden="true">star</span>
+<span class="primary-toggle-label"></span>
+</button>
+<div class="absolute inset-0 z-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+<button type="button" class="delete-tile w-10 h-10 rounded-full bg-white text-primary flex items-center justify-center hover:bg-primary/10 transition-colors shadow-lg" title="Remove image" aria-label="Remove image">
+<span class="material-symbols-outlined" aria-hidden="true">delete</span>
+</button>
+</div>
+</div>
+
+<!-- Add-image dropzone: at most one of these is ever visible at a time -->
+<label class="add-tile hidden aspect-square border-2 border-dashed border-outline-variant rounded-lg flex flex-col items-center justify-center gap-2 hover:border-primary hover:bg-primary/5 transition-all text-on-surface-variant cursor-pointer">
+{{ image_form.image }}
+<span class="material-symbols-outlined text-3xl" aria-hidden="true">add_photo_alternate</span>
+<span class="font-label-md text-label-md">Add Image</span>
+</label>
+</div>
+{% endfor %}
+</div>
+<p class="mt-4 font-label-md text-label-md text-on-surface-variant/70 flex items-start gap-1">
+<span class="material-symbols-outlined text-[16px]" aria-hidden="true">tips_and_updates</span>
+Click the star on any image to make it the primary thumbnail shown across the shop. Up to 5 images total.
+</p>
+</section>
+</div>
+</div>
+
+<footer class="fixed bottom-0 right-0 left-0 md:left-20 lg:left-64 bg-white border-t border-outline-variant px-4 md:px-8 py-4 z-40 flex justify-end gap-4 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+<a href="{% url 'admin_portal:catalog_product_list' %}" class="px-8 py-2.5 rounded-lg border border-outline-variant text-on-surface font-bold font-label-md hover:bg-surface-container-low transition-colors">Cancel</a>
+<button type="submit" class="px-12 py-2.5 rounded-lg bg-primary text-on-primary font-bold font-label-md shadow-lg hover:opacity-90 transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">save</span>
+{% if is_edit %}Save Changes{% else %}Save Product{% endif %}
+</button>
+</footer>
+</form>
+
+<script>
+(function () {
+  function bumpTotalForms(prefix, delta) {
+    var input = document.getElementById('id_' + prefix + '-TOTAL_FORMS');
+    input.value = parseInt(input.value, 10) + delta;
+    return parseInt(input.value, 10);
+  }
+
+  function addRow(containerId, templateId, prefix) {
+    var container = document.getElementById(containerId);
+    var template = document.getElementById(templateId);
+    var index = parseInt(document.getElementById('id_' + prefix + '-TOTAL_FORMS').value, 10);
+    var html = template.innerHTML.replace(/__prefix__/g, index);
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML = html.trim();
+    container.appendChild(wrapper.firstElementChild);
+    bumpTotalForms(prefix, 1);
+  }
+
+  document.getElementById('add-variant-row').addEventListener('click', function () {
+    addRow('variant-rows', 'variant-empty-form', 'variants');
+  });
+
+  // Shared by variant rows only (image rows are hidden outright on
+  // delete, not dimmed -- see markImageRowRemoved below). Previously
+  // checking Delete gave no feedback at all beyond a tiny checkbox,
+  // which read as "delete doesn't work" even though the deletion itself
+  // was always applied correctly on save.
+  function markRowForDeletion(row, checked) {
+    var note = row.querySelector('.delete-note');
+    if (checked) {
+      row.classList.add('opacity-40', 'border-primary');
+      if (note) note.classList.remove('hidden');
+    } else {
+      row.classList.remove('opacity-40', 'border-primary');
+      if (note) note.classList.add('hidden');
+    }
+  }
+
+  document.getElementById('variant-rows').addEventListener('change', function (event) {
+    if (!event.target.name || !event.target.name.endsWith('-DELETE')) return;
+    var row = event.target.closest('.variant-row');
+    if (row) markRowForDeletion(row, event.target.checked);
+  });
+
+  // --- Product Images: reveal-on-demand upload tiles -----------------
+  // Only images that already exist show as photo tiles; exactly one
+  // "Add Image" dropzone is visible at a time (never all 5 slots at
+  // once), matching the fetched Stitch design. Clicking a tile's own
+  // hidden file input (wrapped in the dropzone <label>) opens the
+  // native picker with no "Choose file" text ever shown.
+  var imageRowsContainer = document.getElementById('image-rows');
+  var imageCountLabel = document.getElementById('image-count');
+
+  function allImageRows() {
+    return Array.prototype.slice.call(imageRowsContainer.querySelectorAll('.image-row'));
+  }
+
+  function refreshImageTiles() {
+    var rows = allImageRows().filter(function (row) { return !row.classList.contains('removed'); });
+    var filled = rows.filter(function (row) { return row.classList.contains('has-image'); });
+    var empty = rows.filter(function (row) { return !row.classList.contains('has-image'); });
+
+    imageCountLabel.textContent = filled.length + ' / 5';
+
+    // Hide every row's dropzone first, including filled ones -- a row
+    // that just transitioned empty-to-filled otherwise keeps showing
+    // the dropzone it was revealed as before markImageRowFilled ran,
+    // since it's no longer part of the `empty` set by the time this
+    // runs and so would never get re-hidden.
+    rows.forEach(function (row) {
+      row.querySelector('.add-tile').classList.add('hidden');
+    });
+    if (filled.length < 5 && empty.length > 0) {
+      empty[0].querySelector('.add-tile').classList.remove('hidden');
+    }
+
+    // The primary tile (explicitly marked, or the first filled tile if
+    // none is marked yet -- mirrors normalize_primary_image's own
+    // fallback so the preview matches what actually gets saved) gets
+    // the large featured spot; every other filled tile is a small
+    // gallery square.
+    var primaryRow = filled.find(function (row) {
+      return row.querySelector('.is-primary-wrapper input').checked;
+    }) || filled[0];
+
+    filled.forEach(function (row) {
+      var tile = row.querySelector('.filled-tile');
+      var toggle = row.querySelector('.primary-toggle');
+      var label = row.querySelector('.primary-toggle-label');
+      var isPrimary = row === primaryRow;
+      // col-span-2 only has a grid-placement effect on an actual grid
+      // item -- #image-rows's direct children (.image-row) are the grid
+      // items, .filled-tile is just a nested <div> inside one, so this
+      // must toggle on `row`, not `tile` (a real bug: setting it on
+      // `tile` compiled fine and even reported the right computed style,
+      // it just never affected layout, so the "primary" tile stayed the
+      // same small square as every other tile regardless of which one
+      // was marked primary).
+      row.classList.toggle('col-span-2', isPrimary);
+      tile.classList.toggle('aspect-video', isPrimary);
+      tile.classList.toggle('aspect-square', !isPrimary);
+      tile.classList.toggle('border-primary', isPrimary);
+      tile.classList.toggle('border-outline-variant', !isPrimary);
+      toggle.classList.toggle('bg-primary', isPrimary);
+      toggle.classList.toggle('text-on-primary', isPrimary);
+      toggle.classList.toggle('bg-white/90', !isPrimary);
+      toggle.classList.toggle('text-on-surface-variant', !isPrimary);
+      label.textContent = isPrimary ? 'Primary' : '';
+    });
+  }
+
+  function markImageRowFilled(row, file) {
+    row.classList.add('has-image');
+    row.querySelector('.tile-img').src = URL.createObjectURL(file);
+    row.querySelector('.filled-tile').classList.remove('hidden');
+    refreshImageTiles();
+  }
+
+  function markImageRowRemoved(row) {
+    if (row.dataset.hasPk === 'true') {
+      // A real, already-saved image -- hide it entirely and let the
+      // existing DELETE checkbox (checked below) remove it on save.
+      // Its slot can't come back as a fresh upload dropzone: the
+      // number of blank rows was fixed when the page loaded, and a new
+      // file chosen into a DELETE-marked row would be silently
+      // discarded by Django's formset save (it deletes the instance
+      // instead of applying field changes).
+      row.classList.add('removed', 'hidden');
+      row.querySelector('.delete-wrapper input').checked = true;
+    } else {
+      // Never-saved row -- just undo the choice so the slot is free
+      // to use again, no point leaving a phantom DELETE-marked row.
+      row.classList.remove('has-image');
+      row.querySelector('.filled-tile').classList.add('hidden');
+      var fileInput = row.querySelector('.add-tile input[type="file"]');
+      fileInput.value = '';
+    }
+    refreshImageTiles();
+  }
+
+  imageRowsContainer.addEventListener('change', function (event) {
+    var row = event.target.closest('.image-row');
+    if (!row || row.classList.contains('removed')) return;
+
+    if (event.target.type === 'file' && event.target.files.length) {
+      markImageRowFilled(row, event.target.files[0]);
+    }
+  });
+
+  imageRowsContainer.addEventListener('click', function (event) {
+    var primaryButton = event.target.closest('.primary-toggle');
+    var deleteButton = event.target.closest('.delete-tile');
+    if (!primaryButton && !deleteButton) return;
+    var row = event.target.closest('.image-row');
+    if (!row) return;
+
+    if (primaryButton) {
+      // CodeRabbit finding, PR #53: only the clicked row was ever
+      // checked -- every other row's is_primary stayed however it was,
+      // so the *previous* primary tile (e.g. server-rendered on an
+      // edit page) stayed checked too. refreshImageTiles()'s own
+      // `.find()` for the effective primary then kept returning that
+      // stale one, so clicking a different tile's star visibly did
+      // nothing.
+      allImageRows().forEach(function (otherRow) {
+        otherRow.querySelector('.is-primary-wrapper input').checked = (otherRow === row);
+      });
+      refreshImageTiles();
+    } else if (deleteButton) {
+      markImageRowRemoved(row);
+    }
+  });
+
+  refreshImageTiles();
+})();
+</script>
+{% endblock %}

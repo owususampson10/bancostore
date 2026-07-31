@@ -13,10 +13,10 @@
 <body class="bg-background text-on-surface font-body-md min-h-screen flex flex-col admin-glow-bg">
 <header class="bg-surface border-b border-outline-variant h-16 flex items-center px-margin-desktop">
 <div class="flex justify-between items-center w-full max-w-container-max mx-auto">
-<div class="flex items-center gap-2">
+<a href="{% url 'two_factor:login' %}" class="flex items-center gap-2">
 <img src="{% static 'bancostore-brand/logo/bancostore-logo-light.svg' %}" alt="Bancostore" class="h-6 w-auto">
-<span class="font-label-md text-label-md font-bold text-admin-primary uppercase tracking-wider border-l border-outline-variant pl-2">Admin</span>
-</div>
+<span class="font-label-md text-label-md font-bold text-primary uppercase tracking-wider border-l border-outline-variant pl-2">Admin</span>
+</a>
 <div class="flex items-center gap-stack-md text-on-surface-variant">
 <span class="material-symbols-outlined p-2 rounded-full">security</span>
 <span class="material-symbols-outlined p-2 rounded-full">help_outline</span>
@@ -30,9 +30,9 @@
 <div class="flex flex-col md:flex-row justify-between items-center px-margin-desktop w-full max-w-container-max mx-auto gap-stack-sm">
 <span class="font-label-lg text-label-lg font-semibold text-on-surface">© 2024 Bancostore Internal Systems. All rights reserved.</span>
 <div class="flex gap-stack-lg">
-<a class="font-label-md text-label-md text-secondary hover:text-admin-primary transition-colors underline-offset-4 hover:underline" href="#">Privacy Policy</a>
-<a class="font-label-md text-label-md text-secondary hover:text-admin-primary transition-colors underline-offset-4 hover:underline" href="#">Security Standards</a>
-<a class="font-label-md text-label-md text-secondary hover:text-admin-primary transition-colors underline-offset-4 hover:underline" href="#">Support</a>
+<a class="font-label-md text-label-md text-secondary hover:text-primary transition-colors underline-offset-4 hover:underline" href="#">Privacy Policy</a>
+<a class="font-label-md text-label-md text-secondary hover:text-primary transition-colors underline-offset-4 hover:underline" href="#">Security Standards</a>
+<a class="font-label-md text-label-md text-secondary hover:text-primary transition-colors underline-offset-4 hover:underline" href="#">Support</a>
 </div>
 </div>
 </footer>
