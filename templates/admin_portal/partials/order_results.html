@@ -16,12 +16,12 @@
 <tbody class="divide-y divide-outline-variant">
 {% for order in page_obj.object_list %}
 <tr class="hover:bg-surface-container-low transition-colors">
-<td class="px-6 py-4 font-mono-sm text-mono-sm text-admin-primary">
+<td class="px-6 py-4 font-mono-sm text-mono-sm text-primary">
 <span class="truncate max-w-[160px] inline-block align-bottom" title="{{ order.payment_reference }}">{{ order.payment_reference }}</span>
 </td>
 <td class="px-6 py-4">
 <div class="flex items-center gap-3">
-<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-admin-primary text-xs flex-shrink-0">
+<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-primary text-xs flex-shrink-0">
 {% if order.full_name %}{{ order.full_name|slice:":1"|upper }}{% else %}?{% endif %}
 </div>
 <span class="font-body-md text-body-md text-on-surface font-medium">{{ order.full_name }}</span>
@@ -33,7 +33,7 @@
 <td class="px-6 py-4 font-body-md text-body-md font-bold text-on-surface">GHS {{ order.total|floatformat:2 }}</td>
 <td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ order.created_at|date:"M j, Y" }}</td>
 <td class="px-6 py-4 text-right">
-<a href="{% url 'admin_portal:order_detail' order.pk %}" class="text-admin-primary font-label-md text-label-md hover:underline inline-flex items-center gap-1">
+<a href="{% url 'admin_portal:order_detail' order.pk %}" class="text-primary font-label-md text-label-md hover:underline inline-flex items-center gap-1">
 View
 <span class="material-symbols-outlined text-[16px]" aria-hidden="true">open_in_new</span>
 </a>
@@ -76,7 +76,7 @@ swap-only-#order-results setup can't also reset the search box text,
 status listbox label, or date-picker labels living outside this
 partial, so a full page load is what actually shows a clean form.
 {% endcomment %}
-<a href="{% url 'admin_portal:order_management_queue' %}" class="mt-6 text-admin-primary font-label-md text-label-md hover:underline">Reset all filters</a>
+<a href="{% url 'admin_portal:order_management_queue' %}" class="mt-6 text-primary font-label-md text-label-md hover:underline">Reset all filters</a>
 {% else %}
 <h3 class="font-headline-md text-headline-md text-on-surface">No orders yet.</h3>
 {% endif %}

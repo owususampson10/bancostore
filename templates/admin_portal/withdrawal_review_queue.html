@@ -9,7 +9,7 @@
 {% if withdrawal_requests %}
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
 <div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant flex items-center gap-4">
-<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-admin-primary flex-shrink-0">
+<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-primary flex-shrink-0">
 <span class="material-symbols-outlined" aria-hidden="true">pending_actions</span>
 </div>
 <div>
@@ -18,7 +18,7 @@
 </div>
 </div>
 <div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant flex items-center gap-4">
-<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-admin-primary flex-shrink-0">
+<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-primary flex-shrink-0">
 <span class="material-symbols-outlined" aria-hidden="true">payments</span>
 </div>
 <div>
@@ -29,7 +29,7 @@
 <!-- Display-only nudge, not an approval gate -- this codebase has no
      multi-tier admin permission system, so unlike the original Stitch
      mockup this never claims a "senior admin" has to sign off. -->
-<div class="bg-admin-primary p-6 rounded-xl relative overflow-hidden flex items-center gap-4">
+<div class="bg-primary p-6 rounded-xl relative overflow-hidden flex items-center gap-4">
 <span class="material-symbols-outlined absolute right-[-16px] bottom-[-16px] text-[96px] text-white/10 select-none" aria-hidden="true">priority_high</span>
 <div class="w-12 h-12 bg-white/15 rounded-full flex items-center justify-center text-on-primary flex-shrink-0 relative z-10">
 <span class="material-symbols-outlined" aria-hidden="true">priority_high</span>
@@ -70,7 +70,7 @@
 <tr class="hover:bg-surface-container transition-colors">
 <td class="px-6 py-4">
 <div class="flex items-center gap-3">
-<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-admin-primary text-xs flex-shrink-0">
+<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-primary text-xs flex-shrink-0">
 {% if display_name %}{{ display_name|slice:":1"|upper }}{% else %}?{% endif %}
 </div>
 <span class="font-body-md text-body-md text-on-surface font-semibold">{{ display_name|default:"(No name on file)" }}</span>
@@ -88,13 +88,13 @@
 <td class="px-6 py-4 font-body-md text-body-md font-bold text-on-surface text-right">{{ withdrawal_request.net_amount|floatformat:2 }}</td>
 <td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ withdrawal_request.created_at|date:"M j, Y · g:i A" }}</td>
 <td class="px-6 py-4">
-<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-fixed text-admin-primary font-label-md text-label-md">
-<span class="w-1.5 h-1.5 rounded-full bg-admin-primary animate-pulse"></span>
+<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-fixed text-primary font-label-md text-label-md">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
 Submitted
 </span>
 </td>
 <td class="px-6 py-4 text-right">
-<a href="{% url 'admin_portal:withdrawal_review_detail' withdrawal_request.pk %}" class="text-admin-primary font-label-md text-label-md hover:underline bg-admin-primary/5 px-4 py-2 rounded-lg transition-colors inline-block">Review</a>
+<a href="{% url 'admin_portal:withdrawal_review_detail' withdrawal_request.pk %}" class="text-primary font-label-md text-label-md hover:underline bg-primary/5 px-4 py-2 rounded-lg transition-colors inline-block">Review</a>
 </td>
 </tr>
 {% endwith %}

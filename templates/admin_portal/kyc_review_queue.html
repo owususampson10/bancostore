@@ -33,7 +33,7 @@
 <td class="px-6 py-4">
 {% firstof distributor.full_name distributor.didit_verification.extracted_full_name as display_name %}
 <div class="flex items-center gap-3">
-<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-admin-primary text-xs flex-shrink-0">
+<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center font-bold text-primary text-xs flex-shrink-0">
 {% if display_name %}{{ display_name|slice:":1"|upper }}{% else %}?{% endif %}
 </div>
 <span class="font-body-md text-body-md text-on-surface font-semibold">{{ display_name|default:"(No name on file)" }}</span>
@@ -49,13 +49,13 @@
 </td>
 <td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ distributor.didit_verification.created_at|date:"M j, Y · g:i A" }}</td>
 <td class="px-6 py-4">
-<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-fixed text-admin-primary font-label-md text-label-md">
-<span class="w-1.5 h-1.5 rounded-full bg-admin-primary animate-pulse"></span>
+<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-fixed text-primary font-label-md text-label-md">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
 Pending
 </span>
 </td>
 <td class="px-6 py-4 text-right">
-<a href="{% url 'admin_portal:kyc_review_detail' distributor.pk %}" class="text-admin-primary font-label-md text-label-md hover:underline bg-admin-primary/5 px-4 py-2 rounded-lg transition-colors inline-block">Review Application</a>
+<a href="{% url 'admin_portal:kyc_review_detail' distributor.pk %}" class="text-primary font-label-md text-label-md hover:underline bg-primary/5 px-4 py-2 rounded-lg transition-colors inline-block">Review Application</a>
 </td>
 </tr>
 {% endfor %}

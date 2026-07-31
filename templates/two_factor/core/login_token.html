@@ -18,7 +18,7 @@
 <main class="z-10 w-full max-w-[480px] px-margin-mobile md:px-0 py-stack-xl">
 <div class="bg-surface-container-lowest border border-outline-variant p-stack-xl rounded-xl shadow-lg flex flex-col items-center">
 <div class="mb-stack-lg text-center">
-<div class="flex items-center justify-center mb-stack-md text-admin-primary">
+<div class="flex items-center justify-center mb-stack-md text-primary">
 <span class="material-symbols-outlined text-[48px]" style="font-variation-settings: 'FILL' 1;">security</span>
 </div>
 <h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">Bancostore Admin</h1>
@@ -68,7 +68,7 @@ on BackupTokenForm could never functionally take effect.
 {% endif %}
 {% endif %}
 
-<button type="submit" class="w-full h-14 bg-admin-primary text-white font-label-lg text-label-lg rounded-lg shadow-md hover:opacity-90 active:scale-[0.98] transition-all duration-150 flex items-center justify-center gap-2">
+<button type="submit" class="w-full h-14 bg-primary text-white font-label-lg text-label-lg rounded-lg shadow-md hover:opacity-90 active:scale-[0.98] transition-all duration-150 flex items-center justify-center gap-2">
 <span>Verify</span>
 <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
 </button>
@@ -78,7 +78,7 @@ on BackupTokenForm could never functionally take effect.
 <form method="post" action="" class="w-full mt-stack-md">
 {% csrf_token %}
 {{ wizard.management_form }}
-<button name="wizard_goto_step" type="submit" value="backup" class="w-full text-center font-label-md text-label-md text-admin-primary hover:underline">Use a backup code instead</button>
+<button name="wizard_goto_step" type="submit" value="backup" class="w-full text-center font-label-md text-label-md text-primary hover:underline">Use a backup code instead</button>
 </form>
 {% endif %}
 

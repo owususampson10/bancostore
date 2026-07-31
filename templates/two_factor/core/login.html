@@ -4,7 +4,7 @@
 {% if wizard.steps.current == 'auth' and wizard.form.locked %}
 {# ===== Account Locked (matches the "Account Locked - Bancostore Admin" Stitch screen) ===== #}
 <div class="w-full max-w-lg bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
-<div class="h-48 relative overflow-hidden bg-admin-primary/90 flex items-center justify-center">
+<div class="h-48 relative overflow-hidden bg-primary/90 flex items-center justify-center">
 <div class="relative z-10 bg-white/10 backdrop-blur-md p-6 rounded-full border border-white/20">
 <span class="material-symbols-outlined text-white text-[64px]" style="font-variation-settings: 'FILL' 1;">lock_person</span>
 </div>
@@ -14,8 +14,8 @@
 <h1 class="font-headline-lg text-headline-lg text-on-surface">Security Alert</h1>
 <p class="font-body-lg text-body-lg text-on-surface-variant max-w-md mx-auto">This administrative account is temporarily locked due to too many failed login attempts.</p>
 </div>
-<div class="bg-surface-container-low p-stack-md rounded-lg border-l-4 border-admin-primary text-left flex gap-stack-md items-start">
-<span class="material-symbols-outlined text-admin-primary mt-0.5">mail</span>
+<div class="bg-surface-container-low p-stack-md rounded-lg border-l-4 border-primary text-left flex gap-stack-md items-start">
+<span class="material-symbols-outlined text-primary mt-0.5">mail</span>
 <div>
 <p class="font-label-lg text-label-lg text-on-surface">Verification Pending</p>
 <p class="font-body-sm text-body-sm text-on-surface-variant">A security alert email has been sent to your registered address with instructions to unlock your access.</p>
@@ -68,7 +68,7 @@ Account Access Restricted
 <div class="space-y-stack-xs">
 <div class="flex justify-between items-center">
 <label class="font-label-lg text-label-lg text-on-surface-variant" for="{{ wizard.form.password.id_for_label }}">Password</label>
-<a class="font-label-md text-label-md text-admin-primary hover:underline" href="#">Forgot password?</a>
+<a class="font-label-md text-label-md text-primary hover:underline" href="#">Forgot password?</a>
 </div>
 <div class="relative">
 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60">lock</span>
@@ -76,7 +76,7 @@ Account Access Restricted
 </div>
 {% if wizard.form.password.errors %}<p class="text-admin-error text-body-sm mt-1">{{ wizard.form.password.errors.0 }}</p>{% endif %}
 </div>
-<button class="w-full bg-admin-primary text-white py-4 px-6 rounded-lg font-label-lg text-label-lg font-bold shadow-lg hover:opacity-90 active:scale-[0.98] transition-all duration-150 mt-stack-md flex items-center justify-center gap-2" type="submit">
+<button class="w-full bg-primary text-white py-4 px-6 rounded-lg font-label-lg text-label-lg font-bold shadow-lg hover:opacity-90 active:scale-[0.98] transition-all duration-150 mt-stack-md flex items-center justify-center gap-2" type="submit">
 <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">login</span>
 Log In
 </button>

@@ -2,14 +2,14 @@
 {% block title %}KYC Review: {{ display_name|default:distributor }} — Bancostore Admin Portal{% endblock %}
 {% block content %}
 <div x-data="{ approveOpen: false, rejectOpen: false, lightboxUrl: null, lightboxLabel: '' }">
-<a href="{% url 'admin_portal:kyc_review_queue' %}" class="inline-flex items-center gap-1 text-secondary hover:text-admin-primary transition-colors mb-4">
+<a href="{% url 'admin_portal:kyc_review_queue' %}" class="inline-flex items-center gap-1 text-secondary hover:text-primary transition-colors mb-4">
 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
 <span class="font-label-md text-label-md">Back to List</span>
 </a>
 
 <header class="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
 <div>
-<h2 class="font-headline-md text-headline-md text-on-surface">KYC Review: <span class="text-admin-primary">{{ display_name|default:"(No name on file)" }}</span></h2>
+<h2 class="font-headline-md text-headline-md text-on-surface">KYC Review: <span class="text-primary">{{ display_name|default:"(No name on file)" }}</span></h2>
 <div class="flex flex-wrap items-center gap-x-6 gap-y-2 mt-2">
 <div class="flex items-center gap-2">
 <span class="material-symbols-outlined text-secondary text-[20px]" aria-hidden="true">call</span>
@@ -32,7 +32,7 @@
 <span class="material-symbols-outlined text-[20px]" aria-hidden="true">cancel</span>
 Reject Application
 </button>
-<button type="button" @click="approveOpen = true" class="px-8 py-2.5 rounded-xl bg-admin-primary text-on-primary font-label-md text-label-md shadow-md hover:opacity-90 transition-all flex items-center gap-2">
+<button type="button" @click="approveOpen = true" class="px-8 py-2.5 rounded-xl bg-primary text-on-primary font-label-md text-label-md shadow-md hover:opacity-90 transition-all flex items-center gap-2">
 <span class="material-symbols-outlined text-[20px]" aria-hidden="true">check_circle</span>
 Approve KYC
 </button>
@@ -50,15 +50,15 @@ Approve KYC
 <div class="space-y-4">
 <div class="p-3 bg-surface rounded-lg flex items-center justify-between">
 <span class="font-label-md text-label-md">ID Verification</span>
-<span class="font-bold text-admin-primary">{{ verification.id_verification_status|default:"—" }}</span>
+<span class="font-bold text-primary">{{ verification.id_verification_status|default:"—" }}</span>
 </div>
 <div class="p-3 bg-surface rounded-lg flex items-center justify-between">
 <span class="font-label-md text-label-md">Face Match</span>
-<span class="font-bold text-admin-primary">{{ verification.face_match_status|default:"—" }}{% if verification.face_match_score is not None %} ({{ verification.face_match_score|floatformat:0 }}%){% endif %}</span>
+<span class="font-bold text-primary">{{ verification.face_match_status|default:"—" }}{% if verification.face_match_score is not None %} ({{ verification.face_match_score|floatformat:0 }}%){% endif %}</span>
 </div>
 <div class="p-3 bg-surface rounded-lg flex items-center justify-between">
 <span class="font-label-md text-label-md">Liveness</span>
-<span class="font-bold text-admin-primary">{{ verification.liveness_status|default:"—" }}{% if verification.liveness_score is not None %} ({{ verification.liveness_score|floatformat:0 }}%){% endif %}</span>
+<span class="font-bold text-primary">{{ verification.liveness_status|default:"—" }}{% if verification.liveness_score is not None %} ({{ verification.liveness_score|floatformat:0 }}%){% endif %}</span>
 </div>
 </div>
 <div class="mt-auto pt-6 border-t border-outline-variant">
@@ -166,7 +166,7 @@ Approve KYC
 <input type="hidden" name="action" value="approve">
 <div class="flex gap-3">
 <button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="approveOpen = false">Cancel</button>
-<button type="submit" class="flex-1 bg-admin-primary text-on-primary py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Yes, Approve</button>
+<button type="submit" class="flex-1 bg-primary text-on-primary py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Yes, Approve</button>
 </div>
 </form>
 </div>
@@ -189,7 +189,7 @@ Approve KYC
 </div>
 {% endif %}
 <label for="id_reason" class="font-label-md text-label-md text-secondary block mb-1">Reason (required)</label>
-<textarea id="id_reason" name="reason" x-model="reason" rows="3" required class="w-full rounded-xl border border-outline-variant p-3 font-body-md text-body-md focus:border-admin-primary focus:ring-1 focus:ring-admin-primary outline-none"></textarea>
+<textarea id="id_reason" name="reason" x-model="reason" rows="3" required class="w-full rounded-xl border border-outline-variant p-3 font-body-md text-body-md focus:border-primary focus:ring-1 focus:ring-primary outline-none"></textarea>
 <div class="flex gap-3 mt-4">
 <button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="rejectOpen = false">Cancel</button>
 <button type="submit" :disabled="!reason.trim()" :class="!reason.trim() && 'opacity-50 cursor-not-allowed'" class="flex-1 bg-admin-error text-on-error py-3 px-4 rounded-lg font-button hover:opacity-90 transition-all">Confirm Reject</button>
