@@ -5,7 +5,13 @@
 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
 <div>
 <h2 class="font-headline-md text-headline-md text-on-surface">Product Catalog</h2>
-<p class="font-body-md text-body-md text-on-surface-variant mt-1">Manage products shown on the storefront and homepage.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">
+{% if low_stock == "1" %}
+Showing products with fewer than {{ low_stock_threshold }} units in stock.
+{% else %}
+Manage products shown on the storefront and homepage.
+{% endif %}
+</p>
 </div>
 <div class="flex items-center gap-3">
 <a href="{% url 'admin_portal:catalog_category_list' %}" class="px-6 py-3 rounded-lg font-bold text-label-md border border-outline-variant text-on-surface-variant flex items-center gap-2 hover:bg-surface-container-low transition-all">

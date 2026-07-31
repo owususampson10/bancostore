@@ -73,19 +73,98 @@ _JOB_NAME_LABELS = {
 }
 
 
+# Same cutoff already used by partials/product_results.html's amber/red
+# stock badges -- named here so the dashboard's count and the catalog
+# table's own coloring can never silently drift apart.
+LOW_STOCK_THRESHOLD = 10
+
+# Orders that genuinely need an admin to move them forward. Pending is
+# excluded on purpose -- it's unpaid and there's nothing to do until the
+# customer pays or auto_cancel_unpaid_orders reaps it; delivered/
+# cancelled/refunded are already done. Dispatched is excluded too -- it's
+# in transit, waiting on the courier, not on an admin action.
+ORDERS_AWAITING_ACTION_STATUSES = (Order.Status.CONFIRMED, Order.Status.PROCESSING)
+
+# WalletTransaction rows that represent an actual commission payout, for
+# the dashboard's "This Week's Commissions" figure -- deliberately not
+# withdrawal debits/reversals or cooling-off refunds, which move money
+# for unrelated reasons and would inflate a number meant to answer "how
+# much did the network earn this week."
+COMMISSION_TRANSACTION_TYPES = (
+    WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+    WalletTransaction.TransactionType.BINARY_BONUS,
+    WalletTransaction.TransactionType.MATCHING_BONUS,
+)
+
+
 @login_required(login_url="two_factor:login")
 def dashboard(request):
-    """Task 22 follow-up: the admin's post-login landing page. Without
-    this, AdminLoginView.get_success_url() had nowhere branded to send a
-    just-logged-in admin and fell back to Django Admin's raw /admin/
-    index -- directly undermining this whole initiative (the admin should
-    never see the unstyled system panel, even for a few seconds). Honest
-    placeholder for now, matching apps.distributors.views.dashboard's own
-    "you're logged in, here's the one real thing you can do today"
-    pattern -- KYC Review is the only built admin_portal feature so far."""
+    """Task 27. Replaces the Task 22 placeholder ("you're logged in, KYC
+    Review is the only real feature so far") now that every other
+    admin_portal section has actually shipped. Every number here is a
+    real query, not a fabricated stat -- built from a fetched Stitch
+    screen but reconciled against real scope first: the mockup's global
+    search bar, notification bell, settings gear, floating action
+    button, "System Status" pill, and 7/30-day toggle were all dropped
+    since none of them correspond to a feature that exists (same
+    "reconcile against real scope" pass every other Stitch-sourced page
+    in this codebase has gone through)."""
     if not is_admin_portal_staff(request.user):
         raise PermissionDenied
-    return render(request, "admin_portal/dashboard.html", {"active_nav": "dashboard"})
+
+    week_start = timezone.now() - timedelta(days=7)
+
+    pending_kyc_count = Distributor.objects.filter(
+        kyc_status=Distributor.KycStatus.PENDING,
+        didit_verification__isnull=False,
+    ).count()
+    pending_withdrawals_count = WithdrawalRequest.objects.filter(
+        status=WithdrawalRequest.Status.SUBMITTED
+    ).count()
+    orders_awaiting_action_count = Order.objects.filter(
+        status__in=ORDERS_AWAITING_ACTION_STATUSES
+    ).count()
+    low_stock_count = Product.objects.filter(
+        is_active=True, stock__lt=LOW_STOCK_THRESHOLD
+    ).count()
+
+    total_distributors = Distributor.objects.count()
+    new_distributors_this_week = Distributor.objects.filter(
+        user__date_joined__gte=week_start
+    ).count()
+    total_products = Product.objects.filter(is_active=True).count()
+
+    orders_this_week = Order.objects.filter(created_at__gte=week_start)
+    orders_this_week_count = orders_this_week.count()
+    # Only orders that actually collected payment count toward the GHS
+    # figure -- pending is unpaid, cancelled/refunded gave the money
+    # back, neither is real revenue.
+    orders_this_week_value = orders_this_week.exclude(
+        status__in=[Order.Status.PENDING, Order.Status.CANCELLED, Order.Status.REFUNDED]
+    ).aggregate(total=Sum("total"))["total"] or Decimal("0")
+
+    commissions_this_week = WalletTransaction.objects.filter(
+        transaction_type__in=COMMISSION_TRANSACTION_TYPES,
+        created_at__gte=week_start,
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+
+    recent_orders = Order.objects.order_by("-created_at", "-pk")[:6]
+
+    context = {
+        "pending_kyc_count": pending_kyc_count,
+        "pending_withdrawals_count": pending_withdrawals_count,
+        "orders_awaiting_action_count": orders_awaiting_action_count,
+        "low_stock_count": low_stock_count,
+        "total_distributors": total_distributors,
+        "new_distributors_this_week": new_distributors_this_week,
+        "total_products": total_products,
+        "orders_this_week_count": orders_this_week_count,
+        "orders_this_week_value": orders_this_week_value,
+        "commissions_this_week": commissions_this_week,
+        "recent_orders": recent_orders,
+        "active_nav": "dashboard",
+    }
+    return render(request, "admin_portal/dashboard.html", context)
 
 
 @login_required(login_url="two_factor:login")
@@ -1021,6 +1100,7 @@ def _filtered_products(request):
     category_id = request.GET.get("category", "").strip()
     status = request.GET.get("status", "").strip()
     featured = request.GET.get("featured", "").strip()
+    low_stock = request.GET.get("low_stock", "").strip()
 
     products = Product.objects.select_related("category").prefetch_related("images")
     if query:
@@ -1043,8 +1123,21 @@ def _filtered_products(request):
         products = products.filter(is_featured=True)
     elif featured == "no":
         products = products.filter(is_featured=False)
+    # Reached only via the dashboard's Low Stock Products card -- there's no
+    # visible filter widget for this one, matching the "card links straight
+    # to the matching subset" pattern the other 3 action-needed cards
+    # already use (KYC/withdrawal/order queues).
+    if low_stock == "1":
+        products = products.filter(stock__lt=LOW_STOCK_THRESHOLD)
 
-    return products.order_by("-created_at", "-pk"), query, category_id, status, featured
+    return (
+        products.order_by("-created_at", "-pk"),
+        query,
+        category_id,
+        status,
+        featured,
+        low_stock,
+    )
 
 
 @login_required(login_url="two_factor:login")
@@ -1057,7 +1150,9 @@ def catalog_product_list(request):
     if not is_admin_portal_staff(request.user):
         raise PermissionDenied
 
-    products, query, category_id, status, featured = _filtered_products(request)
+    products, query, category_id, status, featured, low_stock = _filtered_products(
+        request
+    )
     paginator = Paginator(products, 20)
     page_obj = paginator.get_page(request.GET.get("page"))
 
@@ -1071,6 +1166,8 @@ def catalog_product_list(request):
         "category_id": category_id,
         "status": status,
         "featured": featured,
+        "low_stock": low_stock,
+        "low_stock_threshold": LOW_STOCK_THRESHOLD,
         "categories": Category.objects.order_by("name"),
         "querystring_no_page": querystring_no_page,
         "active_nav": "catalog",

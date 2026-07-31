@@ -8,6 +8,7 @@ from django.urls import reverse
 import pytest
 from PIL import Image
 
+from apps.admin_portal.views import LOW_STOCK_THRESHOLD
 from apps.catalog.models import Category, Product, ProductImage, ProductVariant
 from apps.orders.models import Order, OrderItem
 
@@ -289,6 +290,40 @@ def test_product_featured_filter(staff_client):
     body = response.content.decode()
     assert "Featured One" in body
     assert "Regular One" not in body
+
+
+@pytest.mark.django_db
+def test_product_low_stock_filter_only_matches_products_under_the_threshold(
+    staff_client,
+):
+    category = _make_category()
+    Product.objects.create(
+        name="Low Stock One",
+        category=category,
+        price=Decimal("10.00"),
+        stock=5,
+    )
+    Product.objects.create(
+        name="Well Stocked One",
+        category=category,
+        price=Decimal("10.00"),
+        stock=50,
+    )
+    Product.objects.create(
+        name="Exactly At Threshold",
+        category=category,
+        price=Decimal("10.00"),
+        stock=LOW_STOCK_THRESHOLD,
+    )
+
+    response = staff_client.get(_product_list_url(), {"low_stock": "1"})
+
+    body = response.content.decode()
+    assert "Low Stock One" in body
+    assert "Well Stocked One" not in body
+    # Strictly less-than, matching the dashboard count's own semantics --
+    # a product exactly at the threshold isn't "low" yet.
+    assert "Exactly At Threshold" not in body
 
 
 @pytest.mark.django_db

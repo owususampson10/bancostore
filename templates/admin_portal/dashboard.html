@@ -1,24 +1,142 @@
 {% extends "admin_portal/base_dashboard.html" %}
 {% block title %}Bancostore Admin Portal | Dashboard{% endblock %}
 {% block content %}
-<div class="w-full max-w-md mx-auto bg-white rounded-xl border border-outline-variant p-stack-xl text-center">
-<div class="mb-stack-lg flex justify-center">
-<div class="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center">
-<span class="material-symbols-outlined text-[48px] text-primary" style="font-variation-settings: 'FILL' 1;">
-check_circle
-</span>
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">Welcome back, {{ request.user.email|default:request.user.username }}</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">{% now "F j, Y" %}</p>
+</div>
+
+<!-- Action-needed row -->
+<section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+<a href="{% url 'admin_portal:kyc_review_queue' %}" class="bg-white p-6 rounded-xl border {% if pending_kyc_count %}border-primary/30{% else %}border-outline-variant{% endif %} shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
+<div class="flex items-start justify-between">
+<p class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wide">Pending KYC Reviews</p>
+<span class="material-symbols-outlined text-xl {% if pending_kyc_count %}text-primary{% else %}text-on-surface-variant/40{% endif %}" aria-hidden="true">verified_user</span>
+</div>
+<h2 class="font-display-lg text-[40px] text-on-background font-bold mt-2">{{ pending_kyc_count }}</h2>
+</a>
+<a href="{% url 'admin_portal:withdrawal_review_queue' %}" class="bg-white p-6 rounded-xl border {% if pending_withdrawals_count %}border-primary/30{% else %}border-outline-variant{% endif %} shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
+<div class="flex items-start justify-between">
+<p class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wide">Pending Withdrawals</p>
+<span class="material-symbols-outlined text-xl {% if pending_withdrawals_count %}text-primary{% else %}text-on-surface-variant/40{% endif %}" aria-hidden="true">payments</span>
+</div>
+<h2 class="font-display-lg text-[40px] text-on-background font-bold mt-2">{{ pending_withdrawals_count }}</h2>
+</a>
+<a href="{% url 'admin_portal:order_management_queue' %}" class="bg-white p-6 rounded-xl border {% if orders_awaiting_action_count %}border-primary/30{% else %}border-outline-variant{% endif %} shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
+<div class="flex items-start justify-between">
+<p class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wide">Orders Awaiting Action</p>
+<span class="material-symbols-outlined text-xl {% if orders_awaiting_action_count %}text-primary{% else %}text-on-surface-variant/40{% endif %}" aria-hidden="true">shopping_cart</span>
+</div>
+<h2 class="font-display-lg text-[40px] text-on-background font-bold mt-2">{{ orders_awaiting_action_count }}</h2>
+</a>
+<a href="{% url 'admin_portal:catalog_product_list' %}?status=active&low_stock=1" class="bg-white p-6 rounded-xl border {% if low_stock_count %}border-primary/30{% else %}border-outline-variant{% endif %} shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
+<div class="flex items-start justify-between">
+<p class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wide">Low Stock Products</p>
+<span class="material-symbols-outlined text-xl {% if low_stock_count %}text-primary{% else %}text-on-surface-variant/40{% endif %}" aria-hidden="true">inventory_2</span>
+</div>
+<h2 class="font-display-lg text-[40px] text-on-background font-bold mt-2">{{ low_stock_count }}</h2>
+</a>
+</section>
+
+<!-- Business snapshot -->
+<div class="mb-8">
+<h3 class="font-headline-sm text-headline-sm text-on-surface mb-4">Business Snapshot — This Week</h3>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/50 flex items-start justify-between">
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">Total Distributors</p>
+<h4 class="font-headline-md text-headline-md text-on-surface font-bold">{{ total_distributors }}</h4>
+<div class="flex items-center gap-1 mt-2 text-green-700 font-label-md text-label-md">
+<span class="material-symbols-outlined text-sm" aria-hidden="true">trending_up</span>
+<span>+{{ new_distributors_this_week }} this week</span>
 </div>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-stack-sm">
-You're logged in
-</h1>
-<p class="font-body-md text-body-md text-gray-muted mb-stack-xl">
-Welcome, {{ request.user.email|default:request.user.username }}. KYC review is
-available now — withdrawal approval, distributor management, and commission
-oversight are coming in later builds.
-</p>
-<a class="inline-block w-full py-4 px-8 bg-primary hover:opacity-90 text-white font-label-lg text-label-lg rounded-lg transition-all active:scale-95 shadow-sm" href="{% url 'admin_portal:kyc_review_queue' %}">
-Go to KYC Review
+<div class="p-2 rounded-lg bg-white text-on-surface-variant">
+<span class="material-symbols-outlined" aria-hidden="true">group</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/50 flex items-start justify-between">
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">Total Products</p>
+<h4 class="font-headline-md text-headline-md text-on-surface font-bold">{{ total_products }}</h4>
+<p class="text-xs text-on-surface-variant mt-3">Live in Catalog</p>
+</div>
+<div class="p-2 rounded-lg bg-white text-on-surface-variant">
+<span class="material-symbols-outlined" aria-hidden="true">layers</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/50 flex items-start justify-between">
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">This Week's Orders</p>
+<h4 class="font-headline-md text-headline-md text-on-surface font-bold">{{ orders_this_week_count }}</h4>
+<p class="text-xs text-primary font-bold mt-2">GHS {{ orders_this_week_value|floatformat:2 }}</p>
+</div>
+<div class="p-2 rounded-lg bg-white text-on-surface-variant">
+<span class="material-symbols-outlined" aria-hidden="true">shopping_bag</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/50 flex items-start justify-between">
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">This Week's Commissions</p>
+<h4 class="font-headline-md text-headline-md text-on-surface font-bold">GHS {{ commissions_this_week|floatformat:2 }}</h4>
+<p class="text-xs text-on-surface-variant mt-3">Binary + Matching + Direct Referral</p>
+</div>
+<div class="p-2 rounded-lg bg-white text-on-surface-variant">
+<span class="material-symbols-outlined" aria-hidden="true">account_balance_wallet</span>
+</div>
+</div>
+</div>
+</div>
+
+<!-- Recent orders -->
+<section class="bg-white rounded-xl shadow-sm border border-outline-variant overflow-hidden">
+<div class="px-6 py-5 border-b border-outline-variant flex items-center justify-between">
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Recent Orders</h3>
+</div>
+{% if recent_orders %}
+<div class="overflow-x-auto">
+<table class="w-full min-w-[700px] text-left border-collapse">
+<thead class="bg-surface-container-low">
+<tr>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Order</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Customer</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Status</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Total</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Time</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider text-right">Action</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for order in recent_orders %}
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="px-6 py-4 font-mono-sm text-mono-sm text-primary font-bold whitespace-nowrap">#{{ order.pk }}</td>
+<td class="px-6 py-4 font-body-md text-body-md font-semibold whitespace-nowrap">{{ order.full_name }}</td>
+<td class="px-6 py-4">
+{% include "admin_portal/_order_status_pill.html" with status=order.status label=order.get_status_display %}
+</td>
+<td class="px-6 py-4 font-body-md text-body-md font-bold whitespace-nowrap">GHS {{ order.total|floatformat:2 }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant whitespace-nowrap">{{ order.created_at|timesince }} ago</td>
+<td class="px-6 py-4 text-right">
+<a href="{% url 'admin_portal:order_detail' order.pk %}" class="text-primary hover:underline font-label-md text-label-md">Details</a>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+<div class="px-6 py-4 bg-surface-container-low/50 border-t border-outline-variant text-center">
+<a href="{% url 'admin_portal:order_management_queue' %}" class="inline-flex items-center gap-2 font-label-md text-label-md text-primary hover:gap-3 transition-all">
+View All Orders
+<span class="material-symbols-outlined text-sm" aria-hidden="true">arrow_forward</span>
 </a>
 </div>
+{% else %}
+<div class="p-12 flex flex-col items-center text-center">
+<div class="w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-4xl text-on-surface-variant" aria-hidden="true">shopping_cart</span>
+</div>
+<p class="font-headline-md text-headline-md text-on-surface">No orders yet.</p>
+</div>
+{% endif %}
+</section>
 {% endblock %}
