@@ -23,22 +23,33 @@ def _valid_post_data(overrides=None):
     IntegerField/DecimalField/the CONSTANCE_ADDITIONAL_FIELDS custom fields
     are all required (only BooleanField and the plain str CharField default
     to required=False in constance's own FIELDS mapping), so a real save
-    always submits every setting together, not just one group's worth."""
+    always submits every setting together, not just one group's worth.
+
+    Sources values from a single get_values() snapshot (the actual current
+    stored values), not CONSTANCE_CONFIG's defaults -- CodeRabbit finding on
+    PR #55: building from defaults meant any test that saves while some
+    unrelated setting already holds a real non-default value would silently
+    reset that setting back to its default, since ConstanceForm.save()
+    writes every field in the submitted form together. The same snapshot
+    feeds the hidden version hash too, since that's a hash of exactly these
+    values."""
+    current = get_values()
     data = {}
     for name, options in CONSTANCE_CONFIG.items():
         default = options[0]
+        value = current.get(name, default)
         if isinstance(default, bool):
-            if default:
+            if value:
                 data[name] = "on"
             continue
-        data[name] = str(default)
+        data[name] = str(value)
     if overrides:
         data.update(overrides)
     # The hidden version field is a hash of the *current* stored values,
     # computed by BancostoreConstanceForm itself -- not something a test
     # should reimplement, since that would just duplicate (and risk
     # drifting from) the real hashing logic under test.
-    data["version"] = BancostoreConstanceForm(initial=get_values()).initial["version"]
+    data["version"] = BancostoreConstanceForm(initial=current).initial["version"]
     return data
 
 
@@ -120,6 +131,29 @@ def test_saving_updates_a_boolean_constance_setting(staff_client):
 
     assert response.status_code == 302
     assert config.MAINTENANCE_MODE_ENABLED is True
+
+
+@pytest.mark.django_db
+def test_saving_preserves_an_unrelated_settings_already_non_default_value(
+    staff_client,
+):
+    """CodeRabbit finding on PR #55: _valid_post_data() used to build every
+    field from CONSTANCE_CONFIG's seeded defaults, not the live stored
+    values -- since ConstanceForm.save() writes every field in the
+    submitted form together, saving any one setting would have silently
+    reset every OTHER already-customized setting back to its default.
+    OTP_MAX_ATTEMPTS (default 3) stands in for "some setting an earlier
+    admin already customized"; it must survive a save that only intends
+    to change something else entirely."""
+    config.OTP_MAX_ATTEMPTS = 7
+
+    response = staff_client.post(
+        _platform_settings_url(),
+        _valid_post_data({"MAINTENANCE_MODE_ENABLED": "on"}),
+    )
+
+    assert response.status_code == 302
+    assert config.OTP_MAX_ATTEMPTS == 7
 
 
 @pytest.mark.django_db
