@@ -4290,7 +4290,10 @@ a time, same discipline as Task 16's UI slices.
 
 Sequencing: KYC review (Task 22, this is the first slice — admin already actively uses this
 screen, backend already proven in Task 11) → withdrawal approval, distributor search/management,
-commission oversight (Task 23, sliced further when started).
+commission oversight (Task 23, sliced further when started) → catalog management (Task 26) →
+admin dashboard (Task 27). Tasks 26/27 weren't in the original plan — added 2026-07-30/31 after
+auditing which already-shipped backend features still had no dedicated frontend, the same kind of
+gap Task 25 closed for distributors/customers.
 
 ### Task 22: Admin Portal — KYC review screen
 
@@ -4347,6 +4350,81 @@ Full test coverage: `tests/feature/admin_portal/test_withdrawal_review.py`,
 **Dependencies:** Task 22 (shared `apps/admin_portal/` shell), Task 16d (withdrawal backend), Task 13 (commission data)
 
 **Estimated scope:** L
+
+---
+
+### Task 26: Admin Portal — Catalog Management (categories + products)
+
+**Description:** Not in the original plan — found by auditing which already-shipped backend
+features still had no dedicated frontend. Task 7 built `Category`/`Product`/`ProductImage`/
+`ProductVariant` with only Django Admin CRUD; this replaces that with a real Stitch-designed UI in
+`apps/admin_portal/`, matching Task 22/23's established pattern of Django Admin staying underneath
+as the permissions/audit layer while a branded screen sits in front.
+
+**Acceptance criteria:**
+- [x] Category list/create/edit/delete screens (Add Category as a modal, per the fetched Stitch
+      design)
+- [x] Product list screen with real-time auto-filter search (no Filter button) and themed,
+      non-native category/status/featured filter dropdowns
+- [x] Product create/edit form: name/description/price/category/variants, up to 5 images with
+      primary-image selection via reveal-on-demand image tiles (not a raw multi-file input)
+- [x] Delete confirmation modal, shared across categories and products
+- [x] All pages responsive at common breakpoints with no overflow
+
+**Verification:**
+- [x] `tests/feature/admin_portal/test_catalog_management.py` — CRUD/filter/permission/formset/
+      image-cap coverage
+- [x] `tests/feature/catalog/test_primary_image_normalization.py` — `normalize_primary_image()`
+      unit tests
+- [x] Live browser check across category/product list/create/edit/delete, all breakpoints
+- [x] CodeRabbit review, findings fixed pre-merge (see `CLAUDE.md`'s Task 26 entry for the full bug
+      list — a CSS Grid col-span bug, a star-button stacking-context bug, an unhandled
+      `ValueError`/`ProtectedError` pair, and a silently-swallowed formset validation error)
+
+**Shipped via PR #53, merged 2026-07-31.**
+
+**Dependencies:** Task 7 (Category/Product models), Task 22 (shared `apps/admin_portal/` shell)
+
+**Files touched:** `apps/admin_portal/forms.py` (new), `apps/admin_portal/views.py`,
+`apps/admin_portal/urls.py`, `apps/catalog/services.py` (new `normalize_primary_image`),
+`templates/admin_portal/catalog_category_list.html`, `catalog_product_list.html`,
+`catalog_product_form.html`, `partials/category_results.html`, `partials/product_results.html`,
+`partials/_delete_confirm_modal.html`
+
+**Estimated scope:** L
+
+---
+
+### Task 27: Admin Dashboard
+
+**Description:** Not in the original plan — found the same way as Task 26. Replaces the Task 22
+placeholder dashboard ("you're logged in, KYC Review is the only real feature so far") with a real
+one now that every other admin_portal section (KYC, withdrawals, distributor directory, commission
+oversight, catalog) has shipped.
+
+**Acceptance criteria:**
+- [x] Four action-needed cards (Pending KYC, Pending Withdrawals, Orders Awaiting Action, Low Stock
+      Products), each linking to its real admin_portal queue, visually accented only when count > 0
+- [x] Business Snapshot: Total Distributors (+ new this week), Total Products, This Week's Orders
+      (count + GHS value), This Week's Commissions — all real queries over a rolling 7-day window
+- [x] Recent Orders table (latest 6), linking to order detail and the full order management queue
+
+**Verification:**
+- [x] 16 tests in `tests/feature/admin_portal/test_dashboard.py` — permissions, each count's
+      precise inclusion/exclusion logic (including the 7-day window boundary), the orders
+      count-vs-value distinction, and the recent orders table's content/limit/links
+- [x] Full suite green throughout: 1177 passed, 1 skipped
+- [x] CodeRabbit review (2 rounds), all findings fixed pre-merge — see `CLAUDE.md`'s Task 27 entry
+
+**Shipped via PR #54, merged 2026-07-31.**
+
+**Dependencies:** Task 22/23 (admin_portal queues the cards link to), Task 20/21 (dashboard
+patterns this page reuses)
+
+**Files touched:** `apps/admin_portal/views.py` (`dashboard` view + module-level constants),
+`templates/admin_portal/dashboard.html`, `tests/feature/admin_portal/test_dashboard.py`
+
+**Estimated scope:** M
 
 ---
 

@@ -4,19 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project State
 
-**Tasks 1–25 are all done — Task 21 (dashboard extras: binary tree view, earnings history
-verification, carry-forward tracker, notification bell) closed 2026-07-30, the last piece of the
-MVP scope before deployment. Task 24 (deploy to Hostinger VPS) is next — a production action
-requiring user confirmation before any step touches the real VPS/domain, per `SPEC.md` Boundaries.**
-Task 25 didn't exist in the original plan — added
+**Tasks 1–25 are all done. Task 21 (dashboard extras: binary tree view, earnings history
+verification, carry-forward tracker, notification bell) closed 2026-07-30 and was thought to be the
+last piece of the MVP scope before deployment — but auditing which already-shipped backend features
+still had no real, Stitch-designed frontend (Task 22/23's admin_portal precedent set the
+expectation that every admin-facing screen should look like the rest of the app, not Django Admin)
+surfaced two more: Task 26 (Catalog Management) and Task 27 (Admin Dashboard), both closed
+2026-07-31. Task 24 (deploy to Hostinger VPS) is next — a production action requiring user
+confirmation before any step touches the real VPS/domain, per `SPEC.md` Boundaries.**
+Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found
 no task anywhere had ever scoped a self-service order-history page for a customer or distributor,
 needed before Task 20 (Dashboard core stats) links to it. Numbered 25, not inserted as 20, despite
 building first: 20/21 (Phase 8) and 22-24 (Phase 9's Admin Portal / Task 24 Deploy) are already
 real, in places already-shipped-code-referenced numbers — renumbering any of those would mean
 rewriting history across already-built admin_portal code, so this task took the next free integer
-instead and is simply sequenced earlier than its number suggests. What exists and is verified
-working:
+instead and is simply sequenced earlier than its number suggests. Tasks 26 and 27 needed no such
+contortion — found and built in that same order, so they simply took the next two free integers.
+What exists and is verified working:
 
 - **Foundation (Tasks 1–3):** Django 5 scaffold with the full `SPEC.md` stack wired up in
   `bancostore/settings.py` (Redis-backed cache/sessions, Channels/ASGI, Celery, constance, allauth,
@@ -497,6 +502,63 @@ working:
   dropdown view swapped an entire page into the small panel for a cancelled-but-still-logged-in
   distributor — removed from all 4 new views, matching the withdrawal-flow views' existing
   exemption from that same decorator. A parallel security pass found zero exploitable issues.
+- **Catalog Management (Task 26), giving the admin a real UI for product/category CRUD instead of
+  Django Admin:** not in the original plan — found by auditing which already-shipped backend
+  features (Task 7's `Category`/`Product`/`ProductImage`/`ProductVariant` models) still had no
+  dedicated frontend, the same audit that turned up Task 27 below. Built from 5 fetched Stitch
+  screens (Category List, Add Category Modal, Add Product, Delete Confirmation, Product List).
+  Category and product list pages use real-time htmx auto-filter search (no Filter button,
+  matching `distributor_directory`/`order_management_queue`'s existing pattern) and themed
+  Alpine.js listbox dropdowns for category/status/featured filters, never a native `<select>`
+  (this codebase's established reason: a native select's options popup can't be restyled via CSS in
+  any browser). Product images use a dynamically-sized inline formset
+  (`build_product_image_formset`, `MAX_PRODUCT_IMAGES = 5`, `validate_max=True`) and a new
+  `apps/catalog/services.py::normalize_primary_image()` guaranteeing exactly one
+  `ProductImage.is_primary=True` per product after any save. Several real, live-browser-caught bugs
+  were fixed along the way: a CSS Grid bug where the "primary image spans both columns" treatment
+  silently never worked for any tile, because `col-span-2`/`aspect-video` were toggled on a
+  non-grid-item child div instead of the actual grid item (`getComputedStyle()` showed the class
+  correctly applied with zero layout effect); a stacking-context bug where the hover-reveal delete
+  overlay (no explicit z-index) painted over the star/primary-toggle button, blocking clicks; and
+  the reveal-on-demand image tiles' add-tile not hiding once a row filled. CodeRabbit caught three
+  more on PR #53: an unhandled `ValueError` from a non-numeric `?category=` querystring value
+  (fixed with a `category_id.isdigit()` guard); an unhandled `ProtectedError` deleting a product
+  still referenced by an `OrderItem`; and the 5-image-cap formset's `non_form_errors` never being
+  rendered, so `validate_max=True` silently rejected an over-cap submission with no visible
+  explanation. Also fixed, per direct user feedback: every delete icon switched from the dim
+  `admin-error` red to the vibrant `primary` orange, and the admin surface's `admin-primary` maroon
+  accent color (originally a deliberate "distinct admin accent," later user-rejected after seeing
+  it live) was fully retired back to the same `primary` orange used everywhere else in the app —
+  including fixing two dead sidebar/header logo links found during that sweep. Shipped via PR #53,
+  merged 2026-07-31; `tests/feature/admin_portal/test_catalog_management.py` and
+  `tests/feature/catalog/test_primary_image_normalization.py`.
+- **Admin Dashboard (Task 27), replacing the Task 22 placeholder ("you're logged in, KYC Review is
+  the only real feature so far") now that every other admin_portal section had actually shipped:**
+  built from a fetched Stitch screen ("Admin Dashboard - Bancostore Portal"), reconciled against
+  real scope before implementation — the mockup's global search bar, notification bell, settings
+  gear, floating action button, "System Status" pill, and 7/30-day toggle were all dropped since
+  none correspond to a feature that exists in this codebase (the same "reconcile against real
+  scope" pass every other Stitch-sourced page here has gone through). Every number on the page is a
+  real query: four action-needed cards (Pending KYC, Pending Withdrawals, Orders Awaiting Action,
+  Low Stock Products) link straight to their own admin_portal queue and are visually accented only
+  when there's something to act on; a Business Snapshot row (Total Distributors + new-this-week,
+  Total Products, This Week's Orders count + GHS value, This Week's Commissions) uses a rolling
+  7-day window, with module-level constants (`LOW_STOCK_THRESHOLD`, `ORDERS_AWAITING_ACTION_STATUSES`,
+  `COMMISSION_TRANSACTION_TYPES`) documenting exactly which statuses/transaction types count and
+  why — e.g. orders-awaiting-action deliberately excludes `pending` (unpaid, nothing to act on yet)
+  and `dispatched` (in transit, waiting on the courier, not an admin); the commissions figure sums
+  only binary/matching/direct-referral wallet transactions, never withdrawal debits or cooling-off
+  refunds; a Recent Orders table (latest 6) reuses the existing `_order_status_pill` partial.
+  CodeRabbit's review on PR #54 caught two real, fixed gaps: the Low Stock Products card linked to
+  the full active product list rather than the actual low-stock subset (unlike the other three
+  cards, which each land pre-filtered on their own matching queue) — fixed by adding real
+  `low_stock=1` query-param support to `_filtered_products`/`catalog_product_list`, with the
+  amber/red stock-badge cutoff in `product_results.html` (previously an independently hardcoded
+  `10`) now reading the same `LOW_STOCK_THRESHOLD` constant so the two can never drift apart; and
+  the empty-state message on a zero-result low-stock view didn't account for that new filter. 16
+  tests cover every count's precise inclusion/exclusion logic (including the 7-day window boundary)
+  and the orders count-vs-value distinction. Shipped via PR #54, merged 2026-07-31; full suite
+  green throughout (1177 passed, 1 skipped).
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
