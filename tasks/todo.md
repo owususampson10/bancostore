@@ -197,6 +197,19 @@ guessed at.
   entry above). A fourth instance of full-suite-only flakiness, but a different root cause (SQLite
   locking, not query-count/response-content noise) than the three entries above it.
 
+## Known issues — surfaced by Task 30f's first-ever pip-audit run (2026-07-31)
+
+- [ ] `pip-audit -r requirements.txt` (added non-blocking in `.github/workflows/ci.yml` — see Task
+  30) surfaced a real backlog of pre-existing advisories across several packages, some of which are
+  deliberately pinned in this codebase for unrelated reasons documented in `requirements.txt`/
+  `CLAUDE.md` (e.g. `cbor2==5.5.0`, pinned because later versions need a Rust compiler this Mac
+  doesn't have): Django, `django-allauth`, Pillow, WeasyPrint, `cbor2`, pytest, and black each have
+  one or more open advisories. None triaged yet for reachability/exploitability in this codebase's
+  actual usage, and none of the fixed versions have been checked against this project's own pinning
+  constraints. Needs a dedicated `security-and-hardening` pass — per that skill's own triage
+  decision tree (severity, reachability, fix availability) — before any of these are upgraded, one
+  package at a time per this project's dependency-upgrade discipline, not a bulk bump.
+
 ---
 
 ## Phase 0: Foundation
@@ -4561,6 +4574,147 @@ task's code. Live-browser-verified at 1440px and 500px widths (desktop nav, mobi
 form submission + success flash message, empty-state contact-channel display all checked against
 the running `runserver`), per this task's own acceptance criteria. Shipped via PR #56 (task branch
 `task-29-about-contact-pages`), merged into `main`.
+
+---
+
+### Task 30: Fix tracked Known Issues — decorative constance settings, session engine, CI hygiene
+
+**Description:** Not in the original plan — addresses specific items from this file's own "Known
+issues — tracked, not blocking" sections (2026-07-11/12), per explicit user go-ahead. A code
+investigation (`agent-skills:planning-and-task-breakdown`) confirmed 7 `AUTHENTICATION_SETTINGS`
+constance settings are **100% decorative** — each appears exactly once in the whole codebase, in
+its own `apps/platform_settings/config.py` declaration, read by nothing. Split into 6 vertical
+slices, each independently shippable:
+
+- **30a — Password policy enforcement** (`MIN_PASSWORD_LENGTH`, `PASSWORD_COMPLEXITY_ENABLED`):
+  Django's `AUTH_PASSWORD_VALIDATORS` is a static list evaluated once at process start, so it can't
+  read a live, admin-editable constance value — needs custom validator classes that read
+  `constance.config` inside their own `validate()` method instead of `settings.py`-time options.
+  `PASSWORD_COMPLEXITY_ENABLED`'s described behavior ("must contain numbers and capital letters")
+  has **no existing enforcement mechanism at all** to gate — this is new validator logic, not just
+  wiring an existing one.
+- **30b — Session timeout enforcement** (`SESSION_TIMEOUT_MINUTES`, `ADMIN_SESSION_TIMEOUT_MINUTES`):
+  no `SESSION_COOKIE_AGE` override and no `request.session.set_expiry()` call exists anywhere today
+  — every session (admin included) currently uses Django's hardcoded 2-week default with no
+  idle-timeout logic. Needs middleware that calls `set_expiry()` per-request, using the admin value
+  for staff and the regular value otherwise.
+- **30c — Google login (customers) wired for real**: `GOOGLE_LOGIN_CUSTOMERS_ENABLED` currently has
+  no code path — the button's visibility is driven entirely by whether a Google `SocialApp` DB row
+  exists, via allauth's own `{% get_providers %}` tag. Gate that existing template block with this
+  flag too (AND the two conditions), so an admin can hide the button even when a `SocialApp` is
+  configured — but toggling the flag "on" alone can never show a button with no `SocialApp`
+  configured; that DB dependency isn't something a flag alone can satisfy, and the fieldset help
+  text should say so honestly.
+- **30d — Honest documentation for the 3 settings NOT being wired this round** (user-confirmed
+  scope, not a silent skip):
+  - `ADMIN_2FA_METHOD` default is actively wrong (`"sms"`) — no SMS 2FA delivery exists anywhere in
+    this codebase (`otp_totp`/`otp_static` are the only registered django-otp plugins;
+    `two_factor.plugins.phonenumber` handles login-identification, not a delivery channel). Fix the
+    default to `"authenticator_app"` and correct the help text to state SMS isn't implemented.
+  - `PASSWORD_RESET_EXPIRY_MINUTES` (customer email-reset-link expiry only — distributor reset
+    already uses the separate, working `OTP_CODE_EXPIRY_MINUTES`): making this live would require a
+    custom password-reset token generator instead of Django's static `PASSWORD_RESET_TIMEOUT`
+    setting — real but security-token-adjacent code, deferred to its own future task with a
+    `doubt-driven-development` pass rather than rushed into this batch. Help text updated to state
+    this plainly.
+  - `GOOGLE_LOGIN_DISTRIBUTORS_ENABLED` has zero code path — distributor login has no Google
+    markup at all, and an existing regression test
+    (`test_distributor_login_page_has_no_google_login_option`) locks in "always absent." Real
+    distributor Google login (account linking, KYC/group implications) is a new feature, not a
+    wiring fix — help text updated to state the flag currently has no effect.
+- **30e — `SESSION_ENGINE` DB fallback**: switch from
+  `"django.contrib.sessions.backends.cache"` to `"django.contrib.sessions.backends.cached_db"` so a
+  Redis eviction/restart no longer logs out every user platform-wide (including admin's
+  mandatory-2FA state) — `django.contrib.sessions` is already an installed app, so the DB-backed
+  fallback table already exists with no new migration needed.
+- **30f — CI hygiene** (`.github/workflows/ci.yml`): add an explicit `permissions:` block (defaults
+  are broader `GITHUB_TOKEN` scope than this workflow needs — it only ever reads/tests, never
+  writes), pin `actions/checkout@v4`/`actions/setup-python@v5` to a commit SHA instead of a mutable
+  tag (real SHAs resolved from GitHub's API for each action's latest v4.x/v5.x release, not
+  guessed), and add a `pip-audit` dependency-vulnerability-scan step.
+
+**Acceptance criteria:**
+- [x] 30a: registering with a password shorter than the live `MIN_PASSWORD_LENGTH` value is
+      rejected; changing the constance value at runtime (no restart) changes the enforced minimum;
+      `PASSWORD_COMPLEXITY_ENABLED=True` rejects a password with no uppercase letter or no digit,
+      `False` allows it
+- [x] 30b: an authenticated non-staff session's expiry matches the live `SESSION_TIMEOUT_MINUTES`
+      value in seconds; an authenticated staff session's expiry matches
+      `ADMIN_SESSION_TIMEOUT_MINUTES` instead
+- [x] 30c: with a `SocialApp` configured, the customer Google button is hidden when
+      `GOOGLE_LOGIN_CUSTOMERS_ENABLED=False` and shown when `True`; with no `SocialApp` configured
+      the button stays hidden regardless of the flag
+- [x] 30d: `ADMIN_2FA_METHOD`'s default is `"authenticator_app"`; all three help texts (this,
+      `PASSWORD_RESET_EXPIRY_MINUTES`, `GOOGLE_LOGIN_DISTRIBUTORS_ENABLED`) accurately describe
+      current (non-)enforcement, no code behavior otherwise changes
+- [x] 30e: `SESSION_ENGINE` is `cached_db`; an existing session survives a `cache.clear()` (the
+      exact failure mode a Redis eviction/restart would otherwise cause)
+- [x] 30f: `ci.yml` has an explicit top-level `permissions:` block, both pinned actions reference a
+      commit SHA (with the human-readable version as a trailing comment, GitHub's own recommended
+      pattern), and a new step runs `pip-audit` against `requirements.txt`
+
+**Verification:**
+- [x] pytest: new tests for each slice (30a password validators, 30b session expiry, 30c Google
+      button gating, 30e session survives cache clear) — RED before the fix, GREEN after
+- [x] 30d needs no new test (pure config-value/help-text change) — confirmed via
+      `python manage.py shell` reading the live default
+- [x] 30f verified by the CI run on the PR actually executing with the new permissions
+      block/pinned SHAs/pip-audit step and passing
+- [x] Full suite green after every slice, not just the new tests
+- [x] `doubt-driven-development` pass before 30a/30b (auth-adjacent, security-relevant), given no
+      existing pattern in this codebase reads a constance value from inside a password validator or
+      session middleware yet
+- [x] `security-and-hardening` pass across all 6 slices before merge
+
+**Closed out 2026-07-31.** All 6 slices shipped together. A `doubt-driven-development` pass (a
+fresh-context security-auditor agent) ran on the 30a/30b design before any code was written and
+found 2 High findings (both addressed before implementation: dropped an unnecessary
+`SESSION_SAVE_EVERY_REQUEST` setting entirely — `set_expiry()` already marks a session `modified`
+on its own, so it added nothing but a blast-radius cost on every anonymous storefront session too)
+plus Medium findings folded into the design: an `ABSOLUTE_MIN_PASSWORD_LENGTH=6` floor clamped
+inside the validator so an admin fat-fingering `MIN_PASSWORD_LENGTH` to 0 can't fully disable the
+control, and a `try/except` around every `constance.config` read that degrades to a safe hardcoded
+default with a logged warning rather than crashing every password-set/session-check/page-load
+during a Redis outage — applied consistently across all three new modules
+(`apps/accounts/validators.py`, `middleware.py`, `context_processors.py`).
+
+A `code-review-and-quality` pass (a fresh-context code-reviewer agent) approved with two Important
+follow-ups, both fixed before merge: a stale hardcoded "Must be at least 8 characters" hint in
+`templates/account/password_reset_from_key.html` and
+`templates/distributors/set_new_password.html` directly undermined 30a's own point (an admin
+raising `MIN_PASSWORD_LENGTH` would leave the page telling users the old, wrong number) — removed
+entirely, matching `signup.html`'s own existing convention of showing only real validator errors,
+no static hint; and `SessionTimeoutMiddleware` calling `set_expiry()` unconditionally on every
+authenticated request, compounded by 30e's `cached_db` engine, meant a new DB write on the
+single hottest path in a system scoped for hundreds of thousands of users — fixed by only
+renewing once the session's remaining age has drifted outside `[target/2, target]`, with 2 new
+regression tests proving both the skip and the eventual renewal.
+
+A real regression surfaced during full-suite verification, root-caused via
+`debugging-and-error-recovery`: two pre-existing tests in
+`tests/feature/distributors/test_distributor_auth.py` directly poked a raw `PhoneNumber` object
+into the session (bypassing the real view, which always stores `str(phone_number)`) — this only
+"worked" under the old `cache` session engine (which never actually JSON-serializes, letting
+`django_redis` pickle arbitrary objects transparently) and broke under 30e's `cached_db` (which
+does serialize, since it also persists to the `django_session` DB table). Confirmed via full
+traceback this was a test bug, not a production bug — both real write sites already stringify
+before storing — and fixed the two tests to match production's own convention. A second,
+unrelated false failure (`test_distributor_login_is_rate_limited_per_ip`) was traced to two stray
+`runserver` processes left running from earlier browser-verification work sharing the same Redis
+instance as pytest — the exact interference pattern this file's own "Known issues" section already
+documents; stopping those processes made the test pass immediately, confirming zero relation to
+this task's code. Full suite green throughout. Shipped via PR #57.
+
+**Dependencies:** None (all 6 slices are independent of each other and can ship in any order)
+
+**Files likely touched:** `apps/accounts/validators.py` (new, 30a), `bancostore/settings.py`
+(`AUTH_PASSWORD_VALIDATORS`, `SESSION_ENGINE`, new middleware registration), `apps/accounts/`
+(new session-timeout middleware, 30b), `templates/account/login.html`/`signup.html` (30c),
+`apps/platform_settings/config.py` (30d), `.github/workflows/ci.yml` (30f), plus a `tests/` file
+per slice
+
+**Estimated scope:** each slice S; 30a/30b are the two carrying real new logic, 30c/30d/30e/30f are
+smaller
 
 ---
 

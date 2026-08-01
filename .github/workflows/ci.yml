@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [main]
 
+# Task 30f: this workflow only ever checks out code, installs deps, and
+# runs lint/tests -- it never comments on PRs, writes to the repo, or
+# publishes anything, so the default (broader) GITHUB_TOKEN scope is more
+# than it needs. Explicit at the workflow level so every job inherits it;
+# no job here needs anything wider.
+permissions:
+  contents: read
+
 jobs:
   lint:
     # A separate, independent job from `test` -- not just an earlier step
@@ -20,10 +28,12 @@ jobs:
     # each report their own real status, always.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
           cache: "pip"
@@ -36,6 +46,18 @@ jobs:
           black --check .
           isort --check .
           ruff check .
+
+      # Report-only for now (Task 30f) -- this is the first time a
+      # vulnerability scan has ever run against this dependency set, and
+      # it surfaces a real backlog of pre-existing findings across
+      # several deliberately-pinned packages (see requirements.txt's own
+      # pinning comments, e.g. cbor2) that need a dedicated triage/
+      # upgrade pass, not a blocking gate sprung on every future PR
+      # before that triage happens. `|| true` keeps this step green
+      # regardless of findings; the output is still visible in the CI
+      # log for anyone checking.
+      - name: Dependency vulnerability scan (pip-audit, non-blocking)
+        run: pip-audit -r requirements.txt || true
 
   test:
     runs-on: ubuntu-latest
@@ -84,10 +106,12 @@ jobs:
       CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
           cache: "pip"

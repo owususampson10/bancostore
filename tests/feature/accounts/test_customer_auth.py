@@ -5,6 +5,7 @@ from django.core import mail
 from django.urls import reverse
 
 import pytest
+from constance import config
 
 from apps.accounts.models import CustomerProfile
 
@@ -45,6 +46,53 @@ def test_customer_can_register_logout_and_login(client):
 
     assert login_response.status_code == 302
     assert int(client.session["_auth_user_id"]) == user.id
+
+
+@pytest.mark.django_db
+def test_registration_enforces_the_live_min_password_length(client):
+    """Task 30a: MIN_PASSWORD_LENGTH was previously fully decorative --
+    confirms an admin-editable value is actually enforced end-to-end
+    through the real registration endpoint, not just at the validator
+    unit level."""
+    config.MIN_PASSWORD_LENGTH = 12
+
+    response = client.post(
+        reverse("account_signup"),
+        {
+            "full_name": "Kojo Boateng",
+            "email": "kojo@example.test",
+            "phone_number": "+233241234568",
+            "password1": "Sh0rt-Px!",
+            "password2": "Sh0rt-Px!",
+            "terms_accepted": "on",
+        },
+    )
+
+    assert response.status_code == 200
+    assert not User.objects.filter(email="kojo@example.test").exists()
+
+
+@pytest.mark.django_db
+def test_registration_enforces_password_complexity_when_enabled(client):
+    """Task 30a: PASSWORD_COMPLEXITY_ENABLED had no enforcement mechanism
+    at all before this -- confirms a password with no uppercase letter
+    and no digit is rejected end-to-end when the flag is on."""
+    config.PASSWORD_COMPLEXITY_ENABLED = True
+
+    response = client.post(
+        reverse("account_signup"),
+        {
+            "full_name": "Adjoa Sarpong",
+            "email": "adjoa@example.test",
+            "phone_number": "+233241234569",
+            "password1": "all-lowercase-no-digits",
+            "password2": "all-lowercase-no-digits",
+            "terms_accepted": "on",
+        },
+    )
+
+    assert response.status_code == 200
+    assert not User.objects.filter(email="adjoa@example.test").exists()
 
 
 @pytest.mark.django_db

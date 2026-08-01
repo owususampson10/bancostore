@@ -318,6 +318,13 @@ Criteria.
   and the already-seeded-but-unused `CONTACT_*`/`PHYSICAL_ADDRESS` constance settings, never
   fabricated. Closed out 2026-07-31. See `tasks/todo.md` for the full breakdown.
 
+- [x] Task 30: Fix tracked Known Issues (decorative constance settings, `SESSION_ENGINE` DB
+  fallback, CI hygiene) — 6 vertical slices (30a-30f), per explicit user go-ahead 2026-07-31. Two
+  scope decisions were user-confirmed rather than assumed: `PASSWORD_RESET_EXPIRY_MINUTES` and
+  `GOOGLE_LOGIN_DISTRIBUTORS_ENABLED` get honest "not yet enforced" documentation instead of new
+  security-token/distributor-Google-login feature builds. Closed out 2026-07-31 — PR #57. See
+  `tasks/todo.md` for the full breakdown.
+
 ### Phase 10: Deployment
 - [ ] Task 24: Deploy to Hostinger VPS (production) — **needs Hostinger KVM 2 VPS provisioned
   first, and a CI provider confirmed (Open Question #1) before this task starts**
