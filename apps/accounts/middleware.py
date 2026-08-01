@@ -1,8 +1,25 @@
 import logging
 
+from django.utils import timezone
+
 from constance import config
 
 logger = logging.getLogger(__name__)
+
+# Session key holding the timestamp (ISO string) of the last time this
+# middleware actually called set_expiry(). CodeRabbit finding: Django's
+# request.session.get_expiry_age() does NOT decay over real elapsed
+# time once set_expiry() is given a plain integer -- it stores that
+# integer as-is in `_session_expiry` and returns it unchanged on every
+# later call (confirmed against Django's own source; it only decays
+# when set_expiry() is given a datetime/timedelta instead). Using
+# get_expiry_age() to detect "has enough time passed to renew" is
+# therefore permanently wrong for an integer-based expiry -- it would
+# never trigger a second renewal, silently freezing the session's real
+# absolute expiry at whatever it was computed as during the first
+# renewal. Tracking elapsed time via our own timestamp sidesteps that
+# entirely.
+_RENEWED_AT_SESSION_KEY = "_session_timeout_renewed_at"
 
 
 class SessionTimeoutMiddleware:
@@ -58,17 +75,22 @@ class SessionTimeoutMiddleware:
                 # (Redis, and -- since Task 30e's cached_db engine --
                 # the django_session DB table too), the hottest path in
                 # a system scoped for hundreds of thousands of users.
-                # Only renew once the remaining age has drifted outside
-                # [target/2, target] -- a fresh/never-set session starts
-                # at Django's 2-week SESSION_COOKIE_AGE default (well
-                # above target, so it renews immediately), and afterwards
-                # only renews again once genuinely more than half the
-                # window has elapsed. Still guarantees the idle timeout
-                # is enforced (a session is never more than target
-                # seconds old when actually acted on), just without a
-                # write on every single request.
+                # Only renew once real elapsed time since the last
+                # renewal has passed half the window -- still guarantees
+                # the idle timeout is enforced (a session is never more
+                # than target seconds old when actually acted on), just
+                # without a write on every single request. A session
+                # with no renewal timestamp yet (new login, or one that
+                # predates this middleware) always renews immediately.
                 target_seconds = minutes * 60
-                current_age = request.session.get_expiry_age()
-                if not (target_seconds / 2 <= current_age <= target_seconds):
+                now = timezone.now()
+                renewed_at_iso = request.session.get(_RENEWED_AT_SESSION_KEY)
+                needs_renewal = True
+                if renewed_at_iso:
+                    renewed_at = timezone.datetime.fromisoformat(renewed_at_iso)
+                    elapsed_seconds = (now - renewed_at).total_seconds()
+                    needs_renewal = elapsed_seconds >= target_seconds / 2
+                if needs_renewal:
                     request.session.set_expiry(target_seconds)
+                    request.session[_RENEWED_AT_SESSION_KEY] = now.isoformat()
         return self.get_response(request)

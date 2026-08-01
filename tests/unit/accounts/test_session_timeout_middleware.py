@@ -1,7 +1,9 @@
+from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.sessions.backends.db import SessionStore
+from django.utils import timezone
 
 import pytest
 from constance import config
@@ -53,7 +55,18 @@ def test_does_not_re_renew_a_session_that_was_just_renewed():
     a Redis + django_session DB write (Task 30e's cached_db engine) on
     the hottest path in the app. Once a session has just been renewed
     (well within the configured window), a second call in quick
-    succession must not force another write."""
+    succession must not force another write.
+
+    CodeRabbit finding: request.session.get_expiry_age() does NOT decay
+    over real elapsed time once set_expiry() is given a plain integer --
+    Django stores that integer as-is and returns it unchanged on every
+    later call (it only decays when set_expiry() is given a datetime/
+    timedelta instead). An earlier version of this middleware/test used
+    get_expiry_age() to detect drift, which is permanently wrong for an
+    integer-based expiry -- verified against Django's own source. This
+    test (and the one below) instead tracks elapsed real time by mocking
+    django.utils.timezone.now(), matching how the middleware itself must
+    track it."""
     config.SESSION_TIMEOUT_MINUTES = 45
     user = User.objects.create_user(username="ama@example.test", password="pw")
     request = _request_for(user)
@@ -67,21 +80,26 @@ def test_does_not_re_renew_a_session_that_was_just_renewed():
 
 
 @pytest.mark.django_db
-def test_re_renews_once_the_session_has_drifted_past_half_the_window():
+def test_re_renews_once_real_elapsed_time_passes_half_the_window():
     config.SESSION_TIMEOUT_MINUTES = 45
     user = User.objects.create_user(username="ama@example.test", password="pw")
     request = _request_for(user)
     middleware = SessionTimeoutMiddleware(get_response=lambda r: "response")
-    middleware(request)
+    now = timezone.now()
 
-    # Simulate time having passed: the session is now well past the
-    # halfway point of its 45-minute window.
-    request.session.set_expiry((45 * 60 // 2) - 60)
-
-    with patch.object(
-        request.session, "set_expiry", wraps=request.session.set_expiry
-    ) as mock_set_expiry:
+    with patch("apps.accounts.middleware.timezone.now", return_value=now):
         middleware(request)
+
+    # Real wall-clock time has advanced past half the 45-minute window --
+    # get_expiry_age() would still (wrongly) report the original 45*60
+    # unchanged, since it never decays for an integer-based expiry. The
+    # middleware must track this via its own stored timestamp instead.
+    later = now + timedelta(minutes=23)
+    with patch("apps.accounts.middleware.timezone.now", return_value=later):
+        with patch.object(
+            request.session, "set_expiry", wraps=request.session.set_expiry
+        ) as mock_set_expiry:
+            middleware(request)
 
     mock_set_expiry.assert_called_once_with(45 * 60)
 
@@ -122,12 +140,16 @@ class _ExplodingConfig:
 def test_falls_back_gracefully_if_constance_is_unreachable():
     """Security-review finding: a Redis outage must not crash every
     single authenticated request in the app -- the session's own expiry
-    is simply left unchanged this request rather than raising."""
+    is simply left unchanged this request rather than raising.
+    CodeRabbit finding: assert the fallback contract itself (expiry
+    genuinely unchanged), not just that a response came back."""
     user = User.objects.create_user(username="ama@example.test", password="pw")
     request = _request_for(user)
+    original_expiry_age = request.session.get_expiry_age()
     middleware = SessionTimeoutMiddleware(get_response=lambda r: "response")
 
     with patch("apps.accounts.middleware.config", new=_ExplodingConfig()):
         result = middleware(request)
 
     assert result == "response"
+    assert request.session.get_expiry_age() == original_expiry_age

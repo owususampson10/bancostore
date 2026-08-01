@@ -69,7 +69,8 @@ I agree to the <a class="text-primary hover:underline" href="#">Terms of Service
 <span class="material-symbols-outlined group-hover:translate-x-1 transition-transform" style="font-size: 18px;">arrow_forward</span>
 </button>
 {% get_providers as socialaccount_providers %}
-{% if socialaccount_providers and google_login_customers_enabled %}
+{% for provider in socialaccount_providers %}
+{% if provider.id == "google" and google_login_customers_enabled %}
 <div class="relative flex items-center py-stack-md">
 <div class="flex-grow border-t border-outline-variant"></div>
 <span class="flex-shrink mx-4 font-label-md text-label-md text-gray-muted">OR</span>
@@ -85,6 +86,7 @@ I agree to the <a class="text-primary hover:underline" href="#">Terms of Service
 <span>Continue with Google</span>
 </a>
 {% endif %}
+{% endfor %}
 </form>
 </div>
 <div class="bg-surface-container-low py-stack-md text-center border-t border-outline-variant">
