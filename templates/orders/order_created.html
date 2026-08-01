@@ -2,84 +2,78 @@
 {% load humanize %}
 {% block title %}Bancostore | {% if order.status == "confirmed" %}Order Confirmed{% elif order.status == "cancelled" %}Order Cancelled{% elif order.status == "processing" %}Order Processing{% elif order.status == "dispatched" %}Order Dispatched{% elif order.status == "delivered" %}Order Delivered{% elif order.status == "refunded" %}Order Refunded{% else %}Order Placed{% endif %}{% endblock %}
 {% block content %}
-<div class="max-w-[720px] mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-24 text-center">
+<div class="max-w-[1120px] mx-auto px-margin-mobile md:px-margin-desktop py-12 md:py-20">
 
 {% comment %}
-Task 17d Slice 3: built from the fetched Stitch screens ("Order
-Confirmation - Bancostore (Success)"/"(Vibrant Colors - Mobile)",
-"Order Unavailable - Bancostore (Refund Pending)"/"(Refund Pending -
-Mobile)"), reconciled against this project's real header/footer
-(base_store.html) and design tokens rather than the mockups' own
-standalone ones. Dropped from the mockups: the fake nav/footer, and --
-important -- both mockups fabricated an automated refund timeline and a
-fake step-by-step progress tracker for the unavailable state. This
-codebase's actual, confirmed design (2026-07-25) is manual admin
-follow-up with no automated Paystack Refund API integration and no
-tracked timeline (see
-apps/orders/services.py::_cancel_order_for_insufficient_stock) --
-showing either fabricated claim here would promise the customer
-something the backend cannot yet do.
+Split-view redesign (2026-08-01), rebuilt a second time against the actual
+generated HTML source of the "Order Confirmation - Split View Variant"
+Stitch screen (project 14456046746368120137) -- the first pass worked from
+a downscaled screenshot and drifted on several details the source makes
+explicit: a 7/5 (not 5/7) column split, a filled check_circle icon on a
+tinted bg-primary-fixed-dim/20 circle (not an outline ring), same-size
+buttons in a single flex-row from `sm:` up (the earlier `lg:flex-col
+xl:flex-row` combination is what caused "View Order Status" to wrap onto
+two lines), and Delivery Info living inside its own bg-surface-container-low
+box rather than sitting on the bare card background. The separate orange
+"confirmation sent" notice from the first pass is gone too -- the source
+folds that sentence into the intro paragraph instead. Every per-status
+branch from the original Task 17d Slice 3 build is kept (still no
+fabricated refund timeline for the "unavailable" state -- see
+apps/orders/services.py::_cancel_order_for_insufficient_stock).
 {% endcomment %}
+
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
+
+<div class="lg:col-span-7 text-center lg:text-left">
 
 {% if order.status == "confirmed" %}
-<div class="w-20 h-20 rounded-full bg-primary-fixed flex items-center justify-center mx-auto mb-6">
-<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<div class="w-16 h-16 rounded-full bg-primary-fixed-dim/20 flex items-center justify-center mx-auto lg:mx-0 mb-4">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1, 'wght' 700;">check_circle</span>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Confirmed</h1>
-<p class="text-secondary mb-8 max-w-md mx-auto">Thank you for your purchase. We've received your order and it's being prepared.</p>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-4">Order Confirmed</h1>
+<p class="text-secondary text-lg mb-8 max-w-xl mx-auto lg:mx-0">Thank you for your purchase. We've received your order and our team is already getting it ready for dispatch. A confirmation SMS{% if order.email %} and email{% endif %} has been sent to you.</p>
 
 {% elif order.status == "cancelled" %}
-{% comment %}
-Task 25 code review: this copy originally assumed the ONLY way an order
-reaches "cancelled" is Task 17d's own insufficient-stock auto-cancel
-(_cancel_order_for_insufficient_stock). That was true when this page was
-reachable only via the one-time post-checkout redirect. Task 18b's
-cancel_or_refund_order lets an admin cancel an order for any reason, and
-order_detail now makes every order permanently reachable regardless of
-cause -- asserting "an item became unavailable" on an order actually
-cancelled for, say, a customer request would be misinformation. Kept
-deliberately cause-agnostic instead.
-{% endcomment %}
-<div class="w-20 h-20 rounded-full bg-surface-container flex items-center justify-center mx-auto mb-6">
-<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true">inventory_2</span>
+<div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center mx-auto lg:mx-0 mb-4">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1, 'wght' 700;">inventory_2</span>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Cancelled</h1>
-<p class="text-secondary mb-8 max-w-md mx-auto">This order was cancelled. If you were charged, our team will process any applicable refund.</p>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-4">Order Cancelled</h1>
+<p class="text-secondary text-lg mb-8 max-w-xl mx-auto lg:mx-0">This order was cancelled. If you were charged, our team will process any applicable refund.</p>
 
 {% elif order.status == "pending" %}
-<div class="w-20 h-20 rounded-full bg-surface-container flex items-center justify-center mx-auto mb-6">
-<span class="material-symbols-outlined text-secondary text-[40px]" aria-hidden="true">hourglass_top</span>
+<div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center mx-auto lg:mx-0 mb-4">
+<span class="material-symbols-outlined text-secondary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1, 'wght' 700;">hourglass_top</span>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Awaiting Payment Confirmation</h1>
-<p class="text-secondary mb-8 max-w-md mx-auto">We haven't received confirmation of your payment yet. If you just completed payment on Paystack, refresh this page in a moment.</p>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-4">Awaiting Payment Confirmation</h1>
+<p class="text-secondary text-lg mb-8 max-w-xl mx-auto lg:mx-0">We haven't received confirmation of your payment yet. If you just completed payment on Paystack, refresh this page in a moment.</p>
 
 {% elif order.status == "processing" %}
-<div class="w-20 h-20 rounded-full bg-primary-fixed flex items-center justify-center mx-auto mb-6">
-<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true">inventory_2</span>
+<div class="w-16 h-16 rounded-full bg-primary-fixed-dim/20 flex items-center justify-center mx-auto lg:mx-0 mb-4">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1, 'wght' 700;">inventory_2</span>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Processing</h1>
-<p class="text-secondary mb-8 max-w-md mx-auto">We're preparing your order for dispatch.</p>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-4">Order Processing</h1>
+<p class="text-secondary text-lg mb-8 max-w-xl mx-auto lg:mx-0">We're preparing your order for dispatch.</p>
 
 {% elif order.status == "dispatched" %}
-<div class="w-20 h-20 rounded-full bg-primary-fixed flex items-center justify-center mx-auto mb-6">
-<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true">local_shipping</span>
+<div class="w-16 h-16 rounded-full bg-primary-fixed-dim/20 flex items-center justify-center mx-auto lg:mx-0 mb-4">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1, 'wght' 700;">local_shipping</span>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Dispatched</h1>
-<p class="text-secondary mb-8 max-w-md mx-auto">Your order is on its way to you.</p>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-4">Order Dispatched</h1>
+<p class="text-secondary text-lg mb-8 max-w-xl mx-auto lg:mx-0">Your order is on its way to you.</p>
 
 {% elif order.status == "delivered" %}
-<div class="w-20 h-20 rounded-full bg-primary-fixed flex items-center justify-center mx-auto mb-6">
-<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<div class="w-16 h-16 rounded-full bg-primary-fixed-dim/20 flex items-center justify-center mx-auto lg:mx-0 mb-4">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1, 'wght' 700;">check_circle</span>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Delivered</h1>
-<p class="text-secondary mb-8 max-w-md mx-auto">Your order has been delivered. We hope you enjoy it!</p>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-4">Order Delivered</h1>
+<p class="text-secondary text-lg mb-8 max-w-xl mx-auto lg:mx-0">Your order has been delivered. We hope you enjoy it!</p>
 
 {% elif order.status == "refunded" %}
-<div class="w-20 h-20 rounded-full bg-surface-container flex items-center justify-center mx-auto mb-6">
-<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true">currency_exchange</span>
+<div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center mx-auto lg:mx-0 mb-4">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1, 'wght' 700;">currency_exchange</span>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Refunded</h1>
-<p class="text-secondary mb-8 max-w-md mx-auto">This order has been refunded. Contact support if you have any questions.</p>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-4">Order Refunded</h1>
+<p class="text-secondary text-lg mb-8 max-w-xl mx-auto lg:mx-0">This order has been refunded. Contact support if you have any questions.</p>
 
 {% else %}
 {% comment %}
@@ -87,19 +81,39 @@ Defensive fallback only -- every Order.Status value (apps/orders/models.py)
 has its own branch above. Reachable only if that enum ever grows a new
 value this template hasn't been updated for.
 {% endcomment %}
-<div class="w-20 h-20 rounded-full bg-primary-fixed flex items-center justify-center mx-auto mb-6">
-<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true">receipt_long</span>
+<div class="w-16 h-16 rounded-full bg-primary-fixed-dim/20 flex items-center justify-center mx-auto lg:mx-0 mb-4">
+<span class="material-symbols-outlined text-primary text-[40px]" aria-hidden="true" style="font-variation-settings: 'FILL' 1, 'wght' 700;">receipt_long</span>
 </div>
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-2">Order Placed</h1>
-<p class="text-secondary mb-8 max-w-md mx-auto">Your order is being processed.</p>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-4">Order Placed</h1>
+<p class="text-secondary text-lg mb-8 max-w-xl mx-auto lg:mx-0">Your order is being processed.</p>
 {% endif %}
 
-<div class="bg-surface-container-low border border-outline-variant rounded-xl p-6 mb-8 flex flex-col md:flex-row justify-between gap-4 text-left">
+<div class="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
+<a href="{% url 'catalog:product_list' %}" class="bg-primary text-on-primary font-semibold px-10 py-4 rounded-lg hover:brightness-110 transition-all flex items-center justify-center gap-2">
+Continue Shopping
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">arrow_forward</span>
+</a>
+{% if is_confirmation and user.is_authenticated and order.customer_id == user.id %}
+<a href="{% url 'orders:order_detail' order.pk %}" class="border border-on-surface text-on-surface font-semibold px-10 py-4 rounded-lg hover:bg-surface-container-high transition-all flex items-center justify-center gap-2">
+View Order Status
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">receipt_long</span>
+</a>
+{% endif %}
+</div>
+
+<p class="text-secondary pt-8">Having trouble? <a href="{% url 'pages:contact' %}" class="text-primary font-bold hover:underline">Contact our 24/7 Support Team</a></p>
+
+</div>
+
+<aside class="lg:col-span-5 lg:sticky lg:top-[100px]">
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 md:p-8 shadow-sm text-left">
+
+<div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 pb-8 border-b border-outline-variant/50">
 <div>
 <p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Order Reference</p>
-<p class="font-mono text-on-surface">{{ order.payment_reference }}</p>
+<p class="font-mono text-lg text-primary tracking-wide break-all">{{ order.payment_reference }}</p>
 </div>
-<div class="md:text-right">
+<div class="sm:text-right">
 <p class="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Order Total</p>
 <p class="font-headline-md text-headline-md text-on-surface">GHS {{ order.total|intcomma }}</p>
 </div>
@@ -107,20 +121,19 @@ value this template hasn't been updated for.
 
 {% if order.status != "pending" %}
 {% comment %}
-Task 25: broadened from `== "confirmed"` -- this template is now also
-reused by order_detail (a permanent, all-statuses history page), and the
+Task 25: broadened from `== "confirmed"` -- this template is also reused
+by order_detail (a permanent, all-statuses history page), and the
 original condition meant a processing/dispatched/delivered/refunded
 order (where an order spends most of its life) showed no items and no
-delivery info at all, just the bare "Order Placed" header above. Only
-"pending" (no confirmed payment yet, nothing to show) is excluded.
+delivery info at all. Only "pending" (no confirmed payment yet, nothing
+to show) is excluded.
 {% endcomment %}
-<div class="grid grid-cols-1 md:grid-cols-12 gap-6 text-left mb-8">
-<div class="md:col-span-7 bg-surface-container-low border border-outline-variant rounded-lg p-6">
-<h3 class="text-xs font-bold uppercase tracking-widest text-secondary mb-4">Order Summary</h3>
+<div class="space-y-4 mb-8">
+<h3 class="text-xs font-bold uppercase tracking-widest text-secondary">Order Summary</h3>
 <div class="space-y-4">
 {% for item in order.items.all %}
-<div class="flex justify-between items-center {% if not forloop.last %}pb-3 border-b border-outline-variant/30{% endif %}">
-<div class="flex items-center gap-4">
+<div class="flex justify-between items-center gap-4 {% if not forloop.last %}pb-3 border-b border-outline-variant/30{% endif %}">
+<div class="flex items-center gap-4 min-w-0">
 <div class="w-12 h-12 bg-surface-variant rounded-md overflow-hidden flex-shrink-0 flex items-center justify-center">
 {% if item.product.primary_image %}
 <img class="w-full h-full object-cover" src="{{ item.product.primary_image.image.url }}" alt="{{ item.product_name }}">
@@ -128,36 +141,31 @@ delivery info at all, just the bare "Order Placed" header above. Only
 <span class="material-symbols-outlined text-gray-400" aria-hidden="true">image</span>
 {% endif %}
 </div>
-<div>
-<p class="font-semibold text-on-surface">{{ item.product_name }}</p>
+<div class="min-w-0">
+<p class="font-semibold text-sm text-on-surface truncate">{{ item.product_name }}</p>
 <p class="text-xs text-secondary">Quantity: {{ item.quantity }}</p>
 </div>
 </div>
-<span class="font-mono text-secondary">GHS {{ item.line_total|intcomma }}</span>
+<span class="font-mono text-sm text-secondary flex-shrink-0">GHS {{ item.line_total|intcomma }}</span>
 </div>
 {% endfor %}
 </div>
 </div>
-<div class="md:col-span-5 bg-surface-container-low border border-outline-variant rounded-lg p-6">
-<h3 class="text-xs font-bold uppercase tracking-widest text-secondary mb-4">Delivery Info</h3>
-<div class="flex items-start gap-3 mb-6">
-<span class="material-symbols-outlined text-primary mt-1" aria-hidden="true">{% if order.delivery_method == "pickup" %}store{% else %}local_shipping{% endif %}</span>
+<div class="bg-surface-container-low rounded-lg p-5">
+<h3 class="text-xs font-bold uppercase tracking-widest text-secondary mb-3">Delivery Info</h3>
+<div class="flex items-start gap-3">
+<span class="material-symbols-outlined text-primary text-[20px] mt-0.5" aria-hidden="true">{% if order.delivery_method == "pickup" %}store{% else %}local_shipping{% endif %}</span>
 <div>
-<p class="font-bold text-on-surface">{{ order.get_delivery_method_display }}</p>
+<p class="font-bold text-sm text-on-surface">{{ order.get_delivery_method_display }}</p>
 {% if order.delivery_zone %}<p class="text-secondary text-sm">{{ order.get_delivery_zone_display }}</p>{% endif %}
-</div>
-</div>
-<div class="p-3 bg-primary rounded-md text-on-primary text-sm">
-A confirmation SMS{% if order.email %} and email{% endif %} has been sent to you.
 </div>
 </div>
 </div>
 {% endif %}
 
-<a href="{% url 'catalog:product_list' %}" class="inline-flex items-center justify-center gap-2 bg-primary text-on-primary font-semibold px-8 py-3 rounded-full hover:brightness-110 transition-all">
-Continue Shopping
-<span class="material-symbols-outlined text-[20px]" aria-hidden="true">arrow_forward</span>
-</a>
+</div>
+</aside>
 
+</div>
 </div>
 {% endblock %}

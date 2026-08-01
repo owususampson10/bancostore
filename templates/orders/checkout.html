@@ -224,7 +224,7 @@ Delivery Method
 </div>
 <div class="flex justify-between text-secondary">
 <span>Delivery Fee</span>
-<span x-text="deliveryFee === null ? 'Select a delivery zone' : 'GHS ' + deliveryFee.toFixed(2)" :class="deliveryFee === null && 'italic'"></span>
+<span x-text="deliveryFee === null ? 'Select a delivery zone' : (deliveryFee === 0 ? 'Free' : 'GHS ' + deliveryFee.toFixed(2))" :class="deliveryFee === null ? 'italic' : deliveryFee === 0 && 'text-success font-semibold'"></span>
 </div>
 <div class="flex justify-between font-headline-md text-headline-md text-on-surface pt-2">
 <span>Total</span>

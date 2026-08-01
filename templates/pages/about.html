@@ -5,64 +5,168 @@
 
 {% block content %}
 {% comment %}
-Task 29: content grounded directly in SPEC.md's own Objective section --
-what Bancostore actually is and who it's for -- not an invented company
-history, founder story, or headcount, since none of that exists in any
-project doc. Same storefront-page layout convention as
-templates/orders/order_history.html (max-w container, font-headline-lg
-title, white cards on a light background).
+Full rebuild (2026-08-02) against the actual generated HTML source of the
+"About Bancostore - Layered Variant" Stitch screen (project
+14456046746368120137, fetched directly, not a screenshot). Replaces the
+original Task 29 build entirely -- that version had no Stitch source at
+all (content was written straight from SPEC.md's Objective section with a
+generic three-card grid). This version keeps that same real, non-fabricated
+content (no invented founder story, company history, headcount, or press)
+but in the source's own layered/staggered layout: an image-overlap hero,
+a drop-cap narrative section, and a staggered three-item "audience" list
+with large faint background numbers behind each icon (01/02/03) -- the
+one visual element from the source most at risk of getting silently
+dropped, so it's built exactly as generated: absolute-positioned,
+rgba(166,53,0,0.08), 120px, behind the icon via negative z-index.
+
+Decorative photos (hero image, floating circle) intentionally keep the
+Stitch-generated preview URLs as-is, per explicit instruction weighing
+pixel fidelity over the fact that those links live on Stitch's own
+preview CDN rather than an asset this project hosts -- a real risk if
+that CDN ever stops serving them, flagged and accepted, not silently
+carried forward.
 {% endcomment %}
-<div class="bg-[#f9f9f9] py-12 md:py-20 px-margin-mobile md:px-margin-desktop">
+
+<style>
+.about-drop-cap::first-letter {
+  float: left;
+  font-size: 5rem;
+  line-height: 1;
+  padding-right: 12px;
+  color: var(--color-primary);
+  font-weight: 800;
+}
+.about-staggered-number {
+  font-size: 120px;
+  line-height: 1;
+  font-weight: 800;
+  color: rgba(166, 53, 0, 0.08);
+  position: absolute;
+  z-index: -1;
+  top: -40px;
+  left: -20px;
+}
+.about-staggered-number.about-staggered-number-right {
+  left: auto;
+  right: -20px;
+}
+</style>
+
+{# Defensive overflow-x guard, scoped to this page only (not the shared body) -- matches the source's own `body { overflow-x: hidden }` safety net, needed because the narrative section's blurred accent circle and the audience section's large staggered numbers are both absolutely positioned near the viewport edge. #}
+<div class="overflow-x-hidden">
+
+{# Layered overlap hero -- a contained image card with the headline card overlapping its bottom edge #}
+<section class="relative pt-16 md:pt-24 pb-8 md:pb-16 max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop">
+<div class="relative w-full max-w-5xl mx-auto">
+<div class="aspect-[16/9] w-full rounded-2xl overflow-hidden shadow-2xl relative z-10">
+<img class="w-full h-full object-cover" alt="Premium lifestyle commerce environment" src="https://lh3.googleusercontent.com/aida/AP1WRLsIEPI59IO2iGVBwzlzOpFD4BUsJq7qNx-U99UOKYc02v0cyY0AwMPdurLOfn5wUzEeW5SGBcv8bZ-IUrhkb_jAz592w8c7V2-6sQFVZ4mf2a-xVo8a8YANI3FVjYhOOQ5nGUwqAA9g4IreA5Y_uC10gpgAThtnJWfSu9gX_QRoROcPHhoMWDKpr8Tc8nprdGXxxhWMnSCb0UwYRnhmfKd38kTr1dZM9TRc9c33eHqIaGbBocaqWh3ivNFs">
+<div class="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
+</div>
+<div class="relative z-20 -mt-16 md:-mt-20 max-w-2xl bg-surface/95 backdrop-blur-md p-6 md:p-8 rounded-xl shadow-lg border border-surface-container-high mx-auto md:mx-0">
+<h1 class="font-display-lg-mobile text-display-lg-mobile md:font-display-lg md:text-display-lg text-on-surface mb-3 leading-tight">
+About <span class="text-primary">Bancostore</span>
+</h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant">Quality products. Real opportunity. Built for the Ghanaian market.</p>
+</div>
+</div>
+</section>
+
+{# Narrative section -- drop-cap paragraph, blurred accent circle, floated texture image, italic pull quote #}
+<section class="py-16 md:py-24 px-margin-mobile md:px-margin-desktop bg-surface relative overflow-hidden">
+<div class="absolute -right-20 top-1/4 w-80 h-80 bg-primary-fixed-dim/20 rounded-full blur-3xl" aria-hidden="true"></div>
+<div class="max-w-3xl mx-auto relative z-10">
+<div class="flex flex-col gap-8">
+<p class="about-drop-cap font-body-lg text-body-lg text-on-surface leading-relaxed">
+Bancostore is an online store for Ghana, curating quality lifestyle essentials — watches, jewellery, and perfumes — for everyday shoppers. Every order is priced in Ghanaian Cedis and paid for securely via Paystack, with delivery zones covering Kumasi, Accra, and the rest of the country.
+</p>
+<div class="flex justify-center py-4">
+<div class="h-px w-24 bg-primary"></div>
+</div>
+<div class="relative">
+<div class="hidden lg:block absolute -left-48 top-0 w-32 h-32 rounded-full overflow-hidden border-4 border-surface-container-high shadow-lg">
+<img class="w-full h-full object-cover grayscale opacity-50" alt="Texture detail" src="https://lh3.googleusercontent.com/aida/AP1WRLsIEPI59IO2iGVBwzlzOpFD4BUsJq7qNx-U99UOKYc02v0cyY0AwMPdurLOfn5wUzEeW5SGBcv8bZ-IUrhkb_jAz592w8c7V2-6sQFVZ4mf2a-xVo8a8YANI3FVjYhOOQ5nGUwqAA9g4IreA5Y_uC10gpgAThtnJWfSu9gX_QRoROcPHhoMWDKpr8Tc8nprdGXxxhWMnSCb0UwYRnhmfKd38kTr1dZM9TRc9c33eHqIaGbBocaqWh3ivNFs">
+</div>
+<p class="font-body-lg text-body-lg text-on-surface-variant leading-relaxed italic border-l-4 border-primary-fixed-dim pl-8 py-2 bg-surface-container-low/50 rounded-r-lg">
+Alongside the store, Bancostore runs a direct-selling opportunity. Our Independent Representatives build their own businesses through a transparent binary commission structure, turning their networks into sustainable income — not a vague or unverifiable promise.
+</p>
+</div>
+</div>
+</div>
+</section>
+
+{# Audience section -- staggered zigzag list with large faint numbers behind each icon #}
+<section class="pb-16 md:pb-24 px-margin-mobile md:px-margin-desktop overflow-hidden">
 <div class="max-w-4xl mx-auto">
-<div class="text-center mb-12">
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-3">About Bancostore</h1>
-<p class="font-body-lg text-body-lg text-gray-muted max-w-2xl mx-auto">Quality products. Real opportunity. Built for the Ghanaian market.</p>
+<div class="mb-16 md:mb-24 text-center">
+<span class="font-label-caps text-label-caps text-primary tracking-widest block mb-2 uppercase">Ecosystem</span>
+<h2 class="font-headline-lg text-headline-lg text-on-surface">The Path Forward</h2>
 </div>
+<div class="space-y-20 md:space-y-32">
 
-<div class="bg-white border border-outline-variant rounded-xl p-6 md:p-10 mb-8">
-<h2 class="font-headline-md text-headline-md text-on-surface mb-4">What we do</h2>
-<p class="font-body-md text-body-md text-on-surface-variant mb-4">
-Bancostore is an online store for Ghana, curating quality lifestyle and wellness products —
-watches, jewellery, and perfumes — for everyday shoppers. Every order is priced in Ghanaian Cedis
-and paid for securely via Paystack, with delivery zones covering Kumasi, Accra, and the rest of
-the country.
-</p>
-<p class="font-body-md text-body-md text-on-surface-variant">
-Alongside the store, Bancostore runs a direct-selling opportunity: Independent Representatives
-(distributors) can build a business selling our products and growing a team, earning commission
-through a transparent binary structure rather than a vague or unverifiable promise.
-</p>
+{# 01. Customers -- left aligned #}
+<div class="flex flex-col md:flex-row items-center gap-8 max-w-2xl">
+<div class="relative flex-shrink-0">
+<span class="about-staggered-number" aria-hidden="true">01</span>
+<div class="w-20 h-20 rounded-2xl bg-surface-container-high flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-primary text-4xl" aria-hidden="true">shopping_bag</span>
 </div>
-
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-<div class="bg-white border border-outline-variant rounded-xl p-6">
-<div class="w-12 h-12 rounded-full bg-primary-container/10 flex items-center justify-center mb-4">
-<span class="material-symbols-outlined text-primary" aria-hidden="true">storefront</span>
 </div>
-<h3 class="font-label-lg text-label-lg text-on-surface mb-2">Customers</h3>
-<p class="font-body-sm text-body-sm text-gray-muted">Shop as a guest or with an account — no commitment, no commissions, just quality products delivered to your door.</p>
-</div>
-<div class="bg-white border border-outline-variant rounded-xl p-6">
-<div class="w-12 h-12 rounded-full bg-primary-container/10 flex items-center justify-center mb-4">
-<span class="material-symbols-outlined text-primary" aria-hidden="true">groups</span>
-</div>
-<h3 class="font-label-lg text-label-lg text-on-surface mb-2">Distributors</h3>
-<p class="font-body-sm text-body-sm text-gray-muted">Register, get your own Independent Representative (IR) ID, and earn Direct Referral, Binary, and Matching bonuses as your team grows.</p>
-</div>
-<div class="bg-white border border-outline-variant rounded-xl p-6">
-<div class="w-12 h-12 rounded-full bg-primary-container/10 flex items-center justify-center mb-4">
-<span class="material-symbols-outlined text-primary" aria-hidden="true">admin_panel_settings</span>
-</div>
-<h3 class="font-label-lg text-label-lg text-on-surface mb-2">Admin</h3>
-<p class="font-body-sm text-body-sm text-gray-muted">Runs the business behind the scenes — KYC review, withdrawal approval, product and order management, and every commission rate, cap, and fee controlled through a settings panel, no code changes needed.</p>
+<div class="flex-1 text-center md:text-left">
+<span class="font-label-caps text-label-caps text-primary uppercase tracking-widest block mb-1">Customers</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">Shop with Confidence</h3>
+<p class="font-body-md text-body-md text-on-surface-variant mb-4">Access a curated selection of premium products with fast, reliable delivery across Ghana. No commitment, no commissions -- just quality products delivered to your door.</p>
+<a href="{% url 'catalog:product_list' %}" class="font-button text-button text-primary inline-flex items-center gap-2 group">
+Browse Store <span class="material-symbols-outlined text-[18px] group-hover:translate-x-1 transition-transform" aria-hidden="true">arrow_forward</span>
+</a>
 </div>
 </div>
 
-<div class="bg-white border border-outline-variant rounded-xl p-6 md:p-10 text-center">
-<h2 class="font-headline-md text-headline-md text-on-surface mb-3">Want to build a business with us?</h2>
-<p class="font-body-md text-body-md text-gray-muted mb-6 max-w-xl mx-auto">Becoming a distributor takes a registration fee and a starter pack — after that, your earnings are calculated automatically and paid out via Mobile Money or bank transfer.</p>
-<a href="{% url 'distributors:register' %}" class="inline-block px-8 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Become a Distributor</a>
+{# 02. Distributors -- right aligned, staggered #}
+<div class="flex flex-col md:flex-row-reverse items-center gap-8 max-w-2xl ml-auto">
+<div class="relative flex-shrink-0">
+<span class="about-staggered-number about-staggered-number-right" aria-hidden="true">02</span>
+<div class="w-20 h-20 rounded-2xl bg-inverse-surface flex items-center justify-center shadow-xl">
+<span class="material-symbols-outlined text-primary-fixed-dim text-4xl" aria-hidden="true">group</span>
 </div>
 </div>
+<div class="flex-1 text-center md:text-right">
+<span class="font-label-caps text-label-caps text-primary uppercase tracking-widest block mb-1">Distributors</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">Empower Your Growth</h3>
+<p class="font-body-md text-body-md text-on-surface-variant mb-4">Register, get your own Independent Representative (IR) ID, and earn Direct Referral, Binary, and Matching bonuses through one of the market's most transparent commission structures.</p>
+<div class="flex justify-center md:justify-end">
+<a href="{% url 'distributors:register' %}" class="bg-primary text-on-primary px-8 py-3 rounded-lg font-button text-button hover:brightness-110 transition-all shadow-lg">
+Register as Representative
+</a>
+</div>
+</div>
+</div>
+
+{# 03. Admin -- left aligned, staggered #}
+<div class="flex flex-col md:flex-row items-center gap-8 max-w-2xl">
+<div class="relative flex-shrink-0">
+<span class="about-staggered-number" aria-hidden="true">03</span>
+<div class="w-20 h-20 rounded-2xl bg-surface-container flex items-center justify-center border border-surface-container-high shadow-sm">
+<span class="material-symbols-outlined text-secondary text-4xl" aria-hidden="true">shield_with_heart</span>
+</div>
+</div>
+<div class="flex-1 text-center md:text-left">
+<span class="font-label-caps text-label-caps text-primary uppercase tracking-widest block mb-1">Admin</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">Operational Excellence</h3>
+<p class="font-body-md text-body-md text-on-surface-variant mb-4">Our staff portal handles KYC review, withdrawal approval, and product and order management, with every commission rate, cap, and fee controlled through a settings panel -- no code changes needed.</p>
+<a href="{% url 'admin_login' %}" class="font-label-caps text-label-caps text-secondary uppercase hover:text-primary transition-colors inline-flex items-center gap-2">
+Internal Portal <span class="material-symbols-outlined text-[14px]" aria-hidden="true">arrow_outward</span>
+</a>
+</div>
+</div>
+
+</div>
+</div>
+</section>
+
+{# Atmospheric visual break #}
+<section class="h-56 md:h-64 flex items-center justify-center px-margin-mobile mb-8">
+<h2 class="font-headline-lg text-headline-lg text-primary opacity-80 italic tracking-tight text-center">Quality. Growth. Ghana.</h2>
+</section>
+
 </div>
 {% endblock %}

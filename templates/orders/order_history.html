@@ -4,16 +4,22 @@
 {% block content %}
 
 {% comment %}
-Task 25: built from the fetched Stitch screens ("My Orders - Bancostore" /
-"(Mobile)"), reconciled against this project's real header/footer
-(base_store.html) and design tokens rather than the mockups' own
-standalone ones (dropped: their fabricated nav links, footer, and
-numbered-pagination JS toggle demo). One responsive template, not
-separate mobile/desktop templates -- the two mockups' card layouts were
-merged with Tailwind breakpoints, matching this codebase's own
-established convention (cart.html/checkout.html/order_created.html all
-do this). Status pill color classes below map 1:1 to Order.Status's own
-choices -- the mockups happened to already define CSS for all 7 values.
+Master-detail split-view redesign (2026-08-01), rebuilt a second time
+against the actual generated HTML source of the "My Orders - Split View
+Variant" Stitch screen (project 14456046746368120137) -- the first pass
+worked from a downscaled screenshot and drifted on several details the
+source makes explicit: list rows are plain bordered cards with NO
+thumbnail or price (just reference/status/date/PV), the selected state is
+a full border-color + subtle-shadow change (not a left accent bar with a
+tinted fill), the detail panel's product image is large
+(aspect-square, bg-surface-container, object-contain) rather than a small
+thumbnail, and pagination is numbered circles, not Previous/Next text.
+Pure Alpine.js selection state -- no new backend endpoint -- because
+order_history's queryset already prefetches items__product__images for
+every order on the page, so rendering every order's detail panel up
+front costs nothing extra: pagination (default page size) already bounds
+how many orders exist per page. Status pill color classes below still
+map 1:1 to Order.Status's own choices, unchanged from the original build.
 {% endcomment %}
 
 <style>
@@ -27,105 +33,150 @@ choices -- the mockups happened to already define CSS for all 7 values.
 </style>
 
 <div class="min-h-screen bg-[#f9f9f9] py-8 md:py-12 px-margin-mobile md:px-margin-desktop">
-<div class="max-w-4xl mx-auto">
+<div class="max-w-6xl mx-auto">
 <div class="mb-6 md:mb-8">
 <h1 class="font-headline-lg text-headline-lg text-on-surface mb-1">My Orders</h1>
 <p class="font-body-md text-body-md text-gray-muted">Track and manage your recent purchases.</p>
 </div>
 
 {% if page_obj.object_list %}
-<div class="space-y-4">
+<div class="flex flex-col lg:flex-row gap-6 lg:h-[calc(100vh-280px)] lg:min-h-[600px] items-stretch"
+     x-data="{
+       selected: {{ page_obj.object_list.0.pk }},
+       selectOrder(id, $refs) {
+         this.selected = id;
+         if (window.matchMedia('(max-width: 1023px)').matches) {
+           $refs.detailPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+         }
+       },
+     }">
+
+{# LEFT: order list pane -- full width and natural height on mobile, 1/3 width with internal scroll on desktop #}
+<aside class="w-full lg:w-1/3 flex flex-col bg-white border border-outline-variant rounded-xl overflow-hidden lg:min-h-0">
+<div class="p-4 border-b border-outline-variant flex justify-between items-center flex-shrink-0">
+<h2 class="font-headline-sm text-lg text-on-surface">Order History</h2>
+<span class="text-secondary text-sm">{{ page_obj.paginator.count }} order{{ page_obj.paginator.count|pluralize }}</span>
+</div>
+<div class="lg:flex-grow lg:overflow-y-auto p-4 space-y-3">
 {% for order in page_obj.object_list %}
-<a href="{% url 'orders:order_detail' order.pk %}" class="block bg-white border border-outline-variant rounded-xl p-4 md:p-6 transition-colors hover:border-primary">
-
-{# Top row: reference + status pill, date below -- same on every breakpoint #}
-<div class="flex flex-wrap items-start justify-between gap-2 mb-4">
-<div>
-<div class="flex items-center gap-3 flex-wrap">
-<span class="font-body-sm text-body-sm font-semibold text-on-surface">{{ order.payment_reference }}</span>
-<span class="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider status-{{ order.status }}">{{ order.get_status_display }}</span>
+<button type="button"
+        @click="selectOrder({{ order.pk }}, $refs)"
+        :class="selected === {{ order.pk }} ? 'border-primary bg-surface-container-lowest shadow-sm' : 'border-transparent bg-surface-container-lowest hover:border-outline-variant hover:bg-surface-container-low'"
+        class="w-full text-left p-4 border rounded-lg transition-all">
+<div class="flex justify-between items-start gap-2 mb-1">
+<span class="font-semibold text-on-surface truncate">{{ order.payment_reference|truncatechars:16 }}</span>
+<span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex-shrink-0 status-{{ order.status }}">{{ order.get_status_display }}</span>
 </div>
-<p class="text-gray-muted text-sm mt-1">{{ order.created_at|date:"M j, Y" }}</p>
+<div class="flex justify-between items-end">
+<p class="text-secondary text-xs">{{ order.created_at|date:"M j, Y" }}</p>
+<p class="text-[10px] font-bold uppercase tracking-wider text-primary">{{ order.pv_earned }} PV</p>
 </div>
-{% comment %}
-hidden/md:block has to live on this wrapper, not the icon span itself:
-Google's Material Symbols stylesheet sets its own unlayered
-"display: inline-block" on .material-symbols-outlined, which -- per the
-CSS Cascade Layers spec -- always beats a layered Tailwind utility
-(hidden/md:* included) regardless of source order or viewport, so the
-chevron never actually hid on mobile. Same bug and fix as
-templates/admin_portal/platform_settings.html's tab icons.
-{% endcomment %}
-<span class="hidden md:block">
-<span class="material-symbols-outlined text-outline" aria-hidden="true">chevron_right</span>
-</span>
-</div>
-
-{# Product row: thumbnail + name(s), price + PV -- stacks on mobile, #}
-{# sits side-by-side on desktop via the sm:flex-row switch. #}
-<div class="flex flex-col sm:flex-row sm:items-center gap-4 border-t border-outline-variant/50 pt-4">
-{% with first_item=order.items.all.0 item_count=order.items.all|length %}
-<div class="flex items-center gap-4 flex-grow min-w-0">
-<div class="w-16 h-16 bg-surface-container-low rounded-lg flex-shrink-0 overflow-hidden flex items-center justify-center">
-{% if first_item.product.primary_image %}
-<img class="w-full h-full object-cover" src="{{ first_item.product.primary_image.image.url }}" alt="{{ first_item.product_name }}">
-{% else %}
-<span class="material-symbols-outlined text-gray-400" aria-hidden="true">image</span>
-{% endif %}
-</div>
-<div class="min-w-0">
-<h3 class="font-body-md text-body-md font-bold text-on-surface truncate">
-{{ first_item.product_name }}{% if item_count > 1 %} and {{ item_count|add:"-1" }} more{% endif %}
-</h3>
-<div class="flex items-center gap-1 mt-1 text-gray-muted">
-<span class="material-symbols-outlined text-[16px]" aria-hidden="true">stars</span>
-<span class="font-body-sm text-body-sm">{{ order.pv_earned }} PV earned</span>
-</div>
-</div>
-</div>
-{% endwith %}
-<p class="font-headline-md text-headline-md text-on-surface flex-shrink-0">GHS {{ order.total|floatformat:2|intcomma }}</p>
-</div>
-</a>
+</button>
 {% endfor %}
 </div>
 
 {% if page_obj.has_other_pages %}
-<div class="flex items-center justify-between pt-8">
+<div class="p-4 border-t border-outline-variant flex justify-between items-center bg-surface-container-lowest flex-shrink-0">
 {% if page_obj.has_previous %}
-<a href="?page={{ page_obj.previous_page_number }}" class="flex items-center gap-1 font-label-lg text-label-lg text-secondary hover:text-primary transition-colors">
-<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>Previous
+<a href="?page={{ page_obj.previous_page_number }}" class="p-1 hover:bg-surface-container-low rounded-full transition-colors text-secondary flex">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
 </a>
 {% else %}
-<span></span>
+<span class="p-1 text-outline-variant flex" role="link" aria-disabled="true" aria-label="Previous page"><span class="material-symbols-outlined" aria-hidden="true">chevron_left</span></span>
 {% endif %}
-<div class="hidden sm:flex items-center gap-2">
-{% comment %}
-CodeRabbit: page_obj.paginator.page_range alone renders every page number
-with no truncation -- unbounded for a customer with dozens of pages of
-history. page_range (an elided range from the view) inserts
-paginator.ELLIPSIS in place of skipped runs.
-{% endcomment %}
+<div class="flex gap-2">
 {% for num in page_range %}
 {% if num == page_obj.paginator.ELLIPSIS %}
-<span class="w-8 h-8 flex items-center justify-center text-gray-muted text-sm">{{ num }}</span>
+<span class="w-6 h-6 flex items-center justify-center text-secondary text-[10px]">{{ num }}</span>
 {% elif num == page_obj.number %}
-<span class="w-8 h-8 flex items-center justify-center rounded-full bg-primary text-on-primary font-bold text-sm">{{ num }}</span>
+<span class="w-6 h-6 flex items-center justify-center rounded-full bg-primary text-on-primary text-[10px] font-bold">{{ num }}</span>
 {% else %}
-<a href="?page={{ num }}" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-low text-gray-muted text-sm transition-colors">{{ num }}</a>
+<a href="?page={{ num }}" class="w-6 h-6 flex items-center justify-center rounded-full text-secondary text-[10px] hover:bg-surface-container cursor-pointer">{{ num }}</a>
 {% endif %}
 {% endfor %}
 </div>
-<span class="sm:hidden font-body-sm text-body-sm text-gray-muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
 {% if page_obj.has_next %}
-<a href="?page={{ page_obj.next_page_number }}" class="flex items-center gap-1 font-label-lg text-label-lg text-secondary hover:text-primary transition-colors">
-Next<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
+<a href="?page={{ page_obj.next_page_number }}" class="p-1 hover:bg-surface-container-low rounded-full transition-colors text-secondary flex">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
 </a>
 {% else %}
-<span></span>
+<span class="p-1 text-outline-variant flex" role="link" aria-disabled="true" aria-label="Next page"><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></span>
 {% endif %}
 </div>
 {% endif %}
+</aside>
+
+{# RIGHT: detail pane for whichever order is selected on the left #}
+<div class="w-full lg:w-2/3 bg-white border border-outline-variant rounded-xl overflow-hidden flex flex-col lg:min-h-0" x-ref="detailPanel">
+{% for order in page_obj.object_list %}
+{% with first_item=order.items.all.0 item_count=order.items.all|length %}
+<div x-show="selected === {{ order.pk }}" x-cloak class="flex flex-col lg:min-h-0 lg:flex-grow">
+
+<div class="p-6 md:p-8 lg:flex-grow lg:overflow-y-auto">
+<div class="flex flex-wrap items-start justify-between gap-4 mb-8">
+<div class="min-w-0">
+<div class="flex items-center gap-3 flex-wrap mb-2">
+<h3 class="font-headline-md text-2xl text-on-surface break-all">Order {{ order.payment_reference }}</h3>
+<span class="px-3 py-1 rounded-full text-[12px] font-bold uppercase tracking-wider flex-shrink-0 status-{{ order.status }}">{{ order.get_status_display }}</span>
+</div>
+<p class="text-secondary">Placed on {{ order.created_at|date:"F j, Y" }}</p>
+</div>
+<div class="bg-primary-fixed px-6 py-4 rounded-xl text-center min-w-[120px] flex-shrink-0">
+<p class="text-xs font-bold uppercase tracking-widest text-on-primary-fixed-variant mb-1">Total Points</p>
+<p class="font-headline-md text-3xl text-primary">{{ order.pv_earned }} PV</p>
+</div>
+</div>
+
+{% if order.status != "pending" %}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+<div class="bg-surface-container rounded-2xl p-8 aspect-square flex items-center justify-center">
+{% if first_item.product.primary_image %}
+<img class="max-w-full max-h-full object-contain drop-shadow-xl" src="{{ first_item.product.primary_image.image.url }}" alt="{{ first_item.product_name }}">
+{% else %}
+<span class="material-symbols-outlined text-gray-400 text-[64px]" aria-hidden="true">image</span>
+{% endif %}
+</div>
+<div class="space-y-6">
+<div>
+<h4 class="font-headline-md text-xl text-on-surface mb-2">{{ first_item.product_name }}{% if item_count > 1 %} and {{ item_count|add:"-1" }} more{% endif %}</h4>
+<p class="text-secondary mb-4">{% if item_count > 1 %}{{ item_count }} items in total{% else %}Quantity: {{ first_item.quantity }}{% endif %}</p>
+<p class="font-headline-md text-3xl text-on-surface">GHS {{ order.total|intcomma }}</p>
+</div>
+<div class="space-y-3 pt-6 border-t border-outline-variant">
+<h5 class="text-xs font-bold uppercase tracking-widest text-secondary">Summary</h5>
+<div class="flex justify-between">
+<span class="text-secondary">Subtotal</span>
+<span class="text-on-surface">GHS {{ order.subtotal|intcomma }}</span>
+</div>
+<div class="flex justify-between">
+<span class="text-secondary">Delivery Fee</span>
+<span class="text-on-surface">{% if order.delivery_fee %}GHS {{ order.delivery_fee|intcomma }}{% else %}Free{% endif %}</span>
+</div>
+<div class="flex justify-between font-bold pt-2 border-t border-dashed border-outline-variant">
+<span class="text-on-surface">Total</span>
+<span class="text-primary">GHS {{ order.total|intcomma }}</span>
+</div>
+</div>
+</div>
+</div>
+{% else %}
+<p class="text-secondary">We haven't received confirmation of your payment yet for this order.</p>
+{% endif %}
+</div>
+
+{% if order.status != "pending" %}
+<div class="p-6 bg-surface-container-low border-t border-outline-variant flex flex-wrap items-center justify-end gap-4 flex-shrink-0">
+<a href="{% url 'orders:order_detail' order.pk %}" class="border border-outline px-8 py-3 rounded-lg font-semibold hover:bg-white transition-colors">View Full Invoice</a>
+<a href="{% url 'catalog:product_list' %}" class="bg-primary text-on-primary px-10 py-3 rounded-lg font-semibold hover:brightness-110 transition-all">Continue Shopping</a>
+</div>
+{% endif %}
+
+</div>
+{% endwith %}
+{% endfor %}
+</div>
+
+</div>
 
 {% else %}
 <div class="bg-white border border-dashed border-outline-variant rounded-xl p-12 flex flex-col items-center text-center">

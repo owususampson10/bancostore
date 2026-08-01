@@ -210,7 +210,16 @@ def order_confirmation_view(request, payment_reference):
         Order.objects.prefetch_related("items__product__images"),
         payment_reference=payment_reference,
     )
-    return render(request, "orders/order_created.html", {"order": order})
+    # Split-view redesign (2026-08-01): only this one-time post-checkout
+    # redirect shows the "View Order Status" button -- order_detail (the
+    # permanent, revisitable page) reuses this same template without the
+    # flag, since a "View Order Status" button pointing at the page
+    # you're already on would be circular.
+    return render(
+        request,
+        "orders/order_created.html",
+        {"order": order, "is_confirmation": True},
+    )
 
 
 def order_payment_callback(request):
@@ -284,7 +293,10 @@ def order_history(request):
     page_obj = paginator.get_page(request.GET.get("page"))
     # Elided range (CodeRabbit): page_obj.paginator.page_range alone renders
     # every page number with no truncation -- fine at today's order volumes,
-    # but unbounded for a customer with dozens of pages of history.
+    # but unbounded for a customer with dozens of pages of history. Restored
+    # 2026-08-01 after a first split-view pass wrongly dropped this in favor
+    # of Previous/Next text -- the actual generated Stitch source uses
+    # numbered pagination circles even in the narrower list column.
     page_range = paginator.get_elided_page_range(page_obj.number)
     return render(
         request,
