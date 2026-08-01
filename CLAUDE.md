@@ -15,7 +15,9 @@ Admin as the primary path for all 76 constance business-rule settings, the same 
 to its own last remaining raw-Django-Admin surface. Task 29 (Storefront About & Contact pages),
 also closed 2026-07-31, is further ad-hoc work in the same vein as Task 25 — replacing 6 dead
 placeholder links discovered while auditing the storefront, not part of the original numbered
-plan. Task 24 (deploy to Hostinger VPS) is next — a production action requiring user confirmation
+plan. Task 30 (fixing tracked Known Issues — decorative constance settings, session engine, CI
+hygiene), also closed 2026-07-31, was requested directly by the user rather than found during an
+audit. Task 24 (deploy to Hostinger VPS) is next — a production action requiring user confirmation
 before any step touches the real VPS/domain, per
 `SPEC.md` Boundaries.**
 Task 25 didn't exist in the original plan either — added
@@ -632,14 +634,68 @@ What exists and is verified working:
   handful of non-reproducing SQLite `"database table is locked"` failures — a different set of
   files each time — matching this project's already-documented test-order flakiness, confirmed via
   `git stash` isolation to be unrelated to this task's code).
+- **Fixing tracked Known Issues — decorative constance settings, session engine, CI hygiene
+  (Task 30), per explicit user go-ahead:** 6 independent vertical slices. **30a:** two new custom
+  password validators (`apps/accounts/validators.py`) read `constance.config` live inside
+  `validate()`/`get_help_text()` rather than at Django's process-start `AUTH_PASSWORD_VALIDATORS`
+  evaluation, making `MIN_PASSWORD_LENGTH` actually enforced for the first time and building real
+  enforcement for `PASSWORD_COMPLEXITY_ENABLED` (which previously had no mechanism at all, not just
+  no wiring) — both floor-clamped/fail-closed and gracefully degrade to a safe hardcoded default
+  with a logged warning if constance's Redis cache backend is unreachable, rather than crashing
+  every password-set path in the app. **30b:** `apps/accounts/middleware.py::SessionTimeoutMiddleware`
+  makes `SESSION_TIMEOUT_MINUTES`/`ADMIN_SESSION_TIMEOUT_MINUTES` real (previously every session,
+  admin included, used Django's hardcoded 2-week default) — a code-review finding caught that
+  calling `set_expiry()` on every single request would force a new DB write (combined with 30e's
+  `cached_db` engine) on the hottest path in a system scoped for hundreds of thousands of users,
+  fixed by only renewing once the session's remaining age drifts outside `[target/2, target]`.
+  **30c:** `apps/accounts/context_processors.py::google_login_flags` makes
+  `GOOGLE_LOGIN_CUSTOMERS_ENABLED` real by gating the existing allauth `{% get_providers %}` block
+  in `templates/account/login.html`/`signup.html`, AND'd with the pre-existing `SocialApp`-exists
+  check (a flag alone can never satisfy that real DB dependency). **30d:** honest, user-confirmed
+  documentation instead of new feature builds for the 3 settings NOT wired this round —
+  `ADMIN_2FA_METHOD`'s actively-wrong `"sms"` default corrected to `"authenticator_app"` (no SMS
+  2FA delivery path exists anywhere in this codebase), `PASSWORD_RESET_EXPIRY_MINUTES` (customer
+  email-reset-link expiry would need a custom token generator, deferred to its own
+  `doubt-driven-development`-reviewed task) and `GOOGLE_LOGIN_DISTRIBUTORS_ENABLED` (distributor
+  login has zero Google markup; building it is a new feature, not a wiring fix) both now say so
+  plainly in their fieldset help text. **30e:** `SESSION_ENGINE` switched from `cache` to
+  `cached_db` so a Redis eviction/restart no longer logs out every user platform-wide, including
+  admin's mandatory-2FA state (no migration needed, `django.contrib.sessions` already installed) —
+  this surfaced a real, pre-existing bug in two `test_distributor_auth.py` tests that poked a raw
+  `PhoneNumber` object directly into the session (only ever "worked" because the old `cache` engine
+  never actually JSON-serializes, unlike `cached_db`), root-caused via `debugging-and-error-recovery`
+  and fixed to match how the real views already store it (`str(...)`) — confirmed via a full
+  session-write-site audit that production itself was never affected. **30f:** `.github/workflows/
+  ci.yml` gained an explicit `permissions: contents: read` block, both GitHub Actions pinned to a
+  commit SHA (verified against GitHub's own API, not guessed) instead of a mutable version tag, and
+  a `pip-audit` step — deliberately non-blocking (`|| true`) since this is the first vulnerability
+  scan ever run against this dependency set and it surfaced a real backlog across several
+  deliberately-pinned packages (e.g. `cbor2`) that need their own dedicated triage pass, now tracked
+  as a new Known Issue rather than silently gated on or ignored. A `doubt-driven-development` pass
+  (fresh-context security-auditor) on the 30a/30b design before any code was written found 2 High
+  findings, both resolved pre-implementation: an unnecessary `SESSION_SAVE_EVERY_REQUEST` setting
+  was dropped entirely (`set_expiry()` already marks a session modified on its own; the setting
+  would have forced a Redis write on every anonymous storefront request too, not just authenticated
+  traffic) and the `ABSOLUTE_MIN_PASSWORD_LENGTH` floor/graceful-degradation pattern described above
+  was added in response to its Medium findings. A follow-up `code-review-and-quality` pass (fresh-
+  context code-reviewer) approved with two Important fixes applied pre-merge: a stale hardcoded
+  "Must be at least 8 characters" hint in two password-reset templates directly undermined 30a's
+  own point and was removed (matching `signup.html`'s existing convention of showing only real
+  validator errors), and the `set_expiry()`-every-request cost above. Independently re-confirmed by
+  that same review agent's own full-suite run that the `PhoneNumber`/session bug (already found and
+  fixed) and a separate, unrelated rate-limit test false-failure (traced to two stray `runserver`
+  processes left running from earlier browser verification, sharing the same Redis instance as
+  pytest — exactly this project's own already-documented interference gotcha) were both
+  environmental, not defects in this diff. Shipped via PR #57; full suite green throughout.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,
   CSRF-exempt SMS send, an SSRF gap in Didit image downloads, an IR ID overflow bug caught before
-  it shipped). The deliberately deferred remainder — decorative constance settings,
-  production security headers, proxy-aware rate-limit keys, Paystack secret encryption,
-  session-engine fallback — is tracked in the "Known issues" sections at the top of
-  `tasks/todo.md`; read those before touching auth or deployment code.
+  it shipped). Some of the previously-deferred remainder was resolved by Task 30 above (decorative
+  constance settings — partially, see Task 30d for the 3 still-honestly-undocumented rather than
+  wired; session-engine fallback — fully). What's still open — production security headers,
+  proxy-aware rate-limit keys, Paystack secret encryption — is tracked in the "Known issues"
+  sections at the top of `tasks/todo.md`; read those before touching auth or deployment code.
 
 Existing apps: `apps/{accounts,admin_portal,binary_tree,catalog,commissions,distributors,notifications,orders,platform_settings,pv_ledger,wallet,withdrawal}`. Shared
 concurrency helper: `bancostore/concurrency.py` (`retry_on_lock_contention`,

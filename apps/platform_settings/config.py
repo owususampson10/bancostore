@@ -13,11 +13,15 @@ from decimal import Decimal
 AUTHENTICATION_SETTINGS = {
     "GOOGLE_LOGIN_CUSTOMERS_ENABLED": (
         True,
-        "Enable Google one-click login for regular customers",
+        "Enable Google one-click login for regular customers. Only shows "
+        "the button when a Google app is also configured in Django Admin "
+        "(Social Applications) -- turning this on alone won't show a "
+        "button with no Google app configured.",
     ),
     "GOOGLE_LOGIN_DISTRIBUTORS_ENABLED": (
         False,
-        "Enable Google login for distributors (recommended: off)",
+        "Not yet enforced -- distributor login has no Google sign-in option "
+        "built yet. Toggling this currently has no effect.",
     ),
     "DISTRIBUTOR_LOGIN_METHOD": (
         "phone",
@@ -59,8 +63,10 @@ AUTHENTICATION_SETTINGS = {
         "(see SPEC.md Boundaries)",
     ),
     "ADMIN_2FA_METHOD": (
-        "sms",
-        "How the 2FA code is delivered to admin: sms or authenticator app",
+        "authenticator_app",
+        "How the 2FA code is delivered to admin. Not yet enforced -- only "
+        "authenticator-app (TOTP) 2FA is implemented; no SMS delivery path "
+        "exists for admin 2FA.",
     ),
     "MIN_PASSWORD_LENGTH": (
         8,
@@ -80,7 +86,10 @@ AUTHENTICATION_SETTINGS = {
     ),
     "PASSWORD_RESET_EXPIRY_MINUTES": (
         10,
-        "How long a password reset link or OTP remains valid",
+        "Not yet enforced anywhere. Customer email reset-link expiry is "
+        "Django's own static PASSWORD_RESET_TIMEOUT setting (3 days); "
+        "distributor SMS-OTP reset uses OTP_CODE_EXPIRY_MINUTES instead. "
+        "Neither reads this value.",
     ),
 }
 

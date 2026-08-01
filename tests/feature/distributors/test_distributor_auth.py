@@ -37,7 +37,13 @@ def _create_unverified_distributor_with_registration_otp(
 def test_distributor_can_verify_otp_and_login(client):
     distributor = _create_unverified_distributor_with_registration_otp()
     session = client.session
-    session["otp_phone_number"] = distributor.phone_number
+    # str(...), matching exactly how the real views (login_view,
+    # forgot_password) store it -- a raw PhoneNumber object was never
+    # actually reachable in production, only in this test's own session
+    # setup, and only "worked" before Task 30e's cached_db fix because
+    # the old plain-cache session engine never JSON-serialized (it let
+    # django_redis pickle it transparently).
+    session["otp_phone_number"] = str(distributor.phone_number)
     session["otp_purpose"] = "registration"
     session.save()
 
@@ -69,7 +75,7 @@ def test_distributor_can_verify_otp_and_login(client):
 def test_wrong_otp_does_not_verify_the_phone(client):
     distributor = _create_unverified_distributor_with_registration_otp()
     session = client.session
-    session["otp_phone_number"] = distributor.phone_number
+    session["otp_phone_number"] = str(distributor.phone_number)
     session["otp_purpose"] = "registration"
     session.save()
 

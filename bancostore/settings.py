@@ -135,6 +135,10 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
     "django_ratelimit.middleware.RatelimitMiddleware",
+    # Must come after AuthenticationMiddleware (needs request.user).
+    # Enforces the previously-decorative SESSION_TIMEOUT_MINUTES /
+    # ADMIN_SESSION_TIMEOUT_MINUTES constance settings (Task 30b).
+    "apps.accounts.middleware.SessionTimeoutMiddleware",
 ]
 
 # django-ratelimit's middleware requires this — without it, a rate-limited
@@ -245,6 +249,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "apps.orders.context_processors.cart_count",
                 "apps.notifications.context_processors.unread_notification_count",
+                "apps.accounts.context_processors.google_login_flags",
             ],
         },
     },
@@ -283,7 +288,20 @@ CACHES = {
     }
 }
 
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+# cached_db, not plain cache (Task 30e) -- plain cache has no DB fallback,
+# so a Redis eviction/restart previously logged out every user
+# platform-wide, including admin's mandatory-2FA state. django.contrib.
+# sessions is already an installed app, so the DB-backed fallback table
+# already exists -- no new migration needed.
+#
+# Honesty note (code-review finding): this protects against a cache
+# eviction/restart (Django's cached_db.load() already catches a cache
+# miss and reads through to the DB), but NOT against a genuine Redis
+# *connectivity* outage -- django_redis isn't configured with
+# IGNORE_EXCEPTIONS, so a save()/exists() call during a real outage
+# still raises. "Eviction-resilient" is not the same claim as
+# "outage-resilient."
+SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
 SESSION_CACHE_ALIAS = "default"
 
 
@@ -318,6 +336,13 @@ CONSTANCE_DATABASE_CACHE_BACKEND = "default"
 
 
 # Password validation
+#
+# MinimumLengthValidator replaced with a live, constance-editable
+# equivalent (Task 30a) -- the stock validator's min_length is fixed at
+# process-start and can't reflect an admin's MIN_PASSWORD_LENGTH edit
+# without a restart. ConfigurablePasswordComplexityValidator is new --
+# PASSWORD_COMPLEXITY_ENABLED previously had no enforcement mechanism at
+# all.
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -326,7 +351,8 @@ AUTH_PASSWORD_VALIDATORS = [
             "UserAttributeSimilarityValidator"
         )
     },
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "apps.accounts.validators.ConfigurableMinimumLengthValidator"},
+    {"NAME": "apps.accounts.validators.ConfigurablePasswordComplexityValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]

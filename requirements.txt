@@ -88,3 +88,10 @@ pytest-django>=4,<5
 black>=24,<25
 isort>=5,<6
 ruff>=0.6,<1
+
+# Dependency vulnerability scanning (Task 30f) -- report-only in CI for
+# now (see .github/workflows/ci.yml), since the first-ever run against
+# this dependency set surfaced a real backlog of pre-existing findings
+# across several deliberately-pinned packages that need their own
+# dedicated triage/upgrade pass, not a blocking gate sprung on this fix.
+pip-audit>=2.7,<3

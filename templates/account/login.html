@@ -45,7 +45,7 @@ Log In
 <span class="material-symbols-outlined">arrow_forward</span>
 </button>
 {% get_providers as socialaccount_providers %}
-{% if socialaccount_providers %}
+{% if socialaccount_providers and google_login_customers_enabled %}
 <div class="relative my-stack-lg">
 <div class="absolute inset-0 flex items-center">
 <div class="w-full border-t border-outline-variant"></div>
