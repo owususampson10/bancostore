@@ -10,22 +10,43 @@ INPUT_CLASSES = (
 
 
 class ContactForm(forms.Form):
+    # CodeRabbit finding (PR #58): the error text under each field had no
+    # id, and the field itself had no aria-describedby/aria-invalid, so a
+    # screen-reader user submitting an invalid field got no indication of
+    # which field failed or why. aria-describedby is static -- each field's
+    # error <p> always renders in the template (empty when there's no
+    # error), so the id always resolves to something, per the standard
+    # aria-describedby-can-point-at-empty-content pattern. aria-invalid is
+    # set dynamically in clean() below, once real per-field error state
+    # exists.
     name = forms.CharField(
         max_length=120,
         widget=forms.TextInput(
-            attrs={"class": INPUT_CLASSES, "placeholder": "Your name"}
+            attrs={
+                "class": INPUT_CLASSES,
+                "placeholder": "Your name",
+                "aria-describedby": "id_name-error",
+            }
         ),
     )
     email = forms.EmailField(
         max_length=254,  # RFC 5321's own address-length limit
         widget=forms.EmailInput(
-            attrs={"class": INPUT_CLASSES, "placeholder": "you@example.com"}
+            attrs={
+                "class": INPUT_CLASSES,
+                "placeholder": "you@example.com",
+                "aria-describedby": "id_email-error",
+            }
         ),
     )
     subject = forms.CharField(
         max_length=200,
         widget=forms.TextInput(
-            attrs={"class": INPUT_CLASSES, "placeholder": "How can we help?"}
+            attrs={
+                "class": INPUT_CLASSES,
+                "placeholder": "How can we help?",
+                "aria-describedby": "id_subject-error",
+            }
         ),
     )
     message = forms.CharField(
@@ -35,9 +56,23 @@ class ContactForm(forms.Form):
                 "class": INPUT_CLASSES,
                 "rows": 6,
                 "placeholder": "Tell us more...",
+                "aria-describedby": "id_message-error",
             }
         ),
     )
+
+    def clean(self):
+        # Runs after every field's own clean_<field>(), so self.errors
+        # already reflects field-level validation failures at this point --
+        # safe to mark exactly those widgets aria-invalid for the re-render
+        # that follows a failed POST. Never runs for a fresh, unbound form
+        # (a GET request never calls full_clean()), so a first-load field
+        # is never marked invalid before the user has submitted anything.
+        cleaned_data = super().clean()
+        for field_name in self.errors:
+            if field_name in self.fields:
+                self.fields[field_name].widget.attrs["aria-invalid"] = "true"
+        return cleaned_data
 
     def _reject_header_injection(self, field_name):
         # Doubt-driven-development finding: `subject` flows directly

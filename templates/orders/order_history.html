@@ -82,7 +82,7 @@ map 1:1 to Order.Status's own choices, unchanged from the original build.
 <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
 </a>
 {% else %}
-<span class="p-1 text-outline-variant flex"><span class="material-symbols-outlined" aria-hidden="true">chevron_left</span></span>
+<span class="p-1 text-outline-variant flex" role="link" aria-disabled="true" aria-label="Previous page"><span class="material-symbols-outlined" aria-hidden="true">chevron_left</span></span>
 {% endif %}
 <div class="flex gap-2">
 {% for num in page_range %}
@@ -100,7 +100,7 @@ map 1:1 to Order.Status's own choices, unchanged from the original build.
 <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
 </a>
 {% else %}
-<span class="p-1 text-outline-variant flex"><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></span>
+<span class="p-1 text-outline-variant flex" role="link" aria-disabled="true" aria-label="Next page"><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></span>
 {% endif %}
 </div>
 {% endif %}

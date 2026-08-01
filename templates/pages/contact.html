@@ -60,23 +60,23 @@ pixel-fidelity-over-durability instruction as the About page.
 <div class="flex flex-col gap-2">
 <label for="{{ form.name.id_for_label }}" class="font-label-caps text-label-caps text-secondary uppercase">Name</label>
 {{ form.name }}
-{% if form.name.errors %}<p class="text-error text-sm">{{ form.name.errors.0 }}</p>{% endif %}
+<p id="id_name-error" class="text-error text-sm">{% if form.name.errors %}{{ form.name.errors.0 }}{% endif %}</p>
 </div>
 <div class="flex flex-col gap-2">
 <label for="{{ form.email.id_for_label }}" class="font-label-caps text-label-caps text-secondary uppercase">Email</label>
 {{ form.email }}
-{% if form.email.errors %}<p class="text-error text-sm">{{ form.email.errors.0 }}</p>{% endif %}
+<p id="id_email-error" class="text-error text-sm">{% if form.email.errors %}{{ form.email.errors.0 }}{% endif %}</p>
 </div>
 </div>
 <div class="flex flex-col gap-2">
 <label for="{{ form.subject.id_for_label }}" class="font-label-caps text-label-caps text-secondary uppercase">Subject</label>
 {{ form.subject }}
-{% if form.subject.errors %}<p class="text-error text-sm">{{ form.subject.errors.0 }}</p>{% endif %}
+<p id="id_subject-error" class="text-error text-sm">{% if form.subject.errors %}{{ form.subject.errors.0 }}{% endif %}</p>
 </div>
 <div class="flex flex-col gap-2">
 <label for="{{ form.message.id_for_label }}" class="font-label-caps text-label-caps text-secondary uppercase">Message</label>
 {{ form.message }}
-{% if form.message.errors %}<p class="text-error text-sm">{{ form.message.errors.0 }}</p>{% endif %}
+<p id="id_message-error" class="text-error text-sm">{% if form.message.errors %}{{ form.message.errors.0 }}{% endif %}</p>
 </div>
 <div class="pt-2">
 <button type="submit" class="w-full md:w-auto px-10 py-4 bg-primary text-on-primary font-button text-button rounded-lg hover:brightness-110 transition-all active:scale-95 uppercase tracking-widest">
