@@ -5,95 +5,154 @@
 
 {% block content %}
 {% comment %}
-Task 29: contact channels below are read directly from django-constance
-(apps/platform_settings/config.py -- CONTACT_PHONE_NUMBER/
-CONTACT_EMAIL_ADDRESS/WHATSAPP_SUPPORT_NUMBER/PHYSICAL_ADDRESS), each
-only rendered when the admin has actually set it (view already strips
-whitespace-only values to None) -- never a fabricated phone number or
-address. The form sends real email via the existing Gmail SMTP backend.
-{% endcomment %}
-<div class="bg-[#f9f9f9] py-12 md:py-20 px-margin-mobile md:px-margin-desktop">
-<div class="max-w-4xl mx-auto">
-<div class="text-center mb-12">
-<h1 class="font-headline-lg text-headline-lg text-on-surface mb-3">Get in Touch</h1>
-<p class="font-body-lg text-body-lg text-gray-muted max-w-2xl mx-auto">Questions about an order, becoming a distributor, or anything else — we'd love to hear from you.</p>
-</div>
+Full rebuild (2026-08-02) against the actual generated HTML source of the
+"Contact Us - Bancostore" Stitch screen (project 14456046746368120137,
+fetched directly, not a screenshot). Replaces the original Task 29 build
+entirely -- that version had no Stitch source at all. Contact channels
+stay exactly as real: read from django-constance (apps/platform_settings/
+config.py -- CONTACT_PHONE_NUMBER/CONTACT_EMAIL_ADDRESS/
+WHATSAPP_SUPPORT_NUMBER/PHYSICAL_ADDRESS), each only rendered when the
+admin has actually set it. The fetched design's small italic captions
+under each card ("MON-FRI 9AM-6PM", "WE RESPOND WITHIN 24HRS", "FASTEST
+RESPONSE TIME") were dropped -- none of those are real, admin-configured
+facts (no business-hours or SLA setting exists anywhere in this project),
+and showing them as if they were would be exactly the kind of fabricated
+claim this codebase has consistently refused to ship. The source's
+"Subject" field is a styled <select> with fixed categories, but
+apps.pages.forms.ContactForm.subject is a free-text CharField that flows
+directly into the outgoing email's Subject header (with its own
+header-injection guard) -- kept as the real text input, just styled to
+match, rather than changing form/backend behavior to chase a visual
+dropdown. The source's JS fakes a successful send with a client-side
+setTimeout and never actually submits -- dropped entirely; this form must
+really POST to the server, which the plain <form method="post"> below
+already does correctly (unchanged from the original build).
 
-<div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-<div class="md:col-span-2 bg-white border border-outline-variant rounded-xl p-6 md:p-8">
+Per explicit instruction, the form column is `lg:sticky` so it stays in
+view while the contact-channel cards scroll past it on desktop -- this is
+a deliberate deviation from the fetched design (which doesn't have this),
+not an oversight. The "Brand Visual Divider" showroom photo section is
+shown only when PHYSICAL_ADDRESS is configured, since its "visit us" framing
+only makes sense if there's a real address to visit; its decorative photo
+keeps the Stitch-generated preview URL as-is, per the same explicit
+pixel-fidelity-over-durability instruction as the About page.
+{% endcomment %}
+
+<style>
+.contact-card-hover { transition: all 0.3s ease; }
+.contact-card-hover:hover { border-color: var(--color-primary); background-color: var(--color-surface-container-lowest); }
+</style>
+
+<section class="px-margin-mobile md:px-margin-desktop py-10 md:py-20 flex flex-col items-center text-center max-w-container-max mx-auto">
+<h1 class="font-display-lg-mobile text-display-lg-mobile md:font-display-lg md:text-display-lg text-on-surface mb-3">Get in Touch</h1>
+<p class="font-body-lg text-body-lg text-secondary max-w-2xl">Questions about an order, becoming a distributor, or anything else — we'd love to hear from you.</p>
+</section>
+
+<section class="px-margin-mobile md:px-margin-desktop pb-16 md:pb-24 max-w-container-max mx-auto">
+<div class="grid grid-cols-1 lg:grid-cols-10 gap-8 items-start">
+
+{# Left: contact form -- sticky on desktop so it stays in view while the cards on the right scroll #}
+<div class="lg:col-span-6 lg:sticky lg:top-[100px] bg-surface-container-lowest p-6 md:p-10 rounded-lg border border-outline-variant">
 <h2 class="font-headline-md text-headline-md text-on-surface mb-6">Send us a message</h2>
-<form method="post" novalidate>
+<form method="post" novalidate class="space-y-6">
 {% csrf_token %}
-<div class="space-y-4">
-<div>
-<label for="{{ form.name.id_for_label }}" class="block font-label-lg text-label-lg text-on-surface mb-1">Name</label>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<div class="flex flex-col gap-2">
+<label for="{{ form.name.id_for_label }}" class="font-label-caps text-label-caps text-secondary uppercase">Name</label>
 {{ form.name }}
-{% if form.name.errors %}<p class="text-error text-sm mt-1">{{ form.name.errors.0 }}</p>{% endif %}
+{% if form.name.errors %}<p class="text-error text-sm">{{ form.name.errors.0 }}</p>{% endif %}
 </div>
-<div>
-<label for="{{ form.email.id_for_label }}" class="block font-label-lg text-label-lg text-on-surface mb-1">Email</label>
+<div class="flex flex-col gap-2">
+<label for="{{ form.email.id_for_label }}" class="font-label-caps text-label-caps text-secondary uppercase">Email</label>
 {{ form.email }}
-{% if form.email.errors %}<p class="text-error text-sm mt-1">{{ form.email.errors.0 }}</p>{% endif %}
+{% if form.email.errors %}<p class="text-error text-sm">{{ form.email.errors.0 }}</p>{% endif %}
 </div>
-<div>
-<label for="{{ form.subject.id_for_label }}" class="block font-label-lg text-label-lg text-on-surface mb-1">Subject</label>
+</div>
+<div class="flex flex-col gap-2">
+<label for="{{ form.subject.id_for_label }}" class="font-label-caps text-label-caps text-secondary uppercase">Subject</label>
 {{ form.subject }}
-{% if form.subject.errors %}<p class="text-error text-sm mt-1">{{ form.subject.errors.0 }}</p>{% endif %}
+{% if form.subject.errors %}<p class="text-error text-sm">{{ form.subject.errors.0 }}</p>{% endif %}
 </div>
-<div>
-<label for="{{ form.message.id_for_label }}" class="block font-label-lg text-label-lg text-on-surface mb-1">Message</label>
+<div class="flex flex-col gap-2">
+<label for="{{ form.message.id_for_label }}" class="font-label-caps text-label-caps text-secondary uppercase">Message</label>
 {{ form.message }}
-{% if form.message.errors %}<p class="text-error text-sm mt-1">{{ form.message.errors.0 }}</p>{% endif %}
+{% if form.message.errors %}<p class="text-error text-sm">{{ form.message.errors.0 }}</p>{% endif %}
 </div>
-<button type="submit" class="w-full md:w-auto px-8 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold shadow-md hover:brightness-110 transition-all active:scale-95">Send Message</button>
+<div class="pt-2">
+<button type="submit" class="w-full md:w-auto px-10 py-4 bg-primary text-on-primary font-button text-button rounded-lg hover:brightness-110 transition-all active:scale-95 uppercase tracking-widest">
+Send Message
+</button>
 </div>
 </form>
 </div>
 
-<div class="space-y-4">
+{# Right: contact channel cards -- exactly the four real, admin-configured channels #}
+<div class="lg:col-span-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-6">
 {% if contact_phone_number %}
-<div class="bg-white border border-outline-variant rounded-xl p-5 flex items-start gap-3">
+<div class="contact-card-hover bg-surface-container-low p-8 border border-transparent rounded-lg flex flex-col gap-4">
+<div class="w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center">
 <span class="material-symbols-outlined text-primary" aria-hidden="true">call</span>
+</div>
 <div>
-<p class="font-label-md text-label-md text-on-surface">Phone</p>
-<a href="tel:{{ contact_phone_number }}" class="font-body-sm text-body-sm text-gray-muted hover:text-primary transition-colors">{{ contact_phone_number }}</a>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-1">Phone</h3>
+<a href="tel:{{ contact_phone_number }}" class="font-body-md text-body-md text-secondary hover:text-primary transition-colors">{{ contact_phone_number }}</a>
 </div>
 </div>
 {% endif %}
 {% if contact_email_address %}
-<div class="bg-white border border-outline-variant rounded-xl p-5 flex items-start gap-3">
+<div class="contact-card-hover bg-surface-container-low p-8 border border-transparent rounded-lg flex flex-col gap-4">
+<div class="w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center">
 <span class="material-symbols-outlined text-primary" aria-hidden="true">mail</span>
+</div>
 <div>
-<p class="font-label-md text-label-md text-on-surface">Email</p>
-<a href="mailto:{{ contact_email_address }}" class="font-body-sm text-body-sm text-gray-muted hover:text-primary transition-colors break-all">{{ contact_email_address }}</a>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-1">Email</h3>
+<a href="mailto:{{ contact_email_address }}" class="font-body-md text-body-md text-secondary hover:text-primary transition-colors break-all">{{ contact_email_address }}</a>
 </div>
 </div>
 {% endif %}
 {% if whatsapp_support_number %}
-<div class="bg-white border border-outline-variant rounded-xl p-5 flex items-start gap-3">
+<div class="contact-card-hover bg-surface-container-low p-8 border border-transparent rounded-lg flex flex-col gap-4">
+<div class="w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center">
 <span class="material-symbols-outlined text-primary" aria-hidden="true">chat</span>
+</div>
 <div>
-<p class="font-label-md text-label-md text-on-surface">WhatsApp</p>
-<a href="{{ whatsapp_link }}" class="font-body-sm text-body-sm text-gray-muted hover:text-primary transition-colors">{{ whatsapp_support_number }}</a>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-1">WhatsApp</h3>
+<a href="{{ whatsapp_link }}" class="font-body-md text-body-md text-secondary hover:text-primary transition-colors">{{ whatsapp_support_number }}</a>
 </div>
 </div>
 {% endif %}
 {% if physical_address %}
-<div class="bg-white border border-outline-variant rounded-xl p-5 flex items-start gap-3">
+<div class="contact-card-hover bg-surface-container-low p-8 border border-transparent rounded-lg flex flex-col gap-4">
+<div class="w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center">
 <span class="material-symbols-outlined text-primary" aria-hidden="true">location_on</span>
+</div>
 <div>
-<p class="font-label-md text-label-md text-on-surface">Address</p>
-<p class="font-body-sm text-body-sm text-gray-muted">{{ physical_address }}</p>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-1">Physical Address</h3>
+<p class="font-body-md text-body-md text-secondary">{{ physical_address }}</p>
 </div>
 </div>
 {% endif %}
 {% if not contact_phone_number and not contact_email_address and not whatsapp_support_number and not physical_address %}
-<div class="bg-white border border-outline-variant rounded-xl p-5">
-<p class="font-body-sm text-body-sm text-gray-muted">Use the form to reach us — we'll get back to you as soon as we can.</p>
+<div class="bg-surface-container-low p-8 border border-transparent rounded-lg">
+<p class="font-body-md text-body-md text-secondary">Use the form to reach us — we'll get back to you as soon as we can.</p>
 </div>
 {% endif %}
 </div>
+
+</div>
+</section>
+
+{% if physical_address %}
+<section class="px-margin-mobile md:px-margin-desktop mb-16 md:mb-24 max-w-container-max mx-auto overflow-hidden rounded-xl">
+<div class="w-full h-64 md:h-80 relative group bg-cover bg-center" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuCb59GcgJeJXRecCDxZYj4ChRl06ljlAvnq1ULJIc4zBbCq03Dy79bCULV5LdjE-UmlfoAtWs8fbMEt6amA5DFd9E6U1pj8wKO3P5oL9ynvAUYRrebOfwd0-lw3n3OV4QL5GBYQ-XRmqQuCw55UGemYmmR1EURzqUWSKyIGjhJPvTTwwNE0NCcETfdF-wfNGYyrmXIQyZ0mhTn46iPeCPn3qOKq3JP9YYWQPPnSxW1cYnjnc59nOQqt_A")'>
+<div class="absolute inset-0 bg-primary/10 group-hover:bg-transparent transition-colors duration-500"></div>
+<div class="absolute inset-0 flex items-center justify-center px-4">
+<div class="bg-surface-container-lowest/90 backdrop-blur-sm p-6 md:p-8 border border-outline-variant max-w-md text-center">
+<p class="font-label-caps text-label-caps text-primary mb-2 uppercase">Visit Us</p>
+<h4 class="font-headline-md text-headline-md text-on-surface">Experience Excellence in Person</h4>
 </div>
 </div>
 </div>
+</section>
+{% endif %}
 {% endblock %}
