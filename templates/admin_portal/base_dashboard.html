@@ -148,18 +148,20 @@ timer fighting a user mid-read).
 <p class="font-body-md text-body-md text-gray-muted mb-6">You'll need to log in again to access the Admin Portal.</p>
 <div class="flex gap-3">
 <button type="button" class="flex-1 border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-button hover:bg-surface-container-low transition-all" @click="logoutConfirmOpen = false">Cancel</button>
-{# Django 5 removed GET support from LogoutView (http_method_names = #}
-{# ["post", "options"], confirmed in the installed venv's django.contrib #}
-{# .auth.views) -- a plain link here would 405 for every real admin #}
-{# trying to log out. account_logout (allauth's real logout view, #}
-{# already the storefront's own convention -- templates/base_store.html) #}
-{# replaces admin:logout, which was Django's contrib.admin's own #}
-{# internal logout view and redirected to the raw, unstyled native admin #}
-{# login page instead of this project's branded one -- a real bug found #}
-{# via user report. The next field sends an admin back to the branded #}
-{# admin login screen specifically, not allauth's own default redirect #}
-{# (the public storefront home), matching login_url="two_factor:login" #}
-{# already used by every admin_portal view's @login_required. #}
+{% comment %}
+Django 5 removed GET support from LogoutView (http_method_names =
+["post", "options"], confirmed in the installed venv's django.contrib
+.auth.views) -- a plain link here would 405 for every real admin
+trying to log out. account_logout (allauth's real logout view,
+already the storefront's own convention -- templates/base_store.html)
+replaces admin:logout, which was Django's contrib.admin's own
+internal logout view and redirected to the raw, unstyled native admin
+login page instead of this project's branded one -- a real bug found
+via user report. The next field sends an admin back to the branded
+admin login screen specifically, not allauth's own default redirect
+(the public storefront home), matching login_url="two_factor:login"
+already used by every admin_portal view's @login_required.
+{% endcomment %}
 <form method="post" action="{% url 'account_logout' %}" class="flex-1">
 {% csrf_token %}
 <input type="hidden" name="next" value="{% url 'two_factor:login' %}">
