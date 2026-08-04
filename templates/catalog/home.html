@@ -267,9 +267,10 @@ to the right, and the region had no keyboard way to scroll itself.
 Matches the accessibility bar templates/distributors/binary_tree.html
 (Task 21a) already set for this exact class of interaction: tabindex +
 role="group" + a descriptive aria-label, plus visible Previous/Next
-buttons (desktop only -- mobile already has natural touch-swipe and the
-"View All Products" link below) driven by the same scrollBy() calls as
-the new left/right arrow-key handlers.
+buttons driven by the same scrollBy() calls as the left/right arrow-key
+handlers. Per direct user request, the buttons show at every breakpoint
+(not desktop-only) -- mobile's native touch-swipe stays available too,
+this is an additional affordance, not a replacement for it.
 {% endcomment %}
 <section class="py-20 md:py-32 pl-margin-mobile md:pl-16 max-w-[1440px] mx-auto overflow-hidden" x-data>
 <div class="flex justify-between items-end mb-12 pr-margin-mobile md:pr-16">
@@ -290,7 +291,7 @@ the new left/right arrow-key handlers.
 </div>
 {% endfor %}
 </div>
-<div class="hidden md:flex gap-3 mt-2">
+<div class="flex gap-3 mt-2">
 <button type="button" class="w-10 h-10 rounded-[50%] border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll featured products left" @click="$refs.featuredScroll.scrollBy({left: -320, behavior: 'smooth'})">
 <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
 </button>
