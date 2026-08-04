@@ -166,6 +166,51 @@ def test_creating_a_category_with_a_duplicate_name_shows_a_form_error(staff_clie
     assert Category.objects.filter(name="Fine Jewellery").count() == 1
 
 
+@pytest.mark.django_db
+def test_editing_a_category_with_no_image_renders_without_error(staff_client):
+    """Regression test: {{ category.image.url }} raises a real ValueError on
+    an empty ImageField (Django's |default filter only catches falsy
+    *values*, not exceptions raised while resolving .url) -- previously
+    produced a raw 500 whenever a category with no image was opened for
+    editing, e.g. right after clearing its image and saving."""
+    category = Category.objects.create(name="No Image Yet")
+
+    response = staff_client.get(_category_edit_url(category))
+
+    assert response.status_code == 200
+    assert b"Click to upload an image" in response.content
+
+
+@pytest.mark.django_db
+def test_editing_a_category_with_an_image_wires_the_dropzone_to_the_real_file_input(
+    staff_client,
+):
+    """Regression test: when a category already has an image, Django's
+    ClearableFileInput renders a sr-only "clear" checkbox alongside the
+    file input. The old markup wrapped both inside one <label> -- but a
+    label wrapping more than one labelable control delegates its click to
+    the *first* one it contains (the checkbox), not the file input, so
+    clicking the dropzone after deleting the image never opened a file
+    picker. The fix uses an explicit for=/id association instead of
+    wrapping, so the label always targets the file input specifically."""
+    category = Category.objects.create(
+        name="Has An Image", image=_make_uploaded_image()
+    )
+
+    response = staff_client.get(_category_edit_url(category))
+
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert 'id="id_image"' in body
+    assert 'for="id_image"' in body
+    # The file input must not be nested inside the dropzone <label> -- an
+    # implicit wrapper is exactly the ambiguous-delegation shape this
+    # regression guards against.
+    dropzone_label = body[body.index('<label for="id_image"') :]
+    dropzone_label = dropzone_label[: dropzone_label.index("</label>")]
+    assert 'type="file"' not in dropzone_label
+
+
 # ---------------------------------------------------------------------------
 # Category delete
 # ---------------------------------------------------------------------------

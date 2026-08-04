@@ -33,17 +33,52 @@
 Slugs are generated automatically from the name.
 </p>
 </div>
-<div class="space-y-2">
-<label for="{{ form.image.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Category Image</label>
-{% if category.image %}
-<div class="mb-2 w-full h-32 rounded-lg overflow-hidden border border-outline-variant">
-<img src="{{ category.image.url }}" alt="" class="w-full h-full object-cover">
+<div class="space-y-2"
+     x-data="{
+       hasImage: {{ category.image|yesno:'true,false' }},
+       previewUrl: '{% if category.image %}{{ category.image.url }}{% endif %}',
+       onFileChange(event) {
+         if (event.target.files.length) {
+           this.previewUrl = URL.createObjectURL(event.target.files[0]);
+           this.hasImage = true;
+           if (this.$refs.clearCheckbox) this.$refs.clearCheckbox.checked = false;
+         }
+       },
+       removeImage() {
+         this.hasImage = false;
+         this.previewUrl = '';
+         this.$refs.fileInput.value = '';
+         if (this.$refs.clearCheckbox) this.$refs.clearCheckbox.checked = true;
+       }
+     }">
+<label class="font-label-md text-label-md text-on-surface-variant block">Category Image</label>
+
+<!-- Filled tile: current or newly-chosen image, with a hover-reveal delete button -->
+<div class="relative w-full h-40 rounded-xl overflow-hidden border-2 border-outline-variant group" x-show="hasImage" x-cloak>
+<img :src="previewUrl" alt="" class="w-full h-full object-cover">
+<div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+<button type="button" class="w-10 h-10 rounded-[50%] bg-white text-primary flex items-center justify-center hover:bg-primary/10 transition-colors shadow-lg" title="Remove image" aria-label="Remove image" @click="removeImage()">
+<span class="material-symbols-outlined" aria-hidden="true">delete</span>
+</button>
 </div>
-{% endif %}
-<div class="border-2 border-dashed border-outline-variant rounded-xl p-6 flex flex-col items-center justify-center bg-surface hover:border-primary/50 transition-colors">
-<span class="material-symbols-outlined text-primary text-[32px] mb-2" aria-hidden="true">cloud_upload</span>
+</div>
+
+<!-- Empty dropzone: shown until an image exists. Uses an explicit
+     for/id association rather than wrapping the input -- when editing a
+     category that already has an image, {{ form.image }} also renders a
+     sr-only "clear" checkbox alongside the file input (Django's own
+     ClearableFileInput behavior), and a label that *wraps* more than one
+     labelable control delegates its click to the first one it contains
+     (the checkbox here), not the file input -- so nothing visibly
+     happened when clicked. An explicit for="..." always targets the
+     file input specifically, regardless of what else is rendered
+     alongside it. -->
+<label for="{{ form.image.id_for_label }}" class="w-full h-40 border-2 border-dashed border-outline-variant rounded-xl flex flex-col items-center justify-center gap-2 bg-surface hover:border-primary hover:bg-primary/5 transition-all text-on-surface-variant cursor-pointer" x-show="!hasImage" x-cloak>
+<span class="material-symbols-outlined text-primary text-[32px]" aria-hidden="true">add_photo_alternate</span>
+<span class="font-label-md text-label-md">Click to upload an image</span>
+</label>
 {{ form.image }}
-</div>
+
 <p class="text-xs text-on-surface-variant/70">Optional — shown on the storefront's category tile. Categories without one render as a plain text tile.</p>
 {% if form.image.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.image.errors|striptags }}</p>{% endif %}
 </div>

@@ -15,6 +15,18 @@ _INPUT_CLASS = (
 _SELECT_CLASS = _INPUT_CLASS + " appearance-none cursor-pointer"
 
 
+class CategoryImageWidget(forms.ClearableFileInput):
+    """Renders only a sr-only file input plus, when editing a category that
+    already has an image, a sr-only "clear" checkbox -- no visible
+    "Currently: ... Clear:" text at all. Keeps ClearableFileInput's built-in
+    clear-on-checkbox ModelForm semantics (form.save() needs no changes),
+    matching the same "sr-only input, template builds its own tile UI"
+    convention already established for product images
+    (build_product_image_formset below)."""
+
+    template_name = "admin_portal/widgets/category_image_input.html"
+
+
 class CategoryForm(forms.ModelForm):
     """Slug is deliberately not a form field -- Category.save() derives it
     from name automatically (apps/catalog/models.py), matching this
@@ -24,8 +36,12 @@ class CategoryForm(forms.ModelForm):
         model = Category
         fields = ["name", "image"]
         widgets = {
-            "image": forms.ClearableFileInput(
-                attrs={"class": "font-body-md text-body-md"}
+            "image": CategoryImageWidget(
+                attrs={
+                    "class": "sr-only",
+                    "x-ref": "fileInput",
+                    "@change": "onFileChange($event)",
+                }
             ),
         }
 

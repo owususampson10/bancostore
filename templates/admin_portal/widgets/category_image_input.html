@@ -1,0 +1,2 @@
+{% if widget.is_initial %}<input type="checkbox" name="{{ widget.checkbox_name }}" id="{{ widget.checkbox_id }}" class="sr-only" x-ref="clearCheckbox">{% endif %}
+<input type="{{ widget.type }}" name="{{ widget.name }}"{% include "django/forms/widgets/attrs.html" %}>
