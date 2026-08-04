@@ -13,7 +13,15 @@
 <body class="bg-background text-on-surface font-body-md min-h-screen flex flex-col admin-glow-bg">
 <header class="bg-surface border-b border-outline-variant h-16 flex items-center px-margin-desktop">
 <div class="flex justify-between items-center w-full max-w-container-max mx-auto">
-<a href="{% url 'two_factor:login' %}" class="flex items-center gap-2">
+{% comment %}
+Links to the public storefront, not back to this same login page -- a
+logo linking to the public site from an internal login screen is
+standard (GitHub, Stripe, AWS all do this) and gives up nothing: the
+storefront URL is public either way, so there's no security benefit to
+leaving this a dead end. Found via user report: there was previously
+no way at all to leave the admin login screen.
+{% endcomment %}
+<a href="{% url 'catalog:home' %}" class="flex items-center gap-2">
 <img src="{% static 'bancostore-brand/logo/bancostore-logo-light.svg' %}" alt="Bancostore" class="h-6 w-auto">
 <span class="font-label-md text-label-md font-bold text-primary uppercase tracking-wider border-l border-outline-variant pl-2">Admin</span>
 </a>

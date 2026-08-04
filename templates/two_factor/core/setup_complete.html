@@ -21,7 +21,10 @@
 <span class="font-label-lg text-on-surface">Just now</span>
 </div>
 </div>
-<a href="{% url 'admin:index' %}" class="w-full bg-primary text-white font-label-lg py-stack-md rounded-lg hover:opacity-90 transition-colors shadow-md active:scale-95 duration-150 flex items-center justify-center gap-2">
+{# admin:index was Django's raw native admin dashboard, not this #}
+{# project's real Admin Portal -- same leftover-default-URL bug as the #}
+{# logout fix above, found via the same user report. #}
+<a href="{% url 'admin_portal:dashboard' %}" class="w-full bg-primary text-white font-label-lg py-stack-md rounded-lg hover:opacity-90 transition-colors shadow-md active:scale-95 duration-150 flex items-center justify-center gap-2">
 Continue to Admin Panel
 <span class="material-symbols-outlined">arrow_forward</span>
 </a>
