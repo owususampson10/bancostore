@@ -34,7 +34,7 @@ comfortably wide enough.
 {% endcomment %}
 <section class="relative pt-16 md:pt-24 pb-20 md:pb-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto overflow-hidden">
 <div class="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-10 lg:gap-12">
-<div class="w-full lg:w-1/2 flex flex-col items-start text-left">
+<div class="w-full lg:w-1/2 flex flex-col items-center text-center lg:items-start lg:text-left">
 <h1 class="text-[36px] sm:text-[44px] md:text-[72px] lg:text-[56px] xl:text-[72px] leading-[1.05] font-extrabold uppercase tracking-tight mb-6">
 <span class="text-gray-400 opacity-70 block">QUALITY</span><span class="text-on-surface block">PRODUCTS</span>
 <span class="text-gray-400 opacity-70 block mt-4">REAL</span><span class="text-on-surface block">OPPORTUNITY<span class="text-primary">.</span></span>
@@ -76,7 +76,8 @@ We're <span class="font-bold">Bancostore</span>, a Ghana-based lifestyle and wel
 </div>
 </section>
 
-<!-- Shop By Category (bento grid on desktop; first category gets the large tile) -->
+<!-- Shop By Category (bento grid on desktop, matching the real Stitch mockup:
+     tile 1 large 2x2 on the left, tile 2 wide 2x1 top-right, tiles 3+ normal) -->
 {% comment %}
 Code-review finding: a fixed `md:grid-rows-2 md:h-[600px]` (8 cells: one
 2x2 tile + 4 normal tiles) exactly fits 5 categories (4 normal + the
@@ -85,6 +86,18 @@ count above 4 pushed a tile into an unsized implicit row, squashing it.
 `md:auto-rows-[288px]` (600px split across 2 rows, minus the gap) makes
 every row -- explicit or overflow -- the same height, so any number of
 real categories wraps cleanly instead of hitting a ceiling.
+
+Follow-up per direct user feedback: the real Stitch mockup gives the
+*second* tile its own `md:col-span-2` (a wide top-right tile), not just
+the first -- the earlier build only special-cased forloop.first, which
+left tiles 2-4 as plain equal 1x1 cells auto-filling the right half
+instead of one wide tile + two narrow ones underneath it. Text position
+was also changed from centered to bottom-left on every tile, per
+explicit user instruction (a deliberate simplification vs. the mockup's
+own mixed centered/bottom-left treatment). The "View All Products" tile
+now only shows below `lg` (a fallback for smaller screens); at `lg`+ a
+separate "View All Categories" link sits outside the grid entirely,
+matching the mockup's own structure.
 {% endcomment %}
 <section class="py-20 md:py-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto">
 <div class="mb-8">
@@ -94,25 +107,28 @@ real categories wraps cleanly instead of hitting a ceiling.
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 md:auto-rows-[288px]">
 {% for category in categories %}
 {% if category.image %}
-<a href="{% url 'catalog:product_list' %}?category={{ category.slug }}" class="group relative rounded-lg overflow-hidden aspect-square md:aspect-auto{% if forloop.first %} md:col-span-2 md:row-span-2{% endif %}">
+<a href="{% url 'catalog:product_list' %}?category={{ category.slug }}" class="group relative rounded-lg overflow-hidden aspect-square md:aspect-auto{% if forloop.counter == 1 %} md:col-span-2 md:row-span-2{% elif forloop.counter == 2 %} md:col-span-2{% endif %}">
 <img class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" src="{{ category.image.url }}" alt="{{ category.name }}">
 <div class="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-all"></div>
-<div class="absolute inset-0 flex items-center justify-center">
-<span class="relative z-10 text-white font-bold uppercase tracking-widest text-sm md:text-lg text-center px-2">{{ category.name }}</span>
+<div class="absolute bottom-4 left-4 md:bottom-6 md:left-6">
+<span class="relative z-10 text-white font-bold uppercase tracking-widest text-sm md:text-lg drop-shadow-md">{{ category.name }}</span>
 </div>
 </a>
 {% else %}
-<a href="{% url 'catalog:product_list' %}?category={{ category.slug }}" class="group relative rounded-lg overflow-hidden bg-surface-variant flex items-center justify-center transition-all duration-300 hover:bg-surface-container-high hover:shadow-lg hover:-translate-y-0.5 aspect-square md:aspect-auto{% if forloop.first %} md:col-span-2 md:row-span-2{% endif %}">
-<span class="relative z-10 text-on-surface font-bold uppercase tracking-widest text-sm md:text-lg text-center px-2">{{ category.name }}</span>
+<a href="{% url 'catalog:product_list' %}?category={{ category.slug }}" class="group relative rounded-lg overflow-hidden bg-surface-variant flex items-end justify-start p-4 md:p-6 transition-all duration-300 hover:bg-surface-container-high hover:shadow-lg hover:-translate-y-0.5 aspect-square md:aspect-auto{% if forloop.counter == 1 %} md:col-span-2 md:row-span-2{% elif forloop.counter == 2 %} md:col-span-2{% endif %}">
+<span class="relative z-10 text-on-surface font-bold uppercase tracking-widest text-sm md:text-lg">{{ category.name }}</span>
 </a>
 {% endif %}
 {% endfor %}
-<a href="{% url 'catalog:product_list' %}" class="group relative rounded-lg bg-surface-variant flex flex-col items-center justify-center border-2 border-transparent hover:border-primary transition-all aspect-square md:aspect-auto">
+<a href="{% url 'catalog:product_list' %}" class="group relative rounded-lg bg-surface-variant flex flex-col items-center justify-center border-2 border-transparent hover:border-primary transition-all min-h-[150px] col-span-2 md:col-span-4 lg:hidden">
 <span class="text-xs font-bold uppercase tracking-widest text-gray-600 mb-4">View All Products</span>
-<div class="w-12 h-12 rounded-full border border-primary flex items-center justify-center group-hover:bg-primary transition-colors">
+<div class="w-12 h-12 rounded-[50%] border border-primary flex items-center justify-center group-hover:bg-primary transition-colors">
 <span class="material-symbols-outlined text-primary group-hover:text-white">arrow_forward</span>
 </div>
 </a>
+</div>
+<div class="mt-8 text-right hidden lg:block">
+<a href="{% url 'catalog:product_list' %}" class="inline-flex items-center gap-2 text-primary font-bold hover:underline uppercase tracking-widest text-sm">View All Categories</a>
 </div>
 </section>
 
@@ -136,6 +152,20 @@ circle is always order-1 (mobile) / md:order-2 (the true middle slot),
 so it's genuinely centered on the line at every step, regardless of
 which side the text sits on. Text and its empty spacer just swap
 between md:order-1 (left) and md:order-3 (right).
+
+Follow-up per direct user feedback ("timeline is supposed to be a
+circle not a square"): root-caused to this project's own design
+tokens -- static/src/main.css redefines `--radius-full` to 0.75rem
+(12px) for pill-shaped buttons, not a true 50% circle, so every
+square w=h badge using Tailwind's `rounded-full` class (these 4
+number circles, plus the arrow-icon and carousel-arrow circles
+elsewhere on this page) was rendering as a barely-rounded square, not
+a circle. Fixed by switching those specific square badges to the
+arbitrary-value `rounded-[50%]` -- pill-shaped, non-square buttons
+elsewhere on this page correctly keep `rounded-full` as-is. The first
+(orange/primary) circle also gets `motion-safe:animate-pulse`, a
+built-in Tailwind utility that already respects prefers-reduced-motion
+the same way this codebase's existing `.float-item` animation does.
 {% endcomment %}
 <section class="py-20 md:py-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto">
 <div class="text-left mb-16">
@@ -146,7 +176,7 @@ between md:order-1 (left) and md:order-3 (right).
 <div class="absolute left-8 md:left-1/2 top-0 bottom-0 w-0.5 bg-surface-variant -z-10 hidden md:block"></div>
 
 <div class="flex items-center gap-6 md:gap-16 w-full">
-<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 shadow-lg border-4 border-surface">1</div>
+<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-[50%] bg-primary text-on-primary flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 shadow-lg border-4 border-surface motion-safe:animate-pulse">1</div>
 <div class="order-2 md:order-1 flex-1 md:w-1/2 text-left">
 <h3 class="text-xl font-bold mb-2">Shop products</h3>
 <p class="text-gray-600 max-w-xs">Browse our curated collection of lifestyle and wellness essentials.</p>
@@ -155,7 +185,7 @@ between md:order-1 (left) and md:order-3 (right).
 </div>
 
 <div class="flex items-center gap-6 md:gap-16 w-full">
-<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-full bg-surface-variant text-on-surface flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 border-4 border-surface">2</div>
+<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-[50%] bg-surface-variant text-on-surface flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 border-4 border-surface">2</div>
 <div class="order-2 md:order-3 flex-1 md:w-1/2 text-left md:text-right">
 <h3 class="text-xl font-bold mb-2">Pay securely</h3>
 <p class="text-gray-600 max-w-xs md:ml-auto">Checkout quickly with Mobile Money (MoMo) or international cards.</p>
@@ -164,7 +194,7 @@ between md:order-1 (left) and md:order-3 (right).
 </div>
 
 <div class="flex items-center gap-6 md:gap-16 w-full">
-<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-full bg-surface-variant text-on-surface flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 border-4 border-surface">3</div>
+<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-[50%] bg-surface-variant text-on-surface flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 border-4 border-surface">3</div>
 <div class="order-2 md:order-1 flex-1 md:w-1/2 text-left">
 <h3 class="text-xl font-bold mb-2">Get delivery</h3>
 <p class="text-gray-600 max-w-xs">Fast door-to-door delivery or pick up from our designated centers.</p>
@@ -173,7 +203,7 @@ between md:order-1 (left) and md:order-3 (right).
 </div>
 
 <div class="flex items-center gap-6 md:gap-16 w-full">
-<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-full bg-surface-variant text-on-surface flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 border-4 border-surface">4</div>
+<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-[50%] bg-surface-variant text-on-surface flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 border-4 border-surface">4</div>
 <div class="order-2 md:order-3 flex-1 md:w-1/2 text-left md:text-right">
 <h3 class="text-xl font-bold mb-2">Earn income</h3>
 <p class="text-gray-600 max-w-xs md:ml-auto">Join as an IR to earn commissions by building your own team.</p>
@@ -261,10 +291,10 @@ the new left/right arrow-key handlers.
 {% endfor %}
 </div>
 <div class="hidden md:flex gap-3 mt-2">
-<button type="button" class="w-10 h-10 rounded-full border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll featured products left" @click="$refs.featuredScroll.scrollBy({left: -320, behavior: 'smooth'})">
+<button type="button" class="w-10 h-10 rounded-[50%] border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll featured products left" @click="$refs.featuredScroll.scrollBy({left: -320, behavior: 'smooth'})">
 <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
 </button>
-<button type="button" class="w-10 h-10 rounded-full border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll featured products right" @click="$refs.featuredScroll.scrollBy({left: 320, behavior: 'smooth'})">
+<button type="button" class="w-10 h-10 rounded-[50%] border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll featured products right" @click="$refs.featuredScroll.scrollBy({left: 320, behavior: 'smooth'})">
 <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
 </button>
 </div>
