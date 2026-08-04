@@ -114,6 +114,11 @@ def test_category_bento_grid_renders_every_tile_at_five_or_more_categories(clien
     for name in names:
         # Django's autoescaping turns "&" into "&amp;" in rendered HTML.
         assert name.replace("&", "&amp;") in content
+    # Code-review finding: assert the real link, not just the label text --
+    # a "View All Products" string rendered as plain (non-link) text would
+    # have passed the old, weaker assertion.
+    product_list_url = reverse("catalog:product_list")
+    assert f'<a href="{product_list_url}"' in content
     assert "View All Products" in content
 
 

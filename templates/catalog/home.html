@@ -251,7 +251,7 @@ the new left/right arrow-key handlers.
      x-ref="featuredScroll"
      tabindex="0"
      role="group"
-     aria-label="Featured products, horizontally scrollable. Use the left and right arrow keys, the Previous and Next buttons below, or swipe."
+     aria-label="Featured products, horizontally scrollable. Use the left and right arrow keys or swipe."
      @keydown.right.prevent="$refs.featuredScroll.scrollBy({left: 320, behavior: 'smooth'})"
      @keydown.left.prevent="$refs.featuredScroll.scrollBy({left: -320, behavior: 'smooth'})">
 {% for product in featured_products %}
