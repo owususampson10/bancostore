@@ -92,6 +92,30 @@ def test_category_tile_shows_photo_when_category_has_one(client):
 
 
 @pytest.mark.django_db
+def test_category_bento_grid_renders_every_tile_at_five_or_more_categories(client):
+    """Code-review finding on Task 31: the bento grid's first tile spans
+    2x2, which used to exactly fill a fixed 8-cell (4-col x 2-row) grid
+    at 4 categories + the trailing "View All Products" tile -- any real
+    category count of 5+ pushed a tile into an unsized, visually broken
+    row. This doesn't assert on CSS layout directly (out of reach for a
+    server-rendered HTML test), but confirms every category still
+    renders with no template error or silent truncation regardless of
+    count, guarding the underlying data loop while the CSS fix itself
+    was verified live in a real browser."""
+    names = ["Watches", "Jewellery", "Perfumes", "Wellness", "Home & Living", "Bags"]
+    for i, name in enumerate(names):
+        Category.objects.create(name=name, slug=name.lower().replace(" & ", "-"), image=None)
+
+    response = client.get(reverse("catalog:home"))
+
+    content = response.content.decode()
+    for name in names:
+        # Django's autoescaping turns "&" into "&amp;" in rendered HTML.
+        assert name.replace("&", "&amp;") in content
+    assert "View All Products" in content
+
+
+@pytest.mark.django_db
 def test_home_featured_card_shows_primary_image_and_ghs_price(client, category):
     """8a's acceptance criterion is specifically "primary image, name, GHS
     price" — the earlier test only ever checked the name, so a card
