@@ -123,6 +123,26 @@ def test_an_anonymous_user_is_redirected_to_login(client, db):
 
 
 @pytest.mark.django_db
+def test_logging_out_of_the_admin_portal_redirects_to_the_branded_login_page(
+    staff_client,
+):
+    """Regression test: templates/admin_portal/base_dashboard.html's Log Out
+    button used to POST to {% url 'admin:logout' %} -- Django's own
+    contrib.admin logout view, which redirects to the raw native
+    /admin/login/ page instead of this project's real, branded admin
+    login screen. Fixed to POST to account_logout (allauth's real logout
+    view, matching the storefront's own established convention) with a
+    next field pointing at two_factor:login."""
+    login_url = reverse("two_factor:login")
+
+    response = staff_client.post(reverse("account_logout"), {"next": login_url})
+
+    assert response.status_code == 302
+    assert response.url == login_url
+    assert response.url != reverse("admin:login")
+
+
+@pytest.mark.django_db
 def test_pending_kyc_count_only_counts_submitted_verifications(staff_client):
     _make_distributor(with_verification=True)
     _make_distributor(with_verification=True)
