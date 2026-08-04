@@ -622,3 +622,40 @@ def test_a_fresh_token_entry_login_is_not_logged_as_a_remembered_device(
         _post_token_step(client, device, remember=False)
 
     assert not any("remembered device" in record.message for record in caplog.records)
+
+
+def test_admin_login_logo_links_to_the_storefront_not_back_to_itself():
+    """Regression test, found via user report: templates/base_admin_auth.html
+    (the shared header for every 2FA/admin-auth screen) linked its logo to
+    two_factor:login -- itself -- leaving no way at all to reach the
+    public storefront from the admin login screen. Fixed to catalog:home,
+    matching how every other real admin panel (GitHub, Stripe, AWS) links
+    its logo to the public site rather than a dead end."""
+    import re
+
+    from django.template.loader import render_to_string
+    from django.urls import reverse
+
+    html = render_to_string("two_factor/core/login.html", {})
+
+    match = re.search(r'<a href="([^"]+)" class="flex items-center gap-2">', html)
+    assert match is not None
+    assert match.group(1) == reverse("catalog:home")
+    assert match.group(1) != reverse("two_factor:login")
+
+
+def test_2fa_setup_complete_continue_button_links_to_the_real_admin_portal():
+    """Regression test, found via the same user report as the logout and
+    logo fixes: templates/two_factor/core/setup_complete.html's "Continue
+    to Admin Panel" button -- shown once after a brand-new admin finishes
+    mandatory TOTP setup -- linked to admin:index, Django's raw native
+    admin dashboard, instead of admin_portal:dashboard, the real
+    Bancostore Admin Portal every other admin_portal view already routes
+    to."""
+    from django.template.loader import render_to_string
+    from django.urls import reverse
+
+    html = render_to_string("two_factor/core/setup_complete.html", {})
+
+    assert f'href="{reverse("admin_portal:dashboard")}"' in html
+    assert reverse("admin:index") not in html

@@ -123,6 +123,49 @@ def test_category_bento_grid_renders_every_tile_at_five_or_more_categories(clien
 
 
 @pytest.mark.django_db
+def test_category_bento_grid_second_tile_wide_and_view_all_categories_outside_grid(
+    client,
+):
+    """Direct user feedback on Task 31's bento build: the second category
+    must also get a wide `md:col-span-2` tile (matching the real Stitch
+    mockup's top-right tile), not just the first category's large 2x2
+    tile -- and "View All Categories" must be a separate link outside the
+    grid, distinct from the in-grid "View All Products" fallback tile."""
+    # Category.Meta.ordering is ["name"] -- name these alphabetically so
+    # creation order matches the real display order the view queries.
+    first = Category.objects.create(name="A Watches", slug="watches")
+    second = Category.objects.create(name="B Jewellery", slug="jewellery")
+    Category.objects.create(name="C Perfumes", slug="perfumes")
+
+    response = client.get(reverse("catalog:home"))
+
+    content = response.content.decode()
+
+    def tile_class(category_slug):
+        href_pos = content.index(f'?category={category_slug}"')
+        tag_end = content.index(">", href_pos)
+        tag = content[href_pos:tag_end]
+        class_start = tag.index('class="') + len('class="')
+        class_end = tag.index('"', class_start)
+        return tag[class_start:class_end]
+
+    first_tile_class = tile_class(first.slug)
+    assert "md:col-span-2 md:row-span-2" in first_tile_class
+
+    second_tile_class = tile_class(second.slug)
+    assert "md:col-span-2" in second_tile_class
+    assert "md:row-span-2" not in second_tile_class
+
+    assert "View All Categories" in content
+    assert "View All Products" in content
+    product_list_url = reverse("catalog:product_list")
+    # Both labels link to the same real destination, but as two distinct
+    # anchor elements (one inside the grid, one outside it) -- not one
+    # link reused/duplicated by accident.
+    assert content.count(f'<a href="{product_list_url}"') >= 2
+
+
+@pytest.mark.django_db
 def test_home_featured_card_shows_primary_image_and_ghs_price(client, category):
     """8a's acceptance criterion is specifically "primary image, name, GHS
     price" — the earlier test only ever checked the name, so a card

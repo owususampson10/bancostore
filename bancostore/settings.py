@@ -74,6 +74,11 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.sites",
     "django.contrib.humanize",  # comma-formatted prices on the storefront (Task 8)
+    # Required by FORM_RENDERER = TemplatesSetting below -- without this,
+    # django.forms's own built-in widget templates (django/forms/widgets/
+    # text.html etc.) aren't discoverable by our custom-DIRS engine, even
+    # though the default renderer could always find them.
+    "django.forms",
     # Real-time
     "channels",
     # Auth
@@ -254,6 +259,15 @@ TEMPLATES = [
         },
     },
 ]
+
+# Django's default form renderer (django.forms.renderers.DjangoTemplates) uses
+# its own isolated engine with DIRS=[] -- it can't see this project's
+# templates/ directory above, so a form widget's custom template_name (e.g.
+# CategoryImageWidget in apps/admin_portal/forms.py) fails with
+# TemplateDoesNotExist even though the file is right where every other
+# template in this project lives. TemplatesSetting instead reuses the real
+# TEMPLATES config above, which is Django's own documented fix for this.
+FORM_RENDERER = "django.forms.renderers.TemplatesSetting"
 
 WSGI_APPLICATION = "bancostore.wsgi.application"
 ASGI_APPLICATION = "bancostore.asgi.application"
