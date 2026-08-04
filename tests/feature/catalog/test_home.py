@@ -103,8 +103,10 @@ def test_category_bento_grid_renders_every_tile_at_five_or_more_categories(clien
     count, guarding the underlying data loop while the CSS fix itself
     was verified live in a real browser."""
     names = ["Watches", "Jewellery", "Perfumes", "Wellness", "Home & Living", "Bags"]
-    for i, name in enumerate(names):
-        Category.objects.create(name=name, slug=name.lower().replace(" & ", "-"), image=None)
+    for name in names:
+        Category.objects.create(
+            name=name, slug=name.lower().replace(" & ", "-"), image=None
+        )
 
     response = client.get(reverse("catalog:home"))
 
