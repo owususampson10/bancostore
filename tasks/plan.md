@@ -325,6 +325,14 @@ Criteria.
   security-token/distributor-Google-login feature builds. Closed out 2026-07-31 — PR #57. See
   `tasks/todo.md` for the full breakdown.
 
+- [x] Task 31: Storefront home page — Editorial Variant layout rebuild, per direct user request.
+  Rebuilds the Hero, Shop By Category, How It Works, and Featured Products sections of
+  `templates/catalog/home.html` to match the "Storefront Home - Editorial Variant" Stitch screen;
+  the other 5 sections were already equivalent and stayed untouched. All real
+  `Category`/`Product` data wiring preserved. Two real responsive overflow bugs (hero headline vs.
+  its split-layout column at 768px and again at exactly 1024px) found and fixed via live-browser
+  testing. Closed out 2026-08-04. See `tasks/todo.md` for the full breakdown.
+
 ### Phase 10: Deployment
 - [ ] Task 24: Deploy to Hostinger VPS (production) — **needs Hostinger KVM 2 VPS provisioned
   first, and a CI provider confirmed (Open Question #1) before this task starts**

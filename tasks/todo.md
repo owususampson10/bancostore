@@ -4718,6 +4718,78 @@ smaller
 
 ---
 
+### Task 31: Storefront home page — Editorial Variant layout rebuild
+
+**Description:** Not in the original plan — requested directly by the user. Rebuilds
+`templates/catalog/home.html` to adopt the "Storefront Home - Editorial Variant" Stitch screen
+(project `14456046746368120137`, screen `0acbef64d78843fc97925919c3f03611`). The previous home page
+already shared the same overall section structure with this design (hero, lifestyle photo strip,
+brand statement, shop-by-category, mission statement, how-it-works, discover-bancostore bento,
+featured products, distributor CTA) — 5 of those 9 sections were already visually equivalent and
+stayed untouched. 4 sections had genuinely different layouts and were rebuilt: Hero (centered
+text-only → split two-column with a real hero image), Shop By Category (uniform grid → asymmetric
+bento grid, first real category gets a large tile), How It Works (simple 4-column grid → staggered
+zigzag timeline with a connecting line on desktop, a safe simple side-by-side row per step on
+mobile — deliberately not the mockup's own fragile absolute-positioned mobile offsets, which were
+pixel-tuned to specific text lengths), Featured Products (uniform grid → horizontal-scrolling snap
+carousel). All four still render real `Category`/`Product` data from the existing `home` view — no
+fabricated category names or products were introduced.
+
+**Acceptance criteria:**
+- [x] Hero, Shop By Category, How It Works, and Featured Products sections match the new Stitch
+      design's layout
+- [x] All real data wiring preserved: `categories`/`featured_products` loops unchanged, product
+      cards still show real PV/price/in-stock state via the existing `product_card.html` partial
+- [x] Exactly 2 `distributors:register` links remain in the page's own content (hero + CTA band),
+      matching the existing `test_become_a_distributor_links_point_to_real_registration_page`
+      contract
+- [x] The "Discover Bancostore" bento tiles stay honest `Coming soon` placeholders, not wired to
+      About/Contact (would have broken `test_about_link_points_to_the_real_about_page`/
+      `test_contact_link_points_to_the_real_contact_page`'s exact-count assertions)
+- [x] Very responsive: verified clean at 500px (mobile, this Mac's real Chrome resize floor), 768px,
+      1024px, 1280px, and 1440px+
+
+**Verification:**
+- [x] `tests/feature/catalog/test_home.py` (5 tests, +1 added after the code-review pass — see
+      below) and `tests/feature/catalog/test_navigation_links.py` still pass unchanged
+- [x] Full suite for `tests/feature/catalog/` + `tests/feature/orders/`: 112 passed
+- [x] Live-browser verification at every breakpoint above, including opening the mobile hamburger
+      menu and scrolling the featured-products carousel
+- [x] Two real responsive bugs found and fixed via that live testing (not assumed from the mockup):
+      the hero's split layout originally activated at `md:` (768px), but the 72px headline's single
+      long words (e.g. "OPPORTUNITY") can't wrap and overflowed a ~350px column, overlapping the
+      hero image — moved the split to `lg:` (1024px). Even at exactly 1024px a 50/50 split column
+      (~420px) was still too narrow for 72px text — stepped the headline to 56px specifically at
+      the `lg:` tier, only returning to 72px at `xl:` (1280px) where the column is comfortably wide.
+- [x] `code-review-and-quality` pass (fresh-context code-reviewer agent) — 3 real Important findings,
+      all fixed and re-verified live before merge:
+      1. The bento grid's fixed `md:grid-rows-2 md:h-[600px]` (8 cells) exactly filled at 4
+         categories + the "View All" tile — any real count of 5+ pushed a tile into an unsized,
+         visibly squashed implicit row. Fixed with `md:auto-rows-[288px]` so overflow rows match the
+         explicit rows' height; added `test_category_bento_grid_renders_every_tile_at_five_or_more_categories`
+         and live-verified with 6 real (temporarily seeded, then removed) categories.
+      2. The timeline's circles floated at the flex row's natural edge instead of on the centerline
+         (`md:flex-row-reverse` doesn't center a child, it just reverses source order) — fixed with
+         an order-based layout (`order-1 md:order-2` on the circle, always the true middle slot;
+         text/spacer swap `md:order-1`/`md:order-3`), live-verified all 4 steps sit on the line.
+      3. `.hide-scrollbar` removed the one native affordance telling a mouse-only visitor the
+         featured-products carousel had more content, with no keyboard way to scroll the region
+         itself — added `tabindex`/`role="group"`/a descriptive `aria-label`, left/right arrow-key
+         handling, and visible Previous/Next buttons (desktop only), matching the accessibility bar
+         `templates/distributors/binary_tree.html` (Task 21a) already set for this exact class of
+         horizontal-scroll interaction. Live-verified the Next button actually scrolls the carousel.
+
+**Dependencies:** None (reuses the existing `home` view/context, `product_card.html` partial, and
+`base_store.html` header/footer unchanged)
+
+**Files touched:** `templates/catalog/home.html`, `static/src/main.css` (new `.hide-scrollbar`
+utility for the featured-products carousel), `tests/feature/catalog/test_home.py` (1 new
+regression test)
+
+**Estimated scope:** M
+
+---
+
 ## Phase 10: Deployment
 
 ### Task 24: Deploy to Hostinger VPS (production)

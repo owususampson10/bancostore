@@ -198,6 +198,18 @@
   }
 }
 
+/* Storefront home (Editorial Variant, Task 31): hides the horizontal
+   scrollbar on the featured-products carousel -- the snap-scroll
+   interaction itself is the affordance, a visible scrollbar is just
+   visual noise on top of it. */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Task 21a: binary tree connector lines. A standard pure-CSS nested-list
    tree technique (each node's parent-line drawn via ::before/::after on
    the <li>) so connecting lines work at any depth automatically, with no

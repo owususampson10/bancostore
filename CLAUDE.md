@@ -17,8 +17,9 @@ also closed 2026-07-31, is further ad-hoc work in the same vein as Task 25 — r
 placeholder links discovered while auditing the storefront, not part of the original numbered
 plan. Task 30 (fixing tracked Known Issues — decorative constance settings, session engine, CI
 hygiene), also closed 2026-07-31, was requested directly by the user rather than found during an
-audit. Task 24 (deploy to Hostinger VPS) is next — a production action requiring user confirmation
-before any step touches the real VPS/domain, per
+audit. Task 31 (storefront home page — Editorial Variant layout rebuild), closed 2026-08-04, was
+likewise requested directly by the user. Task 24 (deploy to Hostinger VPS) is next — a production
+action requiring user confirmation before any step touches the real VPS/domain, per
 `SPEC.md` Boundaries.**
 Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found
@@ -687,6 +688,32 @@ What exists and is verified working:
   processes left running from earlier browser verification, sharing the same Redis instance as
   pytest — exactly this project's own already-documented interference gotcha) were both
   environmental, not defects in this diff. Shipped via PR #57; full suite green throughout.
+- **Storefront home page — Editorial Variant layout rebuild (Task 31), requested directly by the
+  user:** rebuilds `templates/catalog/home.html` to adopt the "Storefront Home - Editorial Variant"
+  Stitch screen. Of the page's 9 sections, 5 (photo strip, brand statement, mission statement,
+  Discover Bancostore bento, distributor CTA) were already structurally equivalent to the new
+  design and stayed untouched; 4 had genuinely different layouts and were rebuilt: Hero (centered
+  → split two-column with a real hero image), Shop By Category (uniform grid → asymmetric bento,
+  first real category gets a large tile), How It Works (simple grid → staggered zigzag timeline
+  with a connecting line), Featured Products (grid → horizontal-scrolling snap carousel). All four
+  still render real `Category`/`Product` data from the existing `home` view — no fabricated
+  category names or products. Live-browser responsive testing (500/768/1024/1280/1440px) caught
+  two real overflow bugs the mockup itself never surfaced: the hero's split layout originally
+  activated at `md:` (768px), but the 72px headline's single long words (e.g. "OPPORTUNITY") can't
+  wrap and overflowed a ~350px column into the hero image — moved the split to `lg:` (1024px); even
+  there, a 50/50 column (~420px) was still too narrow for 72px text, so the headline steps down to
+  56px specifically at `lg:`, only returning to 72px at `xl:` (1280px). A follow-up
+  `code-review-and-quality` pass found 3 more real Important issues, all fixed and re-verified
+  live: the bento grid's fixed `md:grid-rows-2`/`md:h-[600px]` (8 cells) had a hard ceiling at 4
+  categories — any real count of 5+ squashed a tile into an unsized row, fixed with
+  `md:auto-rows-[288px]` so overflow rows match; the timeline's circles floated off the connecting
+  line instead of sitting on it (`flex-row-reverse` reverses order, it doesn't center a child),
+  fixed with an order-based layout putting the circle in the true middle slot at every step; and
+  the new carousel's `.hide-scrollbar` removed the one native cue that there was more content, with
+  no keyboard way to scroll it — fixed with `tabindex`/`role="group"`/an `aria-label`, arrow-key
+  handling, and visible Previous/Next buttons, matching the accessibility bar
+  `templates/distributors/binary_tree.html` (Task 21a) already set for this exact interaction
+  class. Full suite green (112 passed for the touched test dirs) throughout.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,

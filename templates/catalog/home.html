@@ -4,19 +4,51 @@
 {% block nav_home_class %}text-primary border-b-2 border-primary font-bold{% endblock %}
 
 {% block content %}
+{% comment %}
+Task 31: rebuilt from the "Storefront Home - Editorial Variant" Stitch
+screen (project 14456046746368120137, screen
+0acbef64d78843fc97925919c3f03611). Most sections (photo strip, brand
+statement, mission statement, Discover Bancostore bento, distributor CTA
+band) were already structurally the same as the previous home page, so
+those are untouched. Four sections had genuinely different layouts and
+were rebuilt: Hero (centered -> split with image), Shop By Category
+(uniform grid -> bento), How It Works (simple grid -> staggered
+timeline), Featured Products (grid -> horizontal scroll). All still
+render real Category/Product data -- no fabricated category names or
+products were introduced; the bento grid's "first tile large" treatment
+is applied to whatever real categories exist, not a hardcoded set.
+{% endcomment %}
+
 <!-- Hero -->
-<section class="relative pt-16 md:pt-24 pb-20 md:pb-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto text-center overflow-hidden">
-<div class="relative z-10 flex flex-col items-center">
-<h1 class="text-[40px] md:text-[72px] leading-[1.05] font-extrabold uppercase tracking-tight mb-6">
-<span class="text-gray-400 opacity-70">QUALITY</span> <span class="text-on-surface">PRODUCTS</span><br>
-<span class="text-gray-400 opacity-70">REAL</span> <span class="text-on-surface">OPPORTUNITY</span><span class="text-primary">.</span>
+{% comment %}
+Live-browser findings, both real overflow bugs single long words
+("OPPORTUNITY") can't wrap around: (1) splitting into a side-by-side
+layout at md (768px) put the 72px headline in a ~350px column that's
+nowhere near wide enough -- moved the split (flex-row + w-1/2 + the
+image) to lg (1024px), where the text is still a full-width stacked
+block up to that point. (2) even at exactly 1024px, a 50/50 split
+column (~420px) still isn't quite wide enough for "OPPORTUNITY." at
+72px -- stepped the headline down to 56px for the lg tier specifically,
+only returning to the full 72px at xl (1280px) where the column is
+comfortably wide enough.
+{% endcomment %}
+<section class="relative pt-16 md:pt-24 pb-20 md:pb-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto overflow-hidden">
+<div class="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-10 lg:gap-12">
+<div class="w-full lg:w-1/2 flex flex-col items-start text-left">
+<h1 class="text-[36px] sm:text-[44px] md:text-[72px] lg:text-[56px] xl:text-[72px] leading-[1.05] font-extrabold uppercase tracking-tight mb-6">
+<span class="text-gray-400 opacity-70 block">QUALITY</span><span class="text-on-surface block">PRODUCTS</span>
+<span class="text-gray-400 opacity-70 block mt-4">REAL</span><span class="text-on-surface block">OPPORTUNITY<span class="text-primary">.</span></span>
 </h1>
-<p class="text-lg text-gray-600 max-w-[600px] mb-8">
+<p class="text-lg text-gray-600 max-w-[500px] mb-8">
 Shop everyday lifestyle and wellness products — or build a business selling them.
 </p>
-<div class="flex flex-col sm:flex-row gap-4">
-<a href="{% url 'catalog:product_list' %}" class="bg-primary text-on-primary font-semibold px-12 py-5 rounded-full hover:brightness-110 transition-all shadow-lg">Shop Now</a>
-<a href="{% url 'distributors:register' %}" class="border-2 border-on-surface text-on-surface font-semibold px-12 py-5 rounded-full hover:bg-on-surface hover:text-surface transition-all">Join as a Distributor</a>
+<div class="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+<a href="{% url 'catalog:product_list' %}" class="bg-primary text-on-primary font-semibold px-12 py-5 rounded-full hover:brightness-110 transition-all shadow-lg text-center w-full sm:w-auto">Shop Now</a>
+<a href="{% url 'distributors:register' %}" class="border-2 border-on-surface text-on-surface font-semibold px-12 py-5 rounded-full hover:bg-on-surface hover:text-surface transition-all text-center w-full sm:w-auto">Join as a Distributor</a>
+</div>
+</div>
+<div class="w-full lg:w-1/2 h-[280px] sm:h-[360px] md:h-[420px] lg:h-[500px] rounded-2xl overflow-hidden shadow-2xl relative">
+<img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida/AP1WRLuu2hjIBHNd-Muxit73xoamtejtinNsKqGnCzkZr3CYYWG8BN95sPlHftDPKlZcb4rhKFt5q2IImSovn1sH1rYu7_pdik-ERXy74COTc0f9-BeTS9qRpYPNu8jVYBfj6ub-SB9NIjqXi-IeSy2wheUywKpsDwGxqHJ3Kvn8UoCyhBdkP9YujShHg8w27-6gAY2m8UPIMldSC1y4J8jwVkuuhS3g4OqigQaDUkaJyKPwKNLEJUBQhZRsm3Gs" alt="A premium lifestyle scene representing Bancostore's products and opportunity">
 </div>
 </div>
 </section>
@@ -44,16 +76,25 @@ We're <span class="font-bold">Bancostore</span>, a Ghana-based lifestyle and wel
 </div>
 </section>
 
-<!-- Shop By Category -->
+<!-- Shop By Category (bento grid on desktop; first category gets the large tile) -->
+{% comment %}
+Code-review finding: a fixed `md:grid-rows-2 md:h-[600px]` (8 cells: one
+2x2 tile + 4 normal tiles) exactly fits 5 categories (4 normal + the
+trailing "View All" tile) with nothing to spare -- any real category
+count above 4 pushed a tile into an unsized implicit row, squashing it.
+`md:auto-rows-[288px]` (600px split across 2 rows, minus the gap) makes
+every row -- explicit or overflow -- the same height, so any number of
+real categories wraps cleanly instead of hitting a ceiling.
+{% endcomment %}
 <section class="py-20 md:py-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto">
 <div class="mb-8">
 <h2 class="text-3xl md:text-4xl font-bold mb-2">Discover our products</h2>
 <div class="w-24 h-1 bg-primary"></div>
 </div>
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 md:auto-rows-[288px]">
 {% for category in categories %}
 {% if category.image %}
-<a href="{% url 'catalog:product_list' %}?category={{ category.slug }}" class="group relative aspect-square rounded-lg overflow-hidden">
+<a href="{% url 'catalog:product_list' %}?category={{ category.slug }}" class="group relative rounded-lg overflow-hidden aspect-square md:aspect-auto{% if forloop.first %} md:col-span-2 md:row-span-2{% endif %}">
 <img class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" src="{{ category.image.url }}" alt="{{ category.name }}">
 <div class="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-all"></div>
 <div class="absolute inset-0 flex items-center justify-center">
@@ -61,12 +102,12 @@ We're <span class="font-bold">Bancostore</span>, a Ghana-based lifestyle and wel
 </div>
 </a>
 {% else %}
-<a href="{% url 'catalog:product_list' %}?category={{ category.slug }}" class="group relative aspect-square rounded-lg overflow-hidden bg-surface-variant flex items-center justify-center transition-all duration-300 hover:bg-surface-container-high hover:shadow-lg hover:-translate-y-0.5">
+<a href="{% url 'catalog:product_list' %}?category={{ category.slug }}" class="group relative rounded-lg overflow-hidden bg-surface-variant flex items-center justify-center transition-all duration-300 hover:bg-surface-container-high hover:shadow-lg hover:-translate-y-0.5 aspect-square md:aspect-auto{% if forloop.first %} md:col-span-2 md:row-span-2{% endif %}">
 <span class="relative z-10 text-on-surface font-bold uppercase tracking-widest text-sm md:text-lg text-center px-2">{{ category.name }}</span>
 </a>
 {% endif %}
 {% endfor %}
-<a href="{% url 'catalog:product_list' %}" class="group relative aspect-square rounded-lg bg-surface-variant flex flex-col items-center justify-center border-2 border-transparent hover:border-primary transition-all">
+<a href="{% url 'catalog:product_list' %}" class="group relative rounded-lg bg-surface-variant flex flex-col items-center justify-center border-2 border-transparent hover:border-primary transition-all aspect-square md:aspect-auto">
 <span class="text-xs font-bold uppercase tracking-widest text-gray-600 mb-4">View All Products</span>
 <div class="w-12 h-12 rounded-full border border-primary flex items-center justify-center group-hover:bg-primary transition-colors">
 <span class="material-symbols-outlined text-primary group-hover:text-white">arrow_forward</span>
@@ -84,32 +125,60 @@ We provide quality products and unwavering support to help you build a <span cla
 </div>
 </section>
 
-<!-- How It Works -->
+<!-- How It Works (staggered timeline on desktop; simple stacked rows on mobile) -->
+{% comment %}
+Code-review finding, confirmed via live-browser screenshot: the
+original md:flex-row-reverse approach put each circle at the flex
+row's natural edge (far-left or far-right), nowhere near the vertical
+connector line's md:left-1/2 center -- circles floated visibly off the
+line. Fixed with an order-based layout instead of row-reverse: the
+circle is always order-1 (mobile) / md:order-2 (the true middle slot),
+so it's genuinely centered on the line at every step, regardless of
+which side the text sits on. Text and its empty spacer just swap
+between md:order-1 (left) and md:order-3 (right).
+{% endcomment %}
 <section class="py-20 md:py-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto">
-<div class="text-center mb-16">
+<div class="text-left mb-16">
 <h2 class="text-3xl md:text-4xl font-bold mb-4">How Bancostore works</h2>
-<div class="w-24 h-1 bg-primary mx-auto"></div>
+<div class="w-24 h-1 bg-primary"></div>
 </div>
-<div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-<div class="flex flex-col items-center text-center p-8 border border-surface-variant rounded-lg hover:shadow-xl transition-all">
-<div class="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-xl mb-6">1</div>
+<div class="flex flex-col gap-10 relative max-w-3xl mx-auto">
+<div class="absolute left-8 md:left-1/2 top-0 bottom-0 w-0.5 bg-surface-variant -z-10 hidden md:block"></div>
+
+<div class="flex items-center gap-6 md:gap-16 w-full">
+<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 shadow-lg border-4 border-surface">1</div>
+<div class="order-2 md:order-1 flex-1 md:w-1/2 text-left">
 <h3 class="text-xl font-bold mb-2">Shop products</h3>
-<p class="text-gray-600">Browse our curated collection of lifestyle and wellness essentials.</p>
+<p class="text-gray-600 max-w-xs">Browse our curated collection of lifestyle and wellness essentials.</p>
 </div>
-<div class="flex flex-col items-center text-center p-8 border border-surface-variant rounded-lg hover:shadow-xl transition-all">
-<div class="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-xl mb-6">2</div>
+<div class="hidden md:block md:order-3 md:w-1/2"></div>
+</div>
+
+<div class="flex items-center gap-6 md:gap-16 w-full">
+<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-full bg-surface-variant text-on-surface flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 border-4 border-surface">2</div>
+<div class="order-2 md:order-3 flex-1 md:w-1/2 text-left md:text-right">
 <h3 class="text-xl font-bold mb-2">Pay securely</h3>
-<p class="text-gray-600">Checkout quickly with Mobile Money (MoMo) or international cards.</p>
+<p class="text-gray-600 max-w-xs md:ml-auto">Checkout quickly with Mobile Money (MoMo) or international cards.</p>
 </div>
-<div class="flex flex-col items-center text-center p-8 border border-surface-variant rounded-lg hover:shadow-xl transition-all">
-<div class="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-xl mb-6">3</div>
+<div class="hidden md:block md:order-1 md:w-1/2"></div>
+</div>
+
+<div class="flex items-center gap-6 md:gap-16 w-full">
+<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-full bg-surface-variant text-on-surface flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 border-4 border-surface">3</div>
+<div class="order-2 md:order-1 flex-1 md:w-1/2 text-left">
 <h3 class="text-xl font-bold mb-2">Get delivery</h3>
-<p class="text-gray-600">Fast door-to-door delivery or pick up from our designated centers.</p>
+<p class="text-gray-600 max-w-xs">Fast door-to-door delivery or pick up from our designated centers.</p>
 </div>
-<div class="flex flex-col items-center text-center p-8 border border-surface-variant rounded-lg hover:shadow-xl transition-all">
-<div class="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-xl mb-6">4</div>
+<div class="hidden md:block md:order-3 md:w-1/2"></div>
+</div>
+
+<div class="flex items-center gap-6 md:gap-16 w-full">
+<div class="order-1 md:order-2 w-16 h-16 md:w-20 md:h-20 rounded-full bg-surface-variant text-on-surface flex items-center justify-center font-bold text-2xl md:text-3xl flex-shrink-0 z-10 border-4 border-surface">4</div>
+<div class="order-2 md:order-3 flex-1 md:w-1/2 text-left md:text-right">
 <h3 class="text-xl font-bold mb-2">Earn income</h3>
-<p class="text-gray-600">Join as an IR to earn commissions by building your own team.</p>
+<p class="text-gray-600 max-w-xs md:ml-auto">Join as an IR to earn commissions by building your own team.</p>
+</div>
+<div class="hidden md:block md:order-1 md:w-1/2"></div>
 </div>
 </div>
 <div class="mt-16 text-center">
@@ -160,20 +229,50 @@ We provide quality products and unwavering support to help you build a <span cla
 </div>
 </section>
 
-<!-- Featured Products -->
-<section class="py-20 md:py-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto">
-<div class="flex justify-between items-end mb-12">
+<!-- Featured Products (horizontal scroll) -->
+{% comment %}
+Code-review finding: hiding the scrollbar (.hide-scrollbar) removes the
+one native affordance telling a mouse-only visitor there's more content
+to the right, and the region had no keyboard way to scroll itself.
+Matches the accessibility bar templates/distributors/binary_tree.html
+(Task 21a) already set for this exact class of interaction: tabindex +
+role="group" + a descriptive aria-label, plus visible Previous/Next
+buttons (desktop only -- mobile already has natural touch-swipe and the
+"View All Products" link below) driven by the same scrollBy() calls as
+the new left/right arrow-key handlers.
+{% endcomment %}
+<section class="py-20 md:py-32 pl-margin-mobile md:pl-16 max-w-[1440px] mx-auto overflow-hidden" x-data>
+<div class="flex justify-between items-end mb-12 pr-margin-mobile md:pr-16">
 <h2 class="text-3xl md:text-4xl font-bold">Check out our featured products!</h2>
-<a class="text-primary font-bold hover:underline" href="{% url 'catalog:product_list' %}">View All</a>
+<a class="text-primary font-bold hover:underline hidden md:block" href="{% url 'catalog:product_list' %}">View All</a>
 </div>
 {% if featured_products %}
-<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8">
+<div class="flex gap-6 overflow-x-auto hide-scrollbar pb-8 pr-margin-mobile md:pr-16 snap-x"
+     x-ref="featuredScroll"
+     tabindex="0"
+     role="group"
+     aria-label="Featured products, horizontally scrollable. Use the left and right arrow keys or swipe."
+     @keydown.right.prevent="$refs.featuredScroll.scrollBy({left: 320, behavior: 'smooth'})"
+     @keydown.left.prevent="$refs.featuredScroll.scrollBy({left: -320, behavior: 'smooth'})">
 {% for product in featured_products %}
+<div class="flex-shrink-0 w-[220px] sm:w-[260px] md:w-[300px] snap-start">
 {% include "catalog/partials/product_card.html" %}
+</div>
 {% endfor %}
 </div>
+<div class="hidden md:flex gap-3 mt-2">
+<button type="button" class="w-10 h-10 rounded-full border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll featured products left" @click="$refs.featuredScroll.scrollBy({left: -320, behavior: 'smooth'})">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+</button>
+<button type="button" class="w-10 h-10 rounded-full border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll featured products right" @click="$refs.featuredScroll.scrollBy({left: 320, behavior: 'smooth'})">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+</button>
+</div>
+<div class="mt-2 text-center md:hidden pr-margin-mobile">
+<a class="text-primary font-bold hover:underline" href="{% url 'catalog:product_list' %}">View All Products</a>
+</div>
 {% else %}
-<p class="text-gray-600">No featured products yet — check back soon.</p>
+<p class="text-gray-600 pr-margin-mobile md:pr-16">No featured products yet — check back soon.</p>
 {% endif %}
 </section>
 
