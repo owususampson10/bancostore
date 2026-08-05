@@ -1,0 +1,51 @@
+{% load static %}<!DOCTYPE html>
+{% comment %}
+Shared shell for all 5 error/dead-end pages (404, 500, 403, 400, and the
+CSRF-failure "Session Expired" page). Built from 5 Stitch screens (project
+14456046746368120137: "404 - Page Not Found", "500 - Server Error",
+"403 - Access Denied", "400 - Bad Request", "Session Expired"), fetched and
+read as real HTML source, never a screenshot, per explicit user instruction.
+
+Deliberately standalone -- no base_store.html header/nav/footer -- for two
+reasons, not one: (1) 4 of the 5 Stitch screens explicitly suppress the site
+chrome with the same embedded design reasoning ("Suppressed due to
+Contextual Logic: Transactional/Error Page... prioritize the content
+canvas"); the 5th (400) did include a full mock nav, but that's design-tool
+variance, not a signal worth preserving when it contradicts every sibling
+screen. (2) A real technical constraint backs the same decision: Django's
+default 500 and 400 handlers (django.views.defaults.server_error/
+bad_request) call template.render() with NO request and NO context at all
+-- base_store.html's logged-in-state header (user.is_authenticated,
+cart_count) would silently render wrong (always guest state) on those two
+pages specifically, while 404/403 (which DO get a request) would render
+correctly -- an inconsistency across 5 pages that should look and behave
+the same. Standalone avoids that split entirely.
+
+Color/radius note: every class below is this project's own real compiled
+Tailwind utility (bg-primary, rounded-full, etc.) -- NOT Stitch's own
+generated tailwind-config, which used a muted #a63500 "primary" and a true
+9999px "full" radius. Reusing the project's real classes automatically
+resolves both to the actual brand values (vibrant #f75609 orange,
+--radius-full: 0.75rem, a small radius, not a true pill) with no manual
+override needed -- the same reconciliation pattern used for every other
+Stitch-sourced page in this codebase.
+{% endcomment %}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Bancostore{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'assets/main.css' %}">
+<link rel="icon" type="image/svg+xml" href="{% static 'bancostore-brand/favicon/favicon.svg' %}">
+</head>
+<body class="bg-surface text-on-surface font-body-md min-h-screen flex flex-col antialiased">
+<main class="flex-grow flex items-center justify-center px-6 md:px-16 py-24">
+<div class="max-w-lg w-full text-center flex flex-col items-center">
+{% block error_content %}{% endblock %}
+</div>
+</main>
+</body>
+</html>

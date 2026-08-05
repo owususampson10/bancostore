@@ -1,0 +1,10 @@
+{% extends "errors/base_error.html" %}
+{% block title %}400 Bad Request - Bancostore{% endblock %}
+{% block error_content %}
+<div class="w-24 h-24 rounded-full bg-primary-fixed flex items-center justify-center mb-8">
+<span class="material-symbols-outlined text-primary" style="font-size: 48px;" aria-hidden="true">report_problem</span>
+</div>
+<h1 class="text-3xl md:text-4xl font-extrabold text-on-surface mb-4">Bad Request</h1>
+<p class="text-base md:text-lg text-secondary mb-8 max-w-sm">We couldn't process that request. The link may be broken or incomplete.</p>
+<a href="{% url 'catalog:home' %}" class="inline-flex items-center justify-center px-8 py-4 bg-primary text-on-primary font-bold text-sm uppercase tracking-widest rounded-full hover:bg-primary-container transition-colors">Back to Home</a>
+{% endblock %}
