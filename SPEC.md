@@ -68,14 +68,14 @@ not open for substitution without discussion (see Boundaries):
 
 | Layer | Technology |
 |---|---|
-| Hosting | Hostinger KVM 2 VPS, Ubuntu 22.04 LTS, Nginx, Let's Encrypt |
+| Hosting | Hostinger KVM 2 VPS, Ubuntu 24.04 LTS, Nginx, Let's Encrypt |
 | Backend framework | Django 5, Python 3.12, pip/Poetry |
 | Frontend | Django Templates + HTMX, Alpine.js, Tailwind CSS v4, Vite |
 | Real-time | Django Channels + Daphne (ASGI), Redis channel layer |
 | Database | MySQL 8 in CI and production (via PyMySQL — pure Python driver); SQLite for local dev only (see below), Django ORM, Django Migrations |
 | Cache/Queue | Redis, Celery, Celery Beat (scheduled jobs), Flower (monitoring) |
 | Auth | django-allauth (registration/login + Google), django-two-factor-auth (mandatory admin 2FA), Django's built-in auth groups/permissions for the three roles |
-| Admin panel | Django Admin (customized) |
+| Admin panel | Custom Stitch-designed `admin_portal` app (Tasks 22/23/26-28), fronting Django Admin's own `ModelAdmin` service functions and `simple_history` audit trails underneath; Django Admin stays reachable as a technical fallback for purely archival views (raw wallet ledger, commission cycle logs) |
 | Settings | django-constance (DB-backed, admin-editable business rules) |
 | Files | Django FileField/ImageField (local disk storage), Pillow |
 | Payments | Paystack REST API via `requests` (no official first-party Python SDK) |
@@ -263,8 +263,9 @@ class BinaryBonusCalculator:
   Use Paystack's test mode / a fake gateway — never hit live payment or SMS providers in tests.
 - Standard coverage (happy path + obvious edge cases) elsewhere: catalog, cart, order status
   transitions, admin CRUD.
-- CI runs `pytest` and `black --check . && ruff check .` on every push (to be wired up once
-  a CI provider is chosen — currently undecided, see Open Questions).
+- CI runs `pytest` and `black --check . && ruff check .` on every push via **GitHub Actions**
+  (`.github/workflows/ci.yml`), confirmed and running since early in the project — see Open
+  Questions.
 - **CI must run the commission/wallet/withdrawal test suite against a real MySQL service
   container, not SQLite** — local dev uses SQLite (see Local dev environment above), and SQLite's
   single-writer locking can hide concurrency bugs in the PV-ledger/wallet write paths that only
@@ -321,7 +322,10 @@ class BinaryBonusCalculator:
 
 ## Open Questions
 
-1. CI provider — GitHub Actions assumed but not confirmed (repo has no remote yet)
+1. ~~CI provider~~ — resolved: **GitHub Actions**, `.github/workflows/ci.yml`, running `pytest`
+   against a real `mysql:8` service container and `black --check . && ruff check .` on every push
+   since early in the project (Task 30f hardened it further — explicit `permissions:` block, pinned
+   action SHAs, a `pip-audit` step).
 2. ~~Which SMS provider to actually wire up first for MVP — Arkesel or Hubtel?~~ — resolved
    2026-07-11: **mNotify**, not either of the two originally named in the docs. User has an API
    key already; needed before Task 5 starts.

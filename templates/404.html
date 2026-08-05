@@ -1,0 +1,13 @@
+{% extends "errors/base_error.html" %}
+{% block title %}404 Not Found - Bancostore{% endblock %}
+{% block error_content %}
+<div class="w-32 h-32 rounded-full bg-primary-fixed flex items-center justify-center mb-8">
+<span class="material-symbols-outlined text-primary" style="font-size: 64px;" aria-hidden="true">search_off</span>
+</div>
+<h1 class="text-3xl md:text-5xl font-extrabold text-on-surface mb-4">Page Not Found</h1>
+<p class="text-base md:text-lg text-secondary mb-10 max-w-md">The page you're looking for doesn't exist or may have moved.</p>
+<div class="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
+<a href="{% url 'catalog:home' %}" class="w-full sm:w-auto inline-flex items-center justify-center px-8 py-4 bg-primary text-on-primary font-bold text-sm uppercase tracking-widest rounded-full hover:bg-primary-container transition-colors">Back to Home</a>
+<a href="{% url 'catalog:product_list' %}" class="w-full sm:w-auto inline-flex items-center justify-center px-8 py-4 border border-outline text-on-surface font-bold text-sm uppercase tracking-widest rounded-full hover:bg-surface-container-low hover:text-primary hover:border-primary transition-colors">Browse Shop</a>
+</div>
+{% endblock %}

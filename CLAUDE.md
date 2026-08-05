@@ -899,6 +899,21 @@ and not all 24 on every task: `api-and-interface-design`, `browser-testing-with-
 `shipping-and-launch`, `source-driven-development`, `spec-driven-development`,
 `test-driven-development`, `using-agent-skills`.
 
+## Git & Review Workflow
+
+**Batch pushes and PRs — don't open a PR or push for CodeRabbit review after every small fix.**
+Commit locally after each fix as usual (free, no CI/CodeRabbit cost, keeps history granular).
+Hold off pushing / opening or updating a PR until there's a meaningful batch of work ready, or the
+user explicitly asks to commit/push/ship. When it's time to ship, push the whole batch as one PR
+(or one update to an already-open PR) so CI and CodeRabbit run once across everything, not once per
+fix — this avoids hitting CodeRabbit's rate limits and PRs piling up queued behind each other. If
+CodeRabbit returns findings, fix them all together in a single follow-up commit/push, not one push
+per finding. **Always tell the user before opening/pushing a batch PR** — don't decide silently that
+a batch is "ready" and ship it; flag it and let them confirm timing. Established 2026-08-04 after a
+session that pushed several small independent fixes (home page tweaks, an admin dropzone rebuild, a
+logout fix, native-admin link fixes) as one bundled PR (#60, 5 commits total including one
+follow-up for CodeRabbit's findings) rather than one PR per fix.
+
 ## Testing
 
 pytest + pytest-django. `apps/commissions/services.py`, `apps/wallet/services.py`, and

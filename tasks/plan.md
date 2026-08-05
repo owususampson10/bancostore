@@ -308,6 +308,20 @@ Purely archival views (raw wallet ledger, commission cycle logs) stay on Django 
 through the UI. All pytest tests pass, `black`/`ruff` clean. Verify against `SPEC.md` Success
 Criteria.
 
+- [x] Task 26: Admin Portal — Catalog Management (categories + products). Not in the original plan
+  — found by auditing which already-shipped backend features (Task 7's catalog models) still had
+  no dedicated `admin_portal` frontend, the same audit that turned up Task 27. Built from 5 fetched
+  Stitch screens; a dynamically-sized inline product-image formset with a
+  `normalize_primary_image()` helper guaranteeing exactly one primary image per product. Closed out
+  2026-07-31 — PR #53. See `tasks/todo.md` for the full breakdown.
+
+- [x] Task 27: Admin Dashboard — replaces the Task 22 placeholder now that every other
+  `admin_portal` section had actually shipped. Built from a fetched Stitch screen, reconciled
+  against real scope (dropped a global search bar, notification bell, and other mockup chrome with
+  no corresponding real feature); every number on the page is a real query (pending KYC/withdrawals,
+  orders awaiting action, low-stock products, a rolling 7-day business snapshot). Closed out
+  2026-07-31 — PR #54. See `tasks/todo.md` for the full breakdown.
+
 - [x] Task 28: Platform Settings admin screen — replaces raw Django Admin as the primary path for
   all 76 `django-constance` business-rule settings (10 fieldset groups), the last remaining
   admin-facing surface not yet matching the rest of `admin_portal`'s look. Closed out 2026-07-31 —
@@ -332,10 +346,50 @@ Criteria.
   `Category`/`Product` data wiring preserved. Two real responsive overflow bugs (hero headline vs.
   its split-layout column at 768px and again at exactly 1024px) found and fixed via live-browser
   testing. Closed out 2026-08-04. See `tasks/todo.md` for the full breakdown.
+  - **Follow-up (2026-08-04/05), per direct user feedback after live-testing the shipped page:**
+    hero headline/subtext now centers on mobile/tablet (reverts to left-aligned at `lg:`); the
+    bento grid's second tile also gets a wide `md:col-span-2` span (matching the real Stitch
+    mockup, not just the first tile); bento text moved from centered to bottom-left on every tile;
+    "View All Categories" moved outside the grid into its own link, with the in-grid "View All
+    Products" tile now an `lg:hidden` fallback; the timeline's "square instead of circle" bug
+    root-caused to this project's `rounded-full` token being redefined to `0.75rem` (for pill
+    buttons, not true circles) — fixed with `rounded-[50%]` on the actual circular badges, plus a
+    `motion-safe:animate-pulse` on the first timeline circle; the featured-products carousel's
+    Previous/Next buttons now show at every breakpoint, not desktop-only. Shipped in PR #60
+    alongside Task 32 below.
+
+- [x] Task 32: Admin portal fixes — category-image dropzone, logout redirect, native-admin links.
+  Not in the original plan — found via direct user testing/reports in the same session as Task 31's
+  follow-up. Replaced the Category admin form's raw, unstyled Django `ClearableFileInput` (literal
+  "Currently: ... / Clear / Choose file No file chosen" text) with a modern Alpine-driven
+  dropzone/preview UI matching the product-image dropzone's existing visual language
+  (`CategoryImageWidget`, a small `ClearableFileInput` subclass with its own template — required a
+  small global `FORM_RENDERER = TemplatesSetting` + `django.forms` in `INSTALLED_APPS` fix, since
+  Django's default form renderer can't see this project's real `templates/` directory). Two real
+  bugs found live and fixed: a `ValueError` crash editing any category with no image
+  (`{{ category.image.url }}` on an empty `ImageField` — Django's `|default` filter can't catch
+  exceptions, only falsy values), and a click-delegation bug where the dropzone's `<label>` wrapped
+  both the file input and Django's "clear" checkbox — a label wrapping two labelable controls
+  delegates its click to the first one, so clicking after deleting an image silently did nothing
+  (fixed with an explicit `for=`/`id` association). Also fixed: admin logout was posting to
+  `admin:logout` (Django's own raw internal logout view), redirecting to the native unstyled
+  `/admin/login/` page instead of this project's branded one — switched to `account_logout`
+  (already the storefront's own convention) with a redirect back to the branded admin login. Two
+  more leftover native-admin links found via a follow-up audit: the admin login page's logo linked
+  to itself (no way to reach the public storefront from that screen) — now links to `catalog:home`;
+  the 2FA setup-complete screen's "Continue to Admin Panel" button linked to `admin:index` (raw
+  native admin dashboard) — now links to `admin_portal:dashboard`. A CodeRabbit review on PR #60
+  caught one more real, Major bug: the category dropzone's delete button was only revealed via
+  `group-hover`, and touch devices have no hover state at all, so an admin on a phone/tablet could
+  never discover or reach it — the same latent bug already existed in the pre-existing
+  product-image dropzone this was modeled on; fixed both the same way
+  (`opacity-100 md:opacity-0 md:group-hover:opacity-100`). Shipped 2026-08-05 via PR #60 (5 commits
+  total, including one follow-up addressing CodeRabbit's findings); full CI green (lint, real-MySQL
+  test, CodeRabbit) before merge. See `tasks/todo.md` for the full breakdown.
 
 ### Phase 10: Deployment
-- [ ] Task 24: Deploy to Hostinger VPS (production) — **needs Hostinger KVM 2 VPS provisioned
-  first, and a CI provider confirmed (Open Question #1) before this task starts**
+- [ ] Task 24: Deploy to Hostinger VPS (production) — **needs the Hostinger KVM 2 VPS provisioned
+  first** (CI provider is already confirmed — GitHub Actions, see Open Question #1)
 
 **Checkpoint J (go-live):** Bancostore is reachable over HTTPS at the production domain, running
 on the Hostinger VPS against real MySQL, with Celery/Celery Beat/Daphne kept alive by Supervisor
@@ -355,11 +409,16 @@ and surviving a server reboot.
 
 ## Open Questions (carried from `SPEC.md`, mapped to blocking tasks)
 
-1. CI provider (GitHub Actions assumed) — not blocking; resolve before Checkpoint I / deployment
+1. ~~CI provider (GitHub Actions assumed)~~ — resolved: **GitHub Actions**, running `pytest`
+   against real MySQL and `black`/`ruff` on every push since early in the project; hardened further
+   in Task 30f (explicit `permissions:` block, pinned action SHAs, `pip-audit`)
 2. ~~SMS provider, Arkesel or Hubtel~~ — resolved 2026-07-11: **mNotify**, API key in hand
 3. ~~Email provider, Mailgun or Gmail SMTP~~ — resolved 2026-07-10: **Gmail SMTP**, verified with
    a real send (Task 4); revisit for Mailgun before real production volume
-4. Delivery zone fee table + free-delivery threshold — **needed before Task 17**
+4. ~~Delivery zone fee table + free-delivery threshold~~ — resolved 2026-07-24: Kumasi GHS 20,
+   Accra GHS 50, other regions GHS 70 (the source doc's own Section 5.1 worked example),
+   free-delivery threshold GHS 500, pickup always free. Seeded as admin-editable
+   `django-constance` settings — see `docs/decisions/0005-checkout-cart-design.md`.
 5. ~~Min/max withdrawal amount + withdrawal day~~ — resolved 2026-07-22: GHS 100 minimum, GHS
    10,000 maximum per request, processed Fridays. Seeded in `apps/platform_settings/config.py`;
    admin-editable, not a permanent code decision. Task 16 is now unblocked.
@@ -369,9 +428,9 @@ and surviving a server reboot.
 7. ~~Confirm `pyenv` Python + Homebrew `mysql`/`redis` actually install cleanly on this Mac~~ —
    resolved: Python (already present, no `pyenv` needed) and Redis installed cleanly; MySQL did
    not, so local dev uses SQLite instead (see `SPEC.md` Local dev environment)
-8. Wire up GitHub Actions CI with a real MySQL service container once a CI provider is confirmed
-   (Open Question #1) — this is the safety net for the SQLite/MySQL concurrency gap above, needed
-   before Phase 4 (Commission Engine) merges anything, not blocking Task 1
+8. ~~Wire up GitHub Actions CI with a real MySQL service container~~ — resolved: running since
+   early in the project, the safety net for the SQLite/MySQL concurrency gap above; every
+   commission/wallet/PV-ledger PR since Task 4 has gone through it
 
 Each of these will be asked as a short question right before its blocking task starts, rather than
 all at once now.

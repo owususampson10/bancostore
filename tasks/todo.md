@@ -44,15 +44,16 @@ it's unimportant:
   `apps/distributors/services.py::attempt_distributor_login`). Regression tests added for both
   (wrong-password-stays-generic, correct-password-still-shows-locked) and verified live again
   post-fix.
-- [ ] **Several constance settings are decorative — they exist and look live in the admin panel but
-  nothing reads them**: `MIN_PASSWORD_LENGTH`, `PASSWORD_COMPLEXITY_ENABLED`,
-  `SESSION_TIMEOUT_MINUTES`, `ADMIN_SESSION_TIMEOUT_MINUTES`, `PASSWORD_RESET_EXPIRY_MINUTES`
-  (allauth actually uses Django's own `PASSWORD_RESET_TIMEOUT`, unset, so it defaults to 3 days
-  regardless of what the panel says), `ADMIN_2FA_METHOD` (default value `"sms"` is actively wrong
-  since only authenticator-app 2FA is implemented), `GOOGLE_LOGIN_CUSTOMERS_ENABLED` /
-  `GOOGLE_LOGIN_DISTRIBUTORS_ENABLED` (Google button visibility is actually driven by whether a
-  `SocialApp` row exists, not this flag). Either wire these into real enforcement or mark them
-  "not yet enforced" in the fieldset help text.
+- [x] ~~Several constance settings are decorative — they exist and look live in the admin panel but
+  nothing reads them~~ — **Fixed 2026-07-31 (Task 30a-30d).** `MIN_PASSWORD_LENGTH` and
+  `PASSWORD_COMPLEXITY_ENABLED` are now enforced by custom password validators reading
+  `constance.config` live (30a); `SESSION_TIMEOUT_MINUTES`/`ADMIN_SESSION_TIMEOUT_MINUTES` are now
+  enforced by `SessionTimeoutMiddleware` (30b); `GOOGLE_LOGIN_CUSTOMERS_ENABLED` now actually gates
+  the customer Google login button, ANDed with the real `SocialApp`-exists check (30c). The
+  remaining 3 (`PASSWORD_RESET_EXPIRY_MINUTES`, `ADMIN_2FA_METHOD`'s wrong `"sms"` default,
+  `GOOGLE_LOGIN_DISTRIBUTORS_ENABLED`) were deliberately **not** wired this round — user-confirmed
+  scope, not a silent skip — and instead got honest "not yet enforced" fieldset help text (30d);
+  see Task 30's full breakdown below.
 - [x] ~~`seed_roles` has no guard against running in a non-DEBUG environment~~ — **Fixed
   2026-07-12.** Raises `CommandError` outside `DEBUG`. Existing tests updated to force
   `settings.DEBUG = True` (matching CI's deliberate `DEBUG=False`), new test confirms the guard
@@ -138,19 +139,25 @@ guessed at.
   `MNOTIFY_API_KEY`/`EMAIL_HOST_PASSWORD`) instead of `django-constance`. The rest of
   `PAYMENT_GATEWAY_SETTINGS` (channels, mode toggle, copy) stays in constance — legitimate
   business-rule config, not secrets.
-- [ ] `SESSION_ENGINE = "django.contrib.sessions.backends.cache"` has no DB fallback
+- [x] ~~`SESSION_ENGINE = "django.contrib.sessions.backends.cache"` has no DB fallback
   (`cached_db`) — any Redis eviction/restart logs out every user platform-wide, including admin's
-  mandatory-2FA state. Worth a documented mitigation before go-live.
+  mandatory-2FA state~~ — **Fixed 2026-07-31 (Task 30e).** Switched to `cached_db`; verified an
+  existing session survives a `cache.clear()` (the exact failure mode a Redis eviction/restart
+  would otherwise cause). No migration needed — `django.contrib.sessions` was already installed.
 - [x] ~~Distributor registration reveals phone-number existence (`apps/distributors/forms.py`'s
   uniqueness check)~~ — **Fixed 2026-07-13** as part of Task 10a, for an unrelated reason (payment
   gating the account, not this issue specifically): `clean_phone_number` no longer checks the
   `Distributor` table at all. It only checks `PendingRegistration` (to avoid an unhandled
   `IntegrityError` on a duplicate submission), which doesn't reveal whether a phone number belongs
   to a real, existing distributor.
-- [ ] CI hygiene, not urgent: `.github/workflows/ci.yml` has no explicit `permissions:` block
+- [x] ~~CI hygiene, not urgent: `.github/workflows/ci.yml` has no explicit `permissions:` block
   (defaults to broader `GITHUB_TOKEN` scope than needed), `actions/checkout@v4` is pinned to a
   mutable tag rather than a commit SHA, and there's no dependency vulnerability scan step
-  (`pip-audit`/`safety`) yet — cheap to add now while the dependency set is still small.
+  (`pip-audit`/`safety`) yet~~ — **Fixed 2026-07-31 (Task 30f).** Added an explicit top-level
+  `permissions: contents: read` block, pinned both actions to a commit SHA (with the
+  human-readable version as a trailing comment), and added a `pip-audit` step — deliberately
+  non-blocking (`|| true`) since it's the first-ever scan and surfaced a real pre-existing backlog,
+  now tracked separately below ("Known issues — surfaced by Task 30f's first-ever pip-audit run").
 
 ## Known issues — flagged during Task 18b verification, unrelated to Task 18b (2026-07-26)
 
@@ -196,6 +203,47 @@ guessed at.
   changes, which touch no file under `apps/distributors/` at all (same `git status` scope as the
   entry above). A fourth instance of full-suite-only flakiness, but a different root cause (SQLite
   locking, not query-count/response-content noise) than the three entries above it.
+
+**Investigation (2026-08-05), per explicit user request** — this pattern recurred at least twice
+more since the four entries above (Task 29's closeout; PR #60's `test_lockout_sends_an_alert_email`
+today), 6+ occurrences total, always with the same fingerprint: passes in isolation, fails only in
+full-suite order, a different test each time. Ran a real `debugging-and-error-recovery` pass rather
+than continuing to defer it:
+
+- **Ruled out (tested directly, not just reasoned about):** a `transaction=True` test's database
+  writes do **not** get wiped by Django's post-test flush the way raw `TransactionTestCase` docs
+  would suggest — verified with a direct reproduction (seeded `Group` rows survived a
+  `transaction=True` test's teardown intact).
+- **Ruled out (tested directly):** a `transaction=True` test mutating shared state (e.g. a
+  `django-constance` setting) cannot leak forward into an earlier-numbered plain
+  `@pytest.mark.django_db` test — confirmed pytest-django deterministically runs **every** plain
+  `db` test to completion before **any** `transaction=True` test starts, regardless of file order or
+  command-line argument order (verified by forcing explicit cross-file ordering three different
+  ways; pytest-django reordered every time). This structurally rules out "an earlier transactional
+  test polluted a later plain test" for any of the plain-test failures in this list.
+- **Confirmed live, not just theorized:** re-running the full suite today caught a real
+  `django.db.utils.OperationalError: database table is locked` in a background thread (surfaced as
+  a `PytestUnhandledThreadExceptionWarning`, not a hard failure this time) — direct evidence that
+  SQLite's coarse table-level write lock is genuinely contended during the `transaction=True` batch
+  pytest-django runs at the end of every session. This project has 22 test files using
+  `transaction=True` (real multi-threaded concurrency proofs).
+- **Not yet confirmed:** the exact mechanism behind the *plain*-test failures (missing flash
+  message, off-by-one query count, missing outbox email) remains open — ruling out cross-test
+  transactional pollution narrows it to either leftover in-process Python state (a module-level
+  cache/singleton) or Redis-cache state not covered by the existing `_clear_django_cache` autouse
+  fixture, but neither was caught live this pass.
+
+**Correction (2026-08-05):** the first draft of this investigation recommended broadening CI's
+real-MySQL coverage to all 22 `transaction=True` files, on the mistaken assumption that
+`.github/workflows/ci.yml` only ran the commission/wallet/withdrawal subset against MySQL. Checked
+the actual workflow file directly before implementing that: `pytest -q` with no path/marker filter,
+`testpaths = ["tests"]` in `pyproject.toml` — **CI already runs the entire suite against real MySQL,
+every file, every time.** There is nothing to broaden; the file is already correct. This means the
+SQLite lock contention confirmed above is a **local-development-only artifact** (this Mac cannot run
+MySQL at all, per this project's own long-documented constraint — see `SPEC.md` Local dev
+environment), not a CI or merge-safety gap. It causes confusing local flakes when running the full
+suite on this Mac, but never a false CI failure blocking a real merge. No further action taken on
+`.github/workflows/ci.yml` — correcting course rather than making a pointless change.
 
 ## Known issues — surfaced by Task 30f's first-ever pip-audit run (2026-07-31)
 
@@ -4788,6 +4836,131 @@ regression test)
 
 **Estimated scope:** M
 
+**Follow-up (2026-08-04/05), per direct user feedback after live-testing the shipped page:**
+- Hero headline/subtext now centers on mobile/tablet only (`items-center text-center`, reverting to
+  `lg:items-start lg:text-left` where the split-image layout kicks in).
+- The bento grid's second tile now also gets a wide `md:col-span-2` span (matching the real fetched
+  Stitch mockup exactly — the original build only special-cased `forloop.first`, leaving tiles 2-4
+  as plain equal cells instead of one wide top-right tile).
+- Bento tile text moved from centered to bottom-left on every tile, per explicit instruction (a
+  deliberate simplification vs. the mockup's own mixed centered/bottom-left treatment).
+- "View All Categories" moved out of the grid into its own link below it (`lg:`+ only); the in-grid
+  "View All Products" tile is now an `lg:hidden` mobile/tablet fallback.
+- Root-caused and fixed the "square instead of circle" timeline complaint: this project's
+  `rounded-full` Tailwind token is redefined to `0.75rem` (for pill-shaped buttons), not a true 50%
+  circle, so every square `w=h` "circle" badge on the home page (4 timeline numbers, the bento
+  arrow icon, 2 carousel buttons) rendered as a barely-rounded square. Fixed with the
+  arbitrary-value `rounded-[50%]` on those specific badges, leaving actual pill buttons on
+  `rounded-full` as-is. Added `motion-safe:animate-pulse` to the first (orange) timeline circle.
+- The featured-products carousel's Previous/Next buttons now show at every breakpoint, not
+  desktop-only (`hidden md:flex` → `flex`) — mobile keeps its native touch-swipe too, the buttons
+  are now an additional affordance, not a desktop-only replacement.
+
+Verified live in a real browser at 500/900/1440px. New regression test:
+`test_category_bento_grid_second_tile_wide_and_view_all_categories_outside_grid`. Shipped 2026-08-05
+via PR #60 alongside Task 32.
+
+---
+
+### Task 32: Admin portal fixes — category-image dropzone, logout redirect, native-admin links
+
+**Description:** Not in the original plan — found via direct user testing/bug reports in the same
+session as Task 31's follow-up above. Three unrelated fixes bundled into one PR per this project's
+batching convention (see `CLAUDE.md`'s "Git & Review Workflow"):
+
+1. **Category admin image field modernized.** The `CategoryForm` image field used Django's raw,
+   unstyled `ClearableFileInput` widget, rendering literal "Currently: categories/cat_x.webp /
+   Clear / Choose file No file chosen" text with zero styling. Replaced with a modern Alpine-driven
+   dropzone/preview UI matching the product-image dropzone's existing visual language: a
+   `CategoryImageWidget` (a small `ClearableFileInput` subclass with its own template rendering
+   just the sr-only file input, plus a sr-only "clear" checkbox when editing a category that
+   already has an image — no visible default text). Required a small global fix: Django's default
+   form renderer can't see this project's real `templates/` directory (it uses an isolated engine
+   with `DIRS=[]`), so custom widget templates need `FORM_RENDERER = "django.forms.renderers.
+   TemplatesSetting"` (Django's own documented fix) plus `django.forms` added to `INSTALLED_APPS`
+   so its own built-in widget templates stay discoverable through the same engine.
+2. **Admin logout fixed.** Was posting to `admin:logout` — Django's own raw internal admin logout
+   view, redirecting to the native unstyled `/admin/login/` page instead of this project's branded
+   one. Switched to `account_logout` (allauth's real logout view, already the storefront's own
+   convention) with a hidden `next` field pointing at `two_factor:login`, so logging out lands back
+   on the branded admin login screen specifically, not allauth's own default redirect (the public
+   storefront home).
+3. **Two more leftover native-admin links, found via a follow-up audit** (grepped the whole
+   `templates/`/`apps/` tree for `{% url 'admin: %}`, raw `/admin/` hrefs, and `reverse`/`redirect`
+   calls in Python — confirmed these were the only two remaining instances): the admin login page's
+   logo (`templates/base_admin_auth.html`, the shared header for every 2FA/admin-auth screen)
+   linked to `two_factor:login` — itself — leaving no way to reach the public storefront from the
+   admin login screen; fixed to `catalog:home` (a logo linking to the public site from an internal
+   login screen is standard — GitHub, Stripe, AWS all do this — and gives up nothing, since the
+   storefront URL is public either way). The 2FA setup-complete screen's "Continue to Admin Panel"
+   button linked to `admin:index` (Django's raw native admin dashboard) instead of
+   `admin_portal:dashboard`.
+
+**Real bugs found and fixed live, not just the styling:**
+- `{{ category.image.url }}` raises a real Python `ValueError` on an empty `ImageField` — Django's
+  `|default` filter only substitutes for falsy *values*, not exceptions raised while resolving
+  `.url` on an empty `ImageFieldFile` — crashed the edit page for any category with no image (e.g.
+  right after clearing one and saving). Fixed by checking `{% if category.image %}` first.
+- When a category already has an image, Django's `ClearableFileInput` renders a "clear" checkbox
+  alongside the file input. The dropzone `<label>` wrapped both — per the HTML label spec, a label
+  wrapping more than one labelable control delegates its default click action to the *first* one it
+  contains (the checkbox, rendered first), not the file input — so clicking the dropzone after
+  deleting an image silently did nothing, no file picker ever opened. Root-caused by comparing a
+  synthetic-click DOM test against the already-working product-image dropzone (which uses a
+  single-control label and correctly delegates) as a control. Fixed with an explicit
+  `for="{{ form.image.id_for_label }}"` association instead of implicit wrapping.
+- **CodeRabbit caught one more real, Major bug on PR #60:** the category dropzone's delete button
+  was only revealed via `opacity-0 group-hover:opacity-100`, and touch devices have no hover state
+  at all, so an admin on a phone/tablet could never discover or reach it for an existing image.
+  This exact same pattern already existed in the pre-existing, already-shipped product-image
+  dropzone this one was modeled on — fixed both the same way:
+  `opacity-100 md:opacity-0 md:group-hover:opacity-100`, always visible below `md:` (touch-primary
+  devices), hover-gated at `md:`+ where real mouse hover exists. CodeRabbit also caught 3 style
+  findings (multi-line comments using consecutive `{# #}` tags instead of `{% comment %}`, and one
+  raw HTML `<!-- -->` comment leaking implementation details to the browser instead of staying
+  server-side) — all fixed in a single follow-up commit per this project's "batch CodeRabbit fixes"
+  convention.
+
+**Acceptance criteria:**
+- [x] Category admin form's image field renders a styled dropzone, not raw browser default markup
+- [x] Editing a category with no image renders without error
+- [x] Deleting an existing image, then choosing a replacement, correctly opens the file picker and
+      updates the preview
+- [x] Admin logout lands on the branded admin login page, not `/admin/login/`
+- [x] Admin login page's logo links to the storefront home; 2FA setup-complete's CTA links to
+      `admin_portal:dashboard`
+- [x] The image-tile delete button is visible without hovering, on both the category and product
+      dropzones
+
+**Verification:**
+- [x] New regression tests: `test_editing_a_category_with_no_image_renders_without_error`,
+      `test_editing_a_category_with_an_image_wires_the_dropzone_to_the_real_file_input`
+      (`tests/feature/admin_portal/test_catalog_management.py`);
+      `test_logging_out_of_the_admin_portal_redirects_to_the_branded_login_page`
+      (`tests/feature/admin_portal/test_dashboard.py`);
+      `test_admin_login_logo_links_to_the_storefront_not_back_to_itself`,
+      `test_2fa_setup_complete_continue_button_links_to_the_real_admin_portal`
+      (`tests/feature/accounts/test_admin_auth.py`)
+- [x] Live-browser verified: category dropzone (create + edit + delete + touch-visibility at
+      500/900px), full login → logout round trip, logo click from the login page
+- [x] Full suite runs green throughout (264 passed / 1 skipped; 210 passed / 1 skipped after the
+      CodeRabbit-fix commit) — the 1 skip is the documented WeasyPrint/Pango CI-only test
+- [x] `black`/`isort`/`ruff` clean, `npm run build` clean
+- [x] CI green end to end (lint, real-MySQL test, CodeRabbit) before merge
+
+**Dependencies:** None
+
+**Files touched:** `apps/admin_portal/forms.py`, `templates/admin_portal/catalog_category_form.html`,
+`templates/admin_portal/widgets/category_image_input.html` (new),
+`templates/admin_portal/catalog_product_form.html`, `bancostore/settings.py`,
+`templates/admin_portal/base_dashboard.html`, `templates/base_admin_auth.html`,
+`templates/two_factor/core/setup_complete.html`, plus a `tests/` file per area touched
+
+**Estimated scope:** M
+
+**Closed out 2026-08-05.** Shipped via PR #60 (5 commits, including one follow-up addressing
+CodeRabbit's findings), squash-merged into `main`.
+
 ---
 
 ## Phase 10: Deployment
@@ -4797,7 +4970,7 @@ regression test)
 **This is a production deployment — confirm with the user before running any step against the
 real VPS or domain**, per `SPEC.md` Boundaries (production deploys are an "ask first" action).
 
-**Description:** Stand up the Hostinger KVM 2 VPS (Ubuntu 22.04 LTS) as the production host and
+**Description:** Stand up the Hostinger KVM 2 VPS (Ubuntu 24.04 LTS) as the production host and
 move Bancostore onto it: MySQL 8 (real concurrent writes, replacing local SQLite), Redis, Nginx as
 reverse proxy + static/media file server, Let's Encrypt for HTTPS, and Supervisor to keep Daphne
 (ASGI) and the Celery worker/beat processes running permanently, including across reboots. This is
@@ -4805,10 +4978,10 @@ the point where every "local dev uses SQLite / MySQL doesn't run on this Mac" wo
 `SPEC.md` stops applying — production runs the real stack end to end.
 
 **Acceptance criteria:**
-- [ ] Hostinger KVM 2 VPS provisioned (Ubuntu 22.04 LTS), SSH key-based access configured, root
+- [ ] Hostinger KVM 2 VPS provisioned (Ubuntu 24.04 LTS), SSH key-based access configured, root
   login disabled in favor of a sudo user
 - [ ] MySQL 8, Redis, Nginx, and Python installed on the VPS via `apt` (native install works here —
-  unlike this Mac, Ubuntu 22.04 has current bottles/build tools for all of these)
+  unlike this Mac, Ubuntu 24.04 has current bottles/build tools for all of these)
 - [ ] Production `.env` created directly on the server (never committed): real `SECRET_KEY`,
   `DEBUG=False`, `ALLOWED_HOSTS` set to the production domain, `DATABASE_URL` pointing at the VPS's
   MySQL, `REDIS_URL`, and the Paystack/email/SMS provider keys from `SPEC.md` Open Questions

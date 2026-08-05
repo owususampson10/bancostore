@@ -239,6 +239,12 @@ LOGIN_URL = "two_factor:login"
 # CSRF_COOKIE_SECURE once Task 24 sets up real HTTPS.
 TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
 
+# Themed "Session Expired" page instead of Django's raw technical CSRF
+# error page. templates/404.html, 500.html, 403.html, 400.html need no
+# equivalent setting -- Django's own default error handlers already pick
+# those up by template name alone once the file exists.
+CSRF_FAILURE_VIEW = "bancostore.views.csrf_failure"
+
 ROOT_URLCONF = "bancostore.urls"
 
 TEMPLATES = [

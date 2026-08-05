@@ -41,14 +41,14 @@
 <li>
 <label class="block cursor-pointer">
 <input type="radio" name="category" value="" class="hidden peer" {% if not category_slug %}checked{% endif %}>
-<span class="peer-checked:bg-primary peer-checked:text-on-primary block w-full text-left px-4 py-2 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors">All Products</span>
+<span class="peer-checked:bg-primary peer-checked:text-on-primary peer-checked:hover:!bg-primary peer-checked:hover:!text-on-primary block w-full text-left px-4 py-2 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors">All Products</span>
 </label>
 </li>
 {% for cat in categories %}
 <li>
 <label class="block cursor-pointer">
 <input type="radio" name="category" value="{{ cat.slug }}" class="hidden peer" {% if category_slug == cat.slug %}checked{% endif %}>
-<span class="peer-checked:bg-primary peer-checked:text-on-primary block w-full text-left px-4 py-2 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors">{{ cat.name }}</span>
+<span class="peer-checked:bg-primary peer-checked:text-on-primary peer-checked:hover:!bg-primary peer-checked:hover:!text-on-primary block w-full text-left px-4 py-2 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors">{{ cat.name }}</span>
 </label>
 </li>
 {% endfor %}
