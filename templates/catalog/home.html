@@ -31,6 +31,16 @@ column (~420px) still isn't quite wide enough for "OPPORTUNITY." at
 72px -- stepped the headline down to 56px for the lg tier specifically,
 only returning to the full 72px at xl (1280px) where the column is
 comfortably wide enough.
+
+**Update 2026-08-07, per user bug report:** the hero image's Stitch
+preview CDN link expired the same way the About page's own copy of this
+exact same asset already had (fixed 2026-08-05). Fixed by pointing this
+<img> at the same already-self-hosted static/images/pages/about-hero.jpg
+instead of re-downloading a duplicate. A follow-up sweep confirmed every
+other external Stitch image still on this page (the photo strip, the
+category tile background, the distributor CTA image) and on
+templates/pages/contact.html was still live -- this was the only broken
+one site-wide.
 {% endcomment %}
 <section class="relative pt-16 md:pt-24 pb-20 md:pb-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto overflow-hidden">
 <div class="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-10 lg:gap-12">
@@ -48,7 +58,7 @@ Shop everyday lifestyle and wellness products — or build a business selling th
 </div>
 </div>
 <div class="w-full lg:w-1/2 h-[280px] sm:h-[360px] md:h-[420px] lg:h-[500px] rounded-2xl overflow-hidden shadow-2xl relative">
-<img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida/AP1WRLuu2hjIBHNd-Muxit73xoamtejtinNsKqGnCzkZr3CYYWG8BN95sPlHftDPKlZcb4rhKFt5q2IImSovn1sH1rYu7_pdik-ERXy74COTc0f9-BeTS9qRpYPNu8jVYBfj6ub-SB9NIjqXi-IeSy2wheUywKpsDwGxqHJ3Kvn8UoCyhBdkP9YujShHg8w27-6gAY2m8UPIMldSC1y4J8jwVkuuhS3g4OqigQaDUkaJyKPwKNLEJUBQhZRsm3Gs" alt="A premium lifestyle scene representing Bancostore's products and opportunity">
+<img class="w-full h-full object-cover" src="{% static 'pages/about-hero.jpg' %}" alt="A premium lifestyle scene representing Bancostore's products and opportunity">
 </div>
 </div>
 </section>
