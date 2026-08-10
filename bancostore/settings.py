@@ -468,13 +468,25 @@ else:
 # there, so it's already on the console backend regardless of this value).
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "")
 
-if not DEFAULT_FROM_EMAIL:
-    if not DEBUG and not _RUNNING_UNDER_PYTEST:
+# CodeRabbit follow-up on the same PR: the guard above only rejected an EMPTY
+# value -- it wouldn't have caught someone explicitly (if mistakenly) setting
+# DEFAULT_FROM_EMAIL to one of these two reserved-TLD placeholders directly in
+# production's .env, which would pass the guard yet still silently bounce
+# every real send. Rejected explicitly now, same as _KNOWN_INSECURE_SECRET_KEYS.
+_KNOWN_INSECURE_FROM_EMAILS = {
+    "no-reply@bancostore.example",
+    "no-reply@bancostore.test",
+}
+
+if not DEBUG and not _RUNNING_UNDER_PYTEST:
+    if not DEFAULT_FROM_EMAIL or DEFAULT_FROM_EMAIL in _KNOWN_INSECURE_FROM_EMAILS:
         raise ImproperlyConfigured(
-            "DEFAULT_FROM_EMAIL is not set. Refusing to run outside DEBUG with "
-            "no sender address configured -- set DEFAULT_FROM_EMAIL in the "
+            "DEFAULT_FROM_EMAIL is not configured with a real, deliverable "
+            "sender address. Refusing to run outside DEBUG with an unset or "
+            "known-placeholder value -- set DEFAULT_FROM_EMAIL in the "
             "environment."
         )
+elif not DEFAULT_FROM_EMAIL:
     # Local dev/tests only reach here: a placeholder is harmless since sends
     # are either printed by the console backend or never actually attempted.
     DEFAULT_FROM_EMAIL = "no-reply@bancostore.example"
