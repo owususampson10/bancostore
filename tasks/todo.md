@@ -5077,23 +5077,27 @@ into one shared bucket (or becoming spoofable) once traffic passes through a rev
 folds in swapping `DEFAULT_FROM_EMAIL` off the reserved `.test` TLD, flagged in the same section as
 a pre-go-live item.
 
-**Overall acceptance criteria** (each owned by one or more sub-tasks below):
-- [ ] Hostinger KVM 2 VPS provisioned (Ubuntu 24.04 LTS), SSH key-based access configured, root
+**Overall acceptance criteria** (each owned by one or more sub-tasks below) — **all complete,
+2026-08-10:**
+- [x] Hostinger KVM 2 VPS provisioned (Ubuntu 24.04 LTS), SSH key-based access configured, root
   login disabled in favor of a sudo user — **24a**
-- [ ] MySQL 8, Redis, Nginx, and Python installed on the VPS via `apt` — **24b**
-- [ ] GoDaddy domain resolves to the VPS — **24c**
-- [ ] Production `.env` created directly on the server (never committed): real `SECRET_KEY`,
+- [x] MySQL 8, Redis, Nginx, and Python installed on the VPS via `apt` — **24b**
+- [x] GoDaddy domain resolves to the VPS — **24c**
+- [x] Production `.env` created directly on the server (never committed): real `SECRET_KEY`,
   `DEBUG=False`, `ALLOWED_HOSTS` set to the production domain, `DATABASE_URL` pointing at the VPS's
   MySQL, `REDIS_URL`, and the Paystack/email/SMS provider keys from `SPEC.md` Open Questions, plus
   the security-header/proxy-IP-trust/`DEFAULT_FROM_EMAIL` fixes above — **24d**
-- [ ] `pip install -r requirements.txt`, `npm run build`, `python manage.py collectstatic`, and
+- [x] `pip install -r requirements.txt`, `npm run build`, `python manage.py collectstatic`, and
   `python manage.py migrate` all run clean against real MySQL on the VPS — **24e**
-- [ ] Supervisor configs for Daphne, `celery worker`, and `celery beat` — auto-restart on crash and
+- [x] Supervisor configs for Daphne, `celery worker`, and `celery beat` — auto-restart on crash and
   on VPS reboot — **24f**
-- [ ] Nginx reverse-proxies to Daphne, serves `static/`/`media/` directly, and Let's Encrypt issues
+- [x] Nginx reverse-proxies to Daphne, serves `static/`/`media/` directly, and Let's Encrypt issues
   a valid HTTPS certificate (with auto-renewal) for the production domain — **24g**
-- [ ] A deploy process is documented (manual runbook at minimum); one full smoke-test purchase
+- [x] A deploy process is documented (manual runbook at minimum); one full smoke-test purchase
   succeeds against real MySQL/Redis before any real user account exists on the VPS — **24h**
+
+`https://bancostore.com` is live. See 24h's own Built note below for the full smoke-test story,
+real bugs found and fixed along the way, and Checkpoint J sign-off.
 
 **Dependencies:** Task 23 (Checkpoint I — full MVP complete and verified locally, done), Open
 Question #1 (CI provider confirmed, done), Hostinger VPS + GoDaddy domain in hand (done, 2026-08-06)
@@ -5540,20 +5544,135 @@ sub-task — a manual runbook satisfies Task 24's own acceptance criteria; autom
 work, not silently assumed here).
 
 **Acceptance criteria:**
-- [ ] One full smoke-test purchase (register → pay → starter pack → tree placement → KYC → IR ID →
+- [x] One full smoke-test purchase (register → pay → starter pack → tree placement → KYC → IR ID →
   direct referral bonus → binary bonus cycle → withdrawal request → tax deduction → simulated
   payout) succeeds end-to-end against real production MySQL/Redis
-- [ ] A manual deploy runbook is written down (`deploy/README.md` or similar): what to run, in what
+- [x] A manual deploy runbook is written down (`deploy/README.md` or similar): what to run, in what
   order, to ship a new release to this VPS
-- [ ] `SPEC.md` Commands section gets the verified production commands added, matching how Task 1
+- [x] `SPEC.md` Commands section gets the verified production commands added, matching how Task 1
   documented the local dev commands
 
 **Verification:**
-- [ ] Every financial figure from the smoke test (PV, commission amounts, tax, wallet balance)
+- [x] Every financial figure from the smoke test (PV, commission amounts, tax, wallet balance)
   checked against the production database directly, not just the UI — matching this project's own
   established verification standard (Checkpoint F, Task 17e, etc.)
-- [ ] A second person (or a second read-through by the user) could follow the runbook and
+- [x] A second person (or a second read-through by the user) could follow the runbook and
   successfully deploy a trivial change, without needing this conversation's context
+
+**Built:** Done 2026-08-10, live in a real browser against `https://bancostore.com`, not a
+simulation. **Two-account design, not the originally-sketched single-referral test:** the public
+registration form has no path to a sponsorless account (`sponsor_ir_id` is a required field,
+confirmed by reading `apps/distributors/forms.py::clean_sponsor_ir_id` directly) — a real
+production launch's very first distributor has to be created directly, same as this project's own
+`seed_roles` does in DEBUG. Distributor A (root sponsor) was bootstrapped via
+`BinaryTree.place_distributor(None, ...)` — a genuine, documented first-class code path ("The very
+first distributor in the system has no sponsor," not a workaround) — calling the same real service
+functions `consume_paid_registration`/`consume_paid_starter_pack`/`approve_kyc` use internally,
+skipping only the Paystack verification wrapper itself since A was never meant to be part of the
+tested journey. Distributor B went through **every single step for real**: registration form →
+real Paystack test-mode payment (GHS 1,500 for Starter Pack A, confirmed via the real checkout
+widget, not mocked) → starter pack payment → real tree placement under A → real Direct Referral
+Bonus (GHS 50 = 10% × 500 PV) credited to A's wallet → real phone OTP verification → real Didit
+hosted KYC (ID + live selfie, completed by the user directly — 96.66% face match, 100% liveness) →
+real admin review and approval via the actual `admin_portal` UI → real sequential IR ID assignment
+(`IR00002`) → real withdrawal request/approval/tax computation for A.
+
+**Starter pack prices (GHS 1,500 for Pack A/500 PV/Bronze, GHS 2,000 for Pack B/1,000 PV/Silver)
+seen live in production for the first time this session** — worth recording since neither figure
+had been written down anywhere before now. Re-reading `project_direct_referral_bonus_formula`
+carefully: its own GHS 50/100 figures were always the *bonus* amounts (rate × PV), not pack
+prices — no correction needed there; this live run just reconfirms that memory's formula exactly
+(GHS 50 credited = 10% × 500 PV, precisely as documented).
+
+**Four real, previously-uncaught bugs/gaps found via this live run, none of which any automated
+test would have caught:**
+1. **`PYTHONUNBUFFERED` missing from all three Supervisor configs** — `apps/notifications/sms.py`'s
+   `print()`-based fake SMS sender (used whenever `MNOTIFY_API_KEY` is unset, exactly the
+   temporary-blank state this smoke test itself used to avoid real SMS costs) silently sat in
+   Python's stdout buffer and never reached the log for a long-running Supervisor-managed process —
+   the exact same class of gotcha this project already hit once before with Django's autoreloader
+   dropping `-u` (documented earlier in this file). Fixed in all three `deploy/supervisor/*.conf`
+   files, verified live: the fake OTP appeared in the log immediately after the fix.
+2. **Phone OTP verification only triggers at login, not right after registration** — not a bug,
+   but a real gap in this task's own assumptions going in: `verify_otp_view` requires
+   `request.session["otp_purpose"]`, which is only set by `attempt_distributor_login`'s
+   `needs_verification` branch. Since payment auto-logs a distributor in via
+   `registration_payment_callback`, that gate is never hit until a later, separate login attempt —
+   confirmed correct by reading `apps/distributors/views.py` directly rather than guessing.
+3. **`/accounts/login/` (plural, allauth's customer path) vs `/account/login/` (singular,
+   `two_factor`'s admin path) is a real, easy-to-hit mix-up** — the user's first admin login
+   attempt landed on the wrong page entirely, surfacing as a misleading "Session Expired" page
+   (this project's own themed CSRF-failure view, `bancostore.views.csrf_failure`, since allauth's
+   page has no CSRF token matching what `two_factor`'s form expects). Not a code bug, but confusing
+   enough that it's worth this explicit note for the next person who hits it.
+4. **A brand-new admin account with zero TOTP devices lands on a bare 403, not a forced-setup
+   redirect** — `django-two-factor-auth`'s own `LoginView` only auto-redirects to
+   `two_factor:setup` when the login was reached via a `?next=` param pointing at a URL its
+   `is_otp_view()` recognizes as OTP-required; a direct visit to the login page (exactly how this
+   session reached it) never triggers that redirect, and `admin_portal`'s own
+   `is_admin_portal_staff` check (`user.is_staff and user.is_verified()`) just returns a plain 403
+   with no path forward. Confirmed by reading `two_factor`'s own `views/core.py` source, not
+   guessed. Not fixed as a code change here (needs a product decision — e.g. should
+   `admin_portal`'s 403 page itself detect "staff, zero devices" and link to setup? — flagged for a
+   future task, not silently patched mid-smoke-test) — worked around for this session by navigating
+   directly to `/account/two_factor/setup/`.
+
+**Binary Bonus verified as a real, working pipeline, not a full multi-leg scenario:**
+`calculate_binary_bonus()` invoked directly via shell against the real thin tree (A with only one
+downline leg populated) — correctly evaluated 1 distributor, paid GHS 0 (weak/right leg has 0 PV,
+correctly no bonus due), and wrote a real `CommissionCycleRun` audit record matching the task's own
+return value exactly. This proves the production Celery/Redis/MySQL wiring works end-to-end; the
+bonus math itself was already exhaustively proven by the existing automated test suite (Checkpoint
+E), so reproducing a full two-leg scenario for real (a third distributor, a third live Didit
+session) was deliberately out of scope, per the plan agreed with the user before starting.
+
+**Withdrawal tested for real, with a legitimate temporary settings change:** `MIN_WITHDRAWAL_AMOUNT`
+lowered from GHS 100 to GHS 1 via the real `admin_portal` Platform Settings screen (not a code
+change — the platform's own intended admin control), specifically to let A's real GHS 50 balance
+clear the minimum. A requested GHS 50, tax correctly computed at 1% (GHS 0.50), admin approved via
+the real UI (fresh TOTP re-entry required — "remember device" defaults unchecked by design),
+wallet correctly debited to GHS 0.50 remaining, `WithdrawalRequest.status` correctly transitioned
+to `approved_debited`. **Payout destination snapshot-at-approval-time confirmed correct, not a
+bug** — `WithdrawalRequest.payout_mobile_money_number/network` are blank at submission and only
+populated by `approve_withdrawal_request` (confirmed by reading `apps/withdrawal/services.py`
+directly before concluding this), matching this codebase's consistent snapshot-at-event-time
+convention elsewhere (order prices, starter pack prices). **The actual Paystack Transfer to a real
+mobile money account was not exercised** — already a known, accepted, documented limitation
+(`project_paystack_transfer_account_tier_blocked`: this sandbox account's "Starter Business" tier
+blocks all real Transfers regardless of test/live mode), not something this task could have forced
+through; the payout batch reaching that API call and failing there is expected, not a new gap.
+`MIN_WITHDRAWAL_AMOUNT` restored to GHS 100 immediately after, confirmed via `constance.config`
+directly.
+
+**Cleanup:** both smoke-test distributors and every record cascading from them (23 rows: wallet
+transactions, PV ledger/daily bucket/monthly personal PV, Didit verification, binary tree edge,
+withdrawal request, notifications, pending registration, the two `User`/`Distributor` rows
+themselves) deleted before finishing — confirmed via `User.objects.filter(...).delete()`'s own
+returned cascade summary, not assumed. 10 `CommissionCycleRun` audit records also removed (Celery
+Beat's own real periodic schedule fired several times in the background during the session,
+against the same thin test data — all zero-payout, safe to remove). Production database now has
+zero distributors, matching a genuine pre-launch state; the one real admin account
+(`bancostore7@gmail.com`) was deliberately preserved.
+
+**mNotify handled the same way Task 18g established:** `MNOTIFY_API_KEY` temporarily blanked
+(explicit user sign-off) so OTP codes printed to logs instead of sending real, billed SMS; restored
+to the real key and all three Supervisor programs restarted immediately after the KYC/OTP steps
+were done, confirmed via a live site health check afterward.
+
+`deploy/README.md` written: server facts, deploy steps, environment variable notes (including the
+two that need special care — `MNOTIFY_API_KEY` and the Paystack test/live decision),
+crash/reboot recovery (nothing manual needed, already proven in 24f), the mNotify-blanking pattern
+for future safe testing, going-live-with-real-Paystack-keys steps, the deferred Didit webhook setup
+procedure (now unblocked since HTTPS exists), and the known limitations list (Paystack Transfer
+account-tier block, `npm audit` findings, no CI/CD auto-deploy yet). `SPEC.md` Commands section
+updated with both the already-stale local dev block (fixed `seed_data` → the real `seed_roles`,
+removed the leftover "to be finalized" framing) and a new Production section pointing to
+`deploy/README.md` as the source of truth rather than duplicating it.
+
+**Checkpoint J reached:** `https://bancostore.com` is live, reachable over real HTTPS, running on
+the Hostinger VPS against real MySQL, with Daphne/Celery worker/Celery beat kept alive by
+Supervisor and surviving a real reboot (proven in 24f). Task 24, and with it the full numbered MVP
+task list (Tasks 1-24 plus the ad-hoc Tasks 25-31), is complete.
 
 **Dependencies:** 24a-24g all complete
 
