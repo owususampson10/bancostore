@@ -31,11 +31,11 @@
 <td class="px-6 py-5 text-gray-muted font-body-md text-body-md">{{ member.rank|title|default:"—" }}</td>
 <td class="px-6 py-5">
 {% if member.kyc_status == "approved" %}
-<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-50 text-green-700">Approved</span>
+<span class="px-2.5 py-1 rounded-full font-body-md text-body-md font-semibold bg-green-50 text-green-700">Approved</span>
 {% elif member.kyc_status == "rejected" %}
-<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-error-container text-on-error-container">Rejected</span>
+<span class="px-2.5 py-1 rounded-full font-body-md text-body-md font-semibold bg-error-container text-on-error-container">Rejected</span>
 {% else %}
-<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-surface-container-high text-on-surface-variant">Pending</span>
+<span class="px-2.5 py-1 rounded-full font-body-md text-body-md font-semibold bg-surface-container-high text-on-surface-variant">Pending</span>
 {% endif %}
 </td>
 <td class="px-6 py-5 text-gray-muted font-body-md text-body-md">{{ member.user.date_joined|date:"M d, Y" }}</td>
