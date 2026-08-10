@@ -387,9 +387,29 @@ Criteria.
   total, including one follow-up addressing CodeRabbit's findings); full CI green (lint, real-MySQL
   test, CodeRabbit) before merge. See `tasks/todo.md` for the full breakdown.
 
+- [ ] Task 33: Distributor Team page — flat roster of the personally-recruited downline. Scoped
+  2026-08-10, not yet built. The "Team" sidebar entry has existed as a disabled placeholder since
+  Task 15/21 ("still a future task"); this gives it a real, user-confirmed scope rather than
+  leaving it undecided. Deliberately NOT the same data as the existing Binary Tree page (Task 21a,
+  `apps.binary_tree`'s placement/spillover structure) — this is the *sponsor* chain
+  (`Distributor.sponsor`, the recruitment lineage Matching Bonus already walks), which the codebase
+  already documents as diverging from placement under spillover. Columns: full name, IR ID, rank,
+  KYC status, date joined — all real `Distributor` fields, no fabricated data. Full downline depth
+  (not just direct recruits), using the same bulk-per-level BFS pattern as
+  `apps.commissions.services.sum_downline_binary_bonus_earnings` (one query per level, cycle-guarded,
+  capped at the existing `MAX_MATCHING_BONUS_WALK_DEPTH` ceiling — reused, not duplicated), since a
+  live page load can't afford a per-row recursive walk at this platform's stated scale. Search/sort
+  on the roster explicitly deferred as a fast-follow, not built in the first slice. See
+  `tasks/todo.md` for the full breakdown and the open question this still needs an answer on
+  (whether to include a Personal PV column, which needs an extra per-distributor `pv_ledger` query
+  the other columns don't).
+
 ### Phase 10: Deployment
-- [ ] Task 24: Deploy to Hostinger VPS (production) — **needs the Hostinger KVM 2 VPS provisioned
-  first** (CI provider is already confirmed — GitHub Actions, see Open Question #1)
+- [ ] Task 24: Deploy to Hostinger VPS (production) — Hostinger KVM 2 VPS and the GoDaddy domain
+  are both purchased and in hand as of 2026-08-06 (CI provider was already confirmed — GitHub
+  Actions, see Open Question #1). Broken into vertical sub-tasks 24a-24h — see `tasks/todo.md`.
+  Each sub-task is a production action against the real VPS/domain and needs explicit user
+  go-ahead before it runs, per `SPEC.md` Boundaries.
 
 **Checkpoint J (go-live):** Bancostore is reachable over HTTPS at the production domain, running
 on the Hostinger VPS against real MySQL, with Celery/Celery Beat/Daphne kept alive by Supervisor
