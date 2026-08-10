@@ -5252,7 +5252,14 @@ rather than leaving them for a separate pass:
 
 **Verification:**
 - [x] `python manage.py check --deploy` run locally against the new settings (before the settings
-  even reach the server) shows no unresolved warnings for the items above
+  even reach the server) shows no unresolved warnings for the items this task's acceptance
+  criteria actually named (`SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`,
+  `SECURE_HSTS_SECONDS`, `SECURE_PROXY_SSL_HEADER`, `RATELIMIT_IP_META_KEY`) — two *additional*,
+  never-in-scope Django deploy-checklist warnings (`security.W005` subdomain HSTS,
+  `security.W021` preload) remain and are a deliberate, documented deferral, not an oversight —
+  see the Built note below for the reasoning (CodeRabbit flagged this exact ambiguity on PR #64;
+  this line was reworded to make the distinction explicit rather than leaving the checkbox looking
+  like it silently ignored two open warnings)
 - [x] A regression test (or a manual local check with `DEBUG=False`) confirms the security headers
   only activate when `DEBUG=False`, never affecting local dev
 
@@ -5304,6 +5311,44 @@ the app directory as `.env` once 24e clones the repo. Full local suite green thr
 passed, 1 skipped) — confirming this diff introduced no regression; the one background-thread
 warning (`wallet_wallettransaction` unique-constraint race) is SQLite's known weaker concurrency
 handling under a threaded test, unrelated to anything touched here.
+
+**PR #64 follow-up fixes (2026-08-10), both caught by CI/CodeRabbit, not local review:**
+1. The first push forgot to run `black . && isort . && ruff check .` locally (a genuine miss of
+   this project's own Boundaries) — 15 `ruff` E501 line-length violations in the new comments,
+   fixed by rewrapping.
+2. **CI's `test` job failed with 476 of ~1250 tests returning a `301` redirect.** Root cause: CI
+   deliberately runs the suite with `DEBUG=False` (to catch other `DEBUG=False`-only bugs, e.g.
+   the media-serving gotcha earlier in this file) but isn't behind a real HTTPS-terminating proxy
+   — `django.test.Client`'s requests are plain HTTP by default, so `SECURE_SSL_REDIRECT` redirected
+   nearly every request. A gap in this task's own design that hadn't been considered: gating purely
+   on `not DEBUG` doesn't distinguish "real production" from "a test run that happens to also set
+   `DEBUG=False`." Fixed with `_RUNNING_UNDER_PYTEST` (`"PYTEST_VERSION" in os.environ`, confirmed
+   empirically to be set by pytest ≥8.0 at process start, before Django settings are ever
+   imported) — the whole security-header block and `TWO_FACTOR_REMEMBER_COOKIE_SECURE` now also
+   exclude a pytest run. Reproduced the exact CI failure locally first (`DEBUG=False pytest -q`),
+   confirmed red without the fix and green with it (1250 passed, 1 skipped) before pushing again.
+3. **CodeRabbit's review on the fixed push found 2 more real issues, both fixed the same way this
+   project always addresses review findings — together, in one follow-up commit** (plus 2 more
+   flagged as genuine but deliberately NOT fixed here, see below): `.env.example`'s own
+   `SECRET_KEY=change-me` placeholder was never actually rejected by the fail-closed guard (it only
+   checked for `settings.py`'s own internal `"django-insecure-local-dev-only"` fallback) — extended
+   to a `_KNOWN_INSECURE_SECRET_KEYS` set covering both. And a sharper catch: this task's own
+   `DEFAULT_FROM_EMAIL` fallback fix reproduced the exact bug class it was fixing —
+   `"no-reply@bancostore.example"` is itself also a reserved RFC 2606 TLD. Fixed by extending the
+   same fail-closed pattern already established for `SECRET_KEY` (raise `ImproperlyConfigured` if
+   unset outside `DEBUG` and not under pytest) rather than swapping in yet another fake address.
+   **Two more CodeRabbit findings were deliberately NOT auto-fixed** — both real, both correctly
+   labeled "Heavy lift" by CodeRabbit itself, both representing a bigger decision than a follow-up
+   commit should make silently: (a) `bancostore` sudo user's `NOPASSWD:ALL` policy — a reasoned,
+   documented tradeoff (24a's own Built note: the key is the real security boundary for a
+   single-admin deploy account, matching standard cloud-provider convention), not an oversight, but
+   CodeRabbit's suggested alternative (a command allowlist or separate elevated account) is a
+   legitimate harder-security option worth the user's own call, not silently implemented or
+   silently dismissed; (b) reusing local dev's real Gmail/mNotify/Didit credentials in production
+   — increases blast radius of a local `.env` leak and means local manual testing could message
+   real numbers/inboxes, but replacing them needs new sandbox/production-only accounts, a
+   provisioning decision outside this task's scope and adjacent to `SPEC.md`'s own
+   ask-first boundary on payment/SMS provider integration credentials.
 
 **Dependencies:** 24b (needs real `DATABASE_URL`/`REDIS_URL` targets to point at), 24g conceptually
 (the exact trusted-proxy header name), but the code change itself can be written and reviewed

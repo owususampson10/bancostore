@@ -50,10 +50,18 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-local-dev-only")
 
 DEBUG = os.environ.get("DEBUG", "False") == "True"
 
-if not DEBUG and SECRET_KEY == "django-insecure-local-dev-only":
+# "django-insecure-local-dev-only" is this file's own fallback when SECRET_KEY
+# is unset entirely; "change-me" is .env.example's own placeholder value --
+# a real gap CodeRabbit caught on PR #64: a .env.example copied verbatim with
+# only DEBUG flipped to False would otherwise run with a publicly-known
+# literal, same class of risk as the unset case this guard already covered.
+_KNOWN_INSECURE_SECRET_KEYS = {"django-insecure-local-dev-only", "change-me"}
+
+if not DEBUG and SECRET_KEY in _KNOWN_INSECURE_SECRET_KEYS:
     raise ImproperlyConfigured(
-        "SECRET_KEY is not set. Refusing to run with the insecure default "
-        "outside DEBUG — set SECRET_KEY in the environment."
+        "SECRET_KEY is not set to a real value. Refusing to run with a known "
+        "placeholder outside DEBUG — set a real, random SECRET_KEY in the "
+        "environment."
     )
 
 ALLOWED_HOSTS = [
@@ -449,7 +457,27 @@ else:
 # with real SPF/DKIM alignment for this Gmail-SMTP setup -- a bancostore.com
 # address would need its own mail-sending DNS records this project doesn't
 # have yet.
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@bancostore.example")
+#
+# CodeRabbit caught a real repeat of the same mistake on PR #64: this file's
+# own fallback used to be "no-reply@bancostore.example", which is *also* a
+# reserved RFC 2606 TLD -- so a production run that somehow omitted
+# DEFAULT_FROM_EMAIL would have silently kept sending from an undeliverable
+# address instead of failing loudly. Fail closed instead, matching the
+# SECRET_KEY guard above -- excluding pytest (see _RUNNING_UNDER_PYTEST)
+# since CI never sends real email either (no EMAIL_HOST_USER/PASSWORD set
+# there, so it's already on the console backend regardless of this value).
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "")
+
+if not DEFAULT_FROM_EMAIL:
+    if not DEBUG and not _RUNNING_UNDER_PYTEST:
+        raise ImproperlyConfigured(
+            "DEFAULT_FROM_EMAIL is not set. Refusing to run outside DEBUG with "
+            "no sender address configured -- set DEFAULT_FROM_EMAIL in the "
+            "environment."
+        )
+    # Local dev/tests only reach here: a placeholder is harmless since sends
+    # are either printed by the console backend or never actually attempted.
+    DEFAULT_FROM_EMAIL = "no-reply@bancostore.example"
 
 
 # mNotify — SMS OTP for distributor registration/login/password reset (Task 5).
