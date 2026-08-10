@@ -31,7 +31,16 @@ following the steps below.
 ## Deploying a new release
 
 Run these as the `bancostore` user (`ssh bancostore@186.240.150.230`, using the project's own SSH
-key — password auth is disabled):
+key — password auth is disabled).
+
+**Stop the app processes before migrating, not after.** Celery Beat's schedule lives in MySQL and
+fires on its own timer, independent of a deploy in progress — if `migrate` runs while the old
+Celery worker/Beat/Daphne are still live, Beat can enqueue a periodic commission/wallet/withdrawal
+task partway through the migration, and the *old* worker code picks it up and runs it against a
+now-partially-changed schema. This means a short real downtime window during every deploy that
+touches migrations (typically well under a minute) — an accepted tradeoff, not an oversight, since
+the alternative (a zero-downtime blue/green setup) is real infrastructure this project doesn't have
+yet:
 
 ```bash
 cd /home/bancostore/bancostore
@@ -39,17 +48,17 @@ git pull origin main
 source venv/bin/activate
 pip install -r requirements.txt        # only if requirements.txt changed
 npm install && npm run build           # only if frontend deps/assets changed
-python manage.py migrate               # only if new migrations exist
+python manage.py check                 # catch settings/import errors before anything is stopped
+sudo supervisorctl stop bancostore-daphne bancostore-celery-worker bancostore-celery-beat
+python manage.py migrate               # only if new migrations exist -- safe now, nothing is
+                                        # reading/writing against the schema mid-change
 python manage.py collectstatic --noinput
-sudo supervisorctl restart bancostore-daphne bancostore-celery-worker bancostore-celery-beat
+sudo supervisorctl start bancostore-daphne bancostore-celery-worker bancostore-celery-beat
 ```
 
-**Always run `python manage.py check` before restarting** — catches settings/import errors before
-they take down the live site:
-
-```bash
-python manage.py check
-```
+If a release has no new migrations, stopping/starting is optional — `sudo supervisorctl restart
+bancostore-daphne bancostore-celery-worker bancostore-celery-beat` after `collectstatic` is enough,
+since there's no schema change for old code to race against.
 
 **Verify after restart:**
 

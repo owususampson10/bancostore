@@ -5651,8 +5651,8 @@ themselves) deleted before finishing — confirmed via `User.objects.filter(...)
 returned cascade summary, not assumed. 10 `CommissionCycleRun` audit records also removed (Celery
 Beat's own real periodic schedule fired several times in the background during the session,
 against the same thin test data — all zero-payout, safe to remove). Production database now has
-zero distributors, matching a genuine pre-launch state; the one real admin account
-(`bancostore7@gmail.com`) was deliberately preserved.
+zero distributors, matching a genuine pre-launch state; the preserved production administrator
+account was deliberately kept, not deleted along with the test data.
 
 **mNotify handled the same way Task 18g established:** `MNOTIFY_API_KEY` temporarily blanked
 (explicit user sign-off) so OTP codes printed to logs instead of sending real, billed SMS; restored
