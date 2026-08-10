@@ -5412,15 +5412,47 @@ write capability against the production database, not just connectivity.
 three survive both a process crash and a full VPS reboot without manual intervention.
 
 **Acceptance criteria:**
-- [ ] Supervisor program configs for Daphne, Celery worker, and Celery beat, all set to
+- [x] Supervisor program configs for Daphne, Celery worker, and Celery beat, all set to
   `autostart`/`autorestart`
-- [ ] Supervisor itself enabled to start on boot
+- [x] Supervisor itself enabled to start on boot
 
 **Verification:**
-- [ ] `sudo supervisorctl status` shows all three `RUNNING`
-- [ ] Killing one process (`kill -9`) results in Supervisor restarting it automatically
-- [ ] `sudo reboot` of the VPS, then `sudo supervisorctl status` again shows all three `RUNNING`
+- [x] `sudo supervisorctl status` shows all three `RUNNING`
+- [x] Killing one process (`kill -9`) results in Supervisor restarting it automatically
+- [x] `sudo reboot` of the VPS, then `sudo supervisorctl status` again shows all three `RUNNING`
   with no manual restart
+
+**Built:** Done 2026-08-10. `deploy/supervisor/bancostore-{daphne,celery-worker,celery-beat}.conf`,
+all three running as the non-root `bancostore` user (never root), `directory=/home/bancostore/bancostore`
+explicit on all three — needed for Celery's app discovery (`import bancostore`) specifically, since
+unlike `.env` loading (which resolves via `BASE_DIR`, itself derived from `settings.py`'s own file
+path, not cwd — confirmed by reading `_load_dotenv`'s implementation rather than assuming),
+Celery's `-A bancostore` flag does depend on the working directory. Ran through
+`agent-skills:security-and-hardening` before writing the configs, specifically to confirm Daphne
+binding to `127.0.0.1:8001` only (not `0.0.0.0`) is both correct and load-bearing — it's the exact
+assumption Task 24d's `SECURE_PROXY_SSL_HEADER`/`RATELIMIT_IP_META_KEY` settings already depend on
+("Daphne only listens on 127.0.0.1 -- so trusting this one header is safe"); verified directly with
+`ss -tlnp` rather than trusting the config file alone. Celery worker gets `stopasgroup=true`/
+`killasgroup=true` and a generous 600s `stopwaitsecs` — Celery's own documented Supervisor gotcha
+(the default prefork pool forks child processes; without these, Supervisor's stop signal only
+reaches the parent, orphaning children and any in-flight commission/wallet/withdrawal task they
+hold). Celery Beat pinned to `numprocs=1` with a comment explaining why: a second Beat instance
+would double-fire every periodic task (binary bonus, matching bonus, withdrawal payout, PV expiry),
+a real money-safety bug class, not just a nuisance — uses `django_celery_beat`'s
+`DatabaseScheduler` (already configured in `settings.py`), so the schedule itself lives in MySQL,
+not a local pickle file that could get lost on restart.
+
+Verified beyond just `supervisorctl status`: `curl` directly to Daphne with no `Host` header
+correctly got a `400` (proving `ALLOWED_HOSTS` is enforced even hit directly, not just through
+Nginx); with a valid `Host: bancostore.com` header it correctly got a `301` (proving
+`SECURE_SSL_REDIRECT` from Task 24d is genuinely active, not just present in the settings file —
+expected until Nginx exists in 24g to supply the trusted proxy header); Celery worker's log showed
+all 8 expected registered tasks; Celery Beat's log confirmed `beat: Starting...` (Celery logs to
+stderr by default, not stdout — checked both files rather than assuming one). Crash recovery
+tested for real: `kill -9`'d Daphne's actual pid, Supervisor restarted it with a new pid within 3
+seconds. Reboot survival tested for real, not assumed from `systemctl enable` alone: `sudo reboot`,
+polled for SSH to come back (~10s), confirmed all three `RUNNING` with fresh pids and zero manual
+intervention.
 
 **Dependencies:** 24e
 
