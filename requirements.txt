@@ -82,7 +82,12 @@ django-cryptography>=1,<2
 
 # Testing
 pytest>=8,<9
-pytest-django>=4,<5
+# Pinned exactly (not >=4,<5): 4.13.0 references an internal TestCase
+# attribute (_pre_setup_ran_eagerly) that doesn't exist for this Django
+# version here, breaking every TestCase-based test (all the concurrency
+# tests) with an AttributeError. 4.12.0 is the last version confirmed
+# working against this project's full suite.
+pytest-django==4.12.0
 
 # Formatting / linting
 black>=24,<25
