@@ -404,16 +404,19 @@ Criteria.
   (whether to include a Personal PV column, which needs an extra per-distributor `pv_ledger` query
   the other columns don't).
 
-### Phase 10: Deployment
-- [ ] Task 24: Deploy to Hostinger VPS (production) — Hostinger KVM 2 VPS and the GoDaddy domain
-  are both purchased and in hand as of 2026-08-06 (CI provider was already confirmed — GitHub
-  Actions, see Open Question #1). Broken into vertical sub-tasks 24a-24h — see `tasks/todo.md`.
-  Each sub-task is a production action against the real VPS/domain and needs explicit user
-  go-ahead before it runs, per `SPEC.md` Boundaries.
+### Phase 10: Deployment — complete 2026-08-10
+- [x] Task 24: Deploy to Hostinger VPS (production) — `https://bancostore.com` is live. Broken into
+  vertical sub-tasks 24a-24h, each its own production action confirmed with the user before
+  running (see `tasks/todo.md` for the full breakdown, real bugs found and fixed along the way,
+  and 24h's full live smoke-test story).
 
-**Checkpoint J (go-live):** Bancostore is reachable over HTTPS at the production domain, running
-on the Hostinger VPS against real MySQL, with Celery/Celery Beat/Daphne kept alive by Supervisor
-and surviving a server reboot.
+**Checkpoint J (go-live) — reached 2026-08-10:** Bancostore is reachable over HTTPS at
+`bancostore.com`, running on the Hostinger VPS against real MySQL, with Celery/Celery Beat/Daphne
+kept alive by Supervisor and verified to survive both a process crash and a full server reboot. A
+complete distributor journey (registration → real Paystack payment → tree placement → Direct
+Referral Bonus → real Didit KYC → admin approval → IR ID → withdrawal request/approval/tax) was
+verified live against the production database before being cleaned up, leaving zero distributors
+ahead of real launch.
 
 ## Risks and Mitigations
 

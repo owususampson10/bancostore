@@ -172,19 +172,19 @@ because retrofitting later is far more expensive than building it right now:
 
 ## Commands
 
-To be finalized once the project is scaffolded (`django-admin startproject bancostore`). Expected
-shape based on the stack above:
+### Local development
+
+Verified working, run natively on this Mac (no `pyenv` needed — Python 3.13 is already installed;
+see Local dev environment above for why):
 
 ```
-(run natively on this Mac via pyenv — see Local dev environment above)
-
 Install:       pip install -r requirements.txt && npm install
 Dev server:    python manage.py runserver 0.0.0.0:8000
 ASGI/Channels: daphne -b 0.0.0.0 -p 8001 bancostore.asgi:application
 Dev assets:    npm run dev
 Build assets:  npm run build
 Migrate:       python manage.py migrate
-Seed:          python manage.py seed_data
+Seed:          python manage.py seed_roles   # DEBUG-only, one stub user per role
 Test:          pytest
 Test (unit):   pytest -k commission
 Lint/format:   black . && isort . && ruff check .
@@ -192,6 +192,29 @@ Celery worker: celery -A bancostore worker -l info
 Celery beat:   celery -A bancostore beat -l info
 Flower:        celery -A bancostore flower
 ```
+
+### Production (Hostinger VPS)
+
+Verified working against the real `bancostore.com` deploy (Task 24, 2026-08-10). Full runbook —
+including restart/rollback, temporarily disabling SMS sends for safe testing, and going live with
+real Paystack keys — lives in `deploy/README.md`, not duplicated here. Quick reference:
+
+```
+SSH:              ssh -i ~/.ssh/bancostore_hostinger bancostore@186.240.150.230
+App directory:    /home/bancostore/bancostore
+Deploy a release: git pull origin main && source venv/bin/activate &&
+                   pip install -r requirements.txt && npm run build &&
+                   python manage.py migrate && python manage.py collectstatic --noinput &&
+                   sudo supervisorctl restart bancostore-daphne bancostore-celery-worker \
+                   bancostore-celery-beat
+Check services:   sudo supervisorctl status
+Logs:             tail -f /home/bancostore/bancostore/logs/*.log
+```
+
+Daphne binds `127.0.0.1:8001` only — Nginx (`deploy/nginx/bancostore.conf`) is the sole
+internet-facing process, reverse-proxying to it and serving `/static/`/`/media/` directly. All
+three app processes run under Supervisor (`deploy/supervisor/*.conf`), `autostart`/`autorestart`,
+verified to survive both a process crash and a full VPS reboot with zero manual intervention.
 
 ## Project Structure
 

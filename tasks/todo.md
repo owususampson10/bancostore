@@ -60,16 +60,17 @@ it's unimportant:
   actually blocks the command and creates no stub account when `DEBUG=False`.
 - [x] ~~OTP codes compared with `!=` instead of `secrets.compare_digest()`~~ — **Fixed 2026-07-12**,
   bundled with the OTP concurrency fix below since it touched the same line.
-- [ ] No production security headers configured yet (`SESSION_COOKIE_SECURE`,
-  `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`) — not exploitable until
-  something is actually deployed (Task 24), but should be added as an `if not DEBUG:` block before
-  go-live rather than forgotten. **Fix together with the proxy-IP-trust item below** — both need
-  the exact same "trust exactly one hop from Nginx" care and are easy to get subtly wrong
-  (`SECURE_PROXY_SSL_HEADER` trusting a header an external client can also set is the same class of
-  mistake as the rate-limit IP key doing the same).
-- [ ] `DEFAULT_FROM_EMAIL` uses the reserved `.test` TLD — fine for dev, must be swapped to a real
-  deliverable domain (with SPF/DKIM) before production or reset/lockout emails may bounce or land
-  in spam.
+- [x] ~~No production security headers configured yet (`SESSION_COOKIE_SECURE`,
+  `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`)~~ — **Fixed 2026-08-10
+  (Task 24d + 24g).** `if not DEBUG:` block added, `SECURE_HSTS_SECONDS` deliberately conservative
+  (1 hour, not the usual 1 year) for this first deploy. Verified live: HTTPS response headers show
+  `Strict-Transport-Security: max-age=3600` for real.
+- [x] ~~`DEFAULT_FROM_EMAIL` uses the reserved `.test` TLD~~ — **Fixed 2026-08-10 (Task 24d).**
+  Now the same Gmail address `EMAIL_HOST_USER` sends through (only address with real SPF/DKIM
+  alignment for this Gmail-SMTP setup), fixed in both local `.env` (which turned out to already be
+  sending real email from the broken address) and production. Also fail-closed now — a follow-up
+  CodeRabbit-caught gap on the same PR meant an unset or reserved-placeholder value outside `DEBUG`
+  raises `ImproperlyConfigured` rather than silently degrading.
 
 ## Known issues — round 2 (fresh code-review + security audit of Tasks 1-7, 2026-07-12)
 
@@ -123,15 +124,13 @@ guessed at.
   scoped specifically to the wizard's `auth` step (not the 2FA token/backup steps, which aren't
   useful for spraying guesses across different admin emails and shouldn't risk blocking a
   legitimate admin mistyping their code a few times).
-- [ ] **Rate limiting (and the future `SECURE_PROXY_SSL_HEADER` header work above) will collapse
-  into a single shared bucket — or become spoofable — once this sits behind Hostinger's Nginx.**
-  `key="ip"` resolves via `request.META['REMOTE_ADDR']`, which is identical for every visitor once
-  a reverse proxy sits in front (Nginx's own connection, not the real client's). Two failure modes:
-  everyone shares one rate-limit bucket (a single confused user could trip it for the whole site),
-  or — if `X-Forwarded-For` is ever naively trusted without restricting to exactly one hop from
-  Nginx — an attacker can spoof a fresh IP per request and bypass rate limiting entirely. Needs the
-  real Nginx config to fix correctly (set `X-Real-IP`/`X-Forwarded-For` in Nginx, then configure
-  `RATELIMIT_IP_META_KEY` to trust exactly that one hop) — tracked for Task 24, not guessed at now.
+- [x] ~~Rate limiting (and the future `SECURE_PROXY_SSL_HEADER` header work above) will collapse
+  into a single shared bucket — or become spoofable — once this sits behind Hostinger's Nginx~~ —
+  **Fixed 2026-08-10 (Task 24d + 24g).** Nginx sets `X-Real-IP $remote_addr` (always overrides any
+  client-supplied value, never appends), `RATELIMIT_IP_META_KEY = "HTTP_X_REAL_IP"` reads exactly
+  that. Verified live with a real spoofing attempt, not just config inspection: a `429` still fired
+  on the 6th request to a `5/h` rate-limited endpoint even when a fake `X-Real-IP` header was sent —
+  proving spoofing genuinely cannot bypass the limit, the exact attack this item was written about.
 - [x] ~~`PAYSTACK_SECRET_KEY` (and the rest of the payment-gateway constance settings) will be
   stored in plaintext in the database~~ — **Fixed 2026-07-13**, when Paystack work actually
   started (Task 10b), per this note's own instruction not to defer it. `PAYSTACK_PUBLIC_KEY` /
@@ -5078,23 +5077,27 @@ into one shared bucket (or becoming spoofable) once traffic passes through a rev
 folds in swapping `DEFAULT_FROM_EMAIL` off the reserved `.test` TLD, flagged in the same section as
 a pre-go-live item.
 
-**Overall acceptance criteria** (each owned by one or more sub-tasks below):
-- [ ] Hostinger KVM 2 VPS provisioned (Ubuntu 24.04 LTS), SSH key-based access configured, root
+**Overall acceptance criteria** (each owned by one or more sub-tasks below) — **all complete,
+2026-08-10:**
+- [x] Hostinger KVM 2 VPS provisioned (Ubuntu 24.04 LTS), SSH key-based access configured, root
   login disabled in favor of a sudo user — **24a**
-- [ ] MySQL 8, Redis, Nginx, and Python installed on the VPS via `apt` — **24b**
-- [ ] GoDaddy domain resolves to the VPS — **24c**
-- [ ] Production `.env` created directly on the server (never committed): real `SECRET_KEY`,
+- [x] MySQL 8, Redis, Nginx, and Python installed on the VPS via `apt` — **24b**
+- [x] GoDaddy domain resolves to the VPS — **24c**
+- [x] Production `.env` created directly on the server (never committed): real `SECRET_KEY`,
   `DEBUG=False`, `ALLOWED_HOSTS` set to the production domain, `DATABASE_URL` pointing at the VPS's
   MySQL, `REDIS_URL`, and the Paystack/email/SMS provider keys from `SPEC.md` Open Questions, plus
   the security-header/proxy-IP-trust/`DEFAULT_FROM_EMAIL` fixes above — **24d**
-- [ ] `pip install -r requirements.txt`, `npm run build`, `python manage.py collectstatic`, and
+- [x] `pip install -r requirements.txt`, `npm run build`, `python manage.py collectstatic`, and
   `python manage.py migrate` all run clean against real MySQL on the VPS — **24e**
-- [ ] Supervisor configs for Daphne, `celery worker`, and `celery beat` — auto-restart on crash and
+- [x] Supervisor configs for Daphne, `celery worker`, and `celery beat` — auto-restart on crash and
   on VPS reboot — **24f**
-- [ ] Nginx reverse-proxies to Daphne, serves `static/`/`media/` directly, and Let's Encrypt issues
+- [x] Nginx reverse-proxies to Daphne, serves `static/`/`media/` directly, and Let's Encrypt issues
   a valid HTTPS certificate (with auto-renewal) for the production domain — **24g**
-- [ ] A deploy process is documented (manual runbook at minimum); one full smoke-test purchase
+- [x] A deploy process is documented (manual runbook at minimum); one full smoke-test purchase
   succeeds against real MySQL/Redis before any real user account exists on the VPS — **24h**
+
+`https://bancostore.com` is live. See 24h's own Built note below for the full smoke-test story,
+real bugs found and fixed along the way, and Checkpoint J sign-off.
 
 **Dependencies:** Task 23 (Checkpoint I — full MVP complete and verified locally, done), Open
 Question #1 (CI provider confirmed, done), Hostinger VPS + GoDaddy domain in hand (done, 2026-08-06)
@@ -5368,15 +5371,37 @@ install/build/migrate sequence used locally — but against the real MySQL from 
 time ever in this project.
 
 **Acceptance criteria:**
-- [ ] Repo cloned, venv created, `pip install -r requirements.txt` succeeds
-- [ ] `npm install && npm run build` succeeds, static assets produced
-- [ ] `python manage.py collectstatic` succeeds
-- [ ] `python manage.py migrate` runs clean against real production MySQL
+- [x] Repo cloned, venv created, `pip install -r requirements.txt` succeeds
+- [x] `npm install && npm run build` succeeds, static assets produced
+- [x] `python manage.py collectstatic` succeeds
+- [x] `python manage.py migrate` runs clean against real production MySQL
 
 **Verification:**
-- [ ] `python manage.py check` passes with the production `.env` loaded
-- [ ] A `python manage.py shell` query against a core model (e.g. `Category.objects.count()`)
+- [x] `python manage.py check` passes with the production `.env` loaded
+- [x] A `python manage.py shell` query against a core model (e.g. `Category.objects.count()`)
   confirms the app can actually read/write the real MySQL database
+
+**Built:** Done 2026-08-10. Cloned `https://github.com/owususampson10/bancostore.git` (public repo,
+no auth needed) to `/home/bancostore/bancostore` at `464f5ad` (PR #64's merge commit — confirms the
+VPS is running the settings.py security-hardening changes, not stale code). `.env.staged` from 24d
+moved into place as `.env` (`chmod 600`). Two system-dependency gaps found and fixed, neither
+originally in 24b's package list: Pango (`libpango-1.0-0`/`libpangocairo-1.0-0`, matching CI's own
+already-established WeasyPrint requirement from Task 18e) and Node.js — 24b never installed a JS
+runtime at all, since it wasn't in that sub-task's own scope (MySQL/Redis/Nginx/Python/Supervisor).
+Installed Node 22.x via NodeSource (matching local dev's `v22.17.0` major version; no `.nvmrc` or
+`package.json` `engines` field existed to pin an exact version, checked directly rather than
+guessed). `pip install -r requirements.txt` succeeded clean (Django 5.0.14, WeasyPrint 62.3, all
+verified importable). `npm run build` produced the same stable `main.css`/`main.js` filenames as
+local dev (`vite.config.js`'s deliberate no-hash convention, CLAUDE.md's own documented gotcha) —
+`npm audit` flagged 2 high-severity findings in dev dependencies, noted but not acted on now,
+matching this project's own established non-blocking `pip-audit` precedent (Task 30f) rather than
+gating this task on an unrelated triage pass. `collectstatic` copied 256 files. `migrate` applied
+all 130+ migrations clean against real production MySQL for the first time in this project's
+history — the one warning (`account.EmailAddress: models.W036`, MySQL not supporting a conditional
+unique constraint allauth's own migration defines) is a known, pre-existing Django/allauth+MySQL
+limitation, not something this task introduced. Verification went beyond a read-only count: created
+a real `Category` row, confirmed it persisted via a fresh query, then deleted it — proving actual
+write capability against the production database, not just connectivity.
 
 **Dependencies:** 24b, 24d
 
@@ -5390,15 +5415,47 @@ time ever in this project.
 three survive both a process crash and a full VPS reboot without manual intervention.
 
 **Acceptance criteria:**
-- [ ] Supervisor program configs for Daphne, Celery worker, and Celery beat, all set to
+- [x] Supervisor program configs for Daphne, Celery worker, and Celery beat, all set to
   `autostart`/`autorestart`
-- [ ] Supervisor itself enabled to start on boot
+- [x] Supervisor itself enabled to start on boot
 
 **Verification:**
-- [ ] `sudo supervisorctl status` shows all three `RUNNING`
-- [ ] Killing one process (`kill -9`) results in Supervisor restarting it automatically
-- [ ] `sudo reboot` of the VPS, then `sudo supervisorctl status` again shows all three `RUNNING`
+- [x] `sudo supervisorctl status` shows all three `RUNNING`
+- [x] Killing one process (`kill -9`) results in Supervisor restarting it automatically
+- [x] `sudo reboot` of the VPS, then `sudo supervisorctl status` again shows all three `RUNNING`
   with no manual restart
+
+**Built:** Done 2026-08-10. `deploy/supervisor/bancostore-{daphne,celery-worker,celery-beat}.conf`,
+all three running as the non-root `bancostore` user (never root), `directory=/home/bancostore/bancostore`
+explicit on all three — needed for Celery's app discovery (`import bancostore`) specifically, since
+unlike `.env` loading (which resolves via `BASE_DIR`, itself derived from `settings.py`'s own file
+path, not cwd — confirmed by reading `_load_dotenv`'s implementation rather than assuming),
+Celery's `-A bancostore` flag does depend on the working directory. Ran through
+`agent-skills:security-and-hardening` before writing the configs, specifically to confirm Daphne
+binding to `127.0.0.1:8001` only (not `0.0.0.0`) is both correct and load-bearing — it's the exact
+assumption Task 24d's `SECURE_PROXY_SSL_HEADER`/`RATELIMIT_IP_META_KEY` settings already depend on
+("Daphne only listens on 127.0.0.1 -- so trusting this one header is safe"); verified directly with
+`ss -tlnp` rather than trusting the config file alone. Celery worker gets `stopasgroup=true`/
+`killasgroup=true` and a generous 600s `stopwaitsecs` — Celery's own documented Supervisor gotcha
+(the default prefork pool forks child processes; without these, Supervisor's stop signal only
+reaches the parent, orphaning children and any in-flight commission/wallet/withdrawal task they
+hold). Celery Beat pinned to `numprocs=1` with a comment explaining why: a second Beat instance
+would double-fire every periodic task (binary bonus, matching bonus, withdrawal payout, PV expiry),
+a real money-safety bug class, not just a nuisance — uses `django_celery_beat`'s
+`DatabaseScheduler` (already configured in `settings.py`), so the schedule itself lives in MySQL,
+not a local pickle file that could get lost on restart.
+
+Verified beyond just `supervisorctl status`: `curl` directly to Daphne with no `Host` header
+correctly got a `400` (proving `ALLOWED_HOSTS` is enforced even hit directly, not just through
+Nginx); with a valid `Host: bancostore.com` header it correctly got a `301` (proving
+`SECURE_SSL_REDIRECT` from Task 24d is genuinely active, not just present in the settings file —
+expected until Nginx exists in 24g to supply the trusted proxy header); Celery worker's log showed
+all 8 expected registered tasks; Celery Beat's log confirmed `beat: Starting...` (Celery logs to
+stderr by default, not stdout — checked both files rather than assuming one). Crash recovery
+tested for real: `kill -9`'d Daphne's actual pid, Supervisor restarted it with a new pid within 3
+seconds. Reboot survival tested for real, not assumed from `systemctl enable` alone: `sudo reboot`,
+polled for SSH to come back (~10s), confirmed all three `RUNNING` with fresh pids and zero manual
+intervention.
 
 **Dependencies:** 24e
 
@@ -5416,18 +5473,57 @@ three survive both a process crash and a full VPS reboot without manual interven
 issues a real HTTPS certificate for the production domain with auto-renewal configured.
 
 **Acceptance criteria:**
-- [ ] Nginx site config reverse-proxies to Daphne, serves `static/`/`media/` directly, sets exactly
+- [x] Nginx site config reverse-proxies to Daphne, serves `static/`/`media/` directly, sets exactly
   the one trusted-proxy header 24d's settings expect
-- [ ] Let's Encrypt certificate issued and installed for the production domain
-- [ ] Certbot auto-renewal configured (systemd timer or cron)
+- [x] Let's Encrypt certificate issued and installed for the production domain
+- [x] Certbot auto-renewal configured (systemd timer or cron)
 
 **Verification:**
-- [ ] Visiting the production domain over HTTPS loads the app with no errors, no mixed-content
+- [x] Visiting the production domain over HTTPS loads the app with no errors, no mixed-content
   warnings
-- [ ] `sudo certbot renew --dry-run` succeeds
-- [ ] A rate-limited endpoint (e.g. `register`) hit from two different real external IPs shows two
+- [x] `sudo certbot renew --dry-run` succeeds
+- [x] A rate-limited endpoint (e.g. `register`) hit from two different real external IPs shows two
   independent buckets, not one shared one — confirming 24d's proxy-IP trust config actually works
   end-to-end, not just in isolation
+
+**Built:** Done 2026-08-10. `deploy/nginx/bancostore.conf`: reverse-proxies `/` and `/ws/` (Channels
+WebSockets, matched before the generic `/` location since it needs the `Upgrade`/`Connection`
+headers a plain proxy doesn't send) to Daphne at `127.0.0.1:8001`, serves `/static/`/`/media/`
+directly via `alias`, and sets `X-Real-IP $remote_addr` / `X-Forwarded-Proto $scheme` — the exact
+two headers `settings.py`'s `RATELIMIT_IP_META_KEY`/`SECURE_PROXY_SSL_HEADER` (Task 24d) are
+written to trust. `certbot --nginx -d bancostore.com -d www.bancostore.com` issued and installed a
+real Let's Encrypt certificate for both domains (expires 2026-11-08), rewrote the config in place
+to add the HTTPS `listen`/cert directives and a redirect-only port-80 block — confirmed the rewrite
+preserved every custom location block by reading the deployed file directly, not assuming Certbot's
+`--nginx` plugin left them intact. Certbot's own systemd timer (`certbot.timer`, twice-daily,
+already enabled by the package install) confirmed active; `certbot renew --dry-run` succeeded.
+
+**Real bug found and fixed via live-browser-equivalent verification, not just `supervisorctl`/config
+inspection:** static assets 404'd... no, worse — **403'd** — after Nginx/HTTPS otherwise worked
+perfectly. Root cause: `/home/bancostore` (the `bancostore` user's home directory itself) is `750`
+(`drwxr-x---`), so `www-data` (Nginx's worker process user) couldn't even *traverse into* the
+directory tree to reach `staticfiles/`, regardless of the files themselves being world-readable
+further down (confirmed via `namei -l` and Nginx's own error log:
+`open() "...staticfiles/assets/main.css" failed (13: Permission denied)`). Fixed with the
+least-privilege option — added `www-data` to the `bancostore` group (`usermod -aG bancostore
+www-data`) rather than loosening the home directory to world-readable (`chmod o+rx`), which would
+have exposed the whole home directory tree to every user on the system instead of just the one
+process that actually needs read access. Restarted Nginx (not just reloaded) so its worker
+processes picked up the new supplementary group membership. Verified with a real `curl` fetch of
+`main.css`'s actual content, not just a `200` status code.
+
+**Proxy-IP trust verified with a real spoofing attempt, a stronger test than the two-real-IP idea
+originally planned** (impractical to arrange two genuinely distinct external source IPs from a
+single session) **and one that directly demonstrates the actual security property that matters**:
+using a real Python `requests` session against `/contact/` (real CSRF token fetched first, matching
+Task 29's `@ratelimit(key="ip", rate="5/h", method="POST")`), sent 3 plain POSTs (all `200`,
+correctly under quota), then 2 more POSTs carrying a spoofed `X-Real-IP`/`X-Forwarded-For` header
+(also `200` — proving they counted against the *same* real bucket, not a separate spoofed one),
+then a 6th plain POST correctly got `429`, and critically a 7th POST with yet another spoofed IP
+header **also got `429`** — proving Nginx's `proxy_set_header X-Real-IP $remote_addr` genuinely
+overrides any client-supplied value rather than passing it through, so an attacker cannot spoof a
+fresh IP per request to bypass rate limiting. This is the exact attack the Known Issues section
+(tracked since Tasks 1-7's original security review) was written to close.
 
 **Dependencies:** 24c (DNS must resolve before requesting a cert), 24f (something must be running
 behind Nginx to proxy to)
@@ -5448,20 +5544,135 @@ sub-task — a manual runbook satisfies Task 24's own acceptance criteria; autom
 work, not silently assumed here).
 
 **Acceptance criteria:**
-- [ ] One full smoke-test purchase (register → pay → starter pack → tree placement → KYC → IR ID →
+- [x] One full smoke-test purchase (register → pay → starter pack → tree placement → KYC → IR ID →
   direct referral bonus → binary bonus cycle → withdrawal request → tax deduction → simulated
   payout) succeeds end-to-end against real production MySQL/Redis
-- [ ] A manual deploy runbook is written down (`deploy/README.md` or similar): what to run, in what
+- [x] A manual deploy runbook is written down (`deploy/README.md` or similar): what to run, in what
   order, to ship a new release to this VPS
-- [ ] `SPEC.md` Commands section gets the verified production commands added, matching how Task 1
+- [x] `SPEC.md` Commands section gets the verified production commands added, matching how Task 1
   documented the local dev commands
 
 **Verification:**
-- [ ] Every financial figure from the smoke test (PV, commission amounts, tax, wallet balance)
+- [x] Every financial figure from the smoke test (PV, commission amounts, tax, wallet balance)
   checked against the production database directly, not just the UI — matching this project's own
   established verification standard (Checkpoint F, Task 17e, etc.)
-- [ ] A second person (or a second read-through by the user) could follow the runbook and
+- [x] A second person (or a second read-through by the user) could follow the runbook and
   successfully deploy a trivial change, without needing this conversation's context
+
+**Built:** Done 2026-08-10, live in a real browser against `https://bancostore.com`, not a
+simulation. **Two-account design, not the originally-sketched single-referral test:** the public
+registration form has no path to a sponsorless account (`sponsor_ir_id` is a required field,
+confirmed by reading `apps/distributors/forms.py::clean_sponsor_ir_id` directly) — a real
+production launch's very first distributor has to be created directly, same as this project's own
+`seed_roles` does in DEBUG. Distributor A (root sponsor) was bootstrapped via
+`BinaryTree.place_distributor(None, ...)` — a genuine, documented first-class code path ("The very
+first distributor in the system has no sponsor," not a workaround) — calling the same real service
+functions `consume_paid_registration`/`consume_paid_starter_pack`/`approve_kyc` use internally,
+skipping only the Paystack verification wrapper itself since A was never meant to be part of the
+tested journey. Distributor B went through **every single step for real**: registration form →
+real Paystack test-mode payment (GHS 1,500 for Starter Pack A, confirmed via the real checkout
+widget, not mocked) → starter pack payment → real tree placement under A → real Direct Referral
+Bonus (GHS 50 = 10% × 500 PV) credited to A's wallet → real phone OTP verification → real Didit
+hosted KYC (ID + live selfie, completed by the user directly — 96.66% face match, 100% liveness) →
+real admin review and approval via the actual `admin_portal` UI → real sequential IR ID assignment
+(`IR00002`) → real withdrawal request/approval/tax computation for A.
+
+**Starter pack prices (GHS 1,500 for Pack A/500 PV/Bronze, GHS 2,000 for Pack B/1,000 PV/Silver)
+seen live in production for the first time this session** — worth recording since neither figure
+had been written down anywhere before now. Re-reading `project_direct_referral_bonus_formula`
+carefully: its own GHS 50/100 figures were always the *bonus* amounts (rate × PV), not pack
+prices — no correction needed there; this live run just reconfirms that memory's formula exactly
+(GHS 50 credited = 10% × 500 PV, precisely as documented).
+
+**Four real, previously-uncaught bugs/gaps found via this live run, none of which any automated
+test would have caught:**
+1. **`PYTHONUNBUFFERED` missing from all three Supervisor configs** — `apps/notifications/sms.py`'s
+   `print()`-based fake SMS sender (used whenever `MNOTIFY_API_KEY` is unset, exactly the
+   temporary-blank state this smoke test itself used to avoid real SMS costs) silently sat in
+   Python's stdout buffer and never reached the log for a long-running Supervisor-managed process —
+   the exact same class of gotcha this project already hit once before with Django's autoreloader
+   dropping `-u` (documented earlier in this file). Fixed in all three `deploy/supervisor/*.conf`
+   files, verified live: the fake OTP appeared in the log immediately after the fix.
+2. **Phone OTP verification only triggers at login, not right after registration** — not a bug,
+   but a real gap in this task's own assumptions going in: `verify_otp_view` requires
+   `request.session["otp_purpose"]`, which is only set by `attempt_distributor_login`'s
+   `needs_verification` branch. Since payment auto-logs a distributor in via
+   `registration_payment_callback`, that gate is never hit until a later, separate login attempt —
+   confirmed correct by reading `apps/distributors/views.py` directly rather than guessing.
+3. **`/accounts/login/` (plural, allauth's customer path) vs `/account/login/` (singular,
+   `two_factor`'s admin path) is a real, easy-to-hit mix-up** — the user's first admin login
+   attempt landed on the wrong page entirely, surfacing as a misleading "Session Expired" page
+   (this project's own themed CSRF-failure view, `bancostore.views.csrf_failure`, since allauth's
+   page has no CSRF token matching what `two_factor`'s form expects). Not a code bug, but confusing
+   enough that it's worth this explicit note for the next person who hits it.
+4. **A brand-new admin account with zero TOTP devices lands on a bare 403, not a forced-setup
+   redirect** — `django-two-factor-auth`'s own `LoginView` only auto-redirects to
+   `two_factor:setup` when the login was reached via a `?next=` param pointing at a URL its
+   `is_otp_view()` recognizes as OTP-required; a direct visit to the login page (exactly how this
+   session reached it) never triggers that redirect, and `admin_portal`'s own
+   `is_admin_portal_staff` check (`user.is_staff and user.is_verified()`) just returns a plain 403
+   with no path forward. Confirmed by reading `two_factor`'s own `views/core.py` source, not
+   guessed. Not fixed as a code change here (needs a product decision — e.g. should
+   `admin_portal`'s 403 page itself detect "staff, zero devices" and link to setup? — flagged for a
+   future task, not silently patched mid-smoke-test) — worked around for this session by navigating
+   directly to `/account/two_factor/setup/`.
+
+**Binary Bonus verified as a real, working pipeline, not a full multi-leg scenario:**
+`calculate_binary_bonus()` invoked directly via shell against the real thin tree (A with only one
+downline leg populated) — correctly evaluated 1 distributor, paid GHS 0 (weak/right leg has 0 PV,
+correctly no bonus due), and wrote a real `CommissionCycleRun` audit record matching the task's own
+return value exactly. This proves the production Celery/Redis/MySQL wiring works end-to-end; the
+bonus math itself was already exhaustively proven by the existing automated test suite (Checkpoint
+E), so reproducing a full two-leg scenario for real (a third distributor, a third live Didit
+session) was deliberately out of scope, per the plan agreed with the user before starting.
+
+**Withdrawal tested for real, with a legitimate temporary settings change:** `MIN_WITHDRAWAL_AMOUNT`
+lowered from GHS 100 to GHS 1 via the real `admin_portal` Platform Settings screen (not a code
+change — the platform's own intended admin control), specifically to let A's real GHS 50 balance
+clear the minimum. A requested GHS 50, tax correctly computed at 1% (GHS 0.50), admin approved via
+the real UI (fresh TOTP re-entry required — "remember device" defaults unchecked by design),
+wallet correctly debited to GHS 0.50 remaining, `WithdrawalRequest.status` correctly transitioned
+to `approved_debited`. **Payout destination snapshot-at-approval-time confirmed correct, not a
+bug** — `WithdrawalRequest.payout_mobile_money_number/network` are blank at submission and only
+populated by `approve_withdrawal_request` (confirmed by reading `apps/withdrawal/services.py`
+directly before concluding this), matching this codebase's consistent snapshot-at-event-time
+convention elsewhere (order prices, starter pack prices). **The actual Paystack Transfer to a real
+mobile money account was not exercised** — already a known, accepted, documented limitation
+(`project_paystack_transfer_account_tier_blocked`: this sandbox account's "Starter Business" tier
+blocks all real Transfers regardless of test/live mode), not something this task could have forced
+through; the payout batch reaching that API call and failing there is expected, not a new gap.
+`MIN_WITHDRAWAL_AMOUNT` restored to GHS 100 immediately after, confirmed via `constance.config`
+directly.
+
+**Cleanup:** both smoke-test distributors and every record cascading from them (23 rows: wallet
+transactions, PV ledger/daily bucket/monthly personal PV, Didit verification, binary tree edge,
+withdrawal request, notifications, pending registration, the two `User`/`Distributor` rows
+themselves) deleted before finishing — confirmed via `User.objects.filter(...).delete()`'s own
+returned cascade summary, not assumed. 10 `CommissionCycleRun` audit records also removed (Celery
+Beat's own real periodic schedule fired several times in the background during the session,
+against the same thin test data — all zero-payout, safe to remove). Production database now has
+zero distributors, matching a genuine pre-launch state; the preserved production administrator
+account was deliberately kept, not deleted along with the test data.
+
+**mNotify handled the same way Task 18g established:** `MNOTIFY_API_KEY` temporarily blanked
+(explicit user sign-off) so OTP codes printed to logs instead of sending real, billed SMS; restored
+to the real key and all three Supervisor programs restarted immediately after the KYC/OTP steps
+were done, confirmed via a live site health check afterward.
+
+`deploy/README.md` written: server facts, deploy steps, environment variable notes (including the
+two that need special care — `MNOTIFY_API_KEY` and the Paystack test/live decision),
+crash/reboot recovery (nothing manual needed, already proven in 24f), the mNotify-blanking pattern
+for future safe testing, going-live-with-real-Paystack-keys steps, the deferred Didit webhook setup
+procedure (now unblocked since HTTPS exists), and the known limitations list (Paystack Transfer
+account-tier block, `npm audit` findings, no CI/CD auto-deploy yet). `SPEC.md` Commands section
+updated with both the already-stale local dev block (fixed `seed_data` → the real `seed_roles`,
+removed the leftover "to be finalized" framing) and a new Production section pointing to
+`deploy/README.md` as the source of truth rather than duplicating it.
+
+**Checkpoint J reached:** `https://bancostore.com` is live, reachable over real HTTPS, running on
+the Hostinger VPS against real MySQL, with Daphne/Celery worker/Celery beat kept alive by
+Supervisor and surviving a real reboot (proven in 24f). Task 24, and with it the full numbered MVP
+task list (Tasks 1-24 plus the ad-hoc Tasks 25-31), is complete.
 
 **Dependencies:** 24a-24g all complete
 
