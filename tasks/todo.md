@@ -60,16 +60,17 @@ it's unimportant:
   actually blocks the command and creates no stub account when `DEBUG=False`.
 - [x] ~~OTP codes compared with `!=` instead of `secrets.compare_digest()`~~ — **Fixed 2026-07-12**,
   bundled with the OTP concurrency fix below since it touched the same line.
-- [ ] No production security headers configured yet (`SESSION_COOKIE_SECURE`,
-  `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`) — not exploitable until
-  something is actually deployed (Task 24), but should be added as an `if not DEBUG:` block before
-  go-live rather than forgotten. **Fix together with the proxy-IP-trust item below** — both need
-  the exact same "trust exactly one hop from Nginx" care and are easy to get subtly wrong
-  (`SECURE_PROXY_SSL_HEADER` trusting a header an external client can also set is the same class of
-  mistake as the rate-limit IP key doing the same).
-- [ ] `DEFAULT_FROM_EMAIL` uses the reserved `.test` TLD — fine for dev, must be swapped to a real
-  deliverable domain (with SPF/DKIM) before production or reset/lockout emails may bounce or land
-  in spam.
+- [x] ~~No production security headers configured yet (`SESSION_COOKIE_SECURE`,
+  `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`)~~ — **Fixed 2026-08-10
+  (Task 24d + 24g).** `if not DEBUG:` block added, `SECURE_HSTS_SECONDS` deliberately conservative
+  (1 hour, not the usual 1 year) for this first deploy. Verified live: HTTPS response headers show
+  `Strict-Transport-Security: max-age=3600` for real.
+- [x] ~~`DEFAULT_FROM_EMAIL` uses the reserved `.test` TLD~~ — **Fixed 2026-08-10 (Task 24d).**
+  Now the same Gmail address `EMAIL_HOST_USER` sends through (only address with real SPF/DKIM
+  alignment for this Gmail-SMTP setup), fixed in both local `.env` (which turned out to already be
+  sending real email from the broken address) and production. Also fail-closed now — a follow-up
+  CodeRabbit-caught gap on the same PR meant an unset or reserved-placeholder value outside `DEBUG`
+  raises `ImproperlyConfigured` rather than silently degrading.
 
 ## Known issues — round 2 (fresh code-review + security audit of Tasks 1-7, 2026-07-12)
 
@@ -123,15 +124,13 @@ guessed at.
   scoped specifically to the wizard's `auth` step (not the 2FA token/backup steps, which aren't
   useful for spraying guesses across different admin emails and shouldn't risk blocking a
   legitimate admin mistyping their code a few times).
-- [ ] **Rate limiting (and the future `SECURE_PROXY_SSL_HEADER` header work above) will collapse
-  into a single shared bucket — or become spoofable — once this sits behind Hostinger's Nginx.**
-  `key="ip"` resolves via `request.META['REMOTE_ADDR']`, which is identical for every visitor once
-  a reverse proxy sits in front (Nginx's own connection, not the real client's). Two failure modes:
-  everyone shares one rate-limit bucket (a single confused user could trip it for the whole site),
-  or — if `X-Forwarded-For` is ever naively trusted without restricting to exactly one hop from
-  Nginx — an attacker can spoof a fresh IP per request and bypass rate limiting entirely. Needs the
-  real Nginx config to fix correctly (set `X-Real-IP`/`X-Forwarded-For` in Nginx, then configure
-  `RATELIMIT_IP_META_KEY` to trust exactly that one hop) — tracked for Task 24, not guessed at now.
+- [x] ~~Rate limiting (and the future `SECURE_PROXY_SSL_HEADER` header work above) will collapse
+  into a single shared bucket — or become spoofable — once this sits behind Hostinger's Nginx~~ —
+  **Fixed 2026-08-10 (Task 24d + 24g).** Nginx sets `X-Real-IP $remote_addr` (always overrides any
+  client-supplied value, never appends), `RATELIMIT_IP_META_KEY = "HTTP_X_REAL_IP"` reads exactly
+  that. Verified live with a real spoofing attempt, not just config inspection: a `429` still fired
+  on the 6th request to a `5/h` rate-limited endpoint even when a fake `X-Real-IP` header was sent —
+  proving spoofing genuinely cannot bypass the limit, the exact attack this item was written about.
 - [x] ~~`PAYSTACK_SECRET_KEY` (and the rest of the payment-gateway constance settings) will be
   stored in plaintext in the database~~ — **Fixed 2026-07-13**, when Paystack work actually
   started (Task 10b), per this note's own instruction not to defer it. `PAYSTACK_PUBLIC_KEY` /
@@ -5470,18 +5469,57 @@ intervention.
 issues a real HTTPS certificate for the production domain with auto-renewal configured.
 
 **Acceptance criteria:**
-- [ ] Nginx site config reverse-proxies to Daphne, serves `static/`/`media/` directly, sets exactly
+- [x] Nginx site config reverse-proxies to Daphne, serves `static/`/`media/` directly, sets exactly
   the one trusted-proxy header 24d's settings expect
-- [ ] Let's Encrypt certificate issued and installed for the production domain
-- [ ] Certbot auto-renewal configured (systemd timer or cron)
+- [x] Let's Encrypt certificate issued and installed for the production domain
+- [x] Certbot auto-renewal configured (systemd timer or cron)
 
 **Verification:**
-- [ ] Visiting the production domain over HTTPS loads the app with no errors, no mixed-content
+- [x] Visiting the production domain over HTTPS loads the app with no errors, no mixed-content
   warnings
-- [ ] `sudo certbot renew --dry-run` succeeds
-- [ ] A rate-limited endpoint (e.g. `register`) hit from two different real external IPs shows two
+- [x] `sudo certbot renew --dry-run` succeeds
+- [x] A rate-limited endpoint (e.g. `register`) hit from two different real external IPs shows two
   independent buckets, not one shared one — confirming 24d's proxy-IP trust config actually works
   end-to-end, not just in isolation
+
+**Built:** Done 2026-08-10. `deploy/nginx/bancostore.conf`: reverse-proxies `/` and `/ws/` (Channels
+WebSockets, matched before the generic `/` location since it needs the `Upgrade`/`Connection`
+headers a plain proxy doesn't send) to Daphne at `127.0.0.1:8001`, serves `/static/`/`/media/`
+directly via `alias`, and sets `X-Real-IP $remote_addr` / `X-Forwarded-Proto $scheme` — the exact
+two headers `settings.py`'s `RATELIMIT_IP_META_KEY`/`SECURE_PROXY_SSL_HEADER` (Task 24d) are
+written to trust. `certbot --nginx -d bancostore.com -d www.bancostore.com` issued and installed a
+real Let's Encrypt certificate for both domains (expires 2026-11-08), rewrote the config in place
+to add the HTTPS `listen`/cert directives and a redirect-only port-80 block — confirmed the rewrite
+preserved every custom location block by reading the deployed file directly, not assuming Certbot's
+`--nginx` plugin left them intact. Certbot's own systemd timer (`certbot.timer`, twice-daily,
+already enabled by the package install) confirmed active; `certbot renew --dry-run` succeeded.
+
+**Real bug found and fixed via live-browser-equivalent verification, not just `supervisorctl`/config
+inspection:** static assets 404'd... no, worse — **403'd** — after Nginx/HTTPS otherwise worked
+perfectly. Root cause: `/home/bancostore` (the `bancostore` user's home directory itself) is `750`
+(`drwxr-x---`), so `www-data` (Nginx's worker process user) couldn't even *traverse into* the
+directory tree to reach `staticfiles/`, regardless of the files themselves being world-readable
+further down (confirmed via `namei -l` and Nginx's own error log:
+`open() "...staticfiles/assets/main.css" failed (13: Permission denied)`). Fixed with the
+least-privilege option — added `www-data` to the `bancostore` group (`usermod -aG bancostore
+www-data`) rather than loosening the home directory to world-readable (`chmod o+rx`), which would
+have exposed the whole home directory tree to every user on the system instead of just the one
+process that actually needs read access. Restarted Nginx (not just reloaded) so its worker
+processes picked up the new supplementary group membership. Verified with a real `curl` fetch of
+`main.css`'s actual content, not just a `200` status code.
+
+**Proxy-IP trust verified with a real spoofing attempt, a stronger test than the two-real-IP idea
+originally planned** (impractical to arrange two genuinely distinct external source IPs from a
+single session) **and one that directly demonstrates the actual security property that matters**:
+using a real Python `requests` session against `/contact/` (real CSRF token fetched first, matching
+Task 29's `@ratelimit(key="ip", rate="5/h", method="POST")`), sent 3 plain POSTs (all `200`,
+correctly under quota), then 2 more POSTs carrying a spoofed `X-Real-IP`/`X-Forwarded-For` header
+(also `200` — proving they counted against the *same* real bucket, not a separate spoofed one),
+then a 6th plain POST correctly got `429`, and critically a 7th POST with yet another spoofed IP
+header **also got `429`** — proving Nginx's `proxy_set_header X-Real-IP $remote_addr` genuinely
+overrides any client-supplied value rather than passing it through, so an attacker cannot spoof a
+fresh IP per request to bypass rate limiting. This is the exact attack the Known Issues section
+(tracked since Tasks 1-7's original security review) was written to close.
 
 **Dependencies:** 24c (DNS must resolve before requesting a cert), 24f (something must be running
 behind Nginx to proxy to)
