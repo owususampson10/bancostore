@@ -104,6 +104,12 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6379/0
       CELERY_BROKER_URL: redis://127.0.0.1:6379/1
       CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      # Same reasoning as SECRET_KEY above (Task 24d PR #64) — no real email
+      # is ever sent in CI (no EMAIL_HOST_USER/PASSWORD set, so it's on the
+      # console backend regardless), this just satisfies DEFAULT_FROM_EMAIL's
+      # own fail-closed check for the three steps below that call manage.py
+      # directly, outside pytest (which is otherwise exempted).
+      DEFAULT_FROM_EMAIL: ci-only-dummy-address@example.com
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

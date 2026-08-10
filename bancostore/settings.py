@@ -50,10 +50,18 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-local-dev-only")
 
 DEBUG = os.environ.get("DEBUG", "False") == "True"
 
-if not DEBUG and SECRET_KEY == "django-insecure-local-dev-only":
+# "django-insecure-local-dev-only" is this file's own fallback when SECRET_KEY
+# is unset entirely; "change-me" is .env.example's own placeholder value --
+# a real gap CodeRabbit caught on PR #64: a .env.example copied verbatim with
+# only DEBUG flipped to False would otherwise run with a publicly-known
+# literal, same class of risk as the unset case this guard already covered.
+_KNOWN_INSECURE_SECRET_KEYS = {"django-insecure-local-dev-only", "change-me"}
+
+if not DEBUG and SECRET_KEY in _KNOWN_INSECURE_SECRET_KEYS:
     raise ImproperlyConfigured(
-        "SECRET_KEY is not set. Refusing to run with the insecure default "
-        "outside DEBUG — set SECRET_KEY in the environment."
+        "SECRET_KEY is not set to a real value. Refusing to run with a known "
+        "placeholder outside DEBUG — set a real, random SECRET_KEY in the "
+        "environment."
     )
 
 ALLOWED_HOSTS = [
@@ -61,6 +69,44 @@ ALLOWED_HOSTS = [
     for host in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
     if host.strip()
 ]
+
+# True whenever pytest itself is running the process -- PYTEST_VERSION is set by
+# pytest (>=8.0) at process start, confirmed empirically, well before Django
+# settings are imported. Needed below because CI deliberately runs the test
+# suite with DEBUG=False (to catch other DEBUG=False-only bugs, e.g. the
+# media-serving gotcha documented earlier in this file) but isn't running
+# behind a real HTTPS-terminating proxy -- without this check, the very first
+# CI run after this block was added redirected all 476 non-trivial tests with
+# a 301, since django.test.Client's requests are plain HTTP by default and
+# SECURE_SSL_REDIRECT doesn't know CI isn't real production traffic.
+_RUNNING_UNDER_PYTEST = "PYTEST_VERSION" in os.environ
+
+# Production-only security hardening (Task 24d). Gated on `not DEBUG` so local
+# dev/tests, which always run over plain http://localhost, are never affected --
+# a Secure-flagged cookie or an SSL redirect would silently break local dev if
+# these applied unconditionally. Also excludes a pytest run even when it sets
+# DEBUG=False itself (see _RUNNING_UNDER_PYTEST above).
+if not DEBUG and not _RUNNING_UNDER_PYTEST:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    # Starts conservative (1 hour) rather than the commonly-recommended 1 year --
+    # this is the first production deploy, HTTPS itself isn't verified end-to-end
+    # until Task 24g, and browsers that cache a long HSTS value can't be talked
+    # back out of it if something's misconfigured. Raise once HTTPS has been
+    # stable in production for a while (see tasks/todo.md Task 24d).
+    SECURE_HSTS_SECONDS = 3600
+    # Nginx (Task 24g) is the only process reachable from the public internet --
+    # Daphne only listens on 127.0.0.1 (Task 24f) -- so trusting this one header
+    # is safe: nothing external can set it directly on a request that reaches
+    # Django.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    # Matches the X-Real-IP header Nginx's site config sets (Task 24g). Without
+    # this, django-ratelimit reads REMOTE_ADDR, which is Nginx's own loopback
+    # connection for every visitor once traffic passes through a reverse proxy --
+    # collapsing every visitor into one shared rate-limit bucket instead of one
+    # bucket per real client IP.
+    RATELIMIT_IP_META_KEY = "HTTP_X_REAL_IP"
 
 
 # Application definition
@@ -232,12 +278,16 @@ LOGIN_URL = "two_factor:login"
 # regression test (that one proves a config flag can never skip 2FA
 # outright); the two are covered by separate tests in
 # tests/feature/accounts/test_admin_auth.py. TWO_FACTOR_REMEMBER_COOKIE_SECURE
-# is deliberately left at the library's False default -- this repo has no
-# production security headers configured yet (see tasks/todo.md's Known
-# issues), and a Secure-flagged cookie would silently never be sent over
-# local dev's plain http://localhost. Revisit alongside SESSION_COOKIE_SECURE/
-# CSRF_COOKIE_SECURE once Task 24 sets up real HTTPS.
+# tracks the same `not DEBUG and not _RUNNING_UNDER_PYTEST` condition as
+# SESSION_COOKIE_SECURE/CSRF_COOKIE_SECURE above -- a Secure-flagged cookie
+# would silently never be sent over local dev's plain http://localhost, or
+# resent by django.test.Client's default insecure requests under CI's
+# DEBUG=False test run. Production runs under DEBUG=False from Task 24d
+# onward, but real HTTPS itself isn't live until Nginx + Let's Encrypt land in
+# Task 24g -- this flag is only actually exercised correctly once both are
+# true together.
 TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+TWO_FACTOR_REMEMBER_COOKIE_SECURE = not DEBUG and not _RUNNING_UNDER_PYTEST
 
 # Themed "Session Expired" page instead of Django's raw technical CSRF
 # error page. templates/404.html, 500.html, 403.html, 400.html need no
@@ -399,7 +449,47 @@ if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@bancostore.test")
+# "no-reply@bancostore.test" was a placeholder on the reserved .test TLD -- fine
+# for local dev (never actually sent), but reset/lockout emails sent from a
+# .test address in production would bounce or land in spam. The real value is
+# set via DEFAULT_FROM_EMAIL in production's .env (Task 24d) to the same Gmail
+# address EMAIL_HOST_USER already sends through, since that's the only address
+# with real SPF/DKIM alignment for this Gmail-SMTP setup -- a bancostore.com
+# address would need its own mail-sending DNS records this project doesn't
+# have yet.
+#
+# CodeRabbit caught a real repeat of the same mistake on PR #64: this file's
+# own fallback used to be "no-reply@bancostore.example", which is *also* a
+# reserved RFC 2606 TLD -- so a production run that somehow omitted
+# DEFAULT_FROM_EMAIL would have silently kept sending from an undeliverable
+# address instead of failing loudly. Fail closed instead, matching the
+# SECRET_KEY guard above -- excluding pytest (see _RUNNING_UNDER_PYTEST)
+# since CI never sends real email either (no EMAIL_HOST_USER/PASSWORD set
+# there, so it's already on the console backend regardless of this value).
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "")
+
+# CodeRabbit follow-up on the same PR: the guard above only rejected an EMPTY
+# value -- it wouldn't have caught someone explicitly (if mistakenly) setting
+# DEFAULT_FROM_EMAIL to one of these two reserved-TLD placeholders directly in
+# production's .env, which would pass the guard yet still silently bounce
+# every real send. Rejected explicitly now, same as _KNOWN_INSECURE_SECRET_KEYS.
+_KNOWN_INSECURE_FROM_EMAILS = {
+    "no-reply@bancostore.example",
+    "no-reply@bancostore.test",
+}
+
+if not DEBUG and not _RUNNING_UNDER_PYTEST:
+    if not DEFAULT_FROM_EMAIL or DEFAULT_FROM_EMAIL in _KNOWN_INSECURE_FROM_EMAILS:
+        raise ImproperlyConfigured(
+            "DEFAULT_FROM_EMAIL is not configured with a real, deliverable "
+            "sender address. Refusing to run outside DEBUG with an unset or "
+            "known-placeholder value -- set DEFAULT_FROM_EMAIL in the "
+            "environment."
+        )
+elif not DEFAULT_FROM_EMAIL:
+    # Local dev/tests only reach here: a placeholder is harmless since sends
+    # are either printed by the console backend or never actually attempted.
+    DEFAULT_FROM_EMAIL = "no-reply@bancostore.example"
 
 
 # mNotify — SMS OTP for distributor registration/login/password reset (Task 5).
