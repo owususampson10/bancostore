@@ -5368,15 +5368,37 @@ install/build/migrate sequence used locally — but against the real MySQL from 
 time ever in this project.
 
 **Acceptance criteria:**
-- [ ] Repo cloned, venv created, `pip install -r requirements.txt` succeeds
-- [ ] `npm install && npm run build` succeeds, static assets produced
-- [ ] `python manage.py collectstatic` succeeds
-- [ ] `python manage.py migrate` runs clean against real production MySQL
+- [x] Repo cloned, venv created, `pip install -r requirements.txt` succeeds
+- [x] `npm install && npm run build` succeeds, static assets produced
+- [x] `python manage.py collectstatic` succeeds
+- [x] `python manage.py migrate` runs clean against real production MySQL
 
 **Verification:**
-- [ ] `python manage.py check` passes with the production `.env` loaded
-- [ ] A `python manage.py shell` query against a core model (e.g. `Category.objects.count()`)
+- [x] `python manage.py check` passes with the production `.env` loaded
+- [x] A `python manage.py shell` query against a core model (e.g. `Category.objects.count()`)
   confirms the app can actually read/write the real MySQL database
+
+**Built:** Done 2026-08-10. Cloned `https://github.com/owususampson10/bancostore.git` (public repo,
+no auth needed) to `/home/bancostore/bancostore` at `464f5ad` (PR #64's merge commit — confirms the
+VPS is running the settings.py security-hardening changes, not stale code). `.env.staged` from 24d
+moved into place as `.env` (`chmod 600`). Two system-dependency gaps found and fixed, neither
+originally in 24b's package list: Pango (`libpango-1.0-0`/`libpangocairo-1.0-0`, matching CI's own
+already-established WeasyPrint requirement from Task 18e) and Node.js — 24b never installed a JS
+runtime at all, since it wasn't in that sub-task's own scope (MySQL/Redis/Nginx/Python/Supervisor).
+Installed Node 22.x via NodeSource (matching local dev's `v22.17.0` major version; no `.nvmrc` or
+`package.json` `engines` field existed to pin an exact version, checked directly rather than
+guessed). `pip install -r requirements.txt` succeeded clean (Django 5.0.14, WeasyPrint 62.3, all
+verified importable). `npm run build` produced the same stable `main.css`/`main.js` filenames as
+local dev (`vite.config.js`'s deliberate no-hash convention, CLAUDE.md's own documented gotcha) —
+`npm audit` flagged 2 high-severity findings in dev dependencies, noted but not acted on now,
+matching this project's own established non-blocking `pip-audit` precedent (Task 30f) rather than
+gating this task on an unrelated triage pass. `collectstatic` copied 256 files. `migrate` applied
+all 130+ migrations clean against real production MySQL for the first time in this project's
+history — the one warning (`account.EmailAddress: models.W036`, MySQL not supporting a conditional
+unique constraint allauth's own migration defines) is a known, pre-existing Django/allauth+MySQL
+limitation, not something this task introduced. Verification went beyond a read-only count: created
+a real `Category` row, confirmed it persisted via a fresh query, then deleted it — proving actual
+write capability against the production database, not just connectivity.
 
 **Dependencies:** 24b, 24d
 
