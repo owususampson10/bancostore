@@ -62,6 +62,28 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
+# Production-only security hardening (Task 24d). Gated on `not DEBUG` so local dev/tests, which
+# always run over plain http://localhost, are never affected -- a Secure-flagged cookie or an
+# SSL redirect would silently break local dev if these applied unconditionally.
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    # Starts conservative (1 hour) rather than the commonly-recommended 1 year -- this is the
+    # first production deploy, HTTPS itself isn't verified end-to-end until Task 24g, and browsers
+    # that cache a long HSTS value can't be talked back out of it if something's misconfigured.
+    # Raise once HTTPS has been stable in production for a while (see tasks/todo.md Task 24d).
+    SECURE_HSTS_SECONDS = 3600
+    # Nginx (Task 24g) is the only process reachable from the public internet -- Daphne only
+    # listens on 127.0.0.1 (Task 24f) -- so trusting this one header is safe: nothing external can
+    # set it directly on a request that reaches Django.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    # Matches the X-Real-IP header Nginx's site config sets (Task 24g). Without this,
+    # django-ratelimit reads REMOTE_ADDR, which is Nginx's own loopback connection for every
+    # visitor once traffic passes through a reverse proxy -- collapsing every visitor into one
+    # shared rate-limit bucket instead of one bucket per real client IP.
+    RATELIMIT_IP_META_KEY = "HTTP_X_REAL_IP"
+
 
 # Application definition
 
@@ -232,12 +254,13 @@ LOGIN_URL = "two_factor:login"
 # regression test (that one proves a config flag can never skip 2FA
 # outright); the two are covered by separate tests in
 # tests/feature/accounts/test_admin_auth.py. TWO_FACTOR_REMEMBER_COOKIE_SECURE
-# is deliberately left at the library's False default -- this repo has no
-# production security headers configured yet (see tasks/todo.md's Known
-# issues), and a Secure-flagged cookie would silently never be sent over
-# local dev's plain http://localhost. Revisit alongside SESSION_COOKIE_SECURE/
-# CSRF_COOKIE_SECURE once Task 24 sets up real HTTPS.
+# tracks `not DEBUG`, same as SESSION_COOKIE_SECURE/CSRF_COOKIE_SECURE above --
+# a Secure-flagged cookie would silently never be sent over local dev's plain
+# http://localhost. Production runs under DEBUG=False from Task 24d onward, but
+# real HTTPS itself isn't live until Nginx + Let's Encrypt land in Task 24g --
+# this flag is only actually exercised correctly once both are true together.
 TWO_FACTOR_REMEMBER_COOKIE_AGE = 60 * 60 * 24 * 7
+TWO_FACTOR_REMEMBER_COOKIE_SECURE = not DEBUG
 
 # Themed "Session Expired" page instead of Django's raw technical CSRF
 # error page. templates/404.html, 500.html, 403.html, 400.html need no
@@ -399,7 +422,13 @@ if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@bancostore.test")
+# "no-reply@bancostore.test" was a placeholder on the reserved .test TLD -- fine for local dev
+# (never actually sent), but reset/lockout emails sent from a .test address in production would
+# bounce or land in spam. The real value is set via DEFAULT_FROM_EMAIL in production's .env
+# (Task 24d) to the same Gmail address EMAIL_HOST_USER already sends through, since that's the
+# only address with real SPF/DKIM alignment for this Gmail-SMTP setup -- a bancostore.com address
+# would need its own mail-sending DNS records this project doesn't have yet.
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@bancostore.example")
 
 
 # mNotify — SMS OTP for distributor registration/login/password reset (Task 5).

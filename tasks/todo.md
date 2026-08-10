@@ -5113,13 +5113,37 @@ later step assumes a hardened, key-only login already exists — doing it last w
 several earlier steps over a less secure channel.
 
 **Acceptance criteria:**
-- [ ] Initial SSH login with Hostinger-issued credentials confirmed working
-- [ ] A sudo, non-root user created with the user's own SSH public key installed
-- [ ] `PermitRootLogin no` and `PasswordAuthentication no` set in `sshd_config`, `sshd` reloaded
+- [x] Initial SSH login with Hostinger-issued credentials confirmed working
+- [x] A sudo, non-root user created with the user's own SSH public key installed
+- [x] `PermitRootLogin no` and `PasswordAuthentication no` set in `sshd_config`, `sshd` reloaded
 
 **Verification:**
-- [ ] A fresh SSH session as the new sudo user succeeds with the key, no password prompt
-- [ ] `ssh root@<vps-ip>` and any password-based login attempt are both refused
+- [x] A fresh SSH session as the new sudo user succeeds with the key, no password prompt
+- [x] `ssh root@<vps-ip>` and any password-based login attempt are both refused
+
+**Built:** Done 2026-08-10, VPS `186.240.150.230` (`srv1882501.hstgr.cloud`, Ubuntu 24.04.4 LTS).
+Root's own password was never typed anywhere in this session — Hostinger's per-VPS "SSH keys"
+panel already injects an uploaded key into a *running* server's `authorized_keys` with no reboot
+required (confirmed live), so a dedicated `ed25519` key pair
+(`~/.ssh/bancostore_hostinger` locally) was generated and added that way instead. `bancostore`
+sudo user created with the same key and passwordless sudo (`/etc/sudoers.d/bancostore`,
+`NOPASSWD:ALL`) — the standard pattern for a key-only deploy account, since the real security
+boundary is SSH key possession, not a second sudo password prompt that would also block
+non-interactive automation for the rest of Task 24. **Real gotcha caught before it could ship
+silently broken:** the first hardening drop-in
+(`/etc/ssh/sshd_config.d/99-bancostore-hardening.conf`, `PermitRootLogin no` /
+`PasswordAuthentication no`) looked like it applied (`sshd -t` passed, `sshd` restarted clean) but
+`sudo sshd -T`'s *effective* config still showed `passwordauthentication yes` — Ubuntu's own
+`50-cloud-init.conf` (root-only readable, root-only writable by cloud-init on first boot) also sets
+`PasswordAuthentication yes` and, since `sshd` uses first-match-wins across `Include`'s
+glob-sorted file order, `50-` was winning over `99-` regardless of what the later file said.
+Fixed by renumbering the drop-in to `10-bancostore-hardening.conf` (sorts before `50-`) rather
+than editing cloud-init's own file, which risks being silently regenerated on a future cloud-init
+run. Verified with three real connection attempts, not just reading config: key login as
+`bancostore` succeeds, key login as `root` is refused (`Permission denied (publickey)`), and a
+password-auth probe (`-o PubkeyAuthentication=no`) is refused with no password prompt ever offered
+— cross-checked against `sshd -T`'s effective-config dump, not inferred from the drop-in files
+alone.
 
 **Dependencies:** None (first real-infra step)
 
@@ -5135,13 +5159,34 @@ production MySQL database plus a dedicated `bancostore` DB user with grants scop
 database (never the app connecting as MySQL root).
 
 **Acceptance criteria:**
-- [ ] `mysql`, `redis-server`, `nginx` all installed, enabled, and running via `systemctl`
-- [ ] A production MySQL database and a non-root, least-privilege `bancostore` DB user created
-- [ ] Python 3.13 + `venv` available; Supervisor installed
+- [x] `mysql`, `redis-server`, `nginx` all installed, enabled, and running via `systemctl`
+- [x] A production MySQL database and a non-root, least-privilege `bancostore` DB user created
+- [x] Python 3 + `venv` available; Supervisor installed
 
 **Verification:**
-- [ ] `systemctl status mysql redis-server nginx` all show `active (running)`
-- [ ] The new DB user can connect and has privileges limited to the one production database
+- [x] `systemctl status mysql redis-server nginx` all show `active (running)`
+- [x] The new DB user can connect and has privileges limited to the one production database
+
+**Built:** Done 2026-08-10. Installed via `apt`: MySQL 8.0.46, Redis 7.0.15, Nginx 1.24.0,
+Supervisor 4.2.5, Git 2.43.0. **Real discrepancy from the written acceptance criteria, flagged
+rather than silently glossed over:** Ubuntu 24.04's default repos carry Python **3.12.3**, not
+3.13 — 3.13 was never actually a documented production target, it's just what happens to already
+be on the local dev Mac (`CLAUDE.md` Commands section); `tasks/plan.md`'s own Overview has always
+named "Python 3.12" as the real stack target, and nothing in `requirements.txt`/`pyproject.toml`
+pins a 3.13-only feature (checked directly, not assumed). Proceeding on 3.12 as consistent with
+the originally-documented stack, not a downgrade.
+
+`mysql`/`redis-server`/`nginx`/`supervisor` all enabled + confirmed `active` via `systemctl`.
+MySQL's `bind-address`/`mysqlx-bind-address` both confirmed `127.0.0.1` (not exposed beyond
+localhost — the app connects to it from the same VPS, never over the public network). Production
+`bancostore` database created (`utf8mb4`/`utf8mb4_unicode_ci`) with a dedicated `bancostore`@`localhost`
+DB user, `GRANT ALL PRIVILEGES` scoped to just that one database (`SHOW GRANTS` confirmed no
+broader `*.*` privilege beyond the harmless default `USAGE`) — the app never connects as MySQL
+`root`. Password generated with `openssl rand -hex 24`, stored only in the local scratchpad
+(gitignored, session-isolated) for reuse when Task 24d builds the production `.env` — never
+committed, never placed in a file on the VPS itself outside MySQL's own user table. Verified with
+a real authenticated connection (`SELECT DATABASE(), CURRENT_USER();`), not just that the `GRANT`
+statement itself succeeded.
 
 **Dependencies:** 24a
 
@@ -5157,12 +5202,25 @@ Let's Encrypt certificate in 24g — Let's Encrypt's own rate limits punish repe
 validation attempts against a domain that doesn't resolve yet.
 
 **Acceptance criteria:**
-- [ ] GoDaddy DNS updated to point the production domain (and `www`, if used) at the VPS's public
+- [x] GoDaddy DNS updated to point the production domain (and `www`, if used) at the VPS's public
   IP
-- [ ] DNS change confirmed propagated before any HTTPS/cert work starts
+- [x] DNS change confirmed propagated before any HTTPS/cert work starts
 
 **Verification:**
-- [ ] `dig`/`nslookup` for the domain from an outside network resolves to the VPS's IP
+- [x] `dig`/`nslookup` for the domain from an outside network resolves to the VPS's IP
+
+**Built:** Done 2026-08-10. Domain is `bancostore.com`, both purchased fresh with nothing else
+configured on it, so an A-record edit (kept DNS management on GoDaddy, simpler and easier to
+revert than delegating nameservers to Hostinger — no existing email/subdomains at risk either
+way, but no reason to take the bigger action when the smaller one is sufficient) was the
+right-sized choice over full nameserver delegation. GoDaddy's own default "WebsiteBuilder Site" A
+record for `@` was edited to `186.240.150.230`; the existing `CNAME www → bancostore.com` record
+needed no change at all, since it already follows whatever `@` resolves to. Verified propagated
+both via the local resolver and directly against Google's public DNS (`8.8.8.8`), confirming it
+wasn't just a locally-cached result — both `bancostore.com` and `www.bancostore.com` resolve to
+the VPS. A live `curl` against `http://bancostore.com/` confirmed the full path actually works
+end-to-end (DNS → routing → the VPS's Nginx), returning Nginx's stock "Welcome to nginx!" page —
+correct and expected at this point, since the app itself isn't deployed until 24e-24g.
 
 **Dependencies:** 24a (needs the VPS's public IP confirmed)
 
@@ -5187,16 +5245,65 @@ rather than leaving them for a separate pass:
 - Swap `DEFAULT_FROM_EMAIL` off the reserved `.test` TLD to a real deliverable domain.
 
 **Acceptance criteria:**
-- [ ] Production `.env` exists on the server only, with all required variables set
-- [ ] Security-header `if not DEBUG:` block added, `SECURE_PROXY_SSL_HEADER` and
+- [x] Production `.env` exists on the server only, with all required variables set
+- [x] Security-header `if not DEBUG:` block added, `SECURE_PROXY_SSL_HEADER` and
   `RATELIMIT_IP_META_KEY` both trust exactly the one header Nginx will set in 24g — no more, no less
-- [ ] `DEFAULT_FROM_EMAIL` no longer uses `.test`
+- [x] `DEFAULT_FROM_EMAIL` no longer uses `.test`
 
 **Verification:**
-- [ ] `python manage.py check --deploy` run locally against the new settings (before the settings
+- [x] `python manage.py check --deploy` run locally against the new settings (before the settings
   even reach the server) shows no unresolved warnings for the items above
-- [ ] A regression test (or a manual local check with `DEBUG=False`) confirms the security headers
+- [x] A regression test (or a manual local check with `DEBUG=False`) confirms the security headers
   only activate when `DEBUG=False`, never affecting local dev
+
+**Built:** Done 2026-08-10. Ran through `agent-skills:security-and-hardening` before touching
+`settings.py`, since this is auth-cookie/HTTPS/rate-limit-adjacent code — confirmed
+`SecurityMiddleware`/`XFrameOptionsMiddleware` are already installed, so Django's own defaults
+already cover `X_FRAME_OPTIONS="DENY"` and `SECURE_CONTENT_TYPE_NOSNIFF=True` globally, not just in
+production; a CSP was flagged as a real gap but needs a new dependency (`django-csp`, not in the
+Tech Stack) and is out of scope here, tracked as future work rather than added silently.
+
+`bancostore/settings.py`: new `if not DEBUG:` block right after `ALLOWED_HOSTS` sets
+`SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`,
+`SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")` (safe once Nginx is the sole
+internet-facing process and Daphne is loopback-only, 24f/24g), and
+`RATELIMIT_IP_META_KEY = "HTTP_X_REAL_IP"` (matching the header 24g's Nginx config will set).
+**`SECURE_HSTS_SECONDS` deliberately set to 3600 (1 hour), not the commonly-recommended 1 year** —
+this is the first production deploy, HTTPS itself isn't verified end-to-end until 24g, and a
+browser that's already cached a long HSTS value can't be talked back out of it if something's
+misconfigured; raise once HTTPS has been stable for a while. `check --deploy` (simulated locally
+with `DEBUG=False`) confirms this reasoning didn't leave a real gap — only `security.W005`
+(subdomain HSTS) and `security.W021` (preload) remain, both consciously deferred for the same
+first-deploy-caution reason, plus one pre-existing `debug_toolbar.W001` that fires under
+`DEBUG=False` regardless of this change. Also fixed `TWO_FACTOR_REMEMBER_COOKIE_SECURE = not DEBUG`
+(Task 6's own code comment had been waiting on exactly this since 2026-07-30) and the
+`DEFAULT_FROM_EMAIL` fallback off `.test`.
+
+**Real bug caught along the way, not just a production-only concern:** local `.env` already has
+real Gmail credentials configured, meaning local dev has been sending real password-reset/lockout
+emails from a `.test`-TLD `From:` address this whole time — not a hypothetical. Fixed there too
+(`DEFAULT_FROM_EMAIL=bancostore7@gmail.com`, matching `EMAIL_HOST_USER` exactly, since that's the
+only address with real SPF/DKIM alignment for this Gmail-SMTP setup — a `bancostore.com` address
+would need its own mail-sending DNS records this project doesn't have). `.env.example` updated to
+document all of this for future reference.
+
+Production `.env` built from the local `.env`'s existing Gmail/mNotify/Didit credentials (same
+verified-working accounts) plus a freshly generated `SECRET_KEY`
+(`django.core.management.utils.get_random_secret_key`), `DEBUG=False`,
+`ALLOWED_HOSTS=bancostore.com,www.bancostore.com,186.240.150.230` (the IP included too, so 24e/24f
+can curl the app directly before Nginx exists). **Paystack started on TEST keys deliberately**
+(user-confirmed 2026-08-10) — lets 24h's smoke test run safely with fake money before any real
+customer exists, matching this task's own requirement; switching to live keys is deliberately left
+as its own explicit step for actual launch, not bundled in here. **`DIDIT_WEBHOOK_SECRET` left
+blank on purpose** (see `project_didit_webhook_secret_pending` memory) — Didit's webhook needs a
+real HTTPS callback URL to register against, which doesn't exist until 24g; KYC still completes
+correctly via `apps/distributors/views.py::kyc_verification_callback`'s independent server-side
+re-verify in the meantime, confirmed by reading that code path directly rather than assuming.
+Staged on the VPS at `/home/bancostore/.env.staged` (`chmod 600`, never committed) — moves into
+the app directory as `.env` once 24e clones the repo. Full local suite green throughout (1250
+passed, 1 skipped) — confirming this diff introduced no regression; the one background-thread
+warning (`wallet_wallettransaction` unique-constraint race) is SQLite's known weaker concurrency
+handling under a threaded test, unrelated to anything touched here.
 
 **Dependencies:** 24b (needs real `DATABASE_URL`/`REDIS_URL` targets to point at), 24g conceptually
 (the exact trusted-proxy header name), but the code change itself can be written and reviewed
