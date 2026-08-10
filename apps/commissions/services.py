@@ -318,16 +318,95 @@ def calculate_matching_bonus(total_downline_earnings: Decimal) -> Decimal:
 MAX_MATCHING_BONUS_WALK_DEPTH = 500
 
 
+def walk_sponsor_chain_downline_ids(distributor, max_depth=None) -> set:
+    """Cycle-safe, depth-capped BFS of `distributor`'s SPONSOR chain
+    (Distributor.sponsor, the recruitment chain a starter-pack purchase or
+    registration sets -- deliberately NOT apps.binary_tree's placement
+    tree, which can diverge from who-recruited-whom under spillover).
+    Returns the set of every downline distributor's pk, with no ordering
+    guarantee.
+
+    Extracted from sum_downline_binary_bonus_earnings (Task 14) so Task 33's
+    Team page can reuse the exact same walk instead of a second
+    implementation of the cycle guard below -- a behavior-preserving
+    extraction, not a new algorithm; sum_downline_binary_bonus_earnings's
+    own test suite (tests/unit/commissions/test_matching_bonus.py) already
+    covers cycle-safety and the depth ceiling and continues to pass
+    unchanged against this version.
+
+    `max_depth` is levels deep to walk: None means unlimited, 0 means don't
+    walk at all (returns an empty set immediately).
+
+    One bulk query per level (Distributor.objects.filter(sponsor_id__in=
+    [...])), never one query per distributor, matching this codebase's
+    established "never one query per ancestor" convention (see
+    apps.pv_ledger.services.record_purchase_pv).
+
+    Guards against sponsor-chain cycles explicitly: unlike
+    apps.binary_tree.BinaryTreeEdge (which has a DB constraint banning
+    ancestor == descendant), Distributor.sponsor is a plain self-FK with
+    no such protection. A corrupted graph (e.g. a data-entry bug that
+    reassigns an ancestor's sponsor back to one of their own descendants)
+    would infinite-loop an unguarded "walk until a level is empty" -- each
+    level's query here explicitly excludes every id already counted in a
+    prior level, so even a cyclic graph terminates (the cycle's ids are
+    all consumed by the level that first reaches them, leaving nothing
+    new for the next iteration to find).
+
+    Also hard-capped at MAX_MATCHING_BONUS_WALK_DEPTH regardless of
+    max_depth or the graph's real size -- see that constant's own
+    docstring for why this matters even with the cycle guard above (a
+    cycle-free but pathologically deep chain is a different risk than an
+    infinite loop, and the cycle guard alone doesn't bound it). The name
+    keeps its original Matching-Bonus-specific prefix since that's still
+    where the constant is defined and tuned; Task 33 reuses the same value
+    rather than defining a second, possibly-diverging ceiling."""
+    if max_depth == 0:
+        return set()
+
+    all_downline_ids = set()
+    current_level_ids = [distributor.pk]
+    depth = 0
+    while current_level_ids:
+        if max_depth is not None and depth >= max_depth:
+            break
+        if depth >= MAX_MATCHING_BONUS_WALK_DEPTH:
+            logger.warning(
+                "walk_sponsor_chain_downline_ids: distributor=%s hit "
+                "the %s-level walk ceiling before its sponsor chain ran "
+                "out -- returning only what was found in the first %s "
+                "levels. Needs investigation if this fires in practice "
+                "(either a pathologically deep real chain, or a graph "
+                "issue the cycle guard doesn't catch).",
+                distributor.pk,
+                MAX_MATCHING_BONUS_WALK_DEPTH,
+                MAX_MATCHING_BONUS_WALK_DEPTH,
+            )
+            break
+        next_level_ids = list(
+            Distributor.objects.filter(sponsor_id__in=current_level_ids)
+            .exclude(pk__in=all_downline_ids | {distributor.pk})
+            .values_list("pk", flat=True)
+        )
+        if not next_level_ids:
+            break
+        all_downline_ids.update(next_level_ids)
+        current_level_ids = next_level_ids
+        depth += 1
+
+    return all_downline_ids
+
+
 def sum_downline_binary_bonus_earnings(distributor, max_depth, run_at) -> Decimal:
-    """BFS's `distributor`'s SPONSOR chain (Distributor.sponsor, the
-    recruitment chain a starter-pack purchase or registration sets --
-    deliberately NOT apps.binary_tree's placement tree, which can diverge
-    from who-recruited-whom under spillover), summing every downline
-    member's own BINARY_BONUS-type WalletTransaction credits from the
-    rolling `config.MATCHING_BONUS_INTERVAL_DAYS` days before `run_at`
-    (not a calendar week -- same "undefined calendar-week boundary"
-    reasoning apply_weekly_binary_bonus_cap already documents for the
-    identical ambiguity).
+    """Sums every member of `distributor`'s sponsor-chain downline's own
+    BINARY_BONUS-type WalletTransaction credits from the rolling
+    `config.MATCHING_BONUS_INTERVAL_DAYS` days before `run_at` (not a
+    calendar week -- same "undefined calendar-week boundary" reasoning
+    apply_weekly_binary_bonus_cap already documents for the identical
+    ambiguity). The downline set itself comes from
+    walk_sponsor_chain_downline_ids -- see that function's docstring for
+    the walk/cycle-guard/depth-cap details this function no longer needs
+    to restate.
 
     The window tracks the live cadence setting, not a hardcoded 7 --
     CodeRabbit review, 2026-07-22: an earlier version hardcoded
@@ -347,63 +426,8 @@ def sum_downline_binary_bonus_earnings(distributor, max_depth, run_at) -> Decima
     purchased yet -- gets no matching bonus). Bronze's cap comes from
     config.MATCHING_BONUS_DEPTH_BRONZE at the caller (see
     process_matching_bonus_for_distributor), not hardcoded here -- this
-    function only knows "how many levels," not "which rank means what."
-
-    One bulk query per level (Distributor.objects.filter(sponsor_id__in=
-    [...])), never one query per distributor, matching this codebase's
-    established "never one query per ancestor" convention (see
-    apps.pv_ledger.services.record_purchase_pv) -- proportionate to this
-    task's scope per the live-BFS-not-a-closure-table decision in
-    tasks/todo.md's Task 14 spec note, not a full pre-aggregation.
-
-    Guards against sponsor-chain cycles explicitly: unlike
-    apps.binary_tree.BinaryTreeEdge (which has a DB constraint banning
-    ancestor == descendant), Distributor.sponsor is a plain self-FK with
-    no such protection. A corrupted graph (e.g. a data-entry bug that
-    reassigns an ancestor's sponsor back to one of their own descendants)
-    would infinite-loop an unguarded "walk until a level is empty" -- each
-    level's query here explicitly excludes every id already counted in a
-    prior level, so even a cyclic graph terminates (the cycle's ids are
-    all consumed by the level that first reaches them, leaving nothing
-    new for the next iteration to find).
-
-    Also hard-capped at MAX_MATCHING_BONUS_WALK_DEPTH regardless of
-    max_depth or the graph's real size -- see that constant's own
-    docstring for why this matters even with the cycle guard above (a
-    cycle-free but pathologically deep chain is a different risk than an
-    infinite loop, and the cycle guard alone doesn't bound it)."""
-    if max_depth == 0:
-        return Decimal("0.00")
-
-    all_downline_ids = set()
-    current_level_ids = [distributor.pk]
-    depth = 0
-    while current_level_ids:
-        if max_depth is not None and depth >= max_depth:
-            break
-        if depth >= MAX_MATCHING_BONUS_WALK_DEPTH:
-            logger.warning(
-                "sum_downline_binary_bonus_earnings: distributor=%s hit "
-                "the %s-level walk ceiling before its sponsor chain ran "
-                "out -- summing only what was found in the first %s "
-                "levels. Needs investigation if this fires in practice "
-                "(either a pathologically deep real chain, or a graph "
-                "issue the cycle guard doesn't catch).",
-                distributor.pk,
-                MAX_MATCHING_BONUS_WALK_DEPTH,
-                MAX_MATCHING_BONUS_WALK_DEPTH,
-            )
-            break
-        next_level_ids = list(
-            Distributor.objects.filter(sponsor_id__in=current_level_ids)
-            .exclude(pk__in=all_downline_ids | {distributor.pk})
-            .values_list("pk", flat=True)
-        )
-        if not next_level_ids:
-            break
-        all_downline_ids.update(next_level_ids)
-        current_level_ids = next_level_ids
-        depth += 1
+    function only knows "how many levels," not "which rank means what."."""
+    all_downline_ids = walk_sponsor_chain_downline_ids(distributor, max_depth)
 
     if not all_downline_ids:
         return Decimal("0.00")

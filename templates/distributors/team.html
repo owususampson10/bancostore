@@ -1,0 +1,79 @@
+{% extends "distributors/base_dashboard.html" %}
+{% block title %}Bancostore | My Team{% endblock %}
+{% block content %}
+<div class="mb-8">
+<h2 class="font-headline-lg text-headline-lg text-on-surface mb-1">My Team</h2>
+<p class="font-body-md text-body-md text-gray-muted">Everyone you've personally recruited, directly or through your own recruits.</p>
+</div>
+
+<div class="bg-white rounded-xl border border-outline-variant overflow-hidden shadow-sm">
+<div class="px-6 py-4 border-b border-outline-variant">
+<h5 class="font-headline-md text-headline-md text-on-surface">Team Roster</h5>
+</div>
+
+{% if page_obj.object_list %}
+<div class="overflow-x-auto">
+<table class="w-full min-w-[720px] text-left border-collapse">
+<thead class="bg-surface-container-low">
+<tr>
+<th class="px-6 py-4 font-label-md text-label-md text-gray-muted uppercase tracking-wider">Full Name</th>
+<th class="px-6 py-4 font-label-md text-label-md text-gray-muted uppercase tracking-wider">IR ID</th>
+<th class="px-6 py-4 font-label-md text-label-md text-gray-muted uppercase tracking-wider">Rank</th>
+<th class="px-6 py-4 font-label-md text-label-md text-gray-muted uppercase tracking-wider">KYC Status</th>
+<th class="px-6 py-4 font-label-md text-label-md text-gray-muted uppercase tracking-wider">Date Joined</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/30">
+{% for member in page_obj.object_list %}
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-6 py-5 font-body-md text-body-md font-semibold">{{ member.full_name|default:"—" }}</td>
+<td class="px-6 py-5 text-gray-muted font-body-md text-body-md">{{ member.ir_id|default:"Pending" }}</td>
+<td class="px-6 py-5 text-gray-muted font-body-md text-body-md">{{ member.rank|title|default:"—" }}</td>
+<td class="px-6 py-5">
+{% if member.kyc_status == "approved" %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-50 text-green-700">Approved</span>
+{% elif member.kyc_status == "rejected" %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-error-container text-on-error-container">Rejected</span>
+{% else %}
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-surface-container-high text-on-surface-variant">Pending</span>
+{% endif %}
+</td>
+<td class="px-6 py-5 text-gray-muted font-body-md text-body-md">{{ member.user.date_joined|date:"M d, Y" }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="px-6 py-4 bg-surface-container-low border-t border-outline-variant flex flex-col sm:flex-row items-center justify-between gap-4">
+<p class="text-sm text-gray-muted">
+Showing {{ page_obj.start_index }} to {{ page_obj.end_index }} of {{ page_obj.paginator.count }} team members
+</p>
+<div class="flex items-center gap-2">
+{% if page_obj.has_previous %}
+<a href="?page={{ page_obj.previous_page_number }}" class="p-2 border border-outline-variant rounded-lg hover:bg-white transition-all">
+<span class="material-symbols-outlined">chevron_left</span>
+</a>
+{% endif %}
+<span class="text-sm text-gray-muted px-2">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+{% if page_obj.has_next %}
+<a href="?page={{ page_obj.next_page_number }}" class="p-2 border border-outline-variant rounded-lg hover:bg-white transition-all">
+<span class="material-symbols-outlined">chevron_right</span>
+</a>
+{% endif %}
+</div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="flex flex-col items-center justify-center py-16 px-6 text-center">
+<div class="w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-[32px] text-gray-muted">group</span>
+</div>
+<h6 class="font-headline-md text-headline-md text-on-surface mb-1">No team members yet</h6>
+<p class="text-sm text-gray-muted max-w-xs">Share your referral link to start building your team -- everyone you recruit, and everyone they recruit, will show up here.</p>
+</div>
+{% endif %}
+</div>
+{% endblock %}

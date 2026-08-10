@@ -387,22 +387,21 @@ Criteria.
   total, including one follow-up addressing CodeRabbit's findings); full CI green (lint, real-MySQL
   test, CodeRabbit) before merge. See `tasks/todo.md` for the full breakdown.
 
-- [ ] Task 33: Distributor Team page — flat roster of the personally-recruited downline. Scoped
-  2026-08-10, not yet built. The "Team" sidebar entry has existed as a disabled placeholder since
-  Task 15/21 ("still a future task"); this gives it a real, user-confirmed scope rather than
-  leaving it undecided. Deliberately NOT the same data as the existing Binary Tree page (Task 21a,
-  `apps.binary_tree`'s placement/spillover structure) — this is the *sponsor* chain
-  (`Distributor.sponsor`, the recruitment lineage Matching Bonus already walks), which the codebase
-  already documents as diverging from placement under spillover. Columns: full name, IR ID, rank,
-  KYC status, date joined — all real `Distributor` fields, no fabricated data. Full downline depth
-  (not just direct recruits), using the same bulk-per-level BFS pattern as
-  `apps.commissions.services.sum_downline_binary_bonus_earnings` (one query per level, cycle-guarded,
-  capped at the existing `MAX_MATCHING_BONUS_WALK_DEPTH` ceiling — reused, not duplicated), since a
-  live page load can't afford a per-row recursive walk at this platform's stated scale. Search/sort
-  on the roster explicitly deferred as a fast-follow, not built in the first slice. See
-  `tasks/todo.md` for the full breakdown and the open question this still needs an answer on
-  (whether to include a Personal PV column, which needs an extra per-distributor `pv_ledger` query
-  the other columns don't).
+- [x] Task 33: Distributor Team page — flat roster of the personally-recruited downline. Scoped and
+  built 2026-08-10. The "Team" sidebar entry had existed as a disabled placeholder since Task
+  15/21 ("still a future task"); this gives it a real, user-confirmed scope. Deliberately NOT the
+  same data as the existing Binary Tree page (Task 21a, `apps.binary_tree`'s placement/spillover
+  structure) — this is the *sponsor* chain (`Distributor.sponsor`, the recruitment lineage
+  Matching Bonus already walks), which the codebase already documents as diverging from placement
+  under spillover. Columns: full name, IR ID, rank, KYC status, date joined — all real
+  `Distributor`/`User` fields, no fabricated data (no Personal PV column — user-confirmed
+  2026-08-10, kept to the fields free from one query). Full downline depth (not just direct
+  recruits) via the same bulk-per-level BFS pattern `apps.commissions.services` already used for
+  Matching Bonus — actually extracted into a shared, independently-tested
+  `walk_sponsor_chain_downline_ids` function (a behavior-preserving refactor, verified against the
+  existing Matching Bonus test suite before and after) rather than left as "reused, not
+  duplicated" in name only. Search/sort on the roster explicitly deferred as a fast-follow, not
+  built in this first slice. See `tasks/todo.md` for the full build breakdown.
 
 ### Phase 10: Deployment — complete 2026-08-10
 - [x] Task 24: Deploy to Hostinger VPS (production) — `https://bancostore.com` is live. Broken into
