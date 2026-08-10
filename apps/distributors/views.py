@@ -27,6 +27,7 @@ from django_ratelimit.decorators import ratelimit
 from apps.accounts.permissions import is_distributor
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.binary_tree.services import get_downline_tree
+from apps.commissions.services import walk_sponsor_chain_downline_ids
 from apps.distributors.cooling_off_services import (
     CoolingOffPeriodExpired,
     NoRefundableStarterPackPurchase,
@@ -914,6 +915,49 @@ def binary_tree_view(request):
             "left_team_count": _count_subtree(left_root) if left_root else 0,
             "right_team_count": _count_subtree(right_root) if right_root else 0,
             "active_nav": "binary_tree",
+        },
+    )
+
+
+@login_required(login_url="distributors:login")
+@_redirect_if_cooling_off_cancelled
+def team(request):
+    """Task 33: a distributor's own full recruitment downline (Distributor.
+    sponsor, the sponsor chain -- deliberately NOT apps.binary_tree's
+    placement tree, which diverges from it under spillover; see
+    apps.commissions.services.walk_sponsor_chain_downline_ids's own
+    docstring for that distinction). Always scoped to
+    request.user.distributor -- no distributor id is ever accepted from the
+    URL or query params, same no-IDOR-surface pattern as
+    earnings_history/binary_tree_view.
+
+    Reuses walk_sponsor_chain_downline_ids (Task 14's Matching Bonus code,
+    extracted for this reuse) rather than a second BFS implementation --
+    same cycle guard, same MAX_MATCHING_BONUS_WALK_DEPTH ceiling, one bulk
+    query per level. No Personal PV column (user-confirmed 2026-08-10) --
+    that would need a per-row apps.pv_ledger query the other columns don't,
+    a different cost profile than the rest of this page; PV detail stays
+    on the dashboard/Binary Tree pages."""
+    if not is_distributor(request.user):
+        raise PermissionDenied
+
+    distributor = request.user.distributor
+    downline_ids = walk_sponsor_chain_downline_ids(distributor)
+    roster = (
+        Distributor.objects.filter(pk__in=downline_ids)
+        .select_related("user")
+        .order_by("-user__date_joined", "-pk")
+    )
+
+    paginator = Paginator(roster, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    return render(
+        request,
+        "distributors/team.html",
+        {
+            "page_obj": page_obj,
+            "active_nav": "team",
         },
     )
 

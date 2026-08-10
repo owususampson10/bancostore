@@ -85,14 +85,12 @@
 {% url 'distributors:payout_settings' as payout_settings_url %}
 {% url 'distributors:withdrawal_history' as withdrawal_history_url %}
 {% url 'distributors:binary_tree' as binary_tree_url %}
+{% url 'distributors:team' as team_url %}
 {% url 'distributors:logout' as logout_url %}
 {% include "distributors/_sidebar_nav_item.html" with href=dashboard_url icon="dashboard" label="Dashboard" nav_key="dashboard" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=earnings_history_url icon="history" label="Earnings History" nav_key="earnings_history" active_nav=active_nav %}
-{# Team is still a future task -- shown as a disabled entry (href omitted) #}
-{# rather than a dead link, matching the honesty convention already used #}
-{# by templates/distributors/dashboard.html. Binary Tree wired up as of #}
-{# Task 21a; Withdraw was wired up as of Task 16g. #}
-{% include "distributors/_sidebar_nav_item.html" with icon="group" label="Team" %}
+{# Team wired up as of Task 33. Binary Tree wired up as of Task 21a; Withdraw was wired up as of Task 16g. #}
+{% include "distributors/_sidebar_nav_item.html" with href=team_url icon="group" label="Team" nav_key="team" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=binary_tree_url icon="account_tree" label="Binary Tree" nav_key="binary_tree" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=withdrawal_history_url icon="payments" label="Withdraw" nav_key="withdrawal_history" active_nav=active_nav %}
 <div class="pt-4 mt-4 border-t border-outline-variant/50">

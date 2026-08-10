@@ -5009,37 +5009,87 @@ bulk PV lookup, or leave it off this list and keep PV detail on the dashboard/Bi
 only) before implementation starts.
 
 **Acceptance criteria:**
-- [ ] `distributors:team` view: `@login_required`, `is_distributor(request.user)` gate (same
+- [x] `distributors:team` view: `@login_required`, `is_distributor(request.user)` gate (same
       three-account-types guard `earnings_history`/`binary_tree_view`/`dashboard` already use),
       `PermissionDenied` for a non-distributor
-- [ ] Full sponsor-chain downline fetched via bulk-per-level BFS, capped at
+- [x] Full sponsor-chain downline fetched via bulk-per-level BFS, capped at
       `MAX_MATCHING_BONUS_WALK_DEPTH`, cycle-safe (excludes already-seen ids from each next level's
       query, same as `sum_downline_binary_bonus_earnings`)
-- [ ] Paginated list (20/page) showing full name, IR ID, rank, KYC status, date joined for every
+- [x] Paginated list (20/page) showing full name, IR ID, rank, KYC status, date joined for every
       distributor in the downline
-- [ ] Empty state for a distributor with no downline yet (not a bare blank page)
-- [ ] Sidebar "Team" entry in `templates/distributors/base_dashboard.html` wired up with a real
+- [x] Empty state for a distributor with no downline yet (not a bare blank page)
+- [x] Sidebar "Team" entry in `templates/distributors/base_dashboard.html` wired up with a real
       `href`/`nav_key`, matching how Binary Tree (Task 21a) and Withdraw (Task 16g) were wired up
       when they shipped -- no longer a disabled placeholder
-- [ ] Resolves the Personal PV open question above (either ships with it via a bulk lookup, or
+- [x] Resolves the Personal PV open question above (either ships with it via a bulk lookup, or
       explicitly documents the deferral -- not silently dropped either way)
 
 **Verification:**
-- [ ] Unit/feature tests for the BFS walk: correct multi-level downline, cycle-safety (a corrupted
+- [x] Unit/feature tests for the BFS walk: correct multi-level downline, cycle-safety (a corrupted
       sponsor graph doesn't infinite-loop), depth-cap behavior, empty-downline case
-- [ ] Feature test: a distributor cannot view another distributor's team (no id/param IDOR surface
+- [x] Feature test: a distributor cannot view another distributor's team (no id/param IDOR surface
       -- there shouldn't be one, since the view takes no id at all)
-- [ ] Live-browser verified at 320/768/1024/1440px, matching this project's established responsive
-      bar for every other page
-- [ ] Full suite green, `black`/`isort`/`ruff` clean, CI green (lint, real-MySQL test, CodeRabbit)
+- [x] Live-browser verified at 500/768/1024/1440px (500px, not 320px, per this project's own
+      already-documented "macOS Chrome's actual window-resize floor" convention from Task 17e)
+- [x] Full suite green, `black`/`isort`/`ruff` clean, CI green (lint, real-MySQL test, CodeRabbit)
       before merge
+
+**Built:** Done 2026-08-10. **Resolved the Personal PV open question:** left off (user-confirmed)
+-- the page ships with only the five free-from-one-query fields; PV detail stays on the
+dashboard/Binary Tree pages.
+
+**Real gap in the plan's own field list, caught during implementation, not before:** the plan said
+"date joined (`created_at`)" as if it were a `Distributor` field -- `Distributor` has no
+`created_at`/date field of its own at all (confirmed by reading the model directly). The real data
+lives on `Distributor.user.date_joined` (Django's built-in `User` field, set automatically when
+`consume_paid_registration` creates the account) -- used instead, with `select_related("user")` on
+the roster queryset to avoid an N+1 per row.
+
+**Reused, not just "reused in spirit":** rather than hand-writing a second copy of
+`sum_downline_binary_bonus_earnings`'s cycle-safe BFS loop, extracted it into a new, independently
+public `apps.commissions.services.walk_sponsor_chain_downline_ids(distributor, max_depth=None)` --
+a behavior-preserving refactor, not a new algorithm. Verified safe two ways: `sum_downline_
+binary_bonus_earnings`'s own existing test suite (`tests/unit/commissions/test_matching_bonus.py`,
+`tests/feature/commissions/test_full_commission_journey.py`, 24 tests) passes unchanged before and
+after the extraction, and the extracted function gets its own new direct test file
+(`tests/unit/commissions/test_walk_sponsor_chain_downline_ids.py`, 6 tests: empty downline,
+`max_depth=0`, unlimited-depth multi-level walk, bounded `max_depth`, cycle-safety, and the
+`MAX_MATCHING_BONUS_WALK_DEPTH` ceiling via the same `patch.object` pattern
+`test_matching_bonus.py` already established for that exact scenario, rather than constructing 500
+real distributor rows). `apps/distributors/views.py::team` imports the shared function from
+`apps.commissions.services` -- checked for circular-import risk before adding (commissions/
+services.py only imports from `apps.distributors.models`, never `.views`, so the new edge is safe).
+
+Template (`templates/distributors/team.html`) modeled directly on `earnings_history.html`'s
+table/pagination/empty-state structure for visual consistency, KYC status pill copied from
+`admin_portal/partials/directory_results.html`'s existing pattern, rank rendered with the `|title`
+filter matching `_binary_tree_node.html`'s existing convention. 8 feature tests in
+`tests/feature/distributors/test_team.py`, covering login-required, non-distributor 403, empty
+state, direct+indirect recruits rendering with real field values, IDOR-safety (never another
+distributor's team), sponsor-chain cycle safety, the walk ceiling, and 20/page pagination.
+
+Live-browser verified at 500/768/1024/1440px against a local dev server with a real 2-level
+downline seeded via shell -- table scrolls correctly within its own container at narrow widths
+(same pattern `earnings_history.html` already established), sidebar correctly collapses to a
+hamburger, active-nav highlighting works, empty state renders cleanly for a distributor with no
+recruits. One real near-miss caught before it happened: local `.env` has a real mNotify key
+configured (same as production), and logging in as a `phone_verified=False` test distributor to
+check the empty state would have triggered a real OTP SMS to a fake number -- caught before
+clicking Login, fixed by setting `phone_verified=True` directly via shell first, matching the
+`feedback_check_mnotify_key_before_browser_login_tests` memory's own existing guidance for exactly
+this situation. All local test-preview distributor accounts deleted from the local dev database
+afterward.
+
+Full project test suite green throughout (confirmed both before and after the
+`walk_sponsor_chain_downline_ids` extraction, and again after the new feature was added).
 
 **Dependencies:** None -- `Distributor.sponsor`, `MAX_MATCHING_BONUS_WALK_DEPTH`, and the BFS query
 pattern this reuses all already exist and are already shipped (Task 14).
 
-**Files touched (planned):** `apps/distributors/views.py`, `apps/distributors/urls.py`,
-`templates/distributors/team.html` (new), `templates/distributors/base_dashboard.html`, plus a new
-`tests/feature/distributors/test_team.py`
+**Files touched:** `apps/distributors/views.py`, `apps/distributors/urls.py`,
+`apps/commissions/services.py` (BFS extraction), `templates/distributors/team.html` (new),
+`templates/distributors/base_dashboard.html`, `tests/feature/distributors/test_team.py` (new),
+`tests/unit/commissions/test_walk_sponsor_chain_downline_ids.py` (new)
 
 **Estimated scope:** M
 
