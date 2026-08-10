@@ -4963,51 +4963,356 @@ CodeRabbit's findings), squash-merged into `main`.
 
 ---
 
+### Task 33: Distributor Team page — flat roster of the personally-recruited downline
+
+**Description:** Not in the original plan. The "Team" sidebar entry has sat as a disabled
+placeholder since Task 15/21 ("still a future task -- shown as a disabled entry", see
+`templates/distributors/base_dashboard.html`), with no spec, no task number, and no decision on
+what it should show. Scoped 2026-08-10 after the user noticed the dead entry and asked; user
+confirmed the intended scope (below) after being asked to disambiguate against the existing Binary
+Tree page.
+
+**Why this is a real, separate feature from Binary Tree (Task 21a):** Binary Tree already
+visualizes a distributor's downline via `apps.binary_tree`'s placement/spillover closure table --
+*where* someone ended up placed. This task is the *sponsor* chain instead (`Distributor.sponsor`,
+the recruitment lineage set at registration/starter-pack purchase) -- *who* this distributor
+personally recruited, directly or through their own recruits. `apps/commissions/services.py`'s own
+`sum_downline_binary_bonus_earnings` docstring already documents that these two structures diverge
+under spillover, and Matching Bonus is built specifically around the sponsor chain for that reason
+-- this task reuses that same distinction, not a new one.
+
+**Scope decisions (confirmed with user 2026-08-10):**
+- Data source: `Distributor.sponsor` chain, full downline depth (not just direct recruits) -- "your
+  team" means everyone you've built, not just your immediate recruits.
+- Columns: full name, IR ID, rank, KYC status, date joined (`created_at`) -- all real `Distributor`
+  fields already in the schema, nothing fabricated.
+- Query approach: bulk-per-level BFS, the same pattern `sum_downline_binary_bonus_earnings` already
+  uses and has already been reviewed for cycle-safety (`Distributor.sponsor` has no DB constraint
+  against a cycle, unlike `BinaryTreeEdge`) -- one query per level via
+  `Distributor.objects.filter(sponsor_id__in=[...])`, never one query per distributor. Capped at the
+  existing `MAX_MATCHING_BONUS_WALK_DEPTH` constant as a safety ceiling (reused, not duplicated --
+  see that constant's own docstring for why an unbounded walk is unsafe even with the cycle guard).
+  A live page load justifies this cap even more than Matching Bonus's own background-job use of it
+  did.
+- Ownership scoping: always `request.user.distributor`, no distributor id ever accepted from the
+  URL/query params -- matching `binary_tree_view`/`earnings_history`'s established no-IDOR-surface
+  convention exactly.
+- Pagination: 20/page, matching `order_history`/`earnings_history`'s established convention.
+- Search/sort on the roster: explicitly deferred, not built in this first slice -- flagged as new
+  scope for a fast-follow once there's a real team large enough to need it, not silently dropped.
+
+**Open question, not yet decided:** whether to include a Personal PV column. Unlike the other four
+columns (plain `Distributor` fields, free from the same query), Personal PV requires an extra
+per-distributor lookup against `apps.pv_ledger` (the same source the dashboard's own "Monthly
+Personal PV" stat already reads) -- doing that for every row in a potentially-large roster is a
+different cost profile than the rest of this page. Needs a decision (include it with a batched/
+bulk PV lookup, or leave it off this list and keep PV detail on the dashboard/Binary Tree pages
+only) before implementation starts.
+
+**Acceptance criteria:**
+- [ ] `distributors:team` view: `@login_required`, `is_distributor(request.user)` gate (same
+      three-account-types guard `earnings_history`/`binary_tree_view`/`dashboard` already use),
+      `PermissionDenied` for a non-distributor
+- [ ] Full sponsor-chain downline fetched via bulk-per-level BFS, capped at
+      `MAX_MATCHING_BONUS_WALK_DEPTH`, cycle-safe (excludes already-seen ids from each next level's
+      query, same as `sum_downline_binary_bonus_earnings`)
+- [ ] Paginated list (20/page) showing full name, IR ID, rank, KYC status, date joined for every
+      distributor in the downline
+- [ ] Empty state for a distributor with no downline yet (not a bare blank page)
+- [ ] Sidebar "Team" entry in `templates/distributors/base_dashboard.html` wired up with a real
+      `href`/`nav_key`, matching how Binary Tree (Task 21a) and Withdraw (Task 16g) were wired up
+      when they shipped -- no longer a disabled placeholder
+- [ ] Resolves the Personal PV open question above (either ships with it via a bulk lookup, or
+      explicitly documents the deferral -- not silently dropped either way)
+
+**Verification:**
+- [ ] Unit/feature tests for the BFS walk: correct multi-level downline, cycle-safety (a corrupted
+      sponsor graph doesn't infinite-loop), depth-cap behavior, empty-downline case
+- [ ] Feature test: a distributor cannot view another distributor's team (no id/param IDOR surface
+      -- there shouldn't be one, since the view takes no id at all)
+- [ ] Live-browser verified at 320/768/1024/1440px, matching this project's established responsive
+      bar for every other page
+- [ ] Full suite green, `black`/`isort`/`ruff` clean, CI green (lint, real-MySQL test, CodeRabbit)
+      before merge
+
+**Dependencies:** None -- `Distributor.sponsor`, `MAX_MATCHING_BONUS_WALK_DEPTH`, and the BFS query
+pattern this reuses all already exist and are already shipped (Task 14).
+
+**Files touched (planned):** `apps/distributors/views.py`, `apps/distributors/urls.py`,
+`templates/distributors/team.html` (new), `templates/distributors/base_dashboard.html`, plus a new
+`tests/feature/distributors/test_team.py`
+
+**Estimated scope:** M
+
+**Not yet started.**
+
+---
+
 ## Phase 10: Deployment
 
 ### Task 24: Deploy to Hostinger VPS (production)
 
-**This is a production deployment — confirm with the user before running any step against the
-real VPS or domain**, per `SPEC.md` Boundaries (production deploys are an "ask first" action).
+**This is a production deployment — every sub-task below (24a-24h) touches the real Hostinger VPS
+and/or the real GoDaddy-registered domain. Confirm with the user before running any step of any
+sub-task**, per `SPEC.md` Boundaries (production deploys are an "ask first" action). This is not a
+one-time gate at the top of Task 24 — each sub-task gets its own explicit go-ahead, since each is
+independently capable of taking the real site down or misconfiguring something a later step
+builds on.
 
 **Description:** Stand up the Hostinger KVM 2 VPS (Ubuntu 24.04 LTS) as the production host and
 move Bancostore onto it: MySQL 8 (real concurrent writes, replacing local SQLite), Redis, Nginx as
 reverse proxy + static/media file server, Let's Encrypt for HTTPS, and Supervisor to keep Daphne
 (ASGI) and the Celery worker/beat processes running permanently, including across reboots. This is
 the point where every "local dev uses SQLite / MySQL doesn't run on this Mac" workaround in
-`SPEC.md` stops applying — production runs the real stack end to end.
+`SPEC.md` stops applying — production runs the real stack end to end. Hosting (Hostinger) and the
+domain (GoDaddy) were both purchased and confirmed in hand 2026-08-06, unblocking this task.
+Broken into 8 vertical sub-tasks below — each leaves the VPS in a working, checkpointable state
+before the next one starts, matching this project's established build process (16a-16h,
+17a-17f, 18a-18g, 19a-19c).
 
-**Acceptance criteria:**
+**Also folds in, rather than leaving as separately-tracked deferred items,** the two Known Issues
+this file has explicitly flagged as "needs the real Nginx config, tracked for Task 24" (see the
+"Known issues" sections near the top of this file): production security headers +
+`SECURE_PROXY_SSL_HEADER` trusting exactly one hop from Nginx, and the rate-limit IP key collapsing
+into one shared bucket (or becoming spoofable) once traffic passes through a reverse proxy. Also
+folds in swapping `DEFAULT_FROM_EMAIL` off the reserved `.test` TLD, flagged in the same section as
+a pre-go-live item.
+
+**Overall acceptance criteria** (each owned by one or more sub-tasks below):
 - [ ] Hostinger KVM 2 VPS provisioned (Ubuntu 24.04 LTS), SSH key-based access configured, root
-  login disabled in favor of a sudo user
-- [ ] MySQL 8, Redis, Nginx, and Python installed on the VPS via `apt` (native install works here —
-  unlike this Mac, Ubuntu 24.04 has current bottles/build tools for all of these)
+  login disabled in favor of a sudo user — **24a**
+- [ ] MySQL 8, Redis, Nginx, and Python installed on the VPS via `apt` — **24b**
+- [ ] GoDaddy domain resolves to the VPS — **24c**
 - [ ] Production `.env` created directly on the server (never committed): real `SECRET_KEY`,
   `DEBUG=False`, `ALLOWED_HOSTS` set to the production domain, `DATABASE_URL` pointing at the VPS's
-  MySQL, `REDIS_URL`, and the Paystack/email/SMS provider keys from `SPEC.md` Open Questions
+  MySQL, `REDIS_URL`, and the Paystack/email/SMS provider keys from `SPEC.md` Open Questions, plus
+  the security-header/proxy-IP-trust/`DEFAULT_FROM_EMAIL` fixes above — **24d**
 - [ ] `pip install -r requirements.txt`, `npm run build`, `python manage.py collectstatic`, and
-  `python manage.py migrate` all run clean against real MySQL on the VPS
+  `python manage.py migrate` all run clean against real MySQL on the VPS — **24e**
 - [ ] Supervisor configs for Daphne, `celery worker`, and `celery beat` — auto-restart on crash and
-  on VPS reboot
+  on VPS reboot — **24f**
 - [ ] Nginx reverse-proxies to Daphne, serves `static/`/`media/` directly, and Let's Encrypt issues
-  a valid HTTPS certificate (with auto-renewal) for the production domain
-- [ ] A deploy process is documented (manual runbook at minimum; GitHub Actions auto-deploy on
-  push to `main` if the CI provider from Open Question #1 is confirmed by this point)
+  a valid HTTPS certificate (with auto-renewal) for the production domain — **24g**
+- [ ] A deploy process is documented (manual runbook at minimum); one full smoke-test purchase
+  succeeds against real MySQL/Redis before any real user account exists on the VPS — **24h**
+
+**Dependencies:** Task 23 (Checkpoint I — full MVP complete and verified locally, done), Open
+Question #1 (CI provider confirmed, done), Hostinger VPS + GoDaddy domain in hand (done, 2026-08-06)
+
+**Estimated scope:** L overall, broken into S/M sub-tasks below
+
+---
+
+#### Task 24a: VPS access hardening
+
+**Description:** Confirm SSH access to the Hostinger KVM 2 VPS with the credentials from
+Hostinger's panel, then move off password/root access before anything else touches the box: create
+a non-root sudo user, install the user's SSH public key for it, then disable root SSH login and
+password authentication in `sshd_config`. This is the first sub-task deliberately because every
+later step assumes a hardened, key-only login already exists — doing it last would mean running
+several earlier steps over a less secure channel.
+
+**Acceptance criteria:**
+- [ ] Initial SSH login with Hostinger-issued credentials confirmed working
+- [ ] A sudo, non-root user created with the user's own SSH public key installed
+- [ ] `PermitRootLogin no` and `PasswordAuthentication no` set in `sshd_config`, `sshd` reloaded
 
 **Verification:**
-- [ ] Visiting the production domain over HTTPS loads the app with no errors
-- [ ] `sudo supervisorctl status` shows Daphne, Celery worker, and Celery beat all `RUNNING` after
-  a `sudo reboot` of the VPS
-- [ ] One full smoke-test purchase (mirroring Checkpoint I) succeeds against real MySQL/Redis on
-  the VPS, before any real user account exists on it — per `SPEC.md` Boundaries, never test or
-  develop against the live production server/database once real users and real money are on it
+- [ ] A fresh SSH session as the new sudo user succeeds with the key, no password prompt
+- [ ] `ssh root@<vps-ip>` and any password-based login attempt are both refused
 
-**Dependencies:** Task 23 (Checkpoint I — full MVP complete and verified locally), Open Question #1
-(CI provider confirmed)
+**Dependencies:** None (first real-infra step)
 
-**Files likely touched:** a new `deploy/` directory (Nginx site config, Supervisor program
-configs), `.env.example` (document the production-only variables), `SPEC.md` Commands section
-(add the verified production commands, matching how Task 1 updated the local dev commands),
-possibly `.github/workflows/deploy.yml`
+**Estimated scope:** XS
 
-**Estimated scope:** L
+---
+
+#### Task 24b: Base packages
+
+**Description:** Install MySQL 8, Redis, Nginx, Python 3.13 (or whatever Ubuntu 24.04's repos
+carry), and Supervisor via `apt` — native install works here, unlike this Mac. Create the
+production MySQL database plus a dedicated `bancostore` DB user with grants scoped to just that
+database (never the app connecting as MySQL root).
+
+**Acceptance criteria:**
+- [ ] `mysql`, `redis-server`, `nginx` all installed, enabled, and running via `systemctl`
+- [ ] A production MySQL database and a non-root, least-privilege `bancostore` DB user created
+- [ ] Python 3.13 + `venv` available; Supervisor installed
+
+**Verification:**
+- [ ] `systemctl status mysql redis-server nginx` all show `active (running)`
+- [ ] The new DB user can connect and has privileges limited to the one production database
+
+**Dependencies:** 24a
+
+**Estimated scope:** S
+
+---
+
+#### Task 24c: DNS cutover
+
+**Description:** Point the GoDaddy-registered domain at the Hostinger VPS's IP (A record, or
+Hostinger nameservers — whichever the user prefers) and confirm propagation before requesting a
+Let's Encrypt certificate in 24g — Let's Encrypt's own rate limits punish repeated failed
+validation attempts against a domain that doesn't resolve yet.
+
+**Acceptance criteria:**
+- [ ] GoDaddy DNS updated to point the production domain (and `www`, if used) at the VPS's public
+  IP
+- [ ] DNS change confirmed propagated before any HTTPS/cert work starts
+
+**Verification:**
+- [ ] `dig`/`nslookup` for the domain from an outside network resolves to the VPS's IP
+
+**Dependencies:** 24a (needs the VPS's public IP confirmed)
+
+**Estimated scope:** XS
+
+---
+
+#### Task 24d: Production secrets, `.env`, and the two tracked pre-go-live security fixes
+
+**Description:** Create the production `.env` directly on the server (never committed): real
+`SECRET_KEY`, `DEBUG=False`, `ALLOWED_HOSTS` set to the production domain, `DATABASE_URL` pointing
+at 24b's MySQL, `REDIS_URL`, and the Paystack/email/SMS provider keys. In the same slice, land the
+two code changes this file has been tracking as "needs the real Nginx config, do it at Task 24"
+rather than leaving them for a separate pass:
+- An `if not DEBUG:` settings block: `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`,
+  `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`, and `SECURE_PROXY_SSL_HEADER` set to trust exactly
+  one hop from Nginx (matching whatever header 24g's Nginx config actually sets — not a header an
+  external client could also set directly).
+- `RATELIMIT_IP_META_KEY` configured to read the same trusted-proxy header, so rate limiting
+  doesn't collapse into one shared bucket (or become spoofable) once all traffic arrives via
+  Nginx's own connection.
+- Swap `DEFAULT_FROM_EMAIL` off the reserved `.test` TLD to a real deliverable domain.
+
+**Acceptance criteria:**
+- [ ] Production `.env` exists on the server only, with all required variables set
+- [ ] Security-header `if not DEBUG:` block added, `SECURE_PROXY_SSL_HEADER` and
+  `RATELIMIT_IP_META_KEY` both trust exactly the one header Nginx will set in 24g — no more, no less
+- [ ] `DEFAULT_FROM_EMAIL` no longer uses `.test`
+
+**Verification:**
+- [ ] `python manage.py check --deploy` run locally against the new settings (before the settings
+  even reach the server) shows no unresolved warnings for the items above
+- [ ] A regression test (or a manual local check with `DEBUG=False`) confirms the security headers
+  only activate when `DEBUG=False`, never affecting local dev
+
+**Dependencies:** 24b (needs real `DATABASE_URL`/`REDIS_URL` targets to point at), 24g conceptually
+(the exact trusted-proxy header name), but the code change itself can be written and reviewed
+before 24g runs — just not verified end-to-end until Nginx exists
+
+**Files likely touched:** `bancostore/settings.py`, `.env.example` (document the production-only
+variables, never real values)
+
+**Estimated scope:** S
+
+---
+
+#### Task 24e: App deploy — dependencies, build, migrate
+
+**Description:** Clone the repo onto the VPS, create the production virtualenv, and run the same
+install/build/migrate sequence used locally — but against the real MySQL from 24b for the first
+time ever in this project.
+
+**Acceptance criteria:**
+- [ ] Repo cloned, venv created, `pip install -r requirements.txt` succeeds
+- [ ] `npm install && npm run build` succeeds, static assets produced
+- [ ] `python manage.py collectstatic` succeeds
+- [ ] `python manage.py migrate` runs clean against real production MySQL
+
+**Verification:**
+- [ ] `python manage.py check` passes with the production `.env` loaded
+- [ ] A `python manage.py shell` query against a core model (e.g. `Category.objects.count()`)
+  confirms the app can actually read/write the real MySQL database
+
+**Dependencies:** 24b, 24d
+
+**Estimated scope:** S
+
+---
+
+#### Task 24f: Process management — Supervisor
+
+**Description:** Supervisor configs for Daphne (ASGI), `celery worker`, and `celery beat`, so all
+three survive both a process crash and a full VPS reboot without manual intervention.
+
+**Acceptance criteria:**
+- [ ] Supervisor program configs for Daphne, Celery worker, and Celery beat, all set to
+  `autostart`/`autorestart`
+- [ ] Supervisor itself enabled to start on boot
+
+**Verification:**
+- [ ] `sudo supervisorctl status` shows all three `RUNNING`
+- [ ] Killing one process (`kill -9`) results in Supervisor restarting it automatically
+- [ ] `sudo reboot` of the VPS, then `sudo supervisorctl status` again shows all three `RUNNING`
+  with no manual restart
+
+**Dependencies:** 24e
+
+**Files likely touched:** a new `deploy/` directory (Supervisor program configs)
+
+**Estimated scope:** S
+
+---
+
+#### Task 24g: Nginx reverse proxy + HTTPS
+
+**Description:** Nginx as the public entry point: reverse-proxies to Daphne, serves `static/` and
+`media/` directly, sets the trusted-proxy header 24d's Django settings read
+(`X-Real-IP`/`X-Forwarded-For`, restricted to exactly this one hop), and Let's Encrypt (`certbot`)
+issues a real HTTPS certificate for the production domain with auto-renewal configured.
+
+**Acceptance criteria:**
+- [ ] Nginx site config reverse-proxies to Daphne, serves `static/`/`media/` directly, sets exactly
+  the one trusted-proxy header 24d's settings expect
+- [ ] Let's Encrypt certificate issued and installed for the production domain
+- [ ] Certbot auto-renewal configured (systemd timer or cron)
+
+**Verification:**
+- [ ] Visiting the production domain over HTTPS loads the app with no errors, no mixed-content
+  warnings
+- [ ] `sudo certbot renew --dry-run` succeeds
+- [ ] A rate-limited endpoint (e.g. `register`) hit from two different real external IPs shows two
+  independent buckets, not one shared one — confirming 24d's proxy-IP trust config actually works
+  end-to-end, not just in isolation
+
+**Dependencies:** 24c (DNS must resolve before requesting a cert), 24f (something must be running
+behind Nginx to proxy to)
+
+**Files likely touched:** `deploy/` directory (Nginx site config)
+
+**Estimated scope:** M
+
+---
+
+#### Task 24h: Smoke test + deploy runbook + Checkpoint J sign-off
+
+**Description:** One full purchase journey (mirroring Checkpoint I) run against real MySQL/Redis
+on the VPS, before any real user account exists on it — per `SPEC.md` Boundaries, this is the last
+moment it's safe to test against this specific database. Then document the deploy process as a
+manual runbook (GitHub Actions auto-deploy on push to `main` is explicitly out of scope for this
+sub-task — a manual runbook satisfies Task 24's own acceptance criteria; automating it is future
+work, not silently assumed here).
+
+**Acceptance criteria:**
+- [ ] One full smoke-test purchase (register → pay → starter pack → tree placement → KYC → IR ID →
+  direct referral bonus → binary bonus cycle → withdrawal request → tax deduction → simulated
+  payout) succeeds end-to-end against real production MySQL/Redis
+- [ ] A manual deploy runbook is written down (`deploy/README.md` or similar): what to run, in what
+  order, to ship a new release to this VPS
+- [ ] `SPEC.md` Commands section gets the verified production commands added, matching how Task 1
+  documented the local dev commands
+
+**Verification:**
+- [ ] Every financial figure from the smoke test (PV, commission amounts, tax, wallet balance)
+  checked against the production database directly, not just the UI — matching this project's own
+  established verification standard (Checkpoint F, Task 17e, etc.)
+- [ ] A second person (or a second read-through by the user) could follow the runbook and
+  successfully deploy a trivial change, without needing this conversation's context
+
+**Dependencies:** 24a-24g all complete
+
+**Files likely touched:** `deploy/README.md`, `SPEC.md` Commands section
+
+**Estimated scope:** S
