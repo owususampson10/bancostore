@@ -1,0 +1,21 @@
+{% extends "base_store.html" %}
+
+{% comment %}
+Shared shell for all 7 Task 34 legal/policy pages. Each concrete page sets
+page_title/last_updated and fills the legal_content block with plain
+semantic HTML (h2/p/ul) -- typography comes from the .legal-content CSS
+class in static/src/main.css, not repeated utility classes per element.
+{% endcomment %}
+
+{% block content %}
+<section class="max-w-3xl mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-24">
+<div class="mb-10 pb-8 border-b border-outline-variant">
+<span class="font-label-caps text-label-caps text-primary tracking-widest block mb-2 uppercase">Policies</span>
+<h1 class="font-display-lg-mobile text-display-lg-mobile md:font-display-lg md:text-display-lg text-on-surface mb-3">{% block legal_title %}{% endblock %}</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Last updated: {% block legal_updated %}{% endblock %}</p>
+</div>
+<div class="legal-content">
+{% block legal_content %}{% endblock %}
+</div>
+</section>
+{% endblock %}

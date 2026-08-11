@@ -88,7 +88,7 @@
 <div class="flex items-start gap-3 py-2">
 {{ form.terms_accepted }}
 <label class="font-body-sm text-body-sm text-gray-muted" for="{{ form.terms_accepted.id_for_label }}">
-I agree to the <a class="text-primary hover:underline" href="#">Distributor Agreement</a> and authorize Bancostore to send business updates to my provided contact info.
+I agree to the <a class="text-primary hover:underline" href="{% url 'pages:terms_of_use' %}" target="_blank" rel="noopener noreferrer">Distributor Agreement</a> and authorize Bancostore to send business updates to my provided contact info.
 </label>
 </div>
 {% if form.terms_accepted.errors %}<p class="text-error text-body-sm">{{ form.terms_accepted.errors.0 }}</p>{% endif %}

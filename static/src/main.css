@@ -282,3 +282,72 @@
 .tree-canvas-inner {
   transform-origin: top center;
 }
+
+/* Legal/policy pages (Task 34 -- Terms, Privacy, Cookie Policy, Disclaimer,
+   Earnings Disclosure, AI Disclaimer, Returns/Refunds/Shipping): one shared
+   typography treatment for hand-authored semantic HTML (h2/h3/p/ul/ol), so
+   each policy template writes plain content markup instead of repeating
+   utility classes on every paragraph. */
+.legal-content h2 {
+  font-family: var(--font-headline-md);
+  font-size: var(--text-headline-md);
+  line-height: var(--text-headline-md--line-height);
+  font-weight: var(--text-headline-md--font-weight);
+  color: var(--color-on-surface);
+  margin-top: 2.5rem;
+  margin-bottom: 1rem;
+}
+.legal-content > h2:first-child {
+  margin-top: 0;
+}
+.legal-content h3 {
+  font-family: var(--font-headline-sm);
+  font-size: var(--text-headline-sm);
+  line-height: var(--text-headline-sm--line-height);
+  font-weight: var(--text-headline-sm--font-weight);
+  color: var(--color-on-surface);
+  margin-top: 1.75rem;
+  margin-bottom: 0.75rem;
+}
+.legal-content p {
+  font-family: var(--font-body-md);
+  font-size: var(--text-body-md);
+  line-height: var(--text-body-md--line-height);
+  color: var(--color-on-surface-variant);
+  margin-bottom: 1rem;
+}
+.legal-content ul,
+.legal-content ol {
+  font-family: var(--font-body-md);
+  font-size: var(--text-body-md);
+  line-height: var(--text-body-md--line-height);
+  color: var(--color-on-surface-variant);
+  margin-bottom: 1rem;
+  padding-left: 1.5rem;
+}
+.legal-content ul {
+  list-style-type: disc;
+}
+.legal-content ol {
+  list-style-type: decimal;
+}
+.legal-content li {
+  margin-bottom: 0.5rem;
+}
+.legal-content li > ul,
+.legal-content li > ol {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+}
+.legal-content strong {
+  color: var(--color-on-surface);
+  font-weight: 600;
+}
+.legal-content a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.legal-content a:hover {
+  color: var(--color-primary-container);
+}

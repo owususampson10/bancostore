@@ -1,0 +1,68 @@
+{% extends "pages/legal/_base.html" %}
+
+{% block title %}Bancostore | Terms of Use{% endblock %}
+{% block meta_description %}The terms that govern shopping on Bancostore and joining as a distributor.{% endblock %}
+
+{% block legal_title %}Terms of Use{% endblock %}
+{% block legal_updated %}August 11, 2026{% endblock %}
+
+{% block legal_content %}
+<h2>1. Introduction and Acceptance</h2>
+<p>These Terms of Use ("Terms") govern your access to and use of Bancostore, a Ghana-based online store and direct-selling platform, including our website, storefront, distributor dashboard, and admin portal (together, the "Platform"). By creating an account, placing an order, or registering as a distributor, you agree to these Terms. If you do not agree, please do not use the Platform.</p>
+
+<h2>2. Who May Use Bancostore</h2>
+<p>The Platform serves three types of users:</p>
+<ul>
+<li><strong>Customers</strong> — anyone who shops on the storefront. No registration fee, no commissions, no obligations beyond paying for what you order.</li>
+<li><strong>Distributors</strong> — Independent Representatives (IRs) who register, pay a one-time registration fee, select a starter pack, and are placed in our binary tree structure to build a direct-selling business and earn commissions.</li>
+<li><strong>Admin</strong> — Bancostore staff who operate the Platform (order management, KYC review, withdrawal approval, catalog and settings management).</li>
+</ul>
+<p>You must be at least 18 years old to create an account or register as a distributor.</p>
+
+<h2>3. Accounts and Registration</h2>
+<p>You agree to provide accurate, current information when creating an account and to keep your login credentials confidential. You are responsible for all activity that happens under your account. Distributor accounts require a valid phone number (verified by one-time SMS code) and, where enabled, complete identity verification (KYC) before your first withdrawal.</p>
+
+<h2>4. Shopping on the Storefront</h2>
+<p>Product prices are shown in Ghanaian Cedis (GHS) and may change at any time before you complete checkout. Payments are processed securely through Paystack (Mobile Money, Visa, Mastercard). An order is only confirmed once payment is verified. See our <a href="{% url 'pages:returns_refunds_shipping' %}">Returns, Refunds &amp; Shipping Policy</a> for delivery fees, order statuses, cancellations, and returns.</p>
+
+<h2>5. Becoming a Distributor</h2>
+<p>Joining as a distributor requires paying a one-time registration fee and choosing a starter pack, both processed through Paystack. On confirmed payment, you are assigned a permanent Independent Representative (IR) ID and placed into our binary tree. New distributors have a cooling-off period (currently 7 days from your starter pack purchase, subject to change and shown in your dashboard) during which you may cancel your membership for a partial refund, as described at signup and on your dashboard's Cancel Membership screen.</p>
+<p>Distributors can earn a Direct Referral Bonus, a Binary Bonus, and a Matching Bonus, all governed by rates and caps that Bancostore may adjust from time to time. Earning any commission is never guaranteed — see our <a href="{% url 'pages:earnings_disclosure' %}">Earnings &amp; Income Disclosure</a> for full detail before you register.</p>
+<p>Withdrawals require identity verification (KYC) to be completed and approved, and are subject to minimum/maximum amounts, a processing schedule, and applicable withholding tax, all shown in your dashboard before you submit a request.</p>
+
+<h2>6. Distributor Conduct</h2>
+<p>As a distributor, you agree not to:</p>
+<ul>
+<li>Make income claims to prospects that are not truthful, typical, or consistent with our official Earnings &amp; Income Disclosure;</li>
+<li>Represent Bancostore as a "get rich quick" scheme, an investment product, or a scheme that pays for recruitment alone rather than the sale of real products;</li>
+<li>Register duplicate accounts, misrepresent your identity, or place another person in the binary tree without their consent;</li>
+<li>Send unsolicited bulk messages (spam) while promoting Bancostore or your referral link;</li>
+<li>Use Bancostore's name, logo, or materials in a way that is misleading or not pre-approved.</li>
+</ul>
+
+<h2>7. Intellectual Property</h2>
+<p>The Bancostore name, logo, website design, and all original content on the Platform belong to Bancostore or its licensors and may not be copied or used without permission, except as reasonably needed to promote your own distributorship in line with these Terms.</p>
+
+<h2>8. Prohibited Uses</h2>
+<p>You agree not to misuse the Platform, including by attempting to gain unauthorized access to any account or system, interfering with the Platform's normal operation, scraping or harvesting data, submitting fraudulent orders or payment information, or using the Platform for any unlawful purpose.</p>
+
+<h2>9. Suspension and Termination</h2>
+<p>Bancostore may suspend or terminate your account for violating these Terms, failing KYC verification, fraud, chargebacks, or other conduct that harms the Platform, other users, or Bancostore. You may close your customer account at any time by contacting us. Distributor membership cancellation is handled through the cooling-off process described above or, after that window, by contacting support.</p>
+
+<h2>10. Disclaimers and Limitation of Liability</h2>
+<p>The Platform and its content are provided "as is." To the fullest extent permitted by law, Bancostore is not liable for indirect, incidental, or consequential damages arising from your use of the Platform. See our <a href="{% url 'pages:disclaimer' %}">Disclaimer</a> for more detail, including on product imagery and general information.</p>
+
+<h2>11. Changes to These Terms</h2>
+<p>We may update these Terms from time to time to reflect changes to the Platform or the law. The "Last updated" date above will always reflect the most recent revision. Continuing to use the Platform after a change means you accept the updated Terms.</p>
+
+<h2>12. Governing Law</h2>
+<p>These Terms are governed by the laws of the Republic of Ghana. Any dispute arising from these Terms or your use of the Platform will be subject to the jurisdiction of the courts of Ghana.</p>
+
+{% if terms_and_conditions_text %}
+<h2>13. Additional Terms</h2>
+<div>{{ terms_and_conditions_text|linebreaks }}</div>
+{% endif %}
+
+<h2>{% if terms_and_conditions_text %}14{% else %}13{% endif %}. Contact Us</h2>
+<p>Questions about these Terms? Reach us through our <a href="{% url 'pages:contact' %}">Contact page</a>.</p>
+{% endblock %}

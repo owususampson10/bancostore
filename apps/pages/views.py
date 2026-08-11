@@ -18,6 +18,60 @@ def about(request):
     return render(request, "pages/about.html")
 
 
+def terms_of_use(request):
+    return render(
+        request,
+        "pages/legal/terms-of-use.html",
+        {
+            "terms_and_conditions_text": _stripped_or_none(
+                config.TERMS_AND_CONDITIONS_TEXT
+            )
+        },
+    )
+
+
+def privacy_policy(request):
+    return render(
+        request,
+        "pages/legal/privacy-policy.html",
+        {"privacy_policy_text": _stripped_or_none(config.PRIVACY_POLICY_TEXT)},
+    )
+
+
+def cookie_policy(request):
+    return render(request, "pages/legal/cookie-policy.html")
+
+
+def disclaimer(request):
+    return render(request, "pages/legal/disclaimer.html")
+
+
+def earnings_disclosure(request):
+    return render(request, "pages/legal/earnings-disclosure.html")
+
+
+def ai_disclaimer(request):
+    return render(request, "pages/legal/ai-disclaimer.html")
+
+
+def returns_refunds_shipping(request):
+    return render(
+        request,
+        "pages/legal/returns-refunds-shipping.html",
+        {
+            "delivery_fee_kumasi": config.DELIVERY_FEE_KUMASI,
+            "delivery_fee_accra": config.DELIVERY_FEE_ACCRA,
+            "delivery_fee_other_regions": config.DELIVERY_FEE_OTHER_REGIONS,
+            "free_delivery_threshold": config.FREE_DELIVERY_THRESHOLD,
+            "pending_order_auto_cancel_hours": config.PENDING_ORDER_AUTO_CANCEL_HOURS,
+            "cooling_off_period_days": config.COOLING_OFF_PERIOD_DAYS,
+            "refund_return_policy_text": _stripped_or_none(
+                config.REFUND_RETURN_POLICY_TEXT
+            ),
+        },
+    )
+
+
 def _stripped_or_none(value):
     """A constance value defaults to "" and is meant to stay unset until
     an admin fills it in via the Platform Settings screen -- a
