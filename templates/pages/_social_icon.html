@@ -1,0 +1,13 @@
+{% comment %}
+Shared by the storefront footer (base_store.html) and the admin Social
+Links picker (social_links_settings.html) -- `icon` is a SocialIcon
+dataclass instance (apps/pages/social_icons.py) or the model's own `.icon`
+property, never a raw string. svg_path is always looked up server-side
+from the fixed curated registry, never admin-supplied markup -- see
+apps/pages/models.py::SocialMediaLink.icon.
+{% endcomment %}
+{% if icon.svg_path %}
+<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="{{ icon.svg_path }}"></path></svg>
+{% else %}
+<span class="material-symbols-outlined" aria-hidden="true">public</span>
+{% endif %}

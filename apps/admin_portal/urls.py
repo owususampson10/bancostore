@@ -78,4 +78,21 @@ urlpatterns = [
         name="catalog_product_delete",
     ),
     path("settings/", views.platform_settings, name="platform_settings"),
+    path("social-links/", views.social_links_settings, name="social_links_settings"),
+    path("social-links/add/", views.social_link_create, name="social_link_create"),
+    path(
+        "social-links/<int:pk>/edit/",
+        views.social_link_update,
+        name="social_link_update",
+    ),
+    path(
+        "social-links/<int:pk>/delete/",
+        views.social_link_delete,
+        name="social_link_delete",
+    ),
+    path(
+        "social-links/detect-platform/",
+        views.social_link_detect_platform,
+        name="social_link_detect_platform",
+    ),
 ]

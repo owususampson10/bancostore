@@ -71,6 +71,7 @@ destructive actions/validation) is unaffected.
 {% url 'admin_portal:order_management_queue' as orders_url %}
 {% url 'admin_portal:catalog_product_list' as catalog_url %}
 {% url 'admin_portal:platform_settings' as platform_settings_url %}
+{% url 'admin_portal:social_links_settings' as social_links_url %}
 {% url 'account_logout' as logout_url %}
 {% include "distributors/_sidebar_nav_item.html" with href=dashboard_url icon="dashboard" label="Dashboard" nav_key="dashboard" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=kyc_review_url icon="fact_check" label="KYC Review" nav_key="kyc_review" active_nav=active_nav %}
@@ -80,6 +81,7 @@ destructive actions/validation) is unaffected.
 {% include "distributors/_sidebar_nav_item.html" with href=orders_url icon="inventory_2" label="Orders" nav_key="orders" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=catalog_url icon="category" label="Catalog" nav_key="catalog" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=platform_settings_url icon="settings" label="Settings" nav_key="platform_settings" active_nav=active_nav %}
+{% include "distributors/_sidebar_nav_item.html" with href=social_links_url icon="share" label="Social Links" nav_key="social_links" active_nav=active_nav %}
 <div class="pt-4 mt-4 border-t border-outline-variant/50">
 {% include "distributors/_sidebar_nav_item.html" with href=logout_url icon="logout" label="Log Out" danger=True confirm="logoutConfirmOpen = true" %}
 </div>

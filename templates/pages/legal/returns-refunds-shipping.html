@@ -1,0 +1,48 @@
+{% extends "pages/legal/_base.html" %}
+{% load humanize %}
+
+{% block title %}Bancostore | Returns, Refunds & Shipping Policy{% endblock %}
+{% block meta_description %}Delivery fees, order statuses, cancellations, returns, and refunds on Bancostore.{% endblock %}
+
+{% block legal_title %}Returns, Refunds &amp; Shipping Policy{% endblock %}
+{% block legal_updated %}August 11, 2026{% endblock %}
+
+{% block legal_content %}
+<h2>1. Delivery Zones and Fees</h2>
+<p>Delivery fees depend on where your order is being delivered:</p>
+<ul>
+<li><strong>Kumasi:</strong> GHS {{ delivery_fee_kumasi|intcomma }}</li>
+<li><strong>Accra:</strong> GHS {{ delivery_fee_accra|intcomma }}</li>
+<li><strong>Other Regions:</strong> GHS {{ delivery_fee_other_regions|intcomma }}</li>
+</ul>
+<p>Orders with a subtotal of GHS {{ free_delivery_threshold|intcomma }} or more qualify for free delivery in any zone. These fees are business settings and may change over time — the fee for your delivery zone is always shown at checkout before you pay.</p>
+
+<h2>2. Order Status and Processing</h2>
+<p>Every order moves through a clear set of statuses, shown on your Order Details page:</p>
+<ul>
+<li><strong>Pending</strong> — created, awaiting payment confirmation. An order left unpaid for {{ pending_order_auto_cancel_hours }} hours is automatically cancelled.</li>
+<li><strong>Confirmed</strong> — payment verified, order accepted.</li>
+<li><strong>Processing</strong> — order is being prepared.</li>
+<li><strong>Dispatched</strong> — order has left for delivery.</li>
+<li><strong>Delivered</strong> — order has arrived.</li>
+<li><strong>Cancelled</strong> or <strong>Refunded</strong> — see below.</li>
+</ul>
+
+<h2>3. Cancellations</h2>
+<p>You may request cancellation of an order any time before it has been dispatched by contacting us through our <a href="{% url 'pages:contact' %}">Contact page</a> with your order number. Once an order has been dispatched, it can no longer be cancelled — the return process below applies instead.</p>
+<p>If an item in your order turns out to be unavailable after your payment is confirmed, we will cancel that order and arrange a refund of the amount paid.</p>
+
+<h2>4. Returns and Refunds</h2>
+<p>If you receive a defective, damaged, or incorrect item, contact us through our <a href="{% url 'pages:contact' %}">Contact page</a> with your order number and a description (and photo, where possible) of the issue. Our team will review your request and, where approved, arrange a refund. Approved refunds are returned via Paystack to your original payment method; processing time after approval depends on your bank or Mobile Money provider.</p>
+
+<h2>5. Distributor Membership Cancellation</h2>
+<p>Product returns above are separate from distributor membership cancellation. A new distributor has {{ cooling_off_period_days }} days from their starter pack purchase to cancel their membership for a partial refund to their wallet, minus a processing fee — available from the Cancel Membership screen in your distributor dashboard. This is not a product return and is governed by the terms shown on that screen and in our <a href="{% url 'pages:terms_of_use' %}">Terms of Use</a>.</p>
+
+{% if refund_return_policy_text %}
+<h2>6. Additional Policy Details</h2>
+<div>{{ refund_return_policy_text|linebreaks }}</div>
+{% endif %}
+
+<h2>{% if refund_return_policy_text %}7{% else %}6{% endif %}. Contact Us</h2>
+<p>Questions about a delivery, return, or refund? Reach us through our <a href="{% url 'pages:contact' %}">Contact page</a>.</p>
+{% endblock %}

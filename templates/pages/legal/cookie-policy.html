@@ -1,0 +1,33 @@
+{% extends "pages/legal/_base.html" %}
+
+{% block title %}Bancostore | Cookie Policy{% endblock %}
+{% block meta_description %}What cookies Bancostore uses and why.{% endblock %}
+
+{% block legal_title %}Cookie Policy{% endblock %}
+{% block legal_updated %}August 11, 2026{% endblock %}
+
+{% block legal_content %}
+<h2>1. What Are Cookies</h2>
+<p>Cookies are small pieces of data stored on your device by your browser. Bancostore uses cookies to make the Platform work, keep you logged in, and keep your shopping cart between page visits.</p>
+
+<h2>2. Cookies We Use</h2>
+<p>We use only the cookies needed to operate the Platform:</p>
+<ul>
+<li><strong>Session cookie</strong> — keeps you logged in and remembers your shopping cart while you browse. Without it, you would need to log in again on every page and your cart would not persist.</li>
+<li><strong>CSRF protection cookie</strong> — protects forms on the Platform (login, checkout, contact form, and more) from cross-site request forgery attacks.</li>
+<li><strong>"Remember this device" cookie</strong> — for admin accounts only, an optional cookie that skips the two-factor authentication prompt on a device you've already verified, for up to 7 days. Unchecked by default; you must opt in each time you want it.</li>
+</ul>
+<p>All of these are "strictly necessary" cookies required for the Platform to function — we do not currently use third-party advertising or analytics cookies. If that changes, this policy will be updated first.</p>
+
+<h2>3. Google Sign-In</h2>
+<p>Where enabled, signing in with Google sets a cookie from Google as part of that sign-in flow. This is governed by Google's own privacy and cookie practices, not Bancostore's.</p>
+
+<h2>4. Managing Cookies</h2>
+<p>Most browsers let you view, delete, or block cookies through their settings. Because the cookies above are strictly necessary, blocking them will prevent you from logging in, checking out, or using your shopping cart.</p>
+
+<h2>5. Changes to This Policy</h2>
+<p>We may update this Cookie Policy if the cookies we use change. The "Last updated" date above always reflects the most recent version.</p>
+
+<h2>6. Contact Us</h2>
+<p>Questions about our use of cookies? Reach us through our <a href="{% url 'pages:contact' %}">Contact page</a>.</p>
+{% endblock %}

@@ -1,7 +1,11 @@
 from django import forms
+from django.core.exceptions import ValidationError
 from django.forms import inlineformset_factory
 
+from constance import config
+
 from apps.catalog.models import Category, Product, ProductImage, ProductVariant
+from apps.pages.models import SocialMediaLink
 
 # Shared Tailwind classes so every plain text/number/select/textarea input
 # across the Catalog Management forms matches the admin_portal design
@@ -133,3 +137,58 @@ ProductVariantFormSet = inlineformset_factory(
         "value": forms.TextInput(attrs={"class": _VARIANT_INPUT_CLASS}),
     },
 )
+
+
+class SocialMediaLinkForm(forms.ModelForm):
+    """Every create/update path goes through this form's is_valid() --
+    never Model.objects.create(**request.POST) or a bare .save() -- so
+    SocialMediaLink.url's URLField scheme validator and icon_color's hex
+    RegexValidator are guaranteed to actually run (doubt-driven-development
+    finding: full_clean() is NOT called on a bare .save())."""
+
+    class Meta:
+        model = SocialMediaLink
+        fields = ["name", "url", "platform", "icon_color"]
+        widgets = {
+            "name": forms.TextInput(
+                attrs={"class": _INPUT_CLASS, "placeholder": "e.g. Facebook"}
+            ),
+            "url": forms.URLInput(
+                attrs={
+                    "class": _INPUT_CLASS,
+                    "placeholder": "https://facebook.com/yourpage",
+                }
+            ),
+            "platform": forms.Select(attrs={"class": _SELECT_CLASS}),
+            "icon_color": forms.TextInput(
+                attrs={"class": _INPUT_CLASS, "maxlength": "7"}
+            ),
+        }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        # Doubt-driven-development finding: nothing otherwise stops an
+        # admin from accidentally creating an unbounded number of footer
+        # links. Only checked on create (self.instance.pk is falsy for a
+        # new, unsaved row) -- editing an existing row must never be
+        # blocked by a cap that was already reached.
+        #
+        # CodeRabbit finding: this cap was a hardcoded Python constant --
+        # moved to constance's MAX_SOCIAL_MEDIA_LINKS (default 20) so an
+        # admin can raise/lower it without a deploy, matching this
+        # project's "business rules live in settings, not code" rule.
+        #
+        # Code-review finding: this count-then-create has a TOCTOU race
+        # under two truly concurrent submissions (both could read count()
+        # < the cap before either commits). Accepted, not fixed -- this is
+        # an admin-only, cosmetic footer cap, not a financial path, and
+        # this codebase already reserves select_for_update-grade locking
+        # rigor for money (wallet/PV/commission) code specifically.
+        if not self.instance.pk:
+            max_links = config.MAX_SOCIAL_MEDIA_LINKS
+            if SocialMediaLink.objects.count() >= max_links:
+                raise ValidationError(
+                    f"You can add up to {max_links} social media links. "
+                    "Delete one before adding another."
+                )
+        return cleaned_data
