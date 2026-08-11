@@ -5097,6 +5097,222 @@ pattern this reuses all already exist and are already shipped (Task 14).
 
 ---
 
+### Task 34: Legal/policy pages — Terms of Use, Privacy Policy, Cookie Policy, Disclaimer, Earnings & Income Disclosure, AI Disclaimer, Returns/Refunds/Shipping
+
+**Description:** Not in the original plan — requested directly by the user. Seven static
+legal/compliance pages grounded in this platform's real, already-shipped features (three real user
+roles, Paystack payments, Didit KYC, the three commission types, GHS delivery-zone fees, the order
+lifecycle, the 7-day cooling-off refund) rather than generic boilerplate or invented company facts
+(no fabricated registration numbers, business address, or specific SLA promises not backed by a
+real setting). Grouped under a new "Policies" footer column, matching the existing "Company"/"Shop"
+column convention in `templates/base_store.html`.
+
+**Scope decisions:**
+- One shared `templates/pages/legal/_base.html` shell (title/last-updated header + a
+  `.legal-content` typographic CSS class in `static/src/main.css`, reusing this project's own
+  `--color-*`/`--font-*`/`--text-*` design tokens) so each of the 7 pages writes plain semantic
+  HTML (`h2`/`p`/`ul`) instead of repeating Tailwind utility classes on every paragraph — same
+  "don't repeat the chrome" reasoning as `earnings_history.html`/`team.html` reusing one table
+  shell.
+- Returns/Refunds/Shipping is the one page with real dynamic content: renders the live
+  `DELIVERY_FEE_KUMASI`/`DELIVERY_FEE_ACCRA`/`DELIVERY_FEE_OTHER_REGIONS`/`FREE_DELIVERY_THRESHOLD`/
+  `PENDING_ORDER_AUTO_CANCEL_HOURS` constance values (never hardcoded, matching this project's
+  "business rules live in settings, not code" rule) and wires up the existing but previously-unused
+  `REFUND_RETURN_POLICY_TEXT` constance field (seeded blank in Task-era `config.py`, listed in the
+  admin fieldset since before this task but never read by any view) as an optional admin-editable
+  custom policy block, rendered via the `linebreaks` filter (auto-escaped, safe against an admin
+  pasting HTML/script into a free-text settings field) — mirrors `pages/contact.html`'s existing
+  "only render a channel the admin actually set" pattern.
+- The other six pages are static content (no constance reads) — same treatment as `about.html`.
+- AI Disclaimer states plainly that some decorative/marketing photography on the site may be
+  AI-generated (true — Stitch-sourced imagery), while actual product photos on listing/detail pages
+  come from real `ProductImage` uploads, not AI.
+- No fabricated legal specifics: governing law is stated as "the laws of the Republic of Ghana" and
+  data-protection commitment references the Data Protection Act, 2012 (Act 843) without claiming a
+  specific, unverified Data Protection Commission registration number. Contact details throughout
+  link to the existing `pages:contact` page rather than duplicating/hardcoding an email address.
+
+**Acceptance criteria:**
+- [x] 7 new pages, each with its own view + named URL under the `pages` app: `terms-of-use`,
+      `privacy-policy`, `cookie-policy`, `disclaimer`, `earnings-disclosure`, `ai-disclaimer`,
+      `returns-refunds-shipping`
+- [x] `templates/base_store.html` footer gains a "Policies" column linking all 7, without breaking
+      the existing `test_about_link_points_to_the_real_about_page`-style exact-link-count
+      conventions in `tests/feature/catalog/test_navigation_links.py`
+- [x] Returns/Refunds/Shipping page shows the real, live delivery-fee/auto-cancel constance values
+      and the optional admin-set `REFUND_RETURN_POLICY_TEXT` block
+- [x] All 7 pages render at 200, use `base_store.html` (header/footer present), and are responsive
+      at 500/1440px
+
+**Verification:**
+- [x] `tests/feature/pages/test_legal_pages.py`: 21 tests — one 200-status test per page
+      (parametrized), a footer-links test asserting all 7 named URLs appear on the home page, real
+      delivery-fee/auto-cancel-hours content assertions, `REFUND_RETURN_POLICY_TEXT`/
+      `TERMS_AND_CONDITIONS_TEXT`/`PRIVACY_POLICY_TEXT` shown-when-set / hidden-when-blank-or-
+      whitespace assertions, explicit HTML-escaping regression tests for all three admin free-text
+      fields, content checks for the AI Disclaimer and Earnings Disclosure pages' key claims, and
+      signup/distributor-registration consent-link wiring.
+- [x] Full suite green (`tests/feature/pages` + `tests/feature/accounts` + `tests/feature/distributors`
+      + `tests/feature/catalog` + full project suite), `black`/`isort`/`ruff` clean.
+- [x] `npm run build` run after every template/CSS edit; live-browser-verified at 1440px (footer
+      5-column layout, Returns/Refunds/Shipping page showing live GHS 20/50/70 delivery fees) and
+      500px (footer stacks correctly, policy page copy readable, no overflow) via a real
+      `runserver` session, hard-refreshed after each build per this file's own "Frontend edit-verify
+      loop" gotcha.
+- [x] `code-review-and-quality` pass (fresh-context `code-reviewer` agent) run before commit,
+      per this repo's pre-commit hook requirement. Verdict: REQUEST CHANGES on first pass, two
+      Important findings, both fixed: (1) two more decorative constance settings existed
+      (`TERMS_AND_CONDITIONS_TEXT`/`PRIVACY_POLICY_TEXT`, seeded alongside `REFUND_RETURN_POLICY_TEXT`
+      but never wired to a view) — now wired into Terms of Use / Privacy Policy with the same
+      optional-block, dynamically-numbered pattern; (2) the signup and distributor-registration
+      consent checkboxes still linked `href="#"` for "Terms of Service"/"Privacy Policy"/"Distributor
+      Agreement" — now point to the real pages (Terms of Use also covers distributor terms directly,
+      so "Distributor Agreement" links there rather than a separate, non-existent document), opening
+      in a new tab so a mid-signup form doesn't lose its entered data. The reviewer also independently
+      verified — by rendering a live template with a `<script>` payload — that `REFUND_RETURN_POLICY_TEXT`
+      was already safely auto-escaped via `linebreaks`, and cross-checked every factual claim across
+      all 7 pages against this file's own documented feature set, finding no fabricated content.
+
+**Dependencies:** None (reuses `base_store.html`, `apps.platform_settings.config`,
+`REFUND_RETURN_POLICY_TEXT`/`TERMS_AND_CONDITIONS_TEXT`/`PRIVACY_POLICY_TEXT` — all three already
+seeded, none previously wired to a view)
+
+**Files touched:** `apps/pages/views.py`, `apps/pages/urls.py`,
+`templates/pages/legal/_base.html` (new), 7 new `templates/pages/legal/*.html`,
+`templates/base_store.html`, `templates/account/signup.html`,
+`templates/distributors/register.html`, `static/src/main.css`,
+`tests/feature/pages/test_legal_pages.py` (new)
+
+**Estimated scope:** M
+
+**Built:** Done 2026-08-11.
+
+---
+
+### Task 35: Social Media Links — admin-managed footer links (up to 20) with auto-detected icons
+
+**Description:** Not in the original plan — requested directly by the user. Replaces the storefront
+footer's 3 hardcoded, disabled "Coming soon" social icons with a real admin-managed feature: staff
+can add/delete social media links (name, URL, icon, color) from a new "Social Links" screen in the
+admin portal, matching every other admin-facing screen's real-UI precedent (Task 22/23). The user
+initially asked for "countless"/unlimited links; a pre-implementation review flagged that as a real
+footgun at this project's scale (see below), so the shipped feature caps at `MAX_SOCIAL_MEDIA_LINKS
+= 20` — effectively unlimited for a footer, not literally uncapped. Full design reasoning in
+`docs/decisions/0009-social-media-links-design.md`.
+
+**Scope decisions (user-confirmed via AskUserQuestion before build):** self-hosted a curated
+17-platform icon set (Facebook, Instagram, X, YouTube, TikTok, WhatsApp, Telegram, Pinterest,
+Snapchat, Reddit, Discord, Threads, GitHub, Twitch, Spotify, Medium, WeChat) fetched directly from
+the real published Simple Icons package (CC0-licensed) via `curl`, not hand-approximated and not a
+new pip/npm dependency — rejected the alternative of adding the real `simple-icons` package, which
+this project's Boundaries gate behind asking first. **LinkedIn is deliberately excluded** — a
+`code-review-and-quality` pass (run after the initial build) found that Simple Icons permanently
+removed LinkedIn in v14.0.0 following LinkedIn's own trademark enforcement; the path data this
+project had embedded was accurate (not corrupted), but self-hosting a mark the rights holder had
+removed elsewhere is a real, if likely small, exposure this project chose to avoid rather than
+accept — put to the user via AskUserQuestion, who confirmed dropping it. A LinkedIn link now falls
+back to the generic "Other / Custom" icon, same as any other uncurated platform.
+
+**Built:**
+- `apps/pages/social_icons.py` — the curated registry (`SOCIAL_ICONS`, `SocialIcon` dataclass) and
+  `detect_platform_from_url()`, a pure function matching a pasted URL's hostname against each
+  platform's real domains (exact-or-subdomain only, never substring) with a `"custom"` fallback
+  rendered via the Material Symbols glyph this project already loads everywhere else.
+- `apps/pages/models.py::SocialMediaLink` — `name`, `url` (`URLField`, rejects `javascript:`/`data:`
+  schemes by Django's own default validator), `platform` (choices-constrained to the curated
+  registry — the real SVG markup an admin's browser ever sees always comes from the fixed
+  server-side dict, never from request data), `icon_color` (`\A#[0-9A-Fa-f]{6}\Z`-validated hex),
+  `order`. `MAX_SOCIAL_MEDIA_LINKS = 20`, enforced in `SocialMediaLinkForm.clean()` on create only.
+- `apps/pages/context_processors.py::social_media_links` — injects the link list into every
+  template's context (the footer is shared site-wide); cached indefinitely, invalidated by
+  `post_save`/`post_delete` signals on the model.
+- `apps/admin_portal/views.py`/`forms.py`/`urls.py` — `social_links_settings`/`_create`/`_update`/
+  `_delete` follow the exact full-page POST+redirect shape `catalog_category_*` already established
+  (no htmx partial swaps introduced — an `Explore` investigation found no existing per-row htmx
+  pattern anywhere in this app to be consistent with), reusing the shared
+  `_delete_confirm_modal.html` component verbatim. `social_link_detect_platform` (`GET`, admin-
+  gated, returns JSON only, never echoes the candidate URL back) backs a `fetch()` call from the
+  add/edit form's URL field on blur.
+- `templates/admin_portal/social_links_settings.html` — each row expands/collapses on clicking its
+  name (plain Alpine `x-show`, no server round-trip); a custom icon/color picker (not a native
+  `<select>`, matching this app's established "no native select popups" convention) with every
+  curated icon's real SVG pre-rendered server-side and toggled via Alpine `x-show` bound to a plain
+  string variable — no HTML is ever built dynamically in JS anywhere in this feature. A native
+  `<input type="color">` + hex text field are two-way synced via Alpine for the color picker.
+- `templates/pages/_social_icon.html` — shared icon-render partial (real SVG or Material Symbols
+  fallback), reused by both the footer and the admin picker.
+- `templates/base_store.html` — footer's "Follow Us" section now loops over the live
+  `social_media_links` context var (`target="_blank" rel="noopener noreferrer"` on every link),
+  falling back to the original 3 disabled placeholders when no links are configured yet.
+
+**Pre-implementation adversarial review (`doubt-driven-development`, fresh-context
+`security-auditor` agent):** 10 findings, all folded into the design before any code was written —
+every write must go through `SocialMediaLinkForm.is_valid()` (never a bare `.save()` from raw
+`request.POST`, which would silently skip both the URL scheme and hex-color validators); the
+detect-platform endpoint must never echo the raw candidate URL into its response and must be
+admin-gated like every sibling endpoint (no legitimate reason to leave it public); the context
+processor needed caching at this project's stated scale; an unbounded row count needed a cap; the
+hex regex needed `\A...\Z` anchors instead of `^...$` (a `$` alone still admits one trailing
+newline); `order` needed a `pk` tie-breaker (the exact bug class Task 15d already hit once); and
+footer links opening in a new tab needed `rel="noopener noreferrer"` (reverse-tabnabbing). User
+declined a cross-model second opinion after reviewing the single-model findings (all concrete and
+actionable, none blocking).
+
+**Real bug caught by tests, not assumed away:** the icon-data-generation script produced
+single-domain tuples missing their trailing comma (`domains=("instagram.com")` instead of
+`domains=("instagram.com",)`), silently turning the domain into an iterable of individual
+*characters* instead of a 1-element tuple — `detect_platform_from_url` would never have matched
+Instagram, LinkedIn, TikTok, Snapchat, Threads, GitHub, Twitch, Spotify, or Medium. Caught by
+`tests/unit/pages/test_social_icons.py`'s very first run (2 of 48 tests failed exactly as they
+should have), fixed with a targeted regex substitution across `apps/pages/social_icons.py`, then
+re-verified live in a real browser (pasting an `instagram.com` URL correctly auto-selected the
+Instagram icon).
+
+**Verification:**
+- 22 feature tests (`tests/feature/admin_portal/test_social_links_settings.py`) + 48 unit tests
+  (`tests/unit/pages/`), 70 total — permission gates, full create/update/delete round trips, the
+  `MAX_SOCIAL_MEDIA_LINKS` cap (blocks new rows, never blocks editing an existing one once the table
+  is full), hex/URL/platform validation rejecting malformed and injection-shaped input, the
+  detect-platform endpoint never reflecting its input, footer rendering (configured links, the
+  `target="_blank"`/`rel` pair, the placeholder fallback when empty, HTML-escaping the link name
+  even if a future bulk-import path bypassed form validation), and cache invalidation on
+  save/delete.
+- Full project suite green, `black`/`isort`/`ruff` clean (a
+  `per-file-ignores` entry was added to `pyproject.toml` for `apps/pages/social_icons.py`'s E501 —
+  real, unbreakable SVG path-data lines, not code that should ever be reformatted).
+- Live-browser verified end-to-end against a real `runserver` session (a throwaway staff account
+  created and deleted for this check, matching this project's own "don't touch real accounts for
+  verification" convention): typed an Instagram URL, watched the icon auto-detect, set a custom hex
+  color, saved, confirmed the row and the storefront footer both rendered the real pink Instagram
+  icon, then deleted it via the shared confirm-modal and confirmed the footer fell back to the
+  placeholder icons cleanly.
+- `code-review-and-quality` pass (fresh-context `code-reviewer` agent) run after implementation,
+  specifically re-verifying every doubt-driven-development finding was actually applied in the
+  code (not just claimed) and checking for any further data-entry bugs in the SVG/hex-color
+  registry beyond the one already caught. Verdict: APPROVE, zero Critical/High findings. The
+  reviewer independently re-fetched live Simple Icons data and spot-checked 6 of the (then-18)
+  curated SVG paths byte-for-byte plus all 18 hex colors — all exact matches — and surfaced the
+  real LinkedIn-trademark-removal finding above (fixed), a doc-accuracy nit (this file's own test
+  count, fixed), and a low-severity TOCTOU note on the `MAX_SOCIAL_MEDIA_LINKS` count-then-create
+  check (accepted as a documented trade-off, not fixed — admin-only, cosmetic, not a financial
+  path).
+
+**Files touched:** `apps/pages/social_icons.py` (new), `apps/pages/models.py` (new),
+`apps/pages/context_processors.py` (new), `apps/pages/migrations/0001_initial.py` (new),
+`apps/pages/migrations/0002_alter_socialmedialink_platform.py` (new, LinkedIn removal from
+`choices`), `apps/admin_portal/forms.py`, `apps/admin_portal/views.py`, `apps/admin_portal/urls.py`,
+`templates/admin_portal/social_links_settings.html` (new),
+`templates/admin_portal/base_dashboard.html`, `templates/pages/_social_icon.html` (new),
+`templates/base_store.html`, `bancostore/settings.py` (context processor registration),
+`pyproject.toml` (ruff per-file-ignore), `docs/decisions/0009-social-media-links-design.md` (new),
+`tests/unit/pages/` (new), `tests/feature/admin_portal/test_social_links_settings.py` (new)
+
+**Estimated scope:** L
+
+**Built:** Done 2026-08-11.
+
+---
+
 ## Phase 10: Deployment
 
 ### Task 24: Deploy to Hostinger VPS (production)

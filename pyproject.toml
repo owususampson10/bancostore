@@ -20,3 +20,9 @@ exclude = ["migrations", "venv", "node_modules", "static"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# Curated, fetched-not-authored SVG path data (Task 35) -- each <path
+# d="..."> string is one unbreakable literal from the real Simple Icons
+# source, not code that should ever be manually reformatted or wrapped.
+"apps/pages/social_icons.py" = ["E501"]

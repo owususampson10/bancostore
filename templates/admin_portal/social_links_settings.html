@@ -1,0 +1,211 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Social Links — Bancostore Admin Portal{% endblock %}
+
+{% block content %}
+{% comment %}
+Task 35. Icon rendering (both the row preview and the picker dropdown
+list) is entirely server-rendered from apps/pages/social_icons.py's
+curated registry -- SocialMediaLink.platform is a constrained choices
+field, never free-text, so the real <path d="..."> markup an admin's
+browser ever sees always comes from our own fixed Python dict, never from
+request data. The picker toggles which pre-rendered icon is visible via
+plain Alpine x-show (a CSS display switch), never by building HTML in JS.
+{% endcomment %}
+<script>
+const SOCIAL_LINK_DETECT_URL = "{% url 'admin_portal:social_link_detect_platform' %}";
+async function detectSocialPlatform(url) {
+  if (!url) { return null; }
+  try {
+    const response = await fetch(`${SOCIAL_LINK_DETECT_URL}?url=${encodeURIComponent(url)}`);
+    if (!response.ok) { return null; }
+    const data = await response.json();
+    return data.platform || null;
+  } catch (err) {
+    return null;
+  }
+}
+</script>
+
+<div x-data="{ deleteOpen: false, deleteName: '', deleteUrl: '', deleteKind: 'social link', deleteTrigger: null }">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface">Social Links</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Manage the social media icons shown in the storefront footer. Paste a link and the platform icon is detected automatically -- you can always pick a different one.</p>
+</div>
+</div>
+
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant divide-y divide-outline-variant overflow-hidden">
+{% for link, form in links %}
+<div class="social-link-row"
+     x-data="{ open: {% if link.pk == open_link_id %}true{% else %}false{% endif %}, pickerOpen: false, platform: '{{ link.platform|escapejs }}', color: '{{ link.icon_color|escapejs }}' }">
+<button type="button" class="w-full flex items-center justify-between gap-3 px-4 md:px-6 py-4 text-left hover:bg-surface-container-low transition-colors" @click="open = !open" :aria-expanded="open.toString()">
+<div class="flex items-center gap-3 min-w-0">
+<span class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ color: color }">
+{% for icon in all_icons %}
+<span x-show="platform === '{{ icon.slug }}'" x-cloak class="w-5 h-5">
+{% include "pages/_social_icon.html" with icon=icon %}
+</span>
+{% endfor %}
+</span>
+<span class="font-body-lg text-body-lg text-on-surface truncate">{{ link.name }}</span>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant flex-shrink-0" aria-hidden="true" x-text="open ? 'expand_less' : 'expand_more'"></span>
+</button>
+
+<div x-show="open" x-cloak class="px-4 md:px-6 pb-6 space-y-4 border-t border-outline-variant">
+{% if form.non_field_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md mt-4">{{ form.non_field_errors|striptags }}</div>
+{% endif %}
+<form method="post" action="{% url 'admin_portal:social_link_update' link.pk %}" class="space-y-4 pt-4">
+{% csrf_token %}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="space-y-1">
+<label for="{{ form.name.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Name</label>
+{{ form.name }}
+{% if form.name.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.name.errors|striptags }}</p>{% endif %}
+</div>
+<div class="space-y-1">
+<label for="{{ form.url.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Link URL</label>
+<input type="url" name="{{ form.url.html_name }}" id="{{ form.url.id_for_label }}" value="{{ form.url.value|default:'' }}" placeholder="https://facebook.com/yourpage" @blur="detectSocialPlatform($event.target.value).then(p => { if (p) platform = p })" class="{{ form.url.field.widget.attrs.class }}">
+{% if form.url.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.url.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+{# Platform/icon picker -- custom dropdown, matching this app's established "no native <select> popup" convention #}
+<div class="space-y-1">
+<label class="font-label-md text-label-md text-on-surface-variant block">Icon</label>
+<div class="relative">
+<button type="button" @click="pickerOpen = !pickerOpen" class="w-full flex items-center gap-3 px-4 py-3 bg-surface border border-outline-variant rounded-lg">
+<span class="w-5 h-5 flex items-center justify-center flex-shrink-0" :style="{ color: color }">
+{% for icon in all_icons %}
+<span x-show="platform === '{{ icon.slug }}'" x-cloak class="w-5 h-5">{% include "pages/_social_icon.html" with icon=icon %}</span>
+{% endfor %}
+</span>
+<span class="flex-1 text-left font-body-md text-body-md">
+{% for icon in all_icons %}
+<span x-show="platform === '{{ icon.slug }}'" x-cloak>{{ icon.label }}</span>
+{% endfor %}
+</span>
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant" aria-hidden="true">expand_more</span>
+</button>
+<div x-show="pickerOpen" x-cloak @click.outside="pickerOpen = false" class="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-outline-variant rounded-lg shadow-lg">
+{% for icon in all_icons %}
+<button type="button" @click="platform = '{{ icon.slug }}'; pickerOpen = false" class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low text-left">
+<span class="w-5 h-5 flex items-center justify-center flex-shrink-0" style="color: {{ icon.default_color }}">{% include "pages/_social_icon.html" with icon=icon %}</span>
+<span class="font-body-md text-body-sm text-on-surface">{{ icon.label }}</span>
+</button>
+{% endfor %}
+</div>
+</div>
+<input type="hidden" name="{{ form.platform.html_name }}" :value="platform">
+{% if form.platform.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.platform.errors|striptags }}</p>{% endif %}
+</div>
+
+{# Color picker: native color input + hex text field, two-way synced #}
+<div class="space-y-1">
+<label for="{{ form.icon_color.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Icon Color</label>
+<div class="flex items-center gap-2">
+<input type="color" :value="color" @input="color = $event.target.value" class="w-11 h-11 p-0.5 rounded-lg border border-outline-variant bg-surface cursor-pointer flex-shrink-0" aria-label="Pick icon color">
+<input type="text" name="{{ form.icon_color.html_name }}" id="{{ form.icon_color.id_for_label }}" x-model="color" maxlength="7" placeholder="#1877F2" class="{{ form.icon_color.field.widget.attrs.class }}">
+</div>
+{% if form.icon_color.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.icon_color.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+
+<div class="flex items-center justify-between gap-3 pt-2">
+<button type="button" class="text-admin-error font-label-md text-label-md hover:underline" @click.prevent="deleteOpen = true; deleteName = '{{ link.name|escapejs }}'; deleteUrl = '{% url 'admin_portal:social_link_delete' link.pk %}'; deleteKind = 'social link'; deleteTrigger = $el">Delete</button>
+<button type="submit" class="bg-primary text-on-primary px-6 py-2.5 rounded-lg font-button text-button hover:opacity-90 active:scale-95 transition-all">Save Changes</button>
+</div>
+</form>
+</div>
+</div>
+{% empty %}
+<div class="px-6 py-10 text-center">
+<p class="font-body-md text-body-md text-on-surface-variant">No social links yet. Add your first one below.</p>
+</div>
+{% endfor %}
+</div>
+
+{# Add new link -- collapsed "+ Add Item" affordance by default, expands to the same field set as a row #}
+<div class="mt-4 bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden" x-data="{ open: {{ add_form_open|yesno:'true,false' }}, pickerOpen: false, platform: '{{ add_form.platform.value|default:'custom'|escapejs }}', color: '{{ add_form.icon_color.value|default:'#FFFFFF'|escapejs }}' }">
+{% if at_max %}
+<div class="px-6 py-4 flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">info</span>
+<p class="font-body-sm text-body-sm">You've reached the limit of {{ max_links }} social links. Delete one before adding another.</p>
+</div>
+{% else %}
+<button type="button" class="w-full flex items-center justify-center gap-2 px-4 py-4 text-primary font-button text-button hover:bg-surface-container-low transition-colors" @click="open = !open">
+<span class="material-symbols-outlined" aria-hidden="true">add_circle</span>
+Add Item
+</button>
+<div x-show="open" x-cloak class="px-4 md:px-6 pb-6 space-y-4 border-t border-outline-variant">
+{% if add_form.non_field_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md mt-4">{{ add_form.non_field_errors|striptags }}</div>
+{% endif %}
+<form method="post" action="{% url 'admin_portal:social_link_create' %}" class="space-y-4 pt-4">
+{% csrf_token %}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="space-y-1">
+<label for="{{ add_form.name.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Name</label>
+{{ add_form.name }}
+{% if add_form.name.errors %}<p class="text-admin-error font-label-md text-label-md">{{ add_form.name.errors|striptags }}</p>{% endif %}
+</div>
+<div class="space-y-1">
+<label for="{{ add_form.url.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Link URL</label>
+<input type="url" name="{{ add_form.url.html_name }}" id="{{ add_form.url.id_for_label }}" value="{{ add_form.url.value|default:'' }}" placeholder="https://facebook.com/yourpage" @blur="detectSocialPlatform($event.target.value).then(p => { if (p) platform = p })" class="{{ add_form.url.field.widget.attrs.class }}">
+{% if add_form.url.errors %}<p class="text-admin-error font-label-md text-label-md">{{ add_form.url.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="space-y-1">
+<label class="font-label-md text-label-md text-on-surface-variant block">Icon</label>
+<div class="relative">
+<button type="button" @click="pickerOpen = !pickerOpen" class="w-full flex items-center gap-3 px-4 py-3 bg-surface border border-outline-variant rounded-lg">
+<span class="w-5 h-5 flex items-center justify-center flex-shrink-0" :style="{ color: color }">
+{% for icon in all_icons %}
+<span x-show="platform === '{{ icon.slug }}'" x-cloak class="w-5 h-5">{% include "pages/_social_icon.html" with icon=icon %}</span>
+{% endfor %}
+</span>
+<span class="flex-1 text-left font-body-md text-body-md">
+{% for icon in all_icons %}
+<span x-show="platform === '{{ icon.slug }}'" x-cloak>{{ icon.label }}</span>
+{% endfor %}
+</span>
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant" aria-hidden="true">expand_more</span>
+</button>
+<div x-show="pickerOpen" x-cloak @click.outside="pickerOpen = false" class="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-outline-variant rounded-lg shadow-lg">
+{% for icon in all_icons %}
+<button type="button" @click="platform = '{{ icon.slug }}'; pickerOpen = false" class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low text-left">
+<span class="w-5 h-5 flex items-center justify-center flex-shrink-0" style="color: {{ icon.default_color }}">{% include "pages/_social_icon.html" with icon=icon %}</span>
+<span class="font-body-md text-body-sm text-on-surface">{{ icon.label }}</span>
+</button>
+{% endfor %}
+</div>
+</div>
+<input type="hidden" name="{{ add_form.platform.html_name }}" :value="platform">
+{% if add_form.platform.errors %}<p class="text-admin-error font-label-md text-label-md">{{ add_form.platform.errors|striptags }}</p>{% endif %}
+</div>
+
+<div class="space-y-1">
+<label for="{{ add_form.icon_color.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Icon Color</label>
+<div class="flex items-center gap-2">
+<input type="color" :value="color" @input="color = $event.target.value" class="w-11 h-11 p-0.5 rounded-lg border border-outline-variant bg-surface cursor-pointer flex-shrink-0" aria-label="Pick icon color">
+<input type="text" name="{{ add_form.icon_color.html_name }}" id="{{ add_form.icon_color.id_for_label }}" x-model="color" maxlength="7" placeholder="#1877F2" class="{{ add_form.icon_color.field.widget.attrs.class }}">
+</div>
+{% if add_form.icon_color.errors %}<p class="text-admin-error font-label-md text-label-md">{{ add_form.icon_color.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+
+<div class="flex justify-end pt-2">
+<button type="submit" class="bg-primary text-on-primary px-6 py-2.5 rounded-lg font-button text-button hover:opacity-90 active:scale-95 transition-all">Add Link</button>
+</div>
+</form>
+</div>
+{% endif %}
+</div>
+
+{% include "admin_portal/partials/_delete_confirm_modal.html" %}
+</div>
+{% endblock %}

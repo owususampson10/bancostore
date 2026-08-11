@@ -8,8 +8,8 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, Prefetch, ProtectedError, Q, Sum
-from django.http import HttpResponse
+from django.db.models import Count, Max, Prefetch, ProtectedError, Q, Sum
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -30,6 +30,8 @@ from apps.orders.services import (
     cancel_or_refund_order,
     is_legal_order_status_transition,
 )
+from apps.pages.models import MAX_SOCIAL_MEDIA_LINKS, SocialMediaLink
+from apps.pages.social_icons import SOCIAL_ICONS, detect_platform_from_url
 from apps.platform_settings.admin import BancostoreConstanceForm
 from apps.platform_settings.config import CONSTANCE_CONFIG, CONSTANCE_CONFIG_FIELDSETS
 from apps.wallet.models import WalletTransaction
@@ -52,6 +54,7 @@ from .forms import (
     CategoryForm,
     ProductForm,
     ProductVariantFormSet,
+    SocialMediaLinkForm,
     build_product_image_formset,
 )
 from .permissions import is_admin_portal_staff
@@ -1492,3 +1495,139 @@ def platform_settings(request):
         "active_nav": "platform_settings",
     }
     return render(request, "admin_portal/platform_settings.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Task 35: Social Media Links -- admin-managed, unlimited-count footer links
+# ---------------------------------------------------------------------------
+
+
+def _social_links_settings_context(request, add_form=None, row_forms_override=None):
+    """Shared by social_links_settings/social_link_create/social_link_update
+    so a failed create/update re-renders the exact same page (with that one
+    form's errors visible) instead of a separate error page -- matching
+    the "redirect on success, re-render with errors on failure" shape every
+    other admin_portal create/edit view already uses, just applied to one
+    shared list page instead of a dedicated form page since rows edit
+    in place."""
+    links = list(SocialMediaLink.objects.all())
+    row_forms_override = row_forms_override or {}
+    row_forms = [
+        row_forms_override.get(link.pk) or SocialMediaLinkForm(instance=link)
+        for link in links
+    ]
+    return {
+        "links": list(zip(links, row_forms)),
+        "add_form": add_form or SocialMediaLinkForm(),
+        "at_max": len(links) >= MAX_SOCIAL_MEDIA_LINKS,
+        "max_links": MAX_SOCIAL_MEDIA_LINKS,
+        # Rendered server-side (real SVG/material-icon markup for every
+        # curated platform), toggled client-side only via Alpine x-show --
+        # never built up as an HTML string in JS, so there is no dynamic
+        # markup-construction code path to review for injection risk at all.
+        "all_icons": list(SOCIAL_ICONS.values()),
+        "active_nav": "social_links",
+    }
+
+
+@login_required(login_url="two_factor:login")
+def social_links_settings(request):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    return render(
+        request,
+        "admin_portal/social_links_settings.html",
+        _social_links_settings_context(request),
+    )
+
+
+@login_required(login_url="two_factor:login")
+def social_link_create(request):
+    """POST-only. Every write goes through SocialMediaLinkForm's is_valid()
+    -- never a bare .save() from raw request.POST -- so url/icon_color's
+    validators (and the MAX_SOCIAL_MEDIA_LINKS cap in the form's clean())
+    are guaranteed to actually run (doubt-driven-development finding)."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+    if request.method != "POST":
+        raise PermissionDenied
+
+    form = SocialMediaLinkForm(request.POST)
+    if form.is_valid():
+        link = form.save(commit=False)
+        current_max = SocialMediaLink.objects.aggregate(m=Max("order"))["m"] or 0
+        link.order = current_max + 1
+        link.save()
+        messages.success(request, f'"{link.name}" added.')
+        return redirect("admin_portal:social_links_settings")
+
+    messages.error(request, "Couldn't add that link. Check the highlighted fields.")
+    context = _social_links_settings_context(request, add_form=form)
+    context["add_form_open"] = True
+    return render(
+        request, "admin_portal/social_links_settings.html", context, status=400
+    )
+
+
+@login_required(login_url="two_factor:login")
+def social_link_update(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+    if request.method != "POST":
+        raise PermissionDenied
+
+    link = get_object_or_404(SocialMediaLink, pk=pk)
+    form = SocialMediaLinkForm(request.POST, instance=link)
+    if form.is_valid():
+        form.save()
+        messages.success(request, f'"{link.name}" updated.')
+        return redirect("admin_portal:social_links_settings")
+
+    messages.error(request, "Couldn't save that link. Check the highlighted fields.")
+    context = _social_links_settings_context(
+        request, row_forms_override={link.pk: form}
+    )
+    context["open_link_id"] = link.pk
+    return render(
+        request, "admin_portal/social_links_settings.html", context, status=400
+    )
+
+
+@login_required(login_url="two_factor:login")
+def social_link_delete(request, pk):
+    """POST-only, matches catalog_category_delete's shape exactly (shared
+    _delete_confirm_modal.html partial, plain redirect back to the list)."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    link = get_object_or_404(SocialMediaLink, pk=pk)
+    if request.method == "POST":
+        name = link.name
+        link.delete()
+        messages.success(request, f'"{name}" deleted.')
+    return redirect("admin_portal:social_links_settings")
+
+
+@login_required(login_url="two_factor:login")
+def social_link_detect_platform(request):
+    """GET, called by the add/edit form's own JS on the URL field's blur
+    event (fetch(), not htmx -- a plain JSON response is simpler and more
+    responsive than swapping an HTML partial into a live Alpine scope for
+    a single reactive value). Stateless -- no DB write, just parses the
+    candidate URL and returns the detected platform slug; the admin can
+    still pick a different one from the picker before saving, and the
+    eventual save is validated independently regardless of what this
+    returned. Admin-gated like every sibling endpoint here, not left open
+    (doubt-driven-development finding: no legitimate reason for this to be
+    public, and leaving it open would have widened the blast radius of any
+    future bug in this view). The candidate URL is used only to compute a
+    platform slug -- it is never echoed back into the response, so there
+    is no reflected-content/scheme-injection surface here even though the
+    input itself hasn't been validated as a real URL yet."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    candidate_url = request.GET.get("url", "")
+    detected_platform = detect_platform_from_url(candidate_url)
+    return JsonResponse({"platform": detected_platform})

@@ -714,6 +714,58 @@ What exists and is verified working:
   handling, and visible Previous/Next buttons, matching the accessibility bar
   `templates/distributors/binary_tree.html` (Task 21a) already set for this exact interaction
   class. Full suite green (112 passed for the touched test dirs) throughout.
+- **Legal/policy pages (Task 34), requested directly by the user:** seven pages — Terms of Use,
+  Privacy Policy, Cookie Policy, Disclaimer, Earnings & Income Disclosure, AI Disclaimer, and
+  Returns/Refunds/Shipping — grouped under a new "Policies" footer column in `base_store.html`.
+  Content is grounded in this platform's real, already-shipped features (three real user roles,
+  Paystack payments, Didit KYC, the three commission types, GHS delivery-zone fees, the order
+  lifecycle, the 7-day cooling-off refund) rather than generic boilerplate or invented company
+  facts. One shared `templates/pages/legal/_base.html` shell plus a `.legal-content` CSS typography
+  class (`static/src/main.css`) so each page writes plain semantic HTML instead of repeating
+  Tailwind utility classes per paragraph. Returns/Refunds/Shipping is the one dynamic page: it
+  renders the live `DELIVERY_FEE_KUMASI`/`DELIVERY_FEE_ACCRA`/`DELIVERY_FEE_OTHER_REGIONS`/
+  `FREE_DELIVERY_THRESHOLD`/`PENDING_ORDER_AUTO_CANCEL_HOURS` constance values and wires up the
+  previously-unused `REFUND_RETURN_POLICY_TEXT` constance field (seeded blank since early in the
+  project, listed in the admin fieldset but never read by any view until now) as an optional
+  admin-editable custom policy block. The AI Disclaimer honestly discloses that some decorative/
+  marketing imagery (hero banners, lifestyle photography) may be AI-generated, while real product
+  photos on listing/detail pages are not. 15 new tests in `tests/feature/pages/test_legal_pages.py`;
+  full suite green; live-browser-verified at 500px and 1440px.
+- **Social Media Links (Task 35), requested directly by the user:** replaces the storefront
+  footer's 3 hardcoded, disabled "Coming soon" icons with a real admin-managed feature — staff add/
+  edit/delete social media links (name, URL, icon, color) from a new "Social Links" screen in the
+  admin portal (`apps/admin_portal`), matching Task 22/23's "every admin-facing screen should look
+  like the rest of the app" precedent. `apps/pages/social_icons.py` self-hosts a curated 17-platform
+  brand-icon registry (SVG path data + official hex colors fetched directly from the real Simple
+  Icons package, CC0-licensed) rather than adding a new pip/npm dependency, per explicit
+  user choice offered via `AskUserQuestion`. Pasting a URL auto-detects the platform
+  (`detect_platform_from_url`, exact-or-subdomain hostname matching, never a substring check) via a
+  small admin-gated JSON endpoint called on the URL field's blur — the admin can always override the
+  detected icon manually, and the eventual save is independently re-validated regardless.
+  `SocialMediaLink.platform` is a choices-constrained slug, never raw SVG text: the real icon markup
+  an admin's browser ever renders always comes from the fixed server-side registry, closing off
+  stored-XSS by construction rather than by escaping. Capped at `MAX_SOCIAL_MEDIA_LINKS = 20`
+  (the user's original ask was "countless"/unlimited; a pre-implementation `doubt-driven-development`
+  review — a fresh-context `security-auditor` agent — flagged an uncapped table as a real footgun
+  degrading the public footer on every page load with no floor, folded into the design before code
+  was written). The footer's link list is injected via a new context processor, cached indefinitely
+  and invalidated by `post_save`/`post_delete` signals on the model — the same pattern constance's
+  own Redis cache already uses for business-rule settings, at this project's stated "hundreds of
+  thousands of users" scale. A real bug (icon-data-generation script producing single-domain tuples
+  missing their trailing comma, `domains=("instagram.com")` instead of `domains=("instagram.com",)`
+  — silently iterating over characters instead of the domain string, breaking auto-detect for 9
+  platforms) was caught by `tests/unit/pages/test_social_icons.py`'s very first run, fixed, and
+  re-verified live. A follow-up `code-review-and-quality` pass (fresh-context `code-reviewer` agent,
+  verdict APPROVE) independently re-fetched live Simple Icons data to spot-check the embedded SVG/
+  color data and found one real, non-security issue: Simple Icons permanently removed LinkedIn in
+  v14.0.0 following LinkedIn's own trademark enforcement, and this project had unknowingly embedded
+  a permanent copy of a mark the rights holder had removed elsewhere — put to the user directly
+  (not decided unilaterally), who chose to drop LinkedIn from the curated set entirely (falls back
+  to the generic "custom" icon) rather than keep it. Full design reasoning in
+  `docs/decisions/0009-social-media-links-design.md`. 70 new tests (22 feature + 48 unit); full
+  suite green; live-browser-verified end-to-end (auto-detect, color picker, save, footer render,
+  delete via the shared confirm-modal) against a real `runserver` session with a throwaway staff
+  account created and deleted for the check.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,

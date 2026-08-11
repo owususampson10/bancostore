@@ -139,8 +139,8 @@ still reading (hover/focus), stays manually dismissable.
 </main>
 <!-- Footer (reconciled from the Product Listing / Product Detail Stitch screens) -->
 <footer class="bg-inverse-surface py-16 md:py-24 w-full mt-auto">
-<div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 grid grid-cols-1 md:grid-cols-4 gap-8">
-<div class="space-y-4">
+<div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-8">
+<div class="space-y-4 sm:col-span-2 lg:col-span-1">
 <img src="{% static 'bancostore-brand/logo/bancostore-logo-dark.svg' %}" alt="Bancostore" class="h-9 w-auto">
 <p class="text-sm text-inverse-on-surface/70 max-w-[240px]">Curating quality lifestyle and wellness products, and the opportunity to build a business selling them, for the modern Ghanaian consumer.</p>
 </div>
@@ -161,12 +161,44 @@ still reading (hover/focus), stays manually dismissable.
 </ul>
 </div>
 <div class="space-y-4">
+<h4 class="text-xs font-bold uppercase tracking-widest text-surface">Policies</h4>
+<ul class="space-y-2 text-sm text-inverse-on-surface/70">
+<li><a class="hover:text-surface transition-all" href="{% url 'pages:terms_of_use' %}">Terms of Use</a></li>
+<li><a class="hover:text-surface transition-all" href="{% url 'pages:privacy_policy' %}">Privacy Policy</a></li>
+<li><a class="hover:text-surface transition-all" href="{% url 'pages:cookie_policy' %}">Cookie Policy</a></li>
+<li><a class="hover:text-surface transition-all" href="{% url 'pages:disclaimer' %}">Disclaimer</a></li>
+<li><a class="hover:text-surface transition-all" href="{% url 'pages:earnings_disclosure' %}">Earnings &amp; Income Disclosure</a></li>
+<li><a class="hover:text-surface transition-all" href="{% url 'pages:ai_disclaimer' %}">AI Disclaimer</a></li>
+<li><a class="hover:text-surface transition-all" href="{% url 'pages:returns_refunds_shipping' %}">Returns, Refunds &amp; Shipping</a></li>
+</ul>
+</div>
+<div class="space-y-4">
 <h4 class="text-xs font-bold uppercase tracking-widest text-surface">Follow Us</h4>
+{% comment %}
+Task 35: admin-managed via Social Links in the admin portal
+(apps/pages/models.py::SocialMediaLink), rendered here through the
+social_media_links context processor. icon_color is validated server-side
+to a strict 6-digit hex regex before it can ever reach this style
+attribute (apps/pages/models.py::HEX_COLOR_VALIDATOR); the icon markup
+itself always comes from the fixed curated registry keyed by a
+choices-constrained platform slug, never from admin-supplied text --
+see templates/pages/_social_icon.html.
+{% endcomment %}
+{% if social_media_links %}
+<div class="flex flex-wrap gap-4">
+{% for link in social_media_links %}
+<a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" title="{{ link.name }}" aria-label="{{ link.name }}" class="w-9 h-9 rounded-full border border-inverse-on-surface/30 flex items-center justify-center hover:border-inverse-on-surface transition-colors" style="color: {{ link.icon_color }};">
+<span class="w-[18px] h-[18px]">{% include "pages/_social_icon.html" with icon=link.icon %}</span>
+</a>
+{% endfor %}
+</div>
+{% else %}
 <div class="flex gap-4">
 <span class="w-9 h-9 rounded-full border border-inverse-on-surface/30 flex items-center justify-center" title="Coming soon"><span class="material-symbols-outlined text-[18px]">public</span></span>
 <span class="w-9 h-9 rounded-full border border-inverse-on-surface/30 flex items-center justify-center" title="Coming soon"><span class="material-symbols-outlined text-[18px]">camera</span></span>
 <span class="w-9 h-9 rounded-full border border-inverse-on-surface/30 flex items-center justify-center" title="Coming soon"><span class="material-symbols-outlined text-[18px]">chat</span></span>
 </div>
+{% endif %}
 <p class="text-xs text-inverse-on-surface/60">Bancostore is committed to responsible direct selling in Ghana.</p>
 </div>
 </div>
