@@ -417,6 +417,64 @@ Referral Bonus → real Didit KYC → admin approval → IR ID → withdrawal re
 verified live against the production database before being cleaned up, leaving zero distributors
 ahead of real launch.
 
+### Phase 11: SEO — new scope, not in `SPEC.md` (like Tasks 29/34/35), started 2026-08-11
+The app is live at `bancostore.com` (Checkpoint J) with almost no SEO infrastructure: an audit
+found no `robots.txt`, no sitemap, no canonical/Open Graph/Twitter Card tags, no JSON-LD structured
+data anywhere, and the home page (`templates/catalog/home.html`) doesn't even override the generic
+site-wide `title`/`meta_description` blocks. `Product`/`Category` already have unique slugs and
+slug-based URLs, so no schema change is needed to build on top of them.
+- [x] Task 37: SEO foundations, split into 4 vertical slices (37a-37d)
+  - [x] 37a: Domain-aware meta framework — canonical URL + Open Graph + Twitter Card tags added to
+    `templates/base_store.html`, using `request.scheme`/`request.get_host` (proxy-aware, since
+    `SECURE_PROXY_SSL_HEADER` is already configured for the production Nginx setup — no new
+    `SITE_URL` setting or `django.contrib.sites` wiring needed). Fixes the home page's missing
+    `title`/`meta_description` override. See `tasks/todo.md` Task 37 for the full build/verify
+    detail.
+  - [x] 37b: `robots.txt` + XML sitemap via `django.contrib.sitemaps`, covering products and
+    static/legal pages (no per-category URL exists to sitemap — `product_list` filters by
+    `?category=` query param, and its own canonical tag always points to the bare path); precise
+    `robots.txt` disallow list, not a blanket block (distributor registration/login stay
+    crawlable — a real acquisition funnel page — only the authenticated dashboard sub-paths are
+    blocked). See `tasks/todo.md` Task 37 for the full build/verify detail.
+  - [x] 37c: JSON-LD structured data — `Organization`/`WebSite` sitewide (with a real
+    `SearchAction` for Google's sitelinks search box, and `sameAs` sourced from Task 35's admin-
+    managed social links), `Product` schema on `product_detail` (real price/stock/image, no
+    fabricated `image` when a product has none). See `tasks/todo.md` Task 37 for the full
+    build/verify detail.
+  - [x] 37d: Page speed / Core Web Vitals audit (real Lighthouse via `npx`, Deep mode) — diagnostic
+    pass only, no fixes applied. Top findings: a 1.1MB un-subsetted Material Symbols font (>60% of
+    home page weight), ~9 home-page images still served live from Google's Stitch-generation host
+    (`lh3.googleusercontent.com`) instead of self-hosted, no text compression on Nginx, HTTP/1.1.
+    See `tasks/todo.md` Task 37 for full detail. Fixes deliberately not bundled in — flagged to the
+    user as a candidate follow-up task.
+
+### Phase 12: Performance fixes from the Task 37d audit — Task 38, 2026-08-11
+- [x] Task 38: Self-host the remaining Stitch-generated images still loading live from
+  `lh3.googleusercontent.com` — one of Task 37d's findings, acted on the same session rather than
+  deferred, since a comment already in `templates/catalog/home.html` (2026-08-07) showed one of
+  these exact links had already expired and broken production once. See `tasks/todo.md` Task 38
+  for the full detail. The font-subsetting and Nginx-level findings (text compression, HTTP/2) from
+  the same audit are still open, not silently dropped — they need either a new build-time
+  dependency or production server config changes, both Boundaries requiring the user's sign-off
+  first.
+
+**Checkpoint K — reached 2026-08-11:** `robots.txt`/sitemap reachable and valid (live-verified
+against `runserver`), every audited page has a real canonical/OG/Twitter/title/description
+(live-verified, including the previously-missing home page), JSON-LD parses as valid JSON with
+real database content on both a static and a dynamic page (live-verified — Google's Rich Results
+Test itself wasn't run, since it requires submitting a real production URL to an external Google
+tool, not attempted here), page-speed audit complete with findings reported to the user, Task 38
+acted on the highest-risk one. **Test status, stated precisely rather than as one blanket "full
+suite green" claim (a CodeRabbit finding on PR #70 — the original wording here conflated a
+targeted-suite pass with a full-suite one two paragraphs below it):** every targeted suite for
+each individual slice was green at the time that slice was built (see `tasks/todo.md` Task 37/38
+for each slice's own targeted-suite numbers); one full local `pytest -q` run after 37a+37b was
+green except the one pre-existing, unrelated Task 36 failure (`git stash`-confirmed to already
+exist on `main`); the real-MySQL GitHub Actions CI run on PR #70 itself is the authoritative
+check, since SQLite's locking hides concurrency bugs CI's MySQL container would catch (see
+`SPEC.md` Testing Strategy) — its result is recorded in `tasks/todo.md` once known, not assumed
+green here in advance.
+
 ## Risks and Mitigations
 
 | Risk | Impact | Mitigation |

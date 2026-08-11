@@ -1,0 +1,23 @@
+User-agent: *
+Disallow: /admin/
+Disallow: /admin-portal/
+Disallow: /distributors/dashboard/
+Disallow: /distributors/earnings-history/
+Disallow: /distributors/binary-tree/
+Disallow: /distributors/team/
+Disallow: /distributors/payout-settings/
+Disallow: /distributors/withdraw/
+Disallow: /distributors/withdrawals/
+Disallow: /distributors/cancel-membership/
+Disallow: /distributors/notifications/
+Disallow: /distributors/webhooks/
+Disallow: /distributors/kyc/
+Disallow: /distributors/verify-otp/
+Disallow: /distributors/password/
+Disallow: /distributors/register/pay-fee/
+Disallow: /distributors/starter-pack/
+Disallow: /accounts/
+Disallow: /cart/
+Disallow: /media/kyc/
+
+Sitemap: {{ request.scheme }}://{{ request.get_host }}/sitemap.xml

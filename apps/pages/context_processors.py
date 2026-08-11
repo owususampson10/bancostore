@@ -1,6 +1,9 @@
 import logging
 
 from django.core.cache import cache
+from django.templatetags.static import static
+
+from bancostore.json_ld import dumps_for_script_tag
 
 from .models import SOCIAL_MEDIA_LINKS_CACHE_KEY, SocialMediaLink
 
@@ -14,6 +17,31 @@ logger = logging.getLogger(__name__)
 # left it stale. A day is long enough that this timeout is never the
 # thing normal admin edits rely on, short enough to be a real safety net.
 _CACHE_TIMEOUT_SECONDS = 60 * 60 * 24
+
+
+def _get_cached_social_media_links():
+    """Shared by social_media_links (footer) and organization_json_ld
+    (Task 37c) so both read the same cached list instead of each running
+    its own uncached query on every request -- see social_media_links'
+    own docstring for the caching/fallback reasoning this mirrors."""
+    try:
+        links = cache.get(SOCIAL_MEDIA_LINKS_CACHE_KEY)
+    except Exception:
+        logger.exception(
+            "social_media_links: cache read failed, falling back to the database"
+        )
+        links = None
+
+    if links is None:
+        links = list(SocialMediaLink.objects.all())
+        try:
+            cache.set(
+                SOCIAL_MEDIA_LINKS_CACHE_KEY, links, timeout=_CACHE_TIMEOUT_SECONDS
+            )
+        except Exception:
+            logger.exception("social_media_links: cache write failed")
+
+    return links
 
 
 def social_media_links(request):
@@ -32,21 +60,47 @@ def social_media_links(request):
     render site-wide. Falls back to a real DB read (the actually-correct
     data, not stale) on any cache failure, on both the read and the write
     side, logged so a real Redis outage is still visible in monitoring."""
-    try:
-        links = cache.get(SOCIAL_MEDIA_LINKS_CACHE_KEY)
-    except Exception:
-        logger.exception(
-            "social_media_links: cache read failed, falling back to the database"
-        )
-        links = None
+    return {"social_media_links": _get_cached_social_media_links()}
 
-    if links is None:
-        links = list(SocialMediaLink.objects.all())
-        try:
-            cache.set(
-                SOCIAL_MEDIA_LINKS_CACHE_KEY, links, timeout=_CACHE_TIMEOUT_SECONDS
-            )
-        except Exception:
-            logger.exception("social_media_links: cache write failed")
 
-    return {"social_media_links": links}
+def organization_json_ld(request):
+    """Task 37c: sitewide Organization/WebSite JSON-LD (base_store.html).
+    Serialized here, not built with template tags, so a social link's name
+    or URL can never produce broken/unescaped JSON -- dumps_for_script_tag
+    (bancostore/json_ld.py) is the single source of truth for correct
+    escaping, both for valid JSON syntax and for safety inside a <script>
+    element (a literal "</script>" in an admin-entered social link name
+    could otherwise break out of the tag -- CodeRabbit finding on PR #70,
+    fixed here too even though it was only flagged on the Product JSON-LD
+    twin of this function), matching this codebase's established
+    "constrain server-side, never raw interpolation" rule (see Task 17's
+    Alpine x-data XSS fix for the same reasoning applied to a different
+    injection context)."""
+    base_url = f"{request.scheme}://{request.get_host()}"
+    data = {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "name": "Bancostore",
+                "url": f"{base_url}/",
+                "logo": base_url
+                + static("bancostore-brand/logo/bancostore-logo-orange.svg"),
+                "sameAs": [link.url for link in _get_cached_social_media_links()],
+            },
+            {
+                "@type": "WebSite",
+                "name": "Bancostore",
+                "url": f"{base_url}/",
+                "potentialAction": {
+                    "@type": "SearchAction",
+                    "target": {
+                        "@type": "EntryPoint",
+                        "urlTemplate": f"{base_url}/shop/?q={{search_term_string}}",
+                    },
+                    "query-input": "required name=search_term_string",
+                },
+            },
+        ],
+    }
+    return {"organization_json_ld": dumps_for_script_tag(data)}

@@ -35,7 +35,7 @@ source, not just a stale copy of the link, so a fresh Stitch URL wasn't
 available either. Fixed by downloading the still-alive home page hero
 photo (same "premium lifestyle" theme, already a real asset from this
 project's own Stitch design system, not fabricated) at full resolution
-and self-hosting it at static/images/pages/about-hero.jpg -- permanent,
+and self-hosting it at static/images/pages/about-hero.webp -- permanent,
 immune to any future CDN expiration, unlike swapping in another
 temporary external link that would eventually break the same way.
 {% endcomment %}
@@ -72,7 +72,7 @@ temporary external link that would eventually break the same way.
 <section class="relative pt-16 md:pt-24 pb-8 md:pb-16 max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop">
 <div class="relative w-full max-w-5xl mx-auto">
 <div class="aspect-[16/9] w-full rounded-2xl overflow-hidden shadow-2xl relative z-10">
-<img class="w-full h-full object-cover" alt="Premium lifestyle commerce environment" src="{% static 'pages/about-hero.jpg' %}">
+<img class="w-full h-full object-cover" alt="Premium lifestyle commerce environment" src="{% static 'pages/about-hero.webp' %}">
 <div class="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
 </div>
 <div class="relative z-20 -mt-16 md:-mt-20 max-w-2xl bg-surface/95 backdrop-blur-md p-6 md:p-8 rounded-xl shadow-lg border border-surface-container-high mx-auto md:mx-0">
@@ -97,7 +97,7 @@ Bancostore is an online store for Ghana, curating quality lifestyle essentials â
 </div>
 <div class="relative">
 <div class="hidden lg:block absolute -left-48 top-0 w-32 h-32 rounded-full overflow-hidden border-4 border-surface-container-high shadow-lg">
-<img class="w-full h-full object-cover grayscale opacity-50" alt="Texture detail" src="{% static 'pages/about-hero.jpg' %}">
+<img class="w-full h-full object-cover grayscale opacity-50" alt="Texture detail" src="{% static 'pages/about-hero.webp' %}">
 </div>
 <p class="font-body-lg text-body-lg text-on-surface-variant leading-relaxed italic border-l-4 border-primary-fixed-dim pl-8 py-2 bg-surface-container-low/50 rounded-r-lg">
 Alongside the store, Bancostore runs a direct-selling opportunity. Our Independent Representatives build their own businesses through a transparent binary commission structure, turning their networks into sustainable income â€” not a vague or unverifiable promise.

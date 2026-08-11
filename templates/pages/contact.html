@@ -1,4 +1,5 @@
 {% extends "base_store.html" %}
+{% load static %}
 
 {% block title %}Bancostore | Contact Us{% endblock %}
 {% block meta_description %}Get in touch with Bancostore — questions about an order, becoming a distributor, or anything else.{% endblock %}
@@ -144,7 +145,7 @@ Send Message
 
 {% if physical_address %}
 <section class="px-margin-mobile md:px-margin-desktop mb-16 md:mb-24 max-w-container-max mx-auto overflow-hidden rounded-xl">
-<div class="w-full h-64 md:h-80 relative group bg-cover bg-center" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuCb59GcgJeJXRecCDxZYj4ChRl06ljlAvnq1ULJIc4zBbCq03Dy79bCULV5LdjE-UmlfoAtWs8fbMEt6amA5DFd9E6U1pj8wKO3P5oL9ynvAUYRrebOfwd0-lw3n3OV4QL5GBYQ-XRmqQuCw55UGemYmmR1EURzqUWSKyIGjhJPvTTwwNE0NCcETfdF-wfNGYyrmXIQyZ0mhTn46iPeCPn3qOKq3JP9YYWQPPnSxW1cYnjnc59nOQqt_A")'>
+<div class="w-full h-64 md:h-80 relative group bg-cover bg-center" style='background-image: url("{% static "pages/contact-visit-us.webp" %}")'>
 <div class="absolute inset-0 bg-primary/10 group-hover:bg-transparent transition-colors duration-500"></div>
 <div class="absolute inset-0 flex items-center justify-center px-4">
 <div class="bg-surface-container-lowest/90 backdrop-blur-sm p-6 md:p-8 border border-outline-variant max-w-md text-center">

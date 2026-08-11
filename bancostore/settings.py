@@ -119,6 +119,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
+    "django.contrib.sitemaps",  # XML sitemap for search engines (Task 37b)
     "django.contrib.humanize",  # comma-formatted prices on the storefront (Task 8)
     # Required by FORM_RENDERER = TemplatesSetting below -- without this,
     # django.forms's own built-in widget templates (django/forms/widgets/
@@ -312,6 +313,7 @@ TEMPLATES = [
                 "apps.notifications.context_processors.unread_notification_count",
                 "apps.accounts.context_processors.google_login_flags",
                 "apps.pages.context_processors.social_media_links",
+                "apps.pages.context_processors.organization_json_ld",
             ],
         },
     },

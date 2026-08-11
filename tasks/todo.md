@@ -6078,3 +6078,279 @@ help text. Targeted suite green throughout (updated `test_platform_settings.py` 
 match: `test_currency_fields_render_as_locked_to_ghs` and
 `test_currency_is_locked_to_ghs_even_if_submitted_data_says_otherwise`, the latter mirroring the
 existing `ADMIN_2FA_ENABLED` tamper test's shape).
+
+### Task 37: SEO foundations — meta tags, sitemap, structured data, page-speed audit
+
+Not in `SPEC.md`, same class of new scope as Tasks 29/34/35 — requested directly by the user
+2026-08-11, after the app had already been live at `bancostore.com` for a day (Checkpoint J,
+2026-08-10). An audit before planning found almost nothing SEO-related exists today: no
+`robots.txt`, no sitemap, no canonical/Open Graph/Twitter Card tags, no JSON-LD anywhere, and the
+home page (`templates/catalog/home.html`) doesn't even override `base_store.html`'s generic
+site-wide `title`/`meta_description` blocks — every other major page (`product_list`,
+`product_detail`, all `pages/legal/*`, `about`, `contact`) already does. `Product`/`Category`
+already have unique `SlugField`s and slug-based URLs, so nothing here needs a schema change.
+`SECURE_PROXY_SSL_HEADER` is already configured for the production Nginx setup, so
+`request.build_absolute_uri()` will correctly report `https://bancostore.com/...` for
+canonical/OG URLs with no new `SITE_URL` setting or `django.contrib.sites` wiring needed.
+
+Split into 4 vertical slices, per this codebase's established build process:
+
+**37a. Domain-aware meta framework.** Canonical `<link>`, Open Graph (`og:title`/`og:description`/
+`og:url`/`og:image`/`og:type`), and Twitter Card tags added to `templates/base_store.html`, driven
+by the same `{% block title %}`/`{% block meta_description %}` overrides already used per-page —
+no new per-template plumbing beyond a couple of new blocks (e.g. `og_image`) for pages that want a
+non-default share image. Fixes the home page's missing `title`/`meta_description` override in the
+same pass, since it's the same code path. **Open decision:** no OG share image (1200×630 raster)
+exists yet — only SVG logos under `static/images/bancostore-brand/logo/`. Needs a real image before
+this slice is complete, not a placeholder.
+
+**37b. `robots.txt` + XML sitemap.** `django.contrib.sitemaps` (already available, just not
+wired into `INSTALLED_APPS`/`urls.py` yet) covering products, categories, and static/legal pages;
+`robots.txt` disallows non-public paths (`admin_portal`, distributor dashboard, checkout, accounts,
+`/media/` KYC uploads) and points at the sitemap.
+
+**37c. JSON-LD structured data.** `Organization`/`WebSite` schema sitewide (in `base_store.html`),
+`Product` schema (price, availability, image) on `product_detail`.
+
+**37d. Page speed / Core Web Vitals audit.** Diagnostic pass via `agent-skills:web-performance-auditor`
+against the live production site. Produces findings only — fixes get scoped as their own follow-up
+task if the findings justify it, not bundled blindly into this task.
+
+**Verification (per slice, before moving to the next):** full suite green, live-browser view-source
+check that meta tags render with real values (not template syntax leaking through), `robots.txt`/
+sitemap reachable and valid XML, Google's Rich Results Test validates the JSON-LD with zero errors.
+
+**37a — done 2026-08-11.** User chose "generate a simple branded banner now" (via `AskUserQuestion`)
+for the missing OG share image, over using the bare logo or shipping without one. Built with
+headless Chrome (`--headless --screenshot`, already installed on this Mac, no new dependency) to
+rasterize a small HTML/CSS banner — the existing `bancostore-logo-dark.svg` wordmark (the variant
+already designed for colored backgrounds) on an orange gradient with the site tagline — into an
+exact 1200×630 PNG at `static/images/bancostore-brand/social/og-default.png`.
+
+`templates/base_store.html` gained canonical `<link>`, `og:site_name`/`og:type`/`og:title`/
+`og:description`/`og:url`/`og:image` (+ width/height), and `twitter:card`. **Real Django constraint
+hit and worked around:** the same `{% block %}` tag name can't be repeated inside one template
+(confirmed by an actual `TemplateSyntaxError`, not assumed) — a first attempt tried reusing
+`{% block title %}`/`{% block meta_description %}` verbatim inside the OG meta tags to avoid
+duplicating text; fixed with dedicated `og_title`/`og_description` blocks instead, defaulting to
+the same literal text. `twitter:title`/`twitter:description`/`twitter:image` were deliberately left
+out entirely — Twitter/X's own Card spec falls back to the `og:*` equivalents when they're absent,
+so duplicating them would be redundant, not more correct. `templates/catalog/home.html` (previously
+inheriting the generic sitewide title/description with no override at all — the exact gap the audit
+found) now sets real, keyword-specific `title`/`meta_description`/`og_title`/`og_description`.
+`templates/catalog/product_detail.html` overrides `og_type` to `"product"` and `og_image` to the
+product's own `primary_image` (falling back to the default banner if a product somehow has no
+photo yet) — the highest-value case for real Open Graph data, since distributors routinely share
+product links directly (WhatsApp, social) to sell, unlike a Terms of Use link.
+
+Caught and fixed a real regression in an existing test before it could look like an unrelated
+break: `test_gallery_shows_all_images_with_primary_shown_first` asserted the primary product
+image's URL appears exactly twice on the page (main image + thumbnail) — the new `og:image` tag is
+a legitimate third occurrence, so the count assertion was updated to 3 with a comment explaining
+why, not loosened or deleted. Also found, confirmed via `git stash` to be a **pre-existing,
+unrelated bug already on `main`** (a Task 36 regression, not introduced here): `test_earnings_history.py::
+test_page_loads_the_shared_js_bundle_so_the_sidebar_can_actually_collapse` asserts a literal
+`src="/static/assets/main.js"` script tag, but Task 36 switched Vite's build output to hashed
+cache-busting filenames (`main-<hash>.js`), so that literal string no longer appears anywhere —
+flagged to the user rather than silently fixed, since it's outside this task's scope.
+
+4 new tests in `tests/feature/catalog/test_seo_meta_tags.py` (home page title/description/canonical/
+OG/Twitter tags; product page OG type + real image; product page OG image fallback when no photo
+exists). Live-verified against a real `runserver` (not just pytest): curled the home page and a
+real product page (`vitality-core-daily`), confirmed every canonical/OG/Twitter tag renders with
+real values (no leaked template syntax), confirmed the OG image itself returns HTTP 200, and
+confirmed the product page correctly swaps in that product's own photo instead of the default
+banner. Targeted suite (`tests/feature/catalog/`, `tests/feature/pages/`) green: 99 passed. Full
+suite green except the one pre-existing, unrelated failure above: 1382 passed, 1 skipped.
+
+**37b — done 2026-08-11.** Built TDD (RED tests written first, confirmed failing, then
+implemented). `apps/pages/sitemaps.py` — `ProductSitemap` (active products only, `lastmod` from
+`updated_at`) and `StaticViewSitemap` (home, shop, about, contact, all 7 legal pages). No
+`CategorySitemap`: `Category` has no dedicated detail page (`product_list` filters by
+`?category=<slug>` query param), and a filtered-listing URL in the sitemap would contradict that
+page's own canonical tag (`request.path`, no query string) — deliberately left out rather than
+included incorrectly.
+
+**Real Django behavior discovered mid-build, not assumed:** `django.contrib.sites` is already
+installed (`SITE_ID = 1`, confirmed by the pre-planning audit to be referenced nowhere in this
+codebase) — Django's sitemap framework uses the `Site` model's stored domain for absolute URLs
+whenever `django.contrib.sites` is installed, ignoring the request's own host entirely. First test
+run surfaced the real, previously-invisible consequence: every URL rendered as `example.com`
+(Django's shipped default), not `testserver`/`bancostore.com` as expected. Fixed with a data
+migration (`apps/pages/migrations/0003_configure_production_site_domain.py`, reversible) setting
+the `Site` row to the real production domain — the first real use this `SITE_ID` setting has ever
+had in this codebase. `protocol = "https"` set on both Sitemap classes to match. `robots.txt`
+(`templates/robots.txt`, served via `TemplateView` with `content_type="text/plain"`) blocks
+`/admin/`, `/admin-portal/`, `/accounts/`, `/cart/`, and `/media/kyc/` (private ID documents —
+`/media/products/`/`/media/categories/` stay crawlable for image search) — and, deliberately, only
+the authenticated sub-paths under `/distributors/` (`dashboard/`, `earnings-history/`,
+`binary-tree/`, `team/`, `payout-settings/`, `withdraw/`, `withdrawals/`, `cancel-membership/`,
+`notifications/`, `webhooks/`, `kyc/`, `verify-otp/`, `password/`, and the mid-flow
+`register/pay-fee/`/`starter-pack/` steps), not the whole prefix — a blanket
+`Disallow: /distributors/` would have hidden `/distributors/register/` and `/distributors/login/`
+from Google, the site's actual distributor-acquisition funnel page. 8 new tests in
+`tests/feature/pages/test_seo_robots_sitemap.py`. Live-verified against a real `runserver`: curled
+both endpoints, confirmed `robots.txt` returns real `text/plain` content and `sitemap.xml` lists
+every real seeded product plus every static page with the correct `https://bancostore.com` domain.
+Targeted suite green (`tests/feature/pages/`, `tests/feature/catalog/`: 107 passed); full suite
+green except the one pre-existing Task 36 failure already flagged above (1390 passed, 1 skipped).
+
+**37c — done 2026-08-11.** `apps/pages/context_processors.py` gained `organization_json_ld`
+(registered in `TEMPLATES`, `bancostore/settings.py`), rendering a sitewide `Organization`/
+`WebSite` JSON-LD block (`templates/base_store.html` `<head>`) — `Organization.sameAs` reuses
+Task 35's real admin-managed `SocialMediaLink` rows (verified live: a real configured Facebook
+link showed up correctly), and `WebSite.potentialAction` is a real `SearchAction` pointing at
+`catalog:product_list`'s actual `?q=` search param (`apps/catalog/views.py`), enabling Google's
+sitelinks search box. A shared `_get_cached_social_media_links()` helper was extracted so this new
+context processor and the pre-existing footer one (`social_media_links`, Task 35) read the same
+cached list instead of each running its own uncached query every request — a small, genuinely
+duplicate-avoiding refactor, not scope creep. `apps/catalog/views.py::_build_product_json_ld`
+builds a `Product` schema (name/description/`offers` with real price, `priceCurrency: "GHS"`,
+`availability` from `product.in_stock`) rendered via `product_detail.html`'s `extra_body` block —
+`image` is only included when a real photo exists (claiming the generic OG banner is a photo of a
+specific product would be inaccurate structured data, unlike Open Graph's generic-preview
+convention). Both JSON-LD blocks are serialized server-side rather than built with template tags,
+so a product name or social-link URL containing quotes/special characters can never produce broken
+JSON — matching this codebase's established "constrain server-side, never raw interpolation" rule
+from Task 17's Alpine `x-data` XSS fix. **Update, PR #70 CodeRabbit round:** plain `json.dumps`
+alone (this slice's original implementation) does not escape `<`/`>`/`&`, so a product description
+or admin-entered social link containing a literal `</script>` could break out of the `<script>`
+element and inject HTML — fixed with a new shared `bancostore/json_ld.py::dumps_for_script_tag()`
+(the same escape mapping Django's own `django.utils.html.json_script()` uses), applied to both
+JSON-LD builders, not just the one CodeRabbit's comment pointed at. See the PR #70 fix-round entry
+below for the full detail. Caught the same test-count
+regression pattern as 37a (`test_gallery_shows_all_images_with_primary_shown_first`'s primary-image
+URL occurrence count bumped 3 → 4 for the new `image` field, with an updated comment). 7 new tests
+in `tests/feature/catalog/test_seo_meta_tags.py`, parsing the rendered `<script>` tags with real
+`json.loads` rather than fragile substring matching. Live-verified against a real `runserver`:
+extracted and `json.loads`-parsed both pages' JSON-LD, confirmed well-formed and matching real
+database content (a real product's real price/stock/photo). Targeted suite green (169 passed); no
+further full-suite run needed beyond 37b's (no logic touched outside pages/catalog).
+
+**37d — done 2026-08-11 (diagnostic only, no fixes applied).** Deep-mode Lighthouse audit (real
+`npx lighthouse` CLI, not installed as a project dependency) against the live production home page
+and shop page (`https://bancostore.com/`, `/shop/`); the product-detail page was audited against
+local dev instead, since production's catalog currently has zero real products (a clean-slate
+launch) — noted as a caveat on absolute timing numbers only, not on the structural findings, which
+are identical code either way. Scores: home 90 performance / 91 SEO / 100 best-practices, shop 93 /
+100 / 100, product (local) 92 / 100 / 100. Findings ranked by impact, reported to the user directly
+(not fixed) — see the chat transcript for the full write-up; highest-impact items: a 1.1MB
+un-subsetted Material Symbols variable-font request (the single largest asset on every page,
+>60% of home's total 1.86MB weight); ~9 home-page decorative images served live from
+`lh3.googleusercontent.com` (Google's Stitch-generation image host) instead of ever being
+downloaded and self-hosted — a real production risk (URLs not guaranteed permanent) as well as a
+performance one (~70% oversized for their actual display size, no modern format); no
+gzip/brotli text compression on Nginx for the Vite JS/CSS bundle (~200KB combined savings); HTTP/1.1
+instead of HTTP/2; render-blocking Google Fonts `<link>`; ~70% unused JS in the main Vite bundle.
+Product photos already confirmed clean (real WebP, correctly sized — Task 7's pipeline holds up).
+**No fixes applied in 37d itself — the highest-risk finding was acted on immediately after as
+Task 38 below, per direct user instruction ("keep going") rather than waiting for a separate
+scoping round.**
+
+### Task 38: Self-host the remaining Stitch-generated images (Task 37d follow-up)
+
+The audit's #2 finding (the `lh3.googleusercontent.com` third-party image risk) turned out to be
+worse than "some day this could break" — `templates/catalog/home.html` already carried a
+2026-08-07 comment recording that this exact class of link had already expired and broken the home
+page's hero image once in production, fixed at the time by self-hosting *only* that one image; a
+"follow-up sweep" at the time confirmed the rest were "still live" and left them as-is. That was
+always a temporary reprieve, not a fix — Task 37d's audit re-surfaced the same risk for the
+remaining 9 images site-wide (7 photo-strip images + 1 bento background on the home page, 1
+distributor CTA image on the home page), plus a 10th on `templates/pages/contact.html` (the "Visit
+Us" section background) that hadn't even been in the original 2026-08-07 sweep's scope.
+
+All 10 downloaded via a one-off script (`requests` + Pillow, both already project dependencies —
+no new dependency added) and converted to WebP, matching `bancostore/media.py`'s established
+quality convention (85) but with a smaller resize cap than that helper's own 1600px (400px for the
+small photo-strip thumbnails, 900-1000px for the two larger hero-style images) since these are
+fixed decorative marketing images, not a zoomable admin-uploaded product gallery. Combined size:
+~390KB of third-party requests eliminated, replaced with 264KB of self-hosted WebP (a real
+reduction, not just a risk fix, since the Google-served originals were also ~70% oversized for
+their actual display dimensions per the audit). `about-hero.jpg` (already self-hosted, but flagged
+by the same audit as an oversized JPEG for its largest real use on the About page hero) was
+converted to WebP at its native 1376×768 resolution — not resized, since the About page's `max-w-5xl`
+16:9 hero is a legitimately large use of this file, only the home page's small thumbnail use was
+oversized — cutting it from 110KB to 55KB with no quality loss at the size that actually matters.
+`templates/pages/contact.html` needed a new `{% load static %}` (it had never used the tag before).
+Zero `googleusercontent`/`lh3.` references remain anywhere in `templates/` (grep-confirmed).
+
+**Deliberately not touched — flagged, not silently fixed:** the audit's other two structural
+findings (a 1.1MB un-subsetted Material Symbols icon webfont — this codebase's actively-used icon
+system alongside Heroicons, not a leftover, so the fix is subsetting/self-hosting rather than
+removal, and needs either a new build-time font-subsetting tool or a larger icon-migration effort;
+no text compression + HTTP/1.1 on the production Nginx config) are real but out of scope for a
+same-session fix: one needs a Boundaries-gated new dependency decision, the other is a production
+server config change requiring the user's sign-off before touching the live VPS, per `SPEC.md`
+Boundaries and the Task 24 deploy precedent.
+
+Live-verified against a real `runserver` (not just pytest): curled home, about, and contact pages,
+confirmed every image `src`/`url()` now points at a local `/static/...` path, confirmed zero
+`googleusercontent` references remain in any rendered page, and curled each of the 11 new/changed
+image files directly to confirm all return HTTP 200. `npm run build` re-run (no Tailwind class
+changes, so identical output hashes — confirms this was a pure asset-swap, not a template-structure
+change). Targeted suite green (`tests/feature/catalog/`, `tests/feature/pages/`: 110 passed), no
+Python logic touched so no broader regression risk.
+
+**PR #70 CodeRabbit fix round (2026-08-11), all 6 findings fixed in one follow-up commit per this
+codebase's own established batching convention:**
+1. **Real, Major-severity fix:** `_build_product_json_ld` and `organization_json_ld` both rendered
+   `json.dumps(data)|safe` inside a `<script type="application/ld+json">` tag — plain `json.dumps`
+   doesn't escape `<`/`>`/`&`, so a product description or admin-entered social link containing a
+   literal `</script>` could break out of the script element and inject arbitrary HTML. Fixed with
+   a new shared `bancostore/json_ld.py::dumps_for_script_tag()`, the same escape mapping Django's
+   own `django.utils.html.json_script()` uses — applied to *both* JSON-LD builders, not just the
+   Product one CodeRabbit's comment specifically flagged, since `organization_json_ld`'s `sameAs`
+   list reads the same class of admin-entered free text. Two new regression tests
+   (`test_product_json_ld_escapes_closing_script_tag_in_description`,
+   `test_organization_json_ld_escapes_closing_script_tag_in_social_link_url`) prove the raw
+   `<script>` element never contains a literal `</script>` mid-tag, while the parsed JSON still
+   round-trips back to the real (malicious-looking) input string.
+2. **Real, functional-correctness fix:** `og:image:width`/`og:image:height` were hardcoded to
+   `1200`/`630` even when `product_detail.html` overrides `og_image` with a real product photo of
+   different dimensions — inaccurate metadata. Fixed by wrapping the tags in a new
+   `og_image_dimensions` block (`templates/base_store.html`), overridden empty on product pages
+   specifically when a real photo exists (`templates/catalog/home.html`... `templates/catalog/product_detail.html`).
+   **Real Django gotcha hit while implementing this, not assumed:** an `{% if %}` *wrapping* a
+   `{% block %}` tag has no effect on which content a parent template's block placeholder resolves
+   to — Django collects block overrides structurally by walking the child template's full node
+   tree (including inside `{% if %}`/`{% for %}` bodies) at parse time, then renders only the
+   matched block node's own inner content, never re-evaluating whatever conditional happened to
+   surround it in the child. The `{% if %}` has to live *inside* the block tags to have any
+   runtime effect — exactly the pattern the pre-existing `og_image` block on the same line already
+   used correctly, caught before it shipped by checking that block's own shape rather than
+   guessing. Live-verified against a real `runserver` across all three cases: home page (default
+   banner) keeps the 1200x630 tags, a real product photo omits them entirely, and a product with no
+   photo yet still gets the 1200x630 fallback tags (confirms the `{% if not product.primary_image %}`
+   condition itself is also correct, not just present).
+3. **Real, Minor perf fix:** `_build_product_json_ld` called `product.primary_image` twice (once
+   for the presence check, once for the URL), and `product_detail`'s queryset never prefetched
+   `images` at all — meaning this property (which walks `self.images.all()`) was already a
+   pre-existing N+1 every time the template itself called it (the gallery loop, the primary-image
+   check), not something newly introduced. Fixed both at once: `product_detail`'s
+   `prefetch_related()` gained `"images"` alongside its existing `"variants"`, and
+   `_build_product_json_ld` now resolves `primary_image` once into a local variable instead of
+   re-reading the property.
+4. **Test-quality fix:** `test_robots_txt_disallows_private_paths` asserted
+   `"Disallow: /distributors/" in content` — a substring check that would pass for *any* deeper
+   distributor path being disallowed, without actually proving the specific important ones
+   (`dashboard/`, `withdraw/`) are present. Fixed to assert exact `Disallow:` lines via
+   `.splitlines()`, plus a new companion test
+   (`test_robots_txt_does_not_disallow_distributor_registration_or_login`) proving the positive
+   half of the same claim — registration/login genuinely stay crawlable, not just "the test didn't
+   check for a false Disallow."
+5. **Documentation-accuracy fix (Minor):** `tasks/plan.md` Checkpoint K's summary claimed "full
+   suite green throughout" two paragraphs after admitting one full local run had a known
+   pre-existing failure — a real, confusing overclaim. Reworded to state targeted-suite,
+   full-local-suite, and real-MySQL-CI results as three separate, precisely-scoped facts instead of
+   one blanket claim.
+6. **Documentation-accuracy fix (Major, flagged by CodeRabbit as reachable via an automated
+   analysis run against this exact file):** Task 38's record only cited a targeted-suite result,
+   not a final full-suite run reflecting the finished state of the branch. A full local `pytest -q`
+   run at the pre-fix-round commit (1393 passed, 1 skipped, plus the one already-`git stash`-
+   confirmed pre-existing Task 36 failure) is recorded here as that missing data point; a fresh
+   targeted run after this fix round itself (`tests/feature/catalog/`, `tests/feature/pages/`: 113
+   passed, covering all 6 fixes above) is recorded rather than re-running the full ~20-minute suite
+   a third time for changes confined to these same two directories.
+
+All 6 fixes pushed as a single follow-up commit to PR #70, per this codebase's established "fix
+CodeRabbit findings together, not one push per finding" convention.

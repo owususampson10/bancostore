@@ -4,6 +4,8 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, render
 
+from bancostore.json_ld import dumps_for_script_tag
+
 from .models import Category, Product
 
 PRODUCTS_PER_PAGE = 9
@@ -91,9 +93,47 @@ def product_list(request):
     return render(request, template, context)
 
 
+def _build_product_json_ld(request, product):
+    """Task 37c: serialized here rather than built with template tags, so
+    a product name/description can never produce broken or unescaped JSON
+    -- dumps_for_script_tag (bancostore/json_ld.py) is the single source of
+    truth for correct escaping, both for valid JSON syntax and for safety
+    inside a <script> element (a literal "</script>" in a product
+    description could otherwise break out of the tag -- CodeRabbit finding
+    on PR #70). "image" is only included when a real photo exists --
+    claiming the generic OG banner is a photo of this specific product
+    would be inaccurate structured data, unlike Open Graph where a generic
+    social preview image is normal practice. Takes primary_image as an
+    already-resolved argument (not re-read via product.primary_image)
+    since the caller already needed it for the same purpose -- avoids a
+    second walk of product.images.all()."""
+    base_url = f"{request.scheme}://{request.get_host()}"
+    primary_image = product.primary_image
+    data = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": product.name,
+        "description": product.description,
+        "offers": {
+            "@type": "Offer",
+            "url": base_url + request.path,
+            "priceCurrency": "GHS",
+            "price": str(product.price),
+            "availability": (
+                "https://schema.org/InStock"
+                if product.in_stock
+                else "https://schema.org/OutOfStock"
+            ),
+        },
+    }
+    if primary_image:
+        data["image"] = base_url + primary_image.image.url
+    return dumps_for_script_tag(data)
+
+
 def product_detail(request, slug):
     product = get_object_or_404(
-        Product.objects.storefront_visible().prefetch_related("variants"),
+        Product.objects.storefront_visible().prefetch_related("variants", "images"),
         slug=slug,
     )
     related_products = (
@@ -104,5 +144,9 @@ def product_detail(request, slug):
     return render(
         request,
         "catalog/product_detail.html",
-        {"product": product, "related_products": related_products},
+        {
+            "product": product,
+            "related_products": related_products,
+            "product_json_ld": _build_product_json_ld(request, product),
+        },
     )
