@@ -432,6 +432,10 @@ GENERAL_PLATFORM_SETTINGS = {
         "",
         "Editable refund policy — no developer needed to update",
     ),
+    "MAX_SOCIAL_MEDIA_LINKS": (
+        20,
+        "Maximum number of social media links an admin can add to the footer",
+    ),
 }
 
 # Custom-bounded form fields for the small set of constance keys where an

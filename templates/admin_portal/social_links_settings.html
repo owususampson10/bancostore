@@ -10,6 +10,15 @@ field, never free-text, so the real <path d="..."> markup an admin's
 browser ever sees always comes from our own fixed Python dict, never from
 request data. The picker toggles which pre-rendered icon is visible via
 plain Alpine x-show (a CSS display switch), never by building HTML in JS.
+
+CodeRabbit finding: each row/add-form's initial platform/color used to be
+interpolated directly into Alpine's x-data JS string (guarded by
+|escapejs, but not this project's own established convention -- Task 17's
+checkout page had a real XSS from exactly this raw-interpolation pattern
+once, fixed by switching to json_script + a script-tag read, never
+inline interpolation regardless of escaping). Every row/add-form's
+initial state is now passed via {{ ...|json_script:... }} and read with
+JSON.parse from the matching <script> tag instead.
 {% endcomment %}
 <script>
 const SOCIAL_LINK_DETECT_URL = "{% url 'admin_portal:social_link_detect_platform' %}";
@@ -24,6 +33,10 @@ async function detectSocialPlatform(url) {
     return null;
   }
 }
+function socialLinkPickerState(elementId, open) {
+  const initial = JSON.parse(document.getElementById(elementId).textContent);
+  return { open, pickerOpen: false, platform: initial.platform, color: initial.icon_color };
+}
 </script>
 
 <div x-data="{ deleteOpen: false, deleteName: '', deleteUrl: '', deleteKind: 'social link', deleteTrigger: null }">
@@ -35,9 +48,11 @@ async function detectSocialPlatform(url) {
 </div>
 
 <div class="bg-surface-container-lowest rounded-xl border border-outline-variant divide-y divide-outline-variant overflow-hidden">
-{% for link, form in links %}
+{% for row in rows %}
+{% with link=row.link form=row.form %}
+{{ row.initial|json_script:row.element_id }}
 <div class="social-link-row"
-     x-data="{ open: {% if link.pk == open_link_id %}true{% else %}false{% endif %}, pickerOpen: false, platform: '{{ link.platform|escapejs }}', color: '{{ link.icon_color|escapejs }}' }">
+     x-data="socialLinkPickerState('{{ row.element_id }}', {% if link.pk == open_link_id %}true{% else %}false{% endif %})">
 <button type="button" class="w-full flex items-center justify-between gap-3 px-4 md:px-6 py-4 text-left hover:bg-surface-container-low transition-colors" @click="open = !open" :aria-expanded="open.toString()">
 <div class="flex items-center gap-3 min-w-0">
 <span class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ color: color }">
@@ -120,6 +135,7 @@ async function detectSocialPlatform(url) {
 </form>
 </div>
 </div>
+{% endwith %}
 {% empty %}
 <div class="px-6 py-10 text-center">
 <p class="font-body-md text-body-md text-on-surface-variant">No social links yet. Add your first one below.</p>
@@ -128,7 +144,8 @@ async function detectSocialPlatform(url) {
 </div>
 
 {# Add new link -- collapsed "+ Add Item" affordance by default, expands to the same field set as a row #}
-<div class="mt-4 bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden" x-data="{ open: {{ add_form_open|yesno:'true,false' }}, pickerOpen: false, platform: '{{ add_form.platform.value|default:'custom'|escapejs }}', color: '{{ add_form.icon_color.value|default:'#FFFFFF'|escapejs }}' }">
+{{ add_form_initial|json_script:add_form_element_id }}
+<div class="mt-4 bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden" x-data="socialLinkPickerState('{{ add_form_element_id }}', {{ add_form_open|yesno:'true,false' }})">
 {% if at_max %}
 <div class="px-6 py-4 flex items-center gap-2 text-on-surface-variant">
 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">info</span>

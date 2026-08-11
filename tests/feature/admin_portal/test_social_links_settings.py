@@ -2,8 +2,9 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 
 import pytest
+from constance import config
 
-from apps.pages.models import MAX_SOCIAL_MEDIA_LINKS, SocialMediaLink
+from apps.pages.models import SocialMediaLink
 
 User = get_user_model()
 
@@ -170,7 +171,7 @@ def test_creating_a_link_with_a_javascript_url_is_rejected(staff_client):
 
 @pytest.mark.django_db
 def test_cannot_create_a_link_beyond_the_max_cap(staff_client):
-    for i in range(MAX_SOCIAL_MEDIA_LINKS):
+    for i in range(config.MAX_SOCIAL_MEDIA_LINKS):
         _make(name=f"Link {i}", order=i)
 
     response = staff_client.post(
@@ -184,7 +185,7 @@ def test_cannot_create_a_link_beyond_the_max_cap(staff_client):
     )
 
     assert response.status_code == 400
-    assert SocialMediaLink.objects.count() == MAX_SOCIAL_MEDIA_LINKS
+    assert SocialMediaLink.objects.count() == config.MAX_SOCIAL_MEDIA_LINKS
     assert not SocialMediaLink.objects.filter(name="One Too Many").exists()
 
 
@@ -192,7 +193,9 @@ def test_cannot_create_a_link_beyond_the_max_cap(staff_client):
 def test_editing_an_existing_link_at_the_cap_still_succeeds(staff_client):
     """The cap only blocks *new* rows -- editing one that already exists
     must never be blocked just because the table happens to be full."""
-    links = [_make(name=f"Link {i}", order=i) for i in range(MAX_SOCIAL_MEDIA_LINKS)]
+    links = [
+        _make(name=f"Link {i}", order=i) for i in range(config.MAX_SOCIAL_MEDIA_LINKS)
+    ]
     target = links[0]
 
     response = staff_client.post(

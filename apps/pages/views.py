@@ -25,7 +25,14 @@ def terms_of_use(request):
         {
             "terms_and_conditions_text": _stripped_or_none(
                 config.TERMS_AND_CONDITIONS_TEXT
-            )
+            ),
+            # CodeRabbit finding: this figure was hardcoded as plain text
+            # ("currently 7 days") instead of reading the live setting --
+            # the exact "decorative claim that can silently go stale the
+            # moment an admin changes the real setting" bug class this
+            # project has fixed before (see cooling_off_period_days on the
+            # Returns/Refunds/Shipping page for the established pattern).
+            "cooling_off_period_days": config.COOLING_OFF_PERIOD_DAYS,
         },
     )
 

@@ -73,6 +73,16 @@ class TestDetectPlatformFromUrl:
         assert detect_platform_from_url("https://evil.com?x=facebook.com") == "custom"
         assert detect_platform_from_url("https://evil.com#facebook.com") == "custom"
 
+    def test_scheme_less_url_with_a_double_slash_in_the_path_still_matches(self):
+        """CodeRabbit finding: a bare "//" in url check misdetects a
+        scheme-less URL whose *path* contains "//" as already having a
+        scheme, skipping the "//" prefix urlparse needs to find a netloc
+        at all -- this used to incorrectly fall back to "custom"."""
+        assert detect_platform_from_url("facebook.com/page//photos") == "facebook"
+
+    def test_already_protocol_relative_url_is_not_double_prefixed(self):
+        assert detect_platform_from_url("//facebook.com/page") == "facebook"
+
 
 class TestGetIcon:
     def test_returns_the_registered_icon(self):

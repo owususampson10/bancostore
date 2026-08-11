@@ -164,6 +164,15 @@ SOCIAL_ICONS = {
 
 SOCIAL_ICON_CHOICES = [(slug, icon.label) for slug, icon in SOCIAL_ICONS.items()]
 
+# CodeRabbit finding (performance): the original detect_platform_from_url
+# scanned every platform's every domain on each call -- fine at this
+# registry's size, but a flat domain->slug map turns matching into a
+# per-hostname-label walk instead, which also reads more directly as
+# "exact-or-subdomain" than the nested loop did.
+_DOMAIN_TO_SLUG = {
+    domain: slug for slug, icon in SOCIAL_ICONS.items() for domain in icon.domains
+}
+
 
 def detect_platform_from_url(url):
     """Match a pasted profile/page URL's hostname against each known
@@ -173,7 +182,17 @@ def detect_platform_from_url(url):
     "custom" when nothing matches, never guesses."""
     if not url:
         return "custom"
-    candidate = url if "//" in url else f"//{url}"
+    # CodeRabbit finding: a bare "//" in url check misdetects a
+    # scheme-less URL whose *path* happens to contain "//" (e.g.
+    # "facebook.com/page//photos") as already having a scheme, skipping
+    # the "//" prefix urlparse needs to find a netloc at all -- checking
+    # for an actual "://" scheme separator (or an already-protocol-
+    # relative "//" prefix) is what's actually being tested for here.
+    # (CodeRabbit's own proposed one-line diff for this doesn't handle a
+    # real "https://..." URL correctly -- verified by testing it before
+    # applying; this version is checked against both cases.)
+    has_scheme = "://" in url or url.startswith("//")
+    candidate = url if has_scheme else f"//{url}"
     try:
         netloc = urlparse(candidate).netloc.lower()
     except ValueError:
@@ -184,10 +203,12 @@ def detect_platform_from_url(url):
     if not netloc:
         return "custom"
 
-    for slug, icon in SOCIAL_ICONS.items():
-        for domain in icon.domains:
-            if netloc == domain or netloc.endswith("." + domain):
-                return slug
+    labels = netloc.split(".")
+    for i in range(len(labels)):
+        candidate_domain = ".".join(labels[i:])
+        slug = _DOMAIN_TO_SLUG.get(candidate_domain)
+        if slug:
+            return slug
     return "custom"
 
 

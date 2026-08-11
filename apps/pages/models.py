@@ -1,3 +1,5 @@
+import logging
+
 from django.core.cache import cache
 from django.core.validators import RegexValidator
 from django.db import models
@@ -5,6 +7,8 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from .social_icons import SOCIAL_ICON_CHOICES, get_icon
+
+logger = logging.getLogger(__name__)
 
 # Doubt-driven-development finding: a plain ^...$ pattern still admits a
 # single trailing "\n" (Python re's $ matches just before end-of-string OR
@@ -15,12 +19,6 @@ HEX_COLOR_VALIDATOR = RegexValidator(
     regex=r"\A#[0-9A-Fa-f]{6}\Z",
     message="Enter a valid 6-digit hex color, e.g. #1877F2.",
 )
-
-# Doubt-driven-development finding: nothing stops an admin from
-# accidentally creating an unbounded number of footer links, degrading the
-# public footer on every page. Enforced in SocialMediaLinkForm.clean(), not
-# here -- a create-time business rule, not a data-integrity constraint.
-MAX_SOCIAL_MEDIA_LINKS = 20
 
 SOCIAL_MEDIA_LINKS_CACHE_KEY = "pages:social_media_links"
 
@@ -53,4 +51,16 @@ class SocialMediaLink(models.Model):
 @receiver(post_save, sender=SocialMediaLink)
 @receiver(post_delete, sender=SocialMediaLink)
 def _invalidate_social_media_links_cache(sender, **kwargs):
-    cache.delete(SOCIAL_MEDIA_LINKS_CACHE_KEY)
+    # CodeRabbit finding (context_processors.py): django_redis raises on a
+    # real connection failure rather than degrading gracefully. Left
+    # uncaught here, a Redis hiccup during this signal would surface as a
+    # 500 on the admin's save/delete action even though the actual
+    # database write already succeeded -- misleading the admin into
+    # thinking the change was lost. The next social_media_links()
+    # read falls back to the database on its own cache-read failure
+    # regardless, and the bounded cache timeout is the self-healing floor
+    # if this delete is ever missed.
+    try:
+        cache.delete(SOCIAL_MEDIA_LINKS_CACHE_KEY)
+    except Exception:
+        logger.exception("_invalidate_social_media_links_cache: cache delete failed")

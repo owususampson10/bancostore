@@ -30,7 +30,7 @@ from apps.orders.services import (
     cancel_or_refund_order,
     is_legal_order_status_transition,
 )
-from apps.pages.models import MAX_SOCIAL_MEDIA_LINKS, SocialMediaLink
+from apps.pages.models import SocialMediaLink
 from apps.pages.social_icons import SOCIAL_ICONS, detect_platform_from_url
 from apps.platform_settings.admin import BancostoreConstanceForm
 from apps.platform_settings.config import CONSTANCE_CONFIG, CONSTANCE_CONFIG_FIELDSETS
@@ -45,6 +45,10 @@ from apps.withdrawal.services import (
     WithdrawalRequestNotPending,
     approve_withdrawal_request,
     reject_withdrawal_request,
+)
+from bancostore.concurrency import (
+    retry_on_lock_contention,
+    select_for_update_nowait_if_supported,
 )
 
 from .forms import (
@@ -1512,15 +1516,42 @@ def _social_links_settings_context(request, add_form=None, row_forms_override=No
     in place."""
     links = list(SocialMediaLink.objects.all())
     row_forms_override = row_forms_override or {}
-    row_forms = [
-        row_forms_override.get(link.pk) or SocialMediaLinkForm(instance=link)
-        for link in links
-    ]
+    rows = []
+    for link in links:
+        form = row_forms_override.get(link.pk) or SocialMediaLinkForm(instance=link)
+        rows.append(
+            {
+                "link": link,
+                "form": form,
+                "element_id": f"social-link-initial-{link.pk}",
+                # CodeRabbit finding: raw values were interpolated straight
+                # into Alpine's x-data JS string (guarded by |escapejs, but
+                # this project's own established convention after a real
+                # incident on the checkout page -- Task 17 -- is
+                # json_script + a script-tag read, never inline
+                # interpolation at all, escaped or not). form.*.value
+                # reflects the just-submitted (possibly invalid) value on
+                # a failed save, not just the saved link, so this must
+                # read from the form, not the link, to show what the
+                # admin actually typed.
+                "initial": {
+                    "platform": form["platform"].value() or link.platform,
+                    "icon_color": form["icon_color"].value() or link.icon_color,
+                },
+            }
+        )
+
+    add_form = add_form or SocialMediaLinkForm()
     return {
-        "links": list(zip(links, row_forms)),
-        "add_form": add_form or SocialMediaLinkForm(),
-        "at_max": len(links) >= MAX_SOCIAL_MEDIA_LINKS,
-        "max_links": MAX_SOCIAL_MEDIA_LINKS,
+        "rows": rows,
+        "add_form": add_form,
+        "add_form_element_id": "social-link-add-form-initial",
+        "add_form_initial": {
+            "platform": add_form["platform"].value() or "custom",
+            "icon_color": add_form["icon_color"].value() or "#FFFFFF",
+        },
+        "at_max": len(links) >= config.MAX_SOCIAL_MEDIA_LINKS,
+        "max_links": config.MAX_SOCIAL_MEDIA_LINKS,
         # Rendered server-side (real SVG/material-icon markup for every
         # curated platform), toggled client-side only via Alpine x-show --
         # never built up as an HTML string in JS, so there is no dynamic
@@ -1542,6 +1573,30 @@ def social_links_settings(request):
     )
 
 
+def _save_new_social_link_with_next_order(form):
+    """CodeRabbit finding: a bare `.aggregate(Max("order")) + 1` read-then-
+    write can assign duplicate order values under two truly concurrent
+    creates. Locks the whole table for the duration of the read+write
+    (this table stays small -- at most MAX_SOCIAL_MEDIA_LINKS rows -- so a
+    full-table lock is cheap here, unlike a per-row lock pattern) using
+    this codebase's own established concurrency helper
+    (bancostore/concurrency.py, the same one apps.catalog.services
+    .decrement_stock uses) instead of reinventing locking."""
+
+    def _attempt():
+        with transaction.atomic():
+            locked_links = select_for_update_nowait_if_supported(
+                SocialMediaLink.objects.all()
+            )
+            current_max = locked_links.aggregate(m=Max("order"))["m"] or 0
+            link = form.save(commit=False)
+            link.order = current_max + 1
+            link.save()
+            return link
+
+    return retry_on_lock_contention(_attempt)
+
+
 @login_required(login_url="two_factor:login")
 def social_link_create(request):
     """POST-only. Every write goes through SocialMediaLinkForm's is_valid()
@@ -1555,10 +1610,7 @@ def social_link_create(request):
 
     form = SocialMediaLinkForm(request.POST)
     if form.is_valid():
-        link = form.save(commit=False)
-        current_max = SocialMediaLink.objects.aggregate(m=Max("order"))["m"] or 0
-        link.order = current_max + 1
-        link.save()
+        link = _save_new_social_link_with_next_order(form)
         messages.success(request, f'"{link.name}" added.')
         return redirect("admin_portal:social_links_settings")
 

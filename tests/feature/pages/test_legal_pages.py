@@ -134,6 +134,32 @@ def test_privacy_policy_hides_custom_text_block_when_unset(client):
 
 
 @pytest.mark.django_db
+def test_privacy_policy_escapes_admin_text(client):
+    """CodeRabbit finding: TERMS_AND_CONDITIONS_TEXT and
+    REFUND_RETURN_POLICY_TEXT each had this regression test already --
+    PRIVACY_POLICY_TEXT didn't."""
+    config.PRIVACY_POLICY_TEXT = "<script>alert(1)</script>"
+
+    response = client.get(reverse("pages:privacy_policy"))
+
+    assert b"<script>alert(1)</script>" not in response.content
+    assert b"&lt;script&gt;alert(1)&lt;/script&gt;" in response.content
+
+
+@pytest.mark.django_db
+def test_terms_of_use_shows_the_real_cooling_off_period(client):
+    """CodeRabbit finding: this figure was hardcoded as plain text
+    instead of reading the live COOLING_OFF_PERIOD_DAYS setting."""
+    config.COOLING_OFF_PERIOD_DAYS = 10
+
+    response = client.get(reverse("pages:terms_of_use"))
+
+    content = response.content.decode()
+    assert "10 days" in content
+    assert "7 days" not in content
+
+
+@pytest.mark.django_db
 def test_signup_consent_links_point_to_real_legal_pages(client):
     response = client.get(reverse("account_signup"))
 

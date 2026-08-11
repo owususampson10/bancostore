@@ -2,8 +2,10 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.forms import inlineformset_factory
 
+from constance import config
+
 from apps.catalog.models import Category, Product, ProductImage, ProductVariant
-from apps.pages.models import MAX_SOCIAL_MEDIA_LINKS, SocialMediaLink
+from apps.pages.models import SocialMediaLink
 
 # Shared Tailwind classes so every plain text/number/select/textarea input
 # across the Catalog Management forms matches the admin_portal design
@@ -171,16 +173,22 @@ class SocialMediaLinkForm(forms.ModelForm):
         # new, unsaved row) -- editing an existing row must never be
         # blocked by a cap that was already reached.
         #
+        # CodeRabbit finding: this cap was a hardcoded Python constant --
+        # moved to constance's MAX_SOCIAL_MEDIA_LINKS (default 20) so an
+        # admin can raise/lower it without a deploy, matching this
+        # project's "business rules live in settings, not code" rule.
+        #
         # Code-review finding: this count-then-create has a TOCTOU race
         # under two truly concurrent submissions (both could read count()
-        # < 20 before either commits). Accepted, not fixed -- this is an
-        # admin-only, cosmetic footer cap, not a financial path, and this
-        # codebase already reserves select_for_update-grade locking
+        # < the cap before either commits). Accepted, not fixed -- this is
+        # an admin-only, cosmetic footer cap, not a financial path, and
+        # this codebase already reserves select_for_update-grade locking
         # rigor for money (wallet/PV/commission) code specifically.
         if not self.instance.pk:
-            if SocialMediaLink.objects.count() >= MAX_SOCIAL_MEDIA_LINKS:
+            max_links = config.MAX_SOCIAL_MEDIA_LINKS
+            if SocialMediaLink.objects.count() >= max_links:
                 raise ValidationError(
-                    f"You can add up to {MAX_SOCIAL_MEDIA_LINKS} social "
-                    "media links. Delete one before adding another."
+                    f"You can add up to {max_links} social media links. "
+                    "Delete one before adding another."
                 )
         return cleaned_data

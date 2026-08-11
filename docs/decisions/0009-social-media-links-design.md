@@ -12,10 +12,10 @@ Accepted (2026-08-11)
 
 Task 35 (not in the original plan — requested directly by the user) replaces the storefront
 footer's 3 hardcoded, disabled "Coming soon" social icons (`templates/base_store.html`) with an
-admin-managed feature: staff can add and delete an unlimited number of social media links, each
-with a name, URL, icon, and color. Pasting a URL should auto-detect the platform's icon, with a
-manual override always available; the icon's color should be settable via a color picker with a
-hex text field.
+admin-managed feature: staff can add and delete social media links (up to a configurable cap —
+see Decision 6 — not literally unlimited), each with a name, URL, icon, and color. Pasting a URL
+should auto-detect the platform's icon, with a manual override always available; the icon's color
+should be settable via a color picker with a hex text field.
 
 Several real design gaps needed resolving before implementation, put through a
 `doubt-driven-development` adversarial review (a fresh-context `security-auditor` agent) before any
@@ -89,7 +89,7 @@ for the same reason). The queryset is cached indefinitely (`timeout=None`) and i
 "admin rarely changes this, cache it and invalidate on write" shape constance's own backend already
 uses, not a new caching pattern invented for this feature.
 
-### 6. `MAX_SOCIAL_MEDIA_LINKS = 20` cap, enforced in the form
+### 6. `MAX_SOCIAL_MEDIA_LINKS` cap (default 20), a constance setting, enforced in the form
 
 The user asked for "countless" links with no numeric ceiling in mind — but a
 `doubt-driven-development` finding pointed out that an uncapped table (even absent any malice, just
@@ -97,6 +97,11 @@ an admin fat-fingering an import or repeatedly clicking Add) degrades the public
 single page load with no floor. `MAX_SOCIAL_MEDIA_LINKS` is a generous, effectively-unlimited-in-
 practice ceiling enforced in `SocialMediaLinkForm.clean()`, checked only on *create* (`self.instance.pk`
 falsy) — editing an already-existing row is never blocked just because the table happens to be full.
+Originally a hardcoded Python constant; a `code-review-and-quality` pass (CodeRabbit, on the open
+PR) correctly pointed out this violates this project's own "business rules live in settings, not
+code" rule (`CLAUDE.md`) — moved to `apps/platform_settings/config.py`'s `MAX_SOCIAL_MEDIA_LINKS`
+constance setting so an admin can raise or lower it without a deploy, same treatment as every other
+cap/rate/fee in this codebase.
 
 ### 7. Full-page POST + redirect CRUD, not htmx partial swaps
 
