@@ -78,7 +78,9 @@ urlpatterns = [
         name="catalog_product_delete",
     ),
     path("settings/", views.platform_settings, name="platform_settings"),
-    path("social-links/", views.social_links_settings, name="social_links_settings"),
+    # Task 36c: no standalone page -- Social Links now lives inside the
+    # "settings/" page's General Platform Settings tab; these three remain
+    # as the mutating endpoints that page's own forms POST to.
     path("social-links/add/", views.social_link_create, name="social_link_create"),
     path(
         "social-links/<int:pk>/edit/",

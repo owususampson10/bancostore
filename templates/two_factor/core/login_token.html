@@ -1,4 +1,4 @@
-{% load static %}<!DOCTYPE html>
+{% load static %}{% load vite_tags %}<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="{% static 'assets/main.css' %}">
+<link rel="stylesheet" href="{% vite_css 'main.js' %}">
 </head>
 <body class="bg-background font-body-md text-on-surface min-h-screen flex flex-col items-center justify-center relative overflow-hidden">
 <div class="absolute inset-0 z-0 pointer-events-none opacity-20 overflow-hidden">

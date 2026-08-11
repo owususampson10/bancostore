@@ -1,27 +1,36 @@
-{% extends "admin_portal/base_dashboard.html" %}
-{% block title %}Social Links — Bancostore Admin Portal{% endblock %}
-
-{% block content %}
 {% comment %}
-Task 35. Icon rendering (both the row preview and the picker dropdown
-list) is entirely server-rendered from apps/pages/social_icons.py's
-curated registry -- SocialMediaLink.platform is a constrained choices
-field, never free-text, so the real <path d="..."> markup an admin's
-browser ever sees always comes from our own fixed Python dict, never from
-request data. The picker toggles which pre-rendered icon is visible via
-plain Alpine x-show (a CSS display switch), never by building HTML in JS.
+Task 35/36c. Social Links management, embedded inside platform_settings.html's
+General Platform Settings tab panel (not its own page/sidebar item anymore,
+per explicit user request). Icon rendering (both the row preview and the
+picker dropdown list) is entirely server-rendered from
+apps/pages/social_icons.py's curated registry -- SocialMediaLink.platform is
+a constrained choices field, never free-text, so the real <path d="..."> markup
+an admin's browser ever sees always comes from our own fixed Python dict,
+never from request data. The picker toggles which pre-rendered icon is
+visible via plain Alpine x-show (a CSS display switch), never by building
+HTML in JS.
 
-CodeRabbit finding: each row/add-form's initial platform/color used to be
-interpolated directly into Alpine's x-data JS string (guarded by
-|escapejs, but not this project's own established convention -- Task 17's
-checkout page had a real XSS from exactly this raw-interpolation pattern
-once, fixed by switching to json_script + a script-tag read, never
-inline interpolation regardless of escaping). Every row/add-form's
-initial state is now passed via {{ ...|json_script:... }} and read with
-JSON.parse from the matching <script> tag instead.
+Each row/add-form's initial platform/color is passed via
+{{ ...|json_script:... }} and read with JSON.parse from a matching <script>
+tag, not interpolated into Alpine's x-data string directly (Task 17's
+checkout page had a real XSS from exactly that raw-interpolation pattern
+once).
+
+Task 36d: two real bugs fixed here. (1) Both picker dropdowns used to sit
+inside a parent `overflow-hidden` wrapper (needed only to clip the list's
+own rounded corners), which also clipped the dropdown's own absolutely-
+positioned option list after ~2 items -- confirmed via a live screenshot.
+Removed from both wrappers; harmless since every row/section shares the
+same background color, so there was nothing visible for that overflow-hidden
+to actually clip. (2) Picking an icon now also sets the color field to that
+icon's real default_color (SOCIAL_ICON_DEFAULT_COLORS below, sourced from
+the same trusted server-side registry, not user input) -- with a "reset to
+default" control next to the hex field so a manually-changed color can be
+reverted without retyping it.
 {% endcomment %}
 <script>
 const SOCIAL_LINK_DETECT_URL = "{% url 'admin_portal:social_link_detect_platform' %}";
+const SOCIAL_ICON_DEFAULT_COLORS = { {% for icon in all_icons %}"{{ icon.slug }}": "{{ icon.default_color }}"{% if not forloop.last %}, {% endif %}{% endfor %} };
 async function detectSocialPlatform(url) {
   if (!url) { return null; }
   try {
@@ -35,19 +44,30 @@ async function detectSocialPlatform(url) {
 }
 function socialLinkPickerState(elementId, open) {
   const initial = JSON.parse(document.getElementById(elementId).textContent);
-  return { open, pickerOpen: false, platform: initial.platform, color: initial.icon_color };
+  return {
+    open,
+    pickerOpen: false,
+    platform: initial.platform,
+    color: initial.icon_color,
+    choosePlatform(slug) {
+      this.platform = slug;
+      this.color = SOCIAL_ICON_DEFAULT_COLORS[slug] || this.color;
+      this.pickerOpen = false;
+    },
+    resetColorToDefault() {
+      this.color = SOCIAL_ICON_DEFAULT_COLORS[this.platform] || this.color;
+    },
+  };
 }
 </script>
 
 <div x-data="{ deleteOpen: false, deleteName: '', deleteUrl: '', deleteKind: 'social link', deleteTrigger: null }">
-<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-<div>
-<h2 class="font-headline-md text-headline-md text-on-surface">Social Links</h2>
+<div class="mb-6">
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Social Media Links</h3>
 <p class="font-body-md text-body-md text-on-surface-variant mt-1">Manage the social media icons shown in the storefront footer. Paste a link and the platform icon is detected automatically -- you can always pick a different one.</p>
 </div>
-</div>
 
-<div class="bg-surface-container-lowest rounded-xl border border-outline-variant divide-y divide-outline-variant overflow-hidden">
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant divide-y divide-outline-variant">
 {% for row in rows %}
 {% with link=row.link form=row.form %}
 {{ row.initial|json_script:row.element_id }}
@@ -62,7 +82,7 @@ function socialLinkPickerState(elementId, open) {
 </span>
 {% endfor %}
 </span>
-<span class="font-body-lg text-body-lg text-on-surface truncate">{{ link.name }}</span>
+<span class="font-body-md text-body-md text-on-surface truncate">{{ link.name }}</span>
 </div>
 <span class="material-symbols-outlined text-on-surface-variant flex-shrink-0" aria-hidden="true" x-text="open ? 'expand_less' : 'expand_more'"></span>
 </button>
@@ -81,7 +101,7 @@ function socialLinkPickerState(elementId, open) {
 </div>
 <div class="space-y-1">
 <label for="{{ form.url.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Link URL</label>
-<input type="url" name="{{ form.url.html_name }}" id="{{ form.url.id_for_label }}" value="{{ form.url.value|default:'' }}" placeholder="https://facebook.com/yourpage" @blur="detectSocialPlatform($event.target.value).then(p => { if (p) platform = p })" class="{{ form.url.field.widget.attrs.class }}">
+<input type="url" name="{{ form.url.html_name }}" id="{{ form.url.id_for_label }}" value="{{ form.url.value|default:'' }}" placeholder="https://facebook.com/yourpage" @blur="detectSocialPlatform($event.target.value).then(p => { if (p) choosePlatform(p) })" class="{{ form.url.field.widget.attrs.class }}">
 {% if form.url.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.url.errors|striptags }}</p>{% endif %}
 </div>
 </div>
@@ -106,9 +126,9 @@ function socialLinkPickerState(elementId, open) {
 </button>
 <div x-show="pickerOpen" x-cloak @click.outside="pickerOpen = false" class="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-outline-variant rounded-lg shadow-lg">
 {% for icon in all_icons %}
-<button type="button" @click="platform = '{{ icon.slug }}'; pickerOpen = false" class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low text-left">
+<button type="button" @click="choosePlatform('{{ icon.slug }}')" class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low text-left">
 <span class="w-5 h-5 flex items-center justify-center flex-shrink-0" style="color: {{ icon.default_color }}">{% include "pages/_social_icon.html" with icon=icon %}</span>
-<span class="font-body-md text-body-sm text-on-surface">{{ icon.label }}</span>
+<span class="font-body-md text-body-md text-on-surface">{{ icon.label }}</span>
 </button>
 {% endfor %}
 </div>
@@ -117,12 +137,15 @@ function socialLinkPickerState(elementId, open) {
 {% if form.platform.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.platform.errors|striptags }}</p>{% endif %}
 </div>
 
-{# Color picker: native color input + hex text field, two-way synced #}
+{# Color picker: native color input + hex text field, two-way synced, plus a reset-to-brand-default control #}
 <div class="space-y-1">
 <label for="{{ form.icon_color.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Icon Color</label>
 <div class="flex items-center gap-2">
 <input type="color" :value="color" @input="color = $event.target.value" class="w-11 h-11 p-0.5 rounded-lg border border-outline-variant bg-surface cursor-pointer flex-shrink-0" aria-label="Pick icon color">
 <input type="text" name="{{ form.icon_color.html_name }}" id="{{ form.icon_color.id_for_label }}" x-model="color" maxlength="7" placeholder="#1877F2" class="{{ form.icon_color.field.widget.attrs.class }}">
+<button type="button" @click="resetColorToDefault()" class="p-2.5 rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-colors flex-shrink-0" title="Reset to this platform's default color" aria-label="Reset to this platform's default color">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">restart_alt</span>
+</button>
 </div>
 {% if form.icon_color.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.icon_color.errors|striptags }}</p>{% endif %}
 </div>
@@ -130,7 +153,7 @@ function socialLinkPickerState(elementId, open) {
 
 <div class="flex items-center justify-between gap-3 pt-2">
 <button type="button" class="text-admin-error font-label-md text-label-md hover:underline" @click.prevent="deleteOpen = true; deleteName = '{{ link.name|escapejs }}'; deleteUrl = '{% url 'admin_portal:social_link_delete' link.pk %}'; deleteKind = 'social link'; deleteTrigger = $el">Delete</button>
-<button type="submit" class="bg-primary text-on-primary px-6 py-2.5 rounded-lg font-button text-button hover:opacity-90 active:scale-95 transition-all">Save Changes</button>
+<button type="submit" class="bg-primary text-on-primary px-6 py-2.5 rounded-lg font-label-md text-label-md hover:opacity-90 active:scale-95 transition-all">Save Changes</button>
 </div>
 </form>
 </div>
@@ -145,14 +168,14 @@ function socialLinkPickerState(elementId, open) {
 
 {# Add new link -- collapsed "+ Add Item" affordance by default, expands to the same field set as a row #}
 {{ add_form_initial|json_script:add_form_element_id }}
-<div class="mt-4 bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden" x-data="socialLinkPickerState('{{ add_form_element_id }}', {{ add_form_open|yesno:'true,false' }})">
+<div class="mt-4 bg-surface-container-lowest rounded-xl border border-outline-variant" x-data="socialLinkPickerState('{{ add_form_element_id }}', {{ add_form_open|yesno:'true,false' }})">
 {% if at_max %}
 <div class="px-6 py-4 flex items-center gap-2 text-on-surface-variant">
 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">info</span>
-<p class="font-body-sm text-body-sm">You've reached the limit of {{ max_links }} social links. Delete one before adding another.</p>
+<p class="font-body-md text-body-md">You've reached the limit of {{ max_links }} social links. Delete one before adding another.</p>
 </div>
 {% else %}
-<button type="button" class="w-full flex items-center justify-center gap-2 px-4 py-4 text-primary font-button text-button hover:bg-surface-container-low transition-colors" @click="open = !open">
+<button type="button" class="w-full flex items-center justify-center gap-2 px-4 py-4 text-primary font-label-md text-label-md hover:bg-surface-container-low transition-colors" @click="open = !open">
 <span class="material-symbols-outlined" aria-hidden="true">add_circle</span>
 Add Item
 </button>
@@ -170,7 +193,7 @@ Add Item
 </div>
 <div class="space-y-1">
 <label for="{{ add_form.url.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Link URL</label>
-<input type="url" name="{{ add_form.url.html_name }}" id="{{ add_form.url.id_for_label }}" value="{{ add_form.url.value|default:'' }}" placeholder="https://facebook.com/yourpage" @blur="detectSocialPlatform($event.target.value).then(p => { if (p) platform = p })" class="{{ add_form.url.field.widget.attrs.class }}">
+<input type="url" name="{{ add_form.url.html_name }}" id="{{ add_form.url.id_for_label }}" value="{{ add_form.url.value|default:'' }}" placeholder="https://facebook.com/yourpage" @blur="detectSocialPlatform($event.target.value).then(p => { if (p) choosePlatform(p) })" class="{{ add_form.url.field.widget.attrs.class }}">
 {% if add_form.url.errors %}<p class="text-admin-error font-label-md text-label-md">{{ add_form.url.errors|striptags }}</p>{% endif %}
 </div>
 </div>
@@ -194,9 +217,9 @@ Add Item
 </button>
 <div x-show="pickerOpen" x-cloak @click.outside="pickerOpen = false" class="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-outline-variant rounded-lg shadow-lg">
 {% for icon in all_icons %}
-<button type="button" @click="platform = '{{ icon.slug }}'; pickerOpen = false" class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low text-left">
+<button type="button" @click="choosePlatform('{{ icon.slug }}')" class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low text-left">
 <span class="w-5 h-5 flex items-center justify-center flex-shrink-0" style="color: {{ icon.default_color }}">{% include "pages/_social_icon.html" with icon=icon %}</span>
-<span class="font-body-md text-body-sm text-on-surface">{{ icon.label }}</span>
+<span class="font-body-md text-body-md text-on-surface">{{ icon.label }}</span>
 </button>
 {% endfor %}
 </div>
@@ -210,13 +233,16 @@ Add Item
 <div class="flex items-center gap-2">
 <input type="color" :value="color" @input="color = $event.target.value" class="w-11 h-11 p-0.5 rounded-lg border border-outline-variant bg-surface cursor-pointer flex-shrink-0" aria-label="Pick icon color">
 <input type="text" name="{{ add_form.icon_color.html_name }}" id="{{ add_form.icon_color.id_for_label }}" x-model="color" maxlength="7" placeholder="#1877F2" class="{{ add_form.icon_color.field.widget.attrs.class }}">
+<button type="button" @click="resetColorToDefault()" class="p-2.5 rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-colors flex-shrink-0" title="Reset to this platform's default color" aria-label="Reset to this platform's default color">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">restart_alt</span>
+</button>
 </div>
 {% if add_form.icon_color.errors %}<p class="text-admin-error font-label-md text-label-md">{{ add_form.icon_color.errors|striptags }}</p>{% endif %}
 </div>
 </div>
 
 <div class="flex justify-end pt-2">
-<button type="submit" class="bg-primary text-on-primary px-6 py-2.5 rounded-lg font-button text-button hover:opacity-90 active:scale-95 transition-all">Add Link</button>
+<button type="submit" class="bg-primary text-on-primary px-6 py-2.5 rounded-lg font-label-md text-label-md hover:opacity-90 active:scale-95 transition-all">Add Link</button>
 </div>
 </form>
 </div>
@@ -225,4 +251,3 @@ Add Item
 
 {% include "admin_portal/partials/_delete_confirm_modal.html" %}
 </div>
-{% endblock %}

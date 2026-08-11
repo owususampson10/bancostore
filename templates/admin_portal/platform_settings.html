@@ -1,7 +1,7 @@
 {% extends "admin_portal/base_dashboard.html" %}
 {% block title %}Platform Settings — Bancostore Admin Portal{% endblock %}
 {% block content %}
-<div x-data="{ activeGroup: 0 }">
+<div x-data="{ activeGroup: {{ active_group|default:0 }} }">
 <div class="mb-8">
 <h2 class="font-headline-md text-headline-md text-on-surface">Platform Settings</h2>
 <p class="font-body-md text-body-md text-on-surface-variant mt-1">Control every business rule on the platform — no code changes needed.</p>
@@ -13,10 +13,7 @@
 </div>
 {% endif %}
 
-<form method="post" novalidate class="flex flex-col lg:flex-row gap-6 items-start">
-{% csrf_token %}
-{{ form.version }}
-
+<div class="flex flex-col lg:flex-row gap-6 items-start">
 <!-- Configuration groups: vertical tabs from lg (1024px) up -- side-by-side with
      the outer app sidebar, this needs real width, so it stacks (tabs as a
      horizontal scroll strip above full-width content, no icons -- there's
@@ -24,7 +21,18 @@
      screen, not just phones. Sticky (not just internally scrollable) from
      lg up so it stays in view while the content pane on its right scrolls
      -- top-20 clears the page's own sticky top-0 h-16 header with a small
-     gap, matching that header's own offset convention. -->
+     gap, matching that header's own offset convention.
+
+     Task 36f: this nav lives in the same flex row as the WHOLE right-hand
+     column below (the constance <form> AND the Social Links block after
+     it), not just the form alone -- its containing block for `sticky`
+     purposes is this row, so it stays pinned all the way through Social
+     Links too. It used to be the form's own direct child, which meant it
+     un-stuck and scrolled away as soon as the page scrolled past the
+     form's bottom edge (Social Links couldn't be inside the form -- forms
+     can't nest -- so it sat below as a sibling the nav's old containing
+     block never covered). Confirmed live: this bug reproduced exactly as
+     the user described. -->
 <nav class="w-full lg:w-72 lg:shrink-0 lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-6rem)] bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 overflow-x-auto lg:overflow-y-auto">
 <div class="flex flex-row lg:flex-col gap-1 p-2 min-w-max lg:min-w-0" role="tablist" aria-orientation="vertical">
 {% for group in groups %}
@@ -55,8 +63,13 @@ two classes on separate elements sidesteps the conflict entirely.
 </div>
 </nav>
 
+<div class="w-full flex-1 min-w-0 flex flex-col gap-6">
+<form method="post" novalidate>
+{% csrf_token %}
+{{ form.version }}
+
 <!-- Active group's fields -->
-<div class="w-full flex-1 min-w-0 bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 flex flex-col overflow-hidden">
+<div class="bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 flex flex-col overflow-hidden">
 <div class="px-6 py-4 border-b border-outline-variant/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sticky top-0 bg-surface-container-lowest/95 backdrop-blur-sm z-10">
 <div>
 {% for group in groups %}
@@ -87,6 +100,20 @@ Save Changes
 <span class="block w-11 h-6 bg-surface-container-highest rounded-full peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full transition-colors"></span>
 </span>
 </label>
+{% elif field.is_locked_currency %}
+{# Task 36h: locked to GHS, not an interactive dropdown -- multi-currency #}
+{# isn't built anywhere in this app yet (no price display or Paystack #}
+{# call reads this setting), so a working-looking picker would silently #}
+{# do nothing. field.form_field carries Django's own disabled=True, #}
+{# real tamper-resistance matching ADMIN_2FA_ENABLED's own pattern above. #}
+<div class="min-w-0">
+<label class="block font-label-md text-label-md text-on-surface mb-1 break-words">{{ field.label }}</label>
+<p class="text-[12px] text-on-surface-variant mb-2">{{ field.help_text }}</p>
+<div class="w-full bg-surface-container-low border border-outline-variant rounded-lg px-4 py-3 font-body-md text-body-md text-on-surface-variant flex items-center justify-between">
+<span>{{ field.locked_label }}</span>
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true" title="Locked -- multi-currency support isn't built yet">lock</span>
+</div>
+</div>
 {% else %}
 <div class="min-w-0 {% if field.is_textarea %}lg:col-span-2{% endif %}">
 <label for="{{ field.form_field.id_for_label }}" class="block font-label-md text-label-md text-on-surface mb-1 break-words">{{ field.label }}</label>
@@ -103,5 +130,21 @@ Save Changes
 </div>
 </div>
 </form>
+
+{% comment %}
+Task 36c: Social Links lives inside the General Platform Settings tab,
+but its own <form> elements can't nest inside the constance form above,
+so this is a sibling block gated by the same activeGroup state. Task 36f:
+now a plain flex sibling of the form within the shared column above (see
+the nav's own comment) instead of needing a manual lg:pl-[19.5rem]
+alignment hack.
+{% endcomment %}
+<div x-show="activeGroup === {{ general_settings_tab_index }}" x-cloak>
+<div class="bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 p-6">
+{% include "admin_portal/partials/_social_links_section.html" %}
+</div>
+</div>
+</div>
+</div>
 </div>
 {% endblock %}
