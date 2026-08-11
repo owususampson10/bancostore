@@ -1462,7 +1462,17 @@ def _constance_field_context(name, options, form):
         # real stored initial value (Django's Field.bound_data short-
         # circuits to `initial` for disabled fields, even on a POST re-
         # render) -- never whatever a crafted request might have submitted.
-        context["locked_label"] = dict(bound_field.field.choices)[bound_field.value()]
+        # CodeRabbit finding: a bare dict lookup crashes the *entire*
+        # Platform Settings page (all ~76 settings, not just this field)
+        # with an uncaught KeyError if a legacy/stale value ever ends up
+        # stored (e.g. a direct Redis write, a rollback) that predates
+        # this field being locked to a single GHS choice -- .get() with
+        # the raw stored value as its own fallback shows something honest
+        # instead of crashing.
+        stored_value = bound_field.value()
+        context["locked_label"] = dict(bound_field.field.choices).get(
+            stored_value, stored_value
+        )
     return context
 
 

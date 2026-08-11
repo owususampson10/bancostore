@@ -4,6 +4,7 @@ from django.urls import reverse
 import pytest
 from constance import config
 
+from apps.admin_portal.views import _general_settings_tab_index
 from apps.pages.models import SocialMediaLink
 
 User = get_user_model()
@@ -13,6 +14,16 @@ def _settings_url():
     """Task 36c: no standalone page anymore -- Social Links lives inside
     Platform Settings' General tab."""
     return reverse("admin_portal:platform_settings")
+
+
+def _general_settings_url():
+    """CodeRabbit finding: the redirect tests below only checked *a* tab
+    query param was present, which would still pass for a redirect to the
+    wrong tab -- computed from the same helper the view itself uses
+    (apps.admin_portal.views._general_settings_tab_index) rather than a
+    hardcoded index, so it can't silently drift if CONSTANCE_CONFIG_
+    FIELDSETS is ever reordered."""
+    return f"{_settings_url()}?tab={_general_settings_tab_index()}"
 
 
 def _create_url():
@@ -143,8 +154,7 @@ def test_creating_a_link_redirects_to_the_general_settings_tab(staff_client):
     )
 
     assert response.status_code == 302
-    assert response.url.startswith(reverse("admin_portal:platform_settings"))
-    assert "tab=" in response.url
+    assert response.url == _general_settings_url()
 
 
 @pytest.mark.django_db
@@ -283,8 +293,7 @@ def test_updating_a_link_redirects_to_the_general_settings_tab(staff_client):
     )
 
     assert response.status_code == 302
-    assert response.url.startswith(reverse("admin_portal:platform_settings"))
-    assert "tab=" in response.url
+    assert response.url == _general_settings_url()
 
 
 @pytest.mark.django_db
@@ -351,8 +360,7 @@ def test_deleting_a_link_redirects_to_the_general_settings_tab(staff_client):
     response = staff_client.post(_delete_url(link))
 
     assert response.status_code == 302
-    assert response.url.startswith(reverse("admin_portal:platform_settings"))
-    assert "tab=" in response.url
+    assert response.url == _general_settings_url()
 
 
 @pytest.mark.django_db

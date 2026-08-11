@@ -291,3 +291,19 @@ def test_currency_is_locked_to_ghs_even_if_submitted_data_says_otherwise(staff_c
     assert response.status_code == 302
     assert config.CURRENCY == "GHS"
     assert config.CURRENCY_SYMBOL == "GHS"
+
+
+@pytest.mark.django_db
+def test_a_legacy_non_ghs_stored_value_does_not_crash_the_settings_page(staff_client):
+    """CodeRabbit finding: the locked-currency display used to do a bare
+    dict lookup (choices) that would raise an uncaught KeyError -- and
+    crash the *entire* Platform Settings page, not just this field -- for
+    any stored value outside the single GHS choice. A legacy/stale value
+    (e.g. from a direct Redis write, or a rollback) must degrade to
+    showing that raw value, never a 500."""
+    config.CURRENCY = "NGN"
+
+    response = staff_client.get(_platform_settings_url())
+
+    assert response.status_code == 200
+    assert b"NGN" in response.content
