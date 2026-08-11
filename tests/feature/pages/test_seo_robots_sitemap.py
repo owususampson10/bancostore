@@ -28,14 +28,33 @@ def test_robots_txt_returns_plain_text_200(client):
 @pytest.mark.django_db
 def test_robots_txt_disallows_private_paths(client):
     response = client.get("/robots.txt")
-    content = response.content.decode()
+    lines = response.content.decode().splitlines()
 
-    assert "Disallow: /admin-portal/" in content
-    assert "Disallow: /distributors/" in content
-    assert "Disallow: /accounts/" in content
-    assert "Disallow: /cart/" in content
-    assert "Disallow: /media/kyc/" in content
-    assert "Disallow: /admin/" in content
+    assert "Disallow: /admin-portal/" in lines
+    assert "Disallow: /accounts/" in lines
+    assert "Disallow: /cart/" in lines
+    assert "Disallow: /media/kyc/" in lines
+    assert "Disallow: /admin/" in lines
+    # Exact distributor sub-paths, not just the broad /distributors/ prefix
+    # (a substring check there would pass for any deeper disallow line
+    # without proving these specific, important ones are present --
+    # CodeRabbit finding on PR #70).
+    assert "Disallow: /distributors/dashboard/" in lines
+    assert "Disallow: /distributors/withdraw/" in lines
+    assert "Disallow: /distributors/withdrawals/" in lines
+    assert "Disallow: /distributors/kyc/" in lines
+
+
+@pytest.mark.django_db
+def test_robots_txt_does_not_disallow_distributor_registration_or_login(client):
+    """The one place a blanket `Disallow: /distributors/` would have been
+    wrong: registration/login are this site's real distributor-acquisition
+    funnel pages, not private dashboard content, and must stay crawlable."""
+    response = client.get("/robots.txt")
+    lines = response.content.decode().splitlines()
+
+    assert "Disallow: /distributors/register/" not in lines
+    assert "Disallow: /distributors/login/" not in lines
 
 
 @pytest.mark.django_db

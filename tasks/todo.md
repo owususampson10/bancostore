@@ -6209,10 +6209,16 @@ builds a `Product` schema (name/description/`offers` with real price, `priceCurr
 `availability` from `product.in_stock`) rendered via `product_detail.html`'s `extra_body` block —
 `image` is only included when a real photo exists (claiming the generic OG banner is a photo of a
 specific product would be inaccurate structured data, unlike Open Graph's generic-preview
-convention). Both JSON-LD blocks are serialized server-side with `json.dumps` rather than built
-with template tags, so a product name or social-link URL containing quotes/special characters can
-never produce broken JSON — matching this codebase's established "constrain server-side, never
-raw interpolation" rule from Task 17's Alpine `x-data` XSS fix. Caught the same test-count
+convention). Both JSON-LD blocks are serialized server-side rather than built with template tags,
+so a product name or social-link URL containing quotes/special characters can never produce broken
+JSON — matching this codebase's established "constrain server-side, never raw interpolation" rule
+from Task 17's Alpine `x-data` XSS fix. **Update, PR #70 CodeRabbit round:** plain `json.dumps`
+alone (this slice's original implementation) does not escape `<`/`>`/`&`, so a product description
+or admin-entered social link containing a literal `</script>` could break out of the `<script>`
+element and inject HTML — fixed with a new shared `bancostore/json_ld.py::dumps_for_script_tag()`
+(the same escape mapping Django's own `django.utils.html.json_script()` uses), applied to both
+JSON-LD builders, not just the one CodeRabbit's comment pointed at. See the PR #70 fix-round entry
+below for the full detail. Caught the same test-count
 regression pattern as 37a (`test_gallery_shows_all_images_with_primary_shown_first`'s primary-image
 URL occurrence count bumped 3 → 4 for the new `image` field, with an updated comment). 7 new tests
 in `tests/feature/catalog/test_seo_meta_tags.py`, parsing the rendered `<script>` tags with real
@@ -6284,3 +6290,67 @@ image files directly to confirm all return HTTP 200. `npm run build` re-run (no 
 changes, so identical output hashes — confirms this was a pure asset-swap, not a template-structure
 change). Targeted suite green (`tests/feature/catalog/`, `tests/feature/pages/`: 110 passed), no
 Python logic touched so no broader regression risk.
+
+**PR #70 CodeRabbit fix round (2026-08-11), all 6 findings fixed in one follow-up commit per this
+codebase's own established batching convention:**
+1. **Real, Major-severity fix:** `_build_product_json_ld` and `organization_json_ld` both rendered
+   `json.dumps(data)|safe` inside a `<script type="application/ld+json">` tag — plain `json.dumps`
+   doesn't escape `<`/`>`/`&`, so a product description or admin-entered social link containing a
+   literal `</script>` could break out of the script element and inject arbitrary HTML. Fixed with
+   a new shared `bancostore/json_ld.py::dumps_for_script_tag()`, the same escape mapping Django's
+   own `django.utils.html.json_script()` uses — applied to *both* JSON-LD builders, not just the
+   Product one CodeRabbit's comment specifically flagged, since `organization_json_ld`'s `sameAs`
+   list reads the same class of admin-entered free text. Two new regression tests
+   (`test_product_json_ld_escapes_closing_script_tag_in_description`,
+   `test_organization_json_ld_escapes_closing_script_tag_in_social_link_url`) prove the raw
+   `<script>` element never contains a literal `</script>` mid-tag, while the parsed JSON still
+   round-trips back to the real (malicious-looking) input string.
+2. **Real, functional-correctness fix:** `og:image:width`/`og:image:height` were hardcoded to
+   `1200`/`630` even when `product_detail.html` overrides `og_image` with a real product photo of
+   different dimensions — inaccurate metadata. Fixed by wrapping the tags in a new
+   `og_image_dimensions` block (`templates/base_store.html`), overridden empty on product pages
+   specifically when a real photo exists (`templates/catalog/home.html`... `templates/catalog/product_detail.html`).
+   **Real Django gotcha hit while implementing this, not assumed:** an `{% if %}` *wrapping* a
+   `{% block %}` tag has no effect on which content a parent template's block placeholder resolves
+   to — Django collects block overrides structurally by walking the child template's full node
+   tree (including inside `{% if %}`/`{% for %}` bodies) at parse time, then renders only the
+   matched block node's own inner content, never re-evaluating whatever conditional happened to
+   surround it in the child. The `{% if %}` has to live *inside* the block tags to have any
+   runtime effect — exactly the pattern the pre-existing `og_image` block on the same line already
+   used correctly, caught before it shipped by checking that block's own shape rather than
+   guessing. Live-verified against a real `runserver` across all three cases: home page (default
+   banner) keeps the 1200x630 tags, a real product photo omits them entirely, and a product with no
+   photo yet still gets the 1200x630 fallback tags (confirms the `{% if not product.primary_image %}`
+   condition itself is also correct, not just present).
+3. **Real, Minor perf fix:** `_build_product_json_ld` called `product.primary_image` twice (once
+   for the presence check, once for the URL), and `product_detail`'s queryset never prefetched
+   `images` at all — meaning this property (which walks `self.images.all()`) was already a
+   pre-existing N+1 every time the template itself called it (the gallery loop, the primary-image
+   check), not something newly introduced. Fixed both at once: `product_detail`'s
+   `prefetch_related()` gained `"images"` alongside its existing `"variants"`, and
+   `_build_product_json_ld` now resolves `primary_image` once into a local variable instead of
+   re-reading the property.
+4. **Test-quality fix:** `test_robots_txt_disallows_private_paths` asserted
+   `"Disallow: /distributors/" in content` — a substring check that would pass for *any* deeper
+   distributor path being disallowed, without actually proving the specific important ones
+   (`dashboard/`, `withdraw/`) are present. Fixed to assert exact `Disallow:` lines via
+   `.splitlines()`, plus a new companion test
+   (`test_robots_txt_does_not_disallow_distributor_registration_or_login`) proving the positive
+   half of the same claim — registration/login genuinely stay crawlable, not just "the test didn't
+   check for a false Disallow."
+5. **Documentation-accuracy fix (Minor):** `tasks/plan.md` Checkpoint K's summary claimed "full
+   suite green throughout" two paragraphs after admitting one full local run had a known
+   pre-existing failure — a real, confusing overclaim. Reworded to state targeted-suite,
+   full-local-suite, and real-MySQL-CI results as three separate, precisely-scoped facts instead of
+   one blanket claim.
+6. **Documentation-accuracy fix (Major, flagged by CodeRabbit as reachable via an automated
+   analysis run against this exact file):** Task 38's record only cited a targeted-suite result,
+   not a final full-suite run reflecting the finished state of the branch. A full local `pytest -q`
+   run at the pre-fix-round commit (1393 passed, 1 skipped, plus the one already-`git stash`-
+   confirmed pre-existing Task 36 failure) is recorded here as that missing data point; a fresh
+   targeted run after this fix round itself (`tests/feature/catalog/`, `tests/feature/pages/`: 113
+   passed, covering all 6 fixes above) is recorded rather than re-running the full ~20-minute suite
+   a third time for changes confined to these same two directories.
+
+All 6 fixes pushed as a single follow-up commit to PR #70, per this codebase's established "fix
+CodeRabbit findings together, not one push per finding" convention.

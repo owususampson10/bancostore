@@ -1,8 +1,9 @@
-import json
 import logging
 
 from django.core.cache import cache
 from django.templatetags.static import static
+
+from bancostore.json_ld import dumps_for_script_tag
 
 from .models import SOCIAL_MEDIA_LINKS_CACHE_KEY, SocialMediaLink
 
@@ -65,11 +66,16 @@ def social_media_links(request):
 def organization_json_ld(request):
     """Task 37c: sitewide Organization/WebSite JSON-LD (base_store.html).
     Serialized here, not built with template tags, so a social link's name
-    or URL can never produce broken/unescaped JSON -- json.dumps is the
-    single source of truth for correct escaping, matching this codebase's
-    established "constrain server-side, never raw interpolation" rule
-    (see Task 17's Alpine x-data XSS fix for the same reasoning applied to
-    a different injection context)."""
+    or URL can never produce broken/unescaped JSON -- dumps_for_script_tag
+    (bancostore/json_ld.py) is the single source of truth for correct
+    escaping, both for valid JSON syntax and for safety inside a <script>
+    element (a literal "</script>" in an admin-entered social link name
+    could otherwise break out of the tag -- CodeRabbit finding on PR #70,
+    fixed here too even though it was only flagged on the Product JSON-LD
+    twin of this function), matching this codebase's established
+    "constrain server-side, never raw interpolation" rule (see Task 17's
+    Alpine x-data XSS fix for the same reasoning applied to a different
+    injection context)."""
     base_url = f"{request.scheme}://{request.get_host()}"
     data = {
         "@context": "https://schema.org",
@@ -97,4 +103,4 @@ def organization_json_ld(request):
             },
         ],
     }
-    return {"organization_json_ld": json.dumps(data)}
+    return {"organization_json_ld": dumps_for_script_tag(data)}

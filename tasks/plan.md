@@ -463,9 +463,17 @@ against `runserver`), every audited page has a real canonical/OG/Twitter/title/d
 (live-verified, including the previously-missing home page), JSON-LD parses as valid JSON with
 real database content on both a static and a dynamic page (live-verified — Google's Rich Results
 Test itself wasn't run, since it requires submitting a real production URL to an external Google
-tool, not attempted here), full suite green throughout (1390 passed, 1 skipped, plus the one
-pre-existing unrelated Task 36 failure tracked separately), page-speed audit complete with findings
-reported to the user, not yet acted on.
+tool, not attempted here), page-speed audit complete with findings reported to the user, Task 38
+acted on the highest-risk one. **Test status, stated precisely rather than as one blanket "full
+suite green" claim (a CodeRabbit finding on PR #70 — the original wording here conflated a
+targeted-suite pass with a full-suite one two paragraphs below it):** every targeted suite for
+each individual slice was green at the time that slice was built (see `tasks/todo.md` Task 37/38
+for each slice's own targeted-suite numbers); one full local `pytest -q` run after 37a+37b was
+green except the one pre-existing, unrelated Task 36 failure (`git stash`-confirmed to already
+exist on `main`); the real-MySQL GitHub Actions CI run on PR #70 itself is the authoritative
+check, since SQLite's locking hides concurrency bugs CI's MySQL container would catch (see
+`SPEC.md` Testing Strategy) — its result is recorded in `tasks/todo.md` once known, not assumed
+green here in advance.
 
 ## Risks and Mitigations
 

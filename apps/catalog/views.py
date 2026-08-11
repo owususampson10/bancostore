@@ -1,9 +1,10 @@
-import json
 from decimal import Decimal, InvalidOperation
 
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, render
+
+from bancostore.json_ld import dumps_for_script_tag
 
 from .models import Category, Product
 
@@ -95,13 +96,19 @@ def product_list(request):
 def _build_product_json_ld(request, product):
     """Task 37c: serialized here rather than built with template tags, so
     a product name/description can never produce broken or unescaped JSON
-    -- json.dumps is the single source of truth for correct escaping,
-    matching organization_json_ld's own reasoning (apps/pages/context_processors.py).
-    "image" is only included when a real photo exists -- claiming the
-    generic OG banner is a photo of this specific product would be
-    inaccurate structured data, unlike Open Graph where a generic social
-    preview image is normal practice."""
+    -- dumps_for_script_tag (bancostore/json_ld.py) is the single source of
+    truth for correct escaping, both for valid JSON syntax and for safety
+    inside a <script> element (a literal "</script>" in a product
+    description could otherwise break out of the tag -- CodeRabbit finding
+    on PR #70). "image" is only included when a real photo exists --
+    claiming the generic OG banner is a photo of this specific product
+    would be inaccurate structured data, unlike Open Graph where a generic
+    social preview image is normal practice. Takes primary_image as an
+    already-resolved argument (not re-read via product.primary_image)
+    since the caller already needed it for the same purpose -- avoids a
+    second walk of product.images.all()."""
     base_url = f"{request.scheme}://{request.get_host()}"
+    primary_image = product.primary_image
     data = {
         "@context": "https://schema.org",
         "@type": "Product",
@@ -119,14 +126,14 @@ def _build_product_json_ld(request, product):
             ),
         },
     }
-    if product.primary_image:
-        data["image"] = base_url + product.primary_image.image.url
-    return json.dumps(data)
+    if primary_image:
+        data["image"] = base_url + primary_image.image.url
+    return dumps_for_script_tag(data)
 
 
 def product_detail(request, slug):
     product = get_object_or_404(
-        Product.objects.storefront_visible().prefetch_related("variants"),
+        Product.objects.storefront_visible().prefetch_related("variants", "images"),
         slug=slug,
     )
     related_products = (
