@@ -139,6 +139,8 @@ def test_gallery_shows_all_images_with_primary_shown_first(client, category):
     response = client.get(reverse("catalog:product_detail", args=[product.slug]))
 
     content = response.content.decode()
-    assert content.count(primary.image.url) == 2  # main image + its own thumbnail
+    # main image + its own thumbnail + Task 37a's og:image meta tag
+    # + Task 37c's Product JSON-LD "image" field
+    assert content.count(primary.image.url) == 4
     assert secondary.image.url in content
     assert content.index(primary.image.url) < content.index(secondary.image.url)

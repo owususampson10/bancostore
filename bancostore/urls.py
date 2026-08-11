@@ -5,12 +5,15 @@ URL configuration for bancostore project.
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.contrib.sitemaps.views import sitemap
 from django.urls import include, path
+from django.views.generic import TemplateView
 
 from two_factor.admin import AdminSiteOTPRequired
 from two_factor.urls import urlpatterns as two_factor_urls
 
 from apps.accounts.views import AdminLoginView
+from apps.pages.sitemaps import sitemaps
 
 # Mandatory 2FA for admin (Task 6, SPEC.md Section 2.3) — this must never be
 # made conditional on a settings toggle (e.g. ADMIN_2FA_ENABLED), per
@@ -21,6 +24,12 @@ from apps.accounts.views import AdminLoginView
 admin.site.__class__ = AdminSiteOTPRequired
 
 urlpatterns = [
+    path(
+        "robots.txt",
+        TemplateView.as_view(template_name="robots.txt", content_type="text/plain"),
+        name="robots_txt",
+    ),
+    path("sitemap.xml", sitemap, {"sitemaps": sitemaps}, name="sitemap"),
     path("admin/", admin.site.urls),
     # Shadows two_factor's own "account/login/" route below: same literal
     # path, listed first, so Django's resolver dispatches here instead of to

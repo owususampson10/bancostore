@@ -1,6 +1,11 @@
 {% extends "base_store.html" %}
 {% load static %}
 
+{% block title %}Bancostore | Shop Quality Products & Become a Distributor in Ghana{% endblock %}
+{% block meta_description %}Shop watches, jewellery, and perfumes at Bancostore, or become a distributor to earn Direct Referral, Binary, and Matching bonuses building your own team in Ghana.{% endblock %}
+{% block og_title %}Bancostore | Shop Quality Products & Become a Distributor in Ghana{% endblock %}
+{% block og_description %}Shop watches, jewellery, and perfumes at Bancostore, or become a distributor to earn Direct Referral, Binary, and Matching bonuses building your own team in Ghana.{% endblock %}
+
 {% block nav_home_class %}text-primary border-b-2 border-primary font-bold{% endblock %}
 
 {% block content %}
@@ -35,7 +40,7 @@ comfortably wide enough.
 **Update 2026-08-07, per user bug report:** the hero image's Stitch
 preview CDN link expired the same way the About page's own copy of this
 exact same asset already had (fixed 2026-08-05). Fixed by pointing this
-<img> at the same already-self-hosted static/images/pages/about-hero.jpg
+<img> at the same already-self-hosted static/images/pages/about-hero.webp
 instead of re-downloading a duplicate. A follow-up sweep confirmed every
 other external Stitch image still on this page (the photo strip, the
 category tile background, the distributor CTA image) and on
@@ -58,7 +63,7 @@ Shop everyday lifestyle and wellness products — or build a business selling th
 </div>
 </div>
 <div class="w-full lg:w-1/2 h-[280px] sm:h-[360px] md:h-[420px] lg:h-[500px] rounded-2xl overflow-hidden shadow-2xl relative">
-<img class="w-full h-full object-cover" src="{% static 'pages/about-hero.jpg' %}" alt="A premium lifestyle scene representing Bancostore's products and opportunity">
+<img class="w-full h-full object-cover" src="{% static 'pages/about-hero.webp' %}" alt="A premium lifestyle scene representing Bancostore's products and opportunity">
 </div>
 </div>
 </section>
@@ -66,13 +71,13 @@ Shop everyday lifestyle and wellness products — or build a business selling th
 <!-- Lifestyle Photo Strip -->
 <section class="pb-20 md:pb-32 overflow-hidden">
 <div class="flex gap-4 md:gap-8 justify-center px-4 md:px-0">
-<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-8 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuArufRBiQ72fkL0BQpNY4CPAVuLS6zma5eY_csdEPX2sOULcPKCu0vjsLAE7MlHeJhkTHYJ4YLllscnYBQdBO_quG330DtlshtuhB_oqoUzUJnhl85TWVB3aAX6CHIzOK7vu1RbEj2_NRK_qVCGXLKqGxz185IAOjsH2b_Cjq1T-ZLnz96LdUYcKXe-ZK9UJxZZhwQ1a9tAp9f2BADvpHxBPKS-mvP79CUdPIrYFE9SW9fr7AKScVw5vw" alt="Luxury perfumes"></div>
-<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-0 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCUFJyC_wAJPiFKq9_5dAUKfQeZKAVXX-mQ3bCsc7iZnCIjz5RgcLr1KH9Dzrw5-cBRQhdZj9Jvanjp6VRXa57YUdMh4qf1tGVHZUrZxGz6BDb_DZ0Mwh2rsPmoVw2YDfB1PrCcxGZ2m-2GWxqC8cFp7k00ia_P2-HBlBjCv4F2LUuqVuhek8aJn-e9pzdsqjrSbywASbWVQ5a_ADSH05ItKI7BhKxk5yfhMXwr6lNz2-5fyiW94RgnqA" alt="Smiling professional wearing a smartwatch"></div>
-<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-12 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCBd0q4hg86w0cnUWji9YwmtBBzZJDLYqgVWf6oXfWJYaTWJVXuiGORZX-857NjYfTQQVK34lNHVcbJZMmk-Smdgcr96zxKw7EWPSm0Pw5CnZVFu0zmH_X4k_uTySXUd9Ao2Q1vCk2mKxFWHsqZuR1pSBse-Hrmb-c26AG-YEFZRexx86ZECVUPEZsS1tTb83tyb6814l2jX3D7LwXSeOi-HCGUVabV9YkGJxVuh1OC-GnxwDy04uoQ8w" alt="Wellness supplements"></div>
-<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-4 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDWg4d_0oz7muqMBbDz5LuUFkIT1uAcimS-4L9Xms8431dqVxQ3gs5QopeZU-q4hKNJ-FAe-OkNgFfc9vadgr3u5LVNeAItHT444c2TPVJFGxjCTDAhB1ry8NXn6KqsvwVEqGj1rkXMD6N4cRHp34YNM5aBHJq4z5CKoGU4rfyy0xC0bXkiXC-ydCTzlkgLTLmP1Ahmv8GvTVGGQhDGP0UnGKYqNNn3_qviBnBNWwKLd9RC4JMErPD9NA" alt="Minimalist living room decor"></div>
-<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-16 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBUhxJnZ6Tk8GNxSZPOQukcsieVq0YDCNDXXbwMDavz6OddXbTgeZqSTd1CPeyCO8I4TDzFJ_CojsyxnxUnXnbbIJZy7yXWMOStgnDlgDcIHbTeHqpjjxhKOkd-DcWcdmSGYt8oMyyUkKXMtMHB7PrkAIk45xExTnYP9cfRitcCFx-Q2nE6APxD82AKOxvWaSgOf-aJyZ3zl5R11eHF5Y-DI6a-Z9fHhxmwFBUt2bCz0MLZs7Fr9O8CBQ" alt="High-quality jewellery detail"></div>
-<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-6 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBEE0vw5XOAS9mhZklrzvfYzVQonETNiuyTqGisVnIosabFqr2OBXHtCe_dcm3MR4YYnvHlRqumlLYQjRukLgXpIWcpwHuTxt6Q6SmLCPaPY2aztDOFF2DDYuphEZ_AZCWy2-7se591IEFoTPFrl0ntXJDBH4sey0ZIGo6ZojZGGQRSqKV2xpXzuRm9iXGRMBgcVA1M1OOLS8MXJ7Zuc_jSuHvyE8E6ObuZY9E_sTTY0LhPAWXqu4F5rA" alt="Ghanaian entrepreneurs collaborating"></div>
-<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-20 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA7ebFA_eFnDnsRQlBMpzXReNSY2E5bbb9MQvOZlJAUUk0ZhuKgmMpDY9szLNMVkZq1zvvM9-C_A1gBX9hEGrtigD0Gq170FtlukEMTNi01xnCyGDZ2J1iE8_L3QZuGnjs8xKiBKFLp04TbSZk52KDgnlbWqMszJ3sbJowp96v5CzALzbYgr99AO18VOH2NBm8T8alLYLQhPXyxFC9NJdEAdO8xCdeJKbxZU2j0ceypcq0oO_dut8jKVA" alt="Personal care products"></div>
+<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-8 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="{% static 'pages/home/photo-strip-perfumes.webp' %}" alt="Luxury perfumes"></div>
+<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-0 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="{% static 'pages/home/photo-strip-smartwatch.webp' %}" alt="Smiling professional wearing a smartwatch"></div>
+<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-12 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="{% static 'pages/home/photo-strip-wellness.webp' %}" alt="Wellness supplements"></div>
+<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-4 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="{% static 'pages/home/photo-strip-living-room.webp' %}" alt="Minimalist living room decor"></div>
+<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-16 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="{% static 'pages/home/photo-strip-jewellery.webp' %}" alt="High-quality jewellery detail"></div>
+<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-6 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="{% static 'pages/home/photo-strip-entrepreneurs.webp' %}" alt="Ghanaian entrepreneurs collaborating"></div>
+<div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-20 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="{% static 'pages/home/photo-strip-personal-care.webp' %}" alt="Personal care products"></div>
 </div>
 </section>
 
@@ -231,7 +236,7 @@ the same way this codebase's existing `.float-item` animation does.
 <h2 class="text-3xl md:text-4xl font-bold mb-12 text-center">Discover Bancostore</h2>
 <div class="grid grid-cols-1 md:grid-cols-4 grid-rows-2 gap-4 h-auto md:h-[600px]">
 <div class="md:col-span-2 md:row-span-2 relative rounded-xl overflow-hidden bg-inverse-surface flex items-end group">
-<div class="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-1000 group-hover:scale-105" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuD9UJjxTHf4o0L9FHfP2_MbALjZY53qRFw2_FWNasqk0N46CdpeVLDC2U_6q9___5bBmKxIRQrQmY2Vp4eApiHPw036mYhg8UR_BmwZtIeYKYKI-8zhwIPunm_25cWSv2Pa-esQ8wHCdeZKsmoc34eUhjYeHlgiP6p6hHLgkdHfbC_5sV6dfptt5x19aNPFE37NNxXCwab7xPZR4ERZzbctWhasFptW_xZ4eww9YGhMoHvRgxZ5ydftQQ')"></div>
+<div class="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-1000 group-hover:scale-105" style="background-image: url('{% static 'pages/home/bento-discover.webp' %}')"></div>
 <div class="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
 <div class="relative z-10 p-10">
 <h3 class="text-white text-2xl md:text-3xl mb-4 uppercase font-bold">Know everything about Bancostore</h3>
@@ -328,7 +333,7 @@ Register for GHS 100, choose your starter pack, and start building your network 
 <a href="{% url 'distributors:register' %}" class="inline-block bg-primary text-on-primary font-semibold px-12 py-5 rounded-full shadow-xl hover:brightness-110 transition-all">Register as a Distributor</a>
 </div>
 <div class="relative flex justify-center">
-<div class="relative z-10 w-full max-w-md aspect-square rounded-2xl overflow-hidden shadow-2xl bg-surface-container"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCxO-GD_Ta2YTrxERuI0UCvmcNs4qwiLxymPuqK0C2dj0miI9JNGogbpJCOBrx1pGyIkmCh7FHyEcdn0C2-W05vDOPqlDujT8E9IGealOxU-rWSpPrd5u5uZiwwgEXkO6udn94b897bSQE4iAoJ6E5CXUxfyxuXGYnVUG18-96nqi3tYocvFjMyRK0lALqIOorlT35dq6Qiw2e5xavh7LwEY6cN4FKjjuybGkdZeH1zZRugLTWl1Dduuw" alt="Ghanaian entrepreneur building a business with Bancostore"></div>
+<div class="relative z-10 w-full max-w-md aspect-square rounded-2xl overflow-hidden shadow-2xl bg-surface-container"><img class="w-full h-full object-cover" src="{% static 'pages/home/distributor-cta.webp' %}" alt="Ghanaian entrepreneur building a business with Bancostore"></div>
 <div class="absolute -bottom-10 -right-10 w-64 h-64 bg-primary/20 rounded-full blur-3xl -z-0"></div>
 <div class="absolute -top-10 -left-10 w-48 h-48 border-4 border-primary/30 rounded-xl -z-0 rotate-12"></div>
 </div>

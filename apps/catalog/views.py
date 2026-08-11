@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal, InvalidOperation
 
 from django.core.paginator import Paginator
@@ -91,6 +92,38 @@ def product_list(request):
     return render(request, template, context)
 
 
+def _build_product_json_ld(request, product):
+    """Task 37c: serialized here rather than built with template tags, so
+    a product name/description can never produce broken or unescaped JSON
+    -- json.dumps is the single source of truth for correct escaping,
+    matching organization_json_ld's own reasoning (apps/pages/context_processors.py).
+    "image" is only included when a real photo exists -- claiming the
+    generic OG banner is a photo of this specific product would be
+    inaccurate structured data, unlike Open Graph where a generic social
+    preview image is normal practice."""
+    base_url = f"{request.scheme}://{request.get_host()}"
+    data = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": product.name,
+        "description": product.description,
+        "offers": {
+            "@type": "Offer",
+            "url": base_url + request.path,
+            "priceCurrency": "GHS",
+            "price": str(product.price),
+            "availability": (
+                "https://schema.org/InStock"
+                if product.in_stock
+                else "https://schema.org/OutOfStock"
+            ),
+        },
+    }
+    if product.primary_image:
+        data["image"] = base_url + product.primary_image.image.url
+    return json.dumps(data)
+
+
 def product_detail(request, slug):
     product = get_object_or_404(
         Product.objects.storefront_visible().prefetch_related("variants"),
@@ -104,5 +137,9 @@ def product_detail(request, slug):
     return render(
         request,
         "catalog/product_detail.html",
-        {"product": product, "related_products": related_products},
+        {
+            "product": product,
+            "related_products": related_products,
+            "product_json_ld": _build_product_json_ld(request, product),
+        },
     )

@@ -5,6 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}Bancostore | Quality Products. Real Opportunity.{% endblock %}</title>
 <meta name="description" content="{% block meta_description %}Shop quality lifestyle and wellness products or build a business with Bancostore.{% endblock %}">
+<link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}">
+<meta property="og:site_name" content="Bancostore">
+<meta property="og:type" content="{% block og_type %}website{% endblock %}">
+<meta property="og:title" content="{% block og_title %}Bancostore | Quality Products. Real Opportunity.{% endblock %}">
+<meta property="og:description" content="{% block og_description %}Shop quality lifestyle and wellness products or build a business with Bancostore.{% endblock %}">
+<meta property="og:url" content="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}">
+<meta property="og:image" content="{% block og_image %}{{ request.scheme }}://{{ request.get_host }}{% static 'bancostore-brand/social/og-default.png' %}{% endblock %}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+{# Twitter/X falls back to the og:* tags above for title/description/image #}
+{# when twitter:title/description/image aren't set -- no need to duplicate. #}
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">{{ organization_json_ld|safe }}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">

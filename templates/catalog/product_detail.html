@@ -3,6 +3,10 @@
 
 {% block title %}{{ product.name }} | Bancostore{% endblock %}
 {% block meta_description %}{{ product.description|truncatechars:150 }}{% endblock %}
+{% block og_title %}{{ product.name }} | Bancostore{% endblock %}
+{% block og_description %}{{ product.description|truncatechars:150 }}{% endblock %}
+{% block og_type %}product{% endblock %}
+{% block og_image %}{% if product.primary_image %}{{ request.scheme }}://{{ request.get_host }}{{ product.primary_image.image.url }}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'bancostore-brand/social/og-default.png' %}{% endif %}{% endblock %}
 {% block nav_shop_class %}text-primary border-b-2 border-primary font-bold{% endblock %}
 
 {% block content %}
@@ -118,4 +122,8 @@ Add to Cart
 </section>
 {% endif %}
 </main>
+{% endblock %}
+
+{% block extra_body %}
+<script type="application/ld+json">{{ product_json_ld|safe }}</script>
 {% endblock %}
