@@ -5945,3 +5945,136 @@ task list (Tasks 1-24 plus the ad-hoc Tasks 25-31), is complete.
 **Files likely touched:** `deploy/README.md`, `SPEC.md` Commands section
 
 **Estimated scope:** S
+
+---
+
+### Task 36: Post-deploy fixes — cache-busting, footer layout, Social Links relocation, icon picker bugs, currency dropdown
+
+**Description:** Not in the original plan — found by the user reviewing the real production deploy
+of Tasks 34/35. Four independent fixes, built as vertical slices (36a-36d).
+
+**36a. Real cache-busting (root cause of "legal pages look unstyled in production"):**
+`vite.config.js` used fixed output filenames (`assets/main.css`/`main.js`, no content hash) —
+flagged in its own comment since Task 1 as "revisit once there's a real deploy pipeline." Task 24
+built that pipeline; this is the revisit. Confirmed via direct evidence, not assumption: `curl`
+against the live server showed the correct, freshly-built 86,702-byte CSS (containing the new
+`.legal-content`/`grid-cols-5` rules), but a `fetch()` from inside a real browser tab on the live
+site returned a stale, differently-sized 84,705-byte cached copy — the server was always correct,
+browsers were serving pre-deploy assets from HTTP cache with nothing forcing revalidation. Fixed by
+switching Vite to real content-hashed filenames and adding `apps/pages/templatetags/vite_tags.py`
+(`{% vite_asset "main.js" %}`/`{% vite_css "main.js" %}`), reading `static/dist/.vite/manifest.json`
+to resolve the real hashed path at render time — manifest is re-read on every call in `DEBUG` (so
+local dev's existing `npm run build` + hard-refresh workflow keeps working unchanged) and cached in
+memory in production (`DEBUG=False`, where a new deploy already restarts the Daphne process, so a
+stale in-memory manifest can't outlive a real deploy). Updated all 7 templates referencing the old
+fixed paths.
+
+**36b. Footer layout — 4 columns (Brand/Shop/Company/Policies), Follow Us as its own row below:**
+The 5-column grid built for Task 34/35 put Follow Us as a 5th column; the user wants Brand, Shop,
+Company, Policies as 4 equal columns with Follow Us in its own full-width section underneath.
+
+**36c. Social Links moved into Platform Settings' "General Platform Settings" tab:**
+Originally built as its own top-level admin_portal sidebar item (Task 35) — the user asked for it
+to live under Platform Settings > General instead, alongside the other general/decorative-text
+settings it was already conceptually grouped with (`REFUND_RETURN_POLICY_TEXT` etc.). Sidebar entry
+removed; the CRUD UI (list/add/edit/delete) is embedded as its own section within the existing
+`general_platform_settings` tab panel, as a second `<form>` alongside the constance form (not a
+merge of the two — the constance form's own save button never touches social links, and vice
+versa).
+
+**36d. Icon picker bugs:** (1) the dropdown option list was clipped by a parent `overflow-hidden`
+container on both the row list and the add-form wrapper — confirmed via a live screenshot showing
+the list cut off after 2 items. (2) Selecting an icon now auto-applies that icon's real curated
+`default_color` (a small in-page `SOCIAL_ICON_DEFAULT_COLORS` lookup, sourced from the same trusted
+server-side registry, not user input) — with a "reset to default" control so a manually-picked
+color can be reverted without retyping the hex.
+
+**36e. Currency Symbol → real dropdown:** both `CURRENCY` and `CURRENCY_SYMBOL` were free-text
+fields an admin had to type "GHS" into. Confirmed via grep neither is actually read anywhere in the
+app yet (a decorative setting, the same class Task 30 fixed several of already) — flagged honestly
+rather than silently wiring every hardcoded `GHS` price prefix across the codebase to read it live,
+which is real, separate, unrequested scope. Converted both to a new `currency_field`
+`CONSTANCE_ADDITIONAL_FIELDS` choice type rendering a real native `<select>` of 5 currency
+code/name pairs (GHS, NGN, USD, GBP, EUR), storing the code while displaying the full name —
+matching this same file's own established `WITHDRAWAL_DAY`/`WITHDRAWAL_FREQUENCY` precedent
+(`day_of_week_field`/`withdrawal_frequency_field`, already plain native selects), not the
+Alpine-listbox pattern used elsewhere for fields needing custom popup styling.
+
+**Files touched:** `vite.config.js`, `apps/pages/templatetags/vite_tags.py` (new), 6 base templates,
+`templates/base_store.html` (footer), `apps/admin_portal/urls.py`/`views.py`,
+`templates/admin_portal/base_dashboard.html`, `templates/admin_portal/platform_settings.html`,
+`templates/admin_portal/partials/_social_links_section.html` (new, migrated from the now-deleted
+`templates/admin_portal/social_links_settings.html`), `apps/platform_settings/config.py`, plus
+tests in `tests/feature/admin_portal/test_social_links_settings.py` and
+`tests/feature/admin_portal/test_platform_settings.py`.
+
+**Verification:** all 5 sub-slices live-browser-verified against local dev (not just pytest) —
+36a: hard-refreshed and confirmed the new hashed CSS/JS filenames load, no stale cache. 36b:
+footer confirmed as 4 equal columns (Brand/Shop/Company/Policies) with Follow Us as its own
+full-width row below. 36c: Social Links CRUD confirmed living inside the General Platform Settings
+tab (`?tab=9` deep link), sidebar item confirmed removed. 36d: icon dropdown confirmed showing all
+6 platforms uncut; selecting YouTube confirmed auto-applying `#FF0000`; manually overriding to
+`#123456` and clicking reset confirmed reverting back to `#FF0000`. 36e: server-rendered HTML
+confirmed as a genuine `<select name="CURRENCY">` with all 5 options, `selected` correctly marking
+the live stored value. Full targeted suite green: 357 passed, 1 skipped. **Noticed but not
+addressed, flagged to the user rather than silently changed:** the pre-existing decorative
+`SOCIAL_MEDIA_LINKS` free-text field (a leftover from before Task 35 built the real CRUD version)
+still sits directly above the new Social Links section on the same tab, which now reads as
+redundant/confusing next to the real feature.
+
+**Estimated scope:** L
+
+**36f. Three follow-up fixes, found by the user reviewing 36a-36e live:** (1) the leftover
+decorative `SOCIAL_MEDIA_LINKS` free-text constance field (superseded by Task 35's real
+`SocialMediaLink` CRUD, never actually read anywhere) removed entirely from `GENERAL_PLATFORM_SETTINGS`
+-- it sat directly above the real Social Links section and read as a confusing duplicate. (2) A real
+sticky-positioning bug: the vertical tabs nav was `position: sticky` as a direct child of the
+constance `<form>`, but the Social Links block had to live as a sibling *after* that form closes
+(forms can't nest) -- so the nav's sticky containing block ended at the form's bottom edge, and it
+un-stuck and scrolled away as soon as the page scrolled into Social Links, exactly as the user
+described. Fixed by restructuring `platform_settings.html` so the nav and the whole right-hand
+column (form + Social Links block) share one common flex-row parent -- confirmed live: the nav now
+stays pinned all the way to the very bottom of the page. Also dropped the now-unneeded
+`lg:pl-[19.5rem]` manual alignment hack. (3) Font-size tokens inside
+`_social_links_section.html` normalized to the exact vocabulary `platform_settings.html` itself
+uses everywhere else on the page (grep-confirmed set: `font-headline-sm`/`text-headline-sm`,
+`font-body-md`/`text-body-md`, `font-label-md`/`text-label-md` only) -- replaced an 18px
+`font-body-lg`/`text-body-lg` row title, a 14px `font-body-sm`/`text-body-sm` notice, a mismatched
+`font-body-md`/`text-body-sm` dropdown-option pairing, and three buttons using `font-button`/
+`text-button` -- confirmed via grep against `static/src/main.css` that those two tokens don't exist
+anywhere in this codebase's `@theme` block, so those 3 buttons had been silently rendering with zero
+custom font styling (browser default) this whole time, a real pre-existing bug this fix also closed.
+Live-browser-verified end to end: leftover field confirmed gone, sidebar confirmed sticky through
+the full page including past Social Media Links, and all social-links text confirmed matching the
+rest of the page's sizing. Targeted suite green (303 passed, 1 skipped) both before and after.
+
+**36g/36h. Currency/Currency Symbol, resolved through a direct question rather than guessed at:**
+the user flagged the native `<select>` styling and separately asked what actually happens when an
+admin changes Currency away from Cedis, given Paystack. The honest answer -- confirmed via grep --
+is nothing: no price display or Paystack API call anywhere in this codebase reads `CURRENCY`/
+`CURRENCY_SYMBOL`, and the Paystack merchant account itself is GHS-only, so a working-looking
+5-currency dropdown was a real footgun (an admin picking USD expecting something to change, then
+nothing does). Put to the user directly via `AskUserQuestion` rather than silently choosing --
+**restrict to GHS only** was chosen over "keep 5 options + add a warning" and "leave as-is". 36g's
+first pass (themed 5-option Alpine listbox, matching `catalog_product_form.html`'s Category field --
+built before the Paystack question was asked) was superseded by 36h before it ever shipped: the
+`currency_field` `CONSTANCE_ADDITIONAL_FIELDS` choices are now a single `("GHS", "Ghanaian Cedi
+(GHS)")` entry, and both fields render as a plain locked display (lock icon + honest "Locked to
+GHS -- multi-currency support isn't built yet" help text) instead of any kind of picker.
+`field.disabled = True` (matching `ADMIN_2FA_ENABLED`'s own established tamper-resistance pattern
+in the same function) is defense-in-depth on top of the single-choice restriction -- confirmed via
+Django's `Field.bound_data` semantics that a disabled field's value always resolves from the real
+stored initial value, never a submitted POST body, even on a validation-failure re-render. Real
+multi-currency support (per-currency pricing, the Paystack currency parameter, exchange-rate-safe
+commission math) stays flagged as separate, unrequested scope, not silently built or faked with a
+non-functional picker. Also investigated and resolved without a code change: the user's separate
+observation that Terms/Privacy/Refund text fields "still show" even though Task 34 built real legal
+pages for them turned out to be a different situation than the dead `SOCIAL_MEDIA_LINKS` field 36f
+removed -- `apps/pages/views.py` confirmed all three are genuinely wired to their respective legal
+page as an optional "Additional Details" block that only renders if an admin fills it in, currently
+empty. Put to the user via the same `AskUserQuestion` call; kept as real, working capability rather
+than removed. Live-browser-verified: locked display renders correctly with the lock icon and exact
+help text. Targeted suite green throughout (updated `test_platform_settings.py` currency tests to
+match: `test_currency_fields_render_as_locked_to_ghs` and
+`test_currency_is_locked_to_ghs_even_if_submitted_data_says_otherwise`, the latter mirroring the
+existing `ADMIN_2FA_ENABLED` tamper test's shape).

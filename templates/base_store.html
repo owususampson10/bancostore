@@ -1,4 +1,4 @@
-{% load static %}<!DOCTYPE html>
+{% load static %}{% load vite_tags %}<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -8,8 +8,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="{% static 'assets/main.css' %}">
-<script src="{% static 'assets/main.js' %}" defer></script>
+<link rel="stylesheet" href="{% vite_css 'main.js' %}">
+<script src="{% vite_asset 'main.js' %}" defer></script>
 <link rel="icon" type="image/svg+xml" href="{% static 'bancostore-brand/favicon/favicon.svg' %}">
 <link rel="apple-touch-icon" href="{% static 'bancostore-brand/app-icons/icon-180x180.svg' %}">
 <link rel="manifest" href="{% static 'bancostore-brand/app-icons/site.webmanifest' %}">
@@ -139,8 +139,8 @@ still reading (hover/focus), stays manually dismissable.
 </main>
 <!-- Footer (reconciled from the Product Listing / Product Detail Stitch screens) -->
 <footer class="bg-inverse-surface py-16 md:py-24 w-full mt-auto">
-<div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-8">
-<div class="space-y-4 sm:col-span-2 lg:col-span-1">
+<div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+<div class="space-y-4">
 <img src="{% static 'bancostore-brand/logo/bancostore-logo-dark.svg' %}" alt="Bancostore" class="h-9 w-auto">
 <p class="text-sm text-inverse-on-surface/70 max-w-[240px]">Curating quality lifestyle and wellness products, and the opportunity to build a business selling them, for the modern Ghanaian consumer.</p>
 </div>
@@ -172,8 +172,11 @@ still reading (hover/focus), stays manually dismissable.
 <li><a class="hover:text-surface transition-all" href="{% url 'pages:returns_refunds_shipping' %}">Returns, Refunds &amp; Shipping</a></li>
 </ul>
 </div>
-<div class="space-y-4">
-<h4 class="text-xs font-bold uppercase tracking-widest text-surface">Follow Us</h4>
+</div>
+
+{# Task 36b: Follow Us is its own full-width row below the 4-column group, not a 5th column, per explicit user request. #}
+<div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 mt-12 pt-8 border-t border-inverse-on-surface/10">
+<h4 class="text-xs font-bold uppercase tracking-widest text-surface mb-4">Follow Us</h4>
 {% comment %}
 Task 35: admin-managed via Social Links in the admin portal
 (apps/pages/models.py::SocialMediaLink), rendered here through the
@@ -199,8 +202,7 @@ see templates/pages/_social_icon.html.
 <span class="w-9 h-9 rounded-full border border-inverse-on-surface/30 flex items-center justify-center" title="Coming soon"><span class="material-symbols-outlined text-[18px]">chat</span></span>
 </div>
 {% endif %}
-<p class="text-xs text-inverse-on-surface/60">Bancostore is committed to responsible direct selling in Ghana.</p>
-</div>
+<p class="text-xs text-inverse-on-surface/60 mt-4">Bancostore is committed to responsible direct selling in Ghana.</p>
 </div>
 <div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 mt-12 pt-8 border-t border-inverse-on-surface/10 flex flex-col md:flex-row justify-between items-center gap-2 text-xs text-inverse-on-surface/60">
 <p>&copy; {% now "Y" %} Bancostore. All rights reserved.</p>

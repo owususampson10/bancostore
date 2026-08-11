@@ -12,6 +12,7 @@ from django.db.models import Count, Max, Prefetch, ProtectedError, Q, Sum
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
@@ -1418,6 +1419,23 @@ def _style_constance_form_fields(form):
             widget.attrs["class"] = _INPUT_CLASS
         if name == "ADMIN_2FA_ENABLED":
             field.disabled = True
+        if name in _LOCKED_CURRENCY_SETTINGS:
+            field.disabled = True
+
+
+# Task 36h: locked to GHS, not a themed dropdown -- grep-confirmed neither
+# setting is read anywhere in the app yet (every price display and the
+# Paystack API calls hardcode GHS), and the Paystack merchant account
+# itself is GHS-only, so a working-looking currency picker would be a real
+# footgun: an admin could pick USD expecting prices/payments to switch,
+# and nothing would happen. User-confirmed decision (asked directly,
+# multi-currency support is real, separate, unrequested scope) to lock
+# this to GHS rather than offer a dropdown that silently does nothing.
+# CONSTANCE_ADDITIONAL_FIELDS["currency_field"]'s choices are restricted
+# to a single GHS entry (apps/platform_settings/config.py); field.disabled
+# below is defense-in-depth on top of that, matching ADMIN_2FA_ENABLED's
+# own established pattern in this same function.
+_LOCKED_CURRENCY_SETTINGS = {"CURRENCY", "CURRENCY_SYMBOL"}
 
 
 def _constance_field_context(name, options, form):
@@ -1427,15 +1445,95 @@ def _constance_field_context(name, options, form):
     since that function doesn't use `self` and duplicating its shape here
     (rather than importing an admin-only method) keeps this view
     independent of Django Admin internals."""
-    widget = form[name].field.widget
-    return {
+    bound_field = form[name]
+    widget = bound_field.field.widget
+    is_locked_currency = name in _LOCKED_CURRENCY_SETTINGS
+    context = {
         "name": name,
         "label": _humanize_setting_name(name),
         "help_text": options[1],
-        "form_field": form[name],
+        "form_field": bound_field,
         "is_checkbox": isinstance(widget, forms.CheckboxInput),
         "is_textarea": isinstance(widget, forms.Textarea),
+        "is_locked_currency": is_locked_currency,
     }
+    if is_locked_currency:
+        # bound_field.value() on a disabled field always resolves to the
+        # real stored initial value (Django's Field.bound_data short-
+        # circuits to `initial` for disabled fields, even on a POST re-
+        # render) -- never whatever a crafted request might have submitted.
+        # CodeRabbit finding: a bare dict lookup crashes the *entire*
+        # Platform Settings page (all ~76 settings, not just this field)
+        # with an uncaught KeyError if a legacy/stale value ever ends up
+        # stored (e.g. a direct Redis write, a rollback) that predates
+        # this field being locked to a single GHS choice -- .get() with
+        # the raw stored value as its own fallback shows something honest
+        # instead of crashing.
+        stored_value = bound_field.value()
+        context["locked_label"] = dict(bound_field.field.choices).get(
+            stored_value, stored_value
+        )
+    return context
+
+
+def _build_constance_groups(form):
+    return [
+        {
+            "title": title,
+            "icon": _GROUP_ICONS[title],
+            "fields": [
+                _constance_field_context(name, CONSTANCE_CONFIG[name], form)
+                for name in field_names
+            ],
+        }
+        for title, field_names in CONSTANCE_CONFIG_FIELDSETS.items()
+    ]
+
+
+# Task 36c: Social Links moved from its own sidebar item into this page's
+# General Platform Settings tab, per explicit user request. Looked up by
+# title rather than hardcoded as a numeric index so reordering
+# CONSTANCE_CONFIG_FIELDSETS can never silently point this at the wrong tab.
+_GENERAL_SETTINGS_GROUP_TITLE = "General Platform Settings"
+
+
+def _general_settings_tab_index():
+    return list(CONSTANCE_CONFIG_FIELDSETS.keys()).index(_GENERAL_SETTINGS_GROUP_TITLE)
+
+
+def _resolve_active_group(request, default=None):
+    """?tab=<index> selects which vertical-tab panel is open on page load
+    -- used by the Social Links create/update redirects so saving a link
+    lands back on the General tab it was edited from, not tab 0."""
+    raw = request.GET.get("tab")
+    total = len(CONSTANCE_CONFIG_FIELDSETS)
+    if raw is not None:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = None
+        if value is not None and 0 <= value < total:
+            return value
+    return default if default is not None else 0
+
+
+def _platform_settings_context(request, *, social_link_kwargs=None):
+    """Shared by platform_settings (GET/POST) and the Social Links create/
+    update views' failure paths (which must re-render this exact page,
+    not a separate one, since Social Links now lives inside it)."""
+    initial = get_values()
+    form = BancostoreConstanceForm(initial=initial, request=request)
+    _style_constance_form_fields(form)
+    context = {
+        "form": form,
+        "groups": _build_constance_groups(form),
+        "active_nav": "platform_settings",
+        "general_settings_tab_index": _general_settings_tab_index(),
+    }
+    context.update(
+        _social_links_settings_context(request, **(social_link_kwargs or {}))
+    )
+    return context
 
 
 @login_required(login_url="two_factor:login")
@@ -1449,12 +1547,16 @@ def platform_settings(request):
     validates and saves every setting together in one submission (its
     version-hash staleness check and cross-field WITHDRAWAL_AMOUNT
     validation both operate over the whole form), so there's no way to
-    save just one group's fields even if the UI only shows one at a time."""
+    save just one group's fields even if the UI only shows one at a time.
+
+    Task 36c: also renders the Social Links management UI (its own,
+    separate <form> elements -- see _social_links_settings_context) inside
+    this page's General Platform Settings tab."""
     if not is_admin_portal_staff(request.user):
         raise PermissionDenied
 
-    initial = get_values()
     if request.method == "POST":
+        initial = get_values()
         form = BancostoreConstanceForm(
             initial=initial, request=request, data=request.POST, files=request.FILES
         )
@@ -1477,27 +1579,23 @@ def platform_settings(request):
             request,
             "Some settings couldn't be saved. Check the highlighted fields below.",
         )
-    else:
-        form = BancostoreConstanceForm(initial=initial, request=request)
-        _style_constance_form_fields(form)
-
-    groups = [
-        {
-            "title": title,
-            "icon": _GROUP_ICONS[title],
-            "fields": [
-                _constance_field_context(name, CONSTANCE_CONFIG[name], form)
-                for name in field_names
-            ],
+        context = {
+            "form": form,
+            "groups": _build_constance_groups(form),
+            "active_nav": "platform_settings",
+            "general_settings_tab_index": _general_settings_tab_index(),
+            # Code-review finding: this branch never set active_group, so
+            # a validation failure (e.g. the cross-field WITHDRAWAL_AMOUNT
+            # check) always bounced the admin back to tab 0 -- even if the
+            # page was loaded via ?tab=N (the same-URL POST preserves the
+            # query string), matching the GET path below.
+            "active_group": _resolve_active_group(request),
         }
-        for title, field_names in CONSTANCE_CONFIG_FIELDSETS.items()
-    ]
+        context.update(_social_links_settings_context(request))
+        return render(request, "admin_portal/platform_settings.html", context)
 
-    context = {
-        "form": form,
-        "groups": groups,
-        "active_nav": "platform_settings",
-    }
+    context = _platform_settings_context(request)
+    context["active_group"] = _resolve_active_group(request)
     return render(request, "admin_portal/platform_settings.html", context)
 
 
@@ -1507,12 +1605,12 @@ def platform_settings(request):
 
 
 def _social_links_settings_context(request, add_form=None, row_forms_override=None):
-    """Shared by social_links_settings/social_link_create/social_link_update
-    so a failed create/update re-renders the exact same page (with that one
+    """Shared by platform_settings/social_link_create/social_link_update so
+    a failed create/update re-renders the exact same page (with that one
     form's errors visible) instead of a separate error page -- matching
     the "redirect on success, re-render with errors on failure" shape every
     other admin_portal create/edit view already uses, just applied to one
-    shared list page instead of a dedicated form page since rows edit
+    shared settings page instead of a dedicated form page since rows edit
     in place."""
     links = list(SocialMediaLink.objects.all())
     row_forms_override = row_forms_override or {}
@@ -1557,20 +1655,7 @@ def _social_links_settings_context(request, add_form=None, row_forms_override=No
         # never built up as an HTML string in JS, so there is no dynamic
         # markup-construction code path to review for injection risk at all.
         "all_icons": list(SOCIAL_ICONS.values()),
-        "active_nav": "social_links",
     }
-
-
-@login_required(login_url="two_factor:login")
-def social_links_settings(request):
-    if not is_admin_portal_staff(request.user):
-        raise PermissionDenied
-
-    return render(
-        request,
-        "admin_portal/social_links_settings.html",
-        _social_links_settings_context(request),
-    )
 
 
 def _save_new_social_link_with_next_order(form):
@@ -1612,14 +1697,16 @@ def social_link_create(request):
     if form.is_valid():
         link = _save_new_social_link_with_next_order(form)
         messages.success(request, f'"{link.name}" added.')
-        return redirect("admin_portal:social_links_settings")
+        return redirect(
+            f"{reverse('admin_portal:platform_settings')}"
+            f"?tab={_general_settings_tab_index()}"
+        )
 
     messages.error(request, "Couldn't add that link. Check the highlighted fields.")
-    context = _social_links_settings_context(request, add_form=form)
+    context = _platform_settings_context(request, social_link_kwargs={"add_form": form})
     context["add_form_open"] = True
-    return render(
-        request, "admin_portal/social_links_settings.html", context, status=400
-    )
+    context["active_group"] = _general_settings_tab_index()
+    return render(request, "admin_portal/platform_settings.html", context, status=400)
 
 
 @login_required(login_url="two_factor:login")
@@ -1634,16 +1721,18 @@ def social_link_update(request, pk):
     if form.is_valid():
         form.save()
         messages.success(request, f'"{link.name}" updated.')
-        return redirect("admin_portal:social_links_settings")
+        return redirect(
+            f"{reverse('admin_portal:platform_settings')}"
+            f"?tab={_general_settings_tab_index()}"
+        )
 
     messages.error(request, "Couldn't save that link. Check the highlighted fields.")
-    context = _social_links_settings_context(
-        request, row_forms_override={link.pk: form}
+    context = _platform_settings_context(
+        request, social_link_kwargs={"row_forms_override": {link.pk: form}}
     )
     context["open_link_id"] = link.pk
-    return render(
-        request, "admin_portal/social_links_settings.html", context, status=400
-    )
+    context["active_group"] = _general_settings_tab_index()
+    return render(request, "admin_portal/platform_settings.html", context, status=400)
 
 
 @login_required(login_url="two_factor:login")
@@ -1658,7 +1747,10 @@ def social_link_delete(request, pk):
         name = link.name
         link.delete()
         messages.success(request, f'"{name}" deleted.')
-    return redirect("admin_portal:social_links_settings")
+    return redirect(
+        f"{reverse('admin_portal:platform_settings')}"
+        f"?tab={_general_settings_tab_index()}"
+    )
 
 
 @login_required(login_url="two_factor:login")

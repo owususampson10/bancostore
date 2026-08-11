@@ -1,4 +1,4 @@
-{% load static %}<!DOCTYPE html>
+{% load static %}{% load vite_tags %}<!DOCTYPE html>
 {% comment %}
 Shared shell for all 5 error/dead-end pages (404, 500, 403, 400, and the
 CSRF-failure "Session Expired" page). Built from 5 Stitch screens (project
@@ -38,7 +38,7 @@ Stitch-sourced page in this codebase.
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="{% static 'assets/main.css' %}">
+<link rel="stylesheet" href="{% vite_css 'main.js' %}">
 <link rel="icon" type="image/svg+xml" href="{% static 'bancostore-brand/favicon/favicon.svg' %}">
 </head>
 <body class="bg-surface text-on-surface font-body-md min-h-screen flex flex-col antialiased">

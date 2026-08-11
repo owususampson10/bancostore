@@ -218,6 +218,29 @@ def test_cross_field_withdrawal_amount_validation_still_enforced(staff_client):
 
 
 @pytest.mark.django_db
+def test_a_validation_failure_keeps_the_admin_on_the_tab_they_were_editing(
+    staff_client,
+):
+    """Code-review finding: the POST-failure re-render used to never set
+    active_group at all, silently bouncing the admin back to tab 0
+    (Authentication Settings) regardless of which tab -- General Platform
+    Settings, ?tab=9, the same tab Social Links redirects use -- they were
+    actually on when a cross-field validation error (or any other) fired."""
+    response = staff_client.post(
+        f"{_platform_settings_url()}?tab=9",
+        _valid_post_data(
+            {
+                "MIN_WITHDRAWAL_AMOUNT": "9000",
+                "MAX_WITHDRAWAL_AMOUNT": "100",
+            }
+        ),
+    )
+
+    assert response.status_code == 200
+    assert b"activeGroup: 9" in response.content
+
+
+@pytest.mark.django_db
 def test_out_of_range_percentage_field_is_rejected(staff_client):
     """percentage_field bounds BINARY_BONUS_RATE to 0-100 -- a fat-fingered
     750 (the real incident this bound was added to prevent, per
@@ -229,3 +252,58 @@ def test_out_of_range_percentage_field_is_rejected(staff_client):
 
     assert response.status_code == 200
     assert config.BINARY_BONUS_RATE != Decimal("750")
+
+
+# ---------------------------------------------------------------------------
+# Currency Symbol / Currency -- locked to GHS (Task 36e/36h)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_currency_fields_render_as_locked_to_ghs(staff_client):
+    """Task 36h: no longer even a dropdown -- user-confirmed decision after
+    being asked directly what changing it away from GHS would actually do
+    (nothing: no price display or Paystack call reads this setting, and
+    the Paystack merchant account itself is GHS-only). A locked display
+    is honest about that; a working-looking picker would not be."""
+    response = staff_client.get(_platform_settings_url())
+
+    content = response.content.decode()
+    assert "Ghanaian Cedi (GHS)" in content
+    assert "Nigerian Naira" not in content
+    assert "US Dollar" not in content
+    assert "British Pound" not in content
+    assert "Euro (EUR)" not in content
+    assert "Locked to GHS" in content
+
+
+@pytest.mark.django_db
+def test_currency_is_locked_to_ghs_even_if_submitted_data_says_otherwise(staff_client):
+    """field.disabled=True (apps/admin_portal/views.py) means a submitted
+    value is always ignored in favor of the real stored value -- the same
+    tamper-resistance shape as the existing ADMIN_2FA_ENABLED test, applied
+    here since CURRENCY/CURRENCY_SYMBOL are locked the same way."""
+    response = staff_client.post(
+        _platform_settings_url(),
+        _valid_post_data({"CURRENCY": "NGN", "CURRENCY_SYMBOL": "NGN"}),
+    )
+
+    assert response.status_code == 302
+    assert config.CURRENCY == "GHS"
+    assert config.CURRENCY_SYMBOL == "GHS"
+
+
+@pytest.mark.django_db
+def test_a_legacy_non_ghs_stored_value_does_not_crash_the_settings_page(staff_client):
+    """CodeRabbit finding: the locked-currency display used to do a bare
+    dict lookup (choices) that would raise an uncaught KeyError -- and
+    crash the *entire* Platform Settings page, not just this field -- for
+    any stored value outside the single GHS choice. A legacy/stale value
+    (e.g. from a direct Redis write, or a rollback) must degrade to
+    showing that raw value, never a 500."""
+    config.CURRENCY = "NGN"
+
+    response = staff_client.get(_platform_settings_url())
+
+    assert response.status_code == 200
+    assert b"NGN" in response.content

@@ -12,12 +12,15 @@ export default defineConfig({
         main: "static/src/main.js",
       },
       output: {
-        // Stable filenames so Django templates can reference them directly
-        // (e.g. {% static 'assets/main.css' %}) without reading the Vite
-        // manifest. Revisit with cache-busting once there's a real deploy
-        // pipeline (Task 24) to serve from.
-        entryFileNames: "assets/[name].js",
-        assetFileNames: "assets/[name][extname]",
+        // Task 36a: real content-hashed filenames, resolved at render time
+        // via static/dist/.vite/manifest.json (apps/pages/templatetags/
+        // vite_tags.py) -- the previous stable-filename setup had no
+        // cache-busting at all, which was a real production bug, not
+        // hypothetical: a live deploy's CSS change was invisible to real
+        // browsers (stale cached main.css) even though the server was
+        // serving the correct, freshly-built file the whole time.
+        entryFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash][extname]",
       },
     },
   },

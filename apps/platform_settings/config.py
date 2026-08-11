@@ -404,17 +404,34 @@ GENERAL_PLATFORM_SETTINGS = {
         "",
         "Business address shown on the contact page and invoices",
     ),
-    "SOCIAL_MEDIA_LINKS": (
-        "",
-        "Facebook, Instagram, TikTok, Twitter links for the footer",
-    ),
+    # Task 36f: the old free-text "Social Media Links" decorative field that
+    # used to live here (never read anywhere -- Task 35 built the real
+    # SocialMediaLink model/CRUD instead) is removed entirely, not just
+    # hidden -- it sat directly above the real Social Links section on this
+    # same tab and read as a confusing duplicate of it.
+    # Task 36e: was free text an admin had to type "GHS" into -- a bounded
+    # choice field, matching this file's own established WITHDRAWAL_DAY/
+    # WITHDRAWAL_FREQUENCY precedent (day_of_week_field/
+    # withdrawal_frequency_field below), not a one-off custom widget.
+    # Task 36h: locked to a single GHS choice, user-confirmed after being
+    # asked directly -- every price display in this codebase currently
+    # hardcodes a literal "GHS" prefix (grep confirms neither CURRENCY nor
+    # CURRENCY_SYMBOL is read anywhere) and the Paystack merchant account
+    # itself is GHS-only, so offering NGN/USD/GBP/EUR as if they were real
+    # choices would silently do nothing while looking functional -- a real
+    # footgun. Wiring every hardcoded price prefix (and the Paystack
+    # currency parameter) to read a live multi-currency setting is real,
+    # separate, unrequested scope, not something to fake with a dropdown.
     "CURRENCY": (
         "GHS",
-        "Currency used across the platform",
+        "Locked to GHS -- multi-currency support (Paystack, per-currency "
+        "pricing) isn't built yet",
+        "currency_field",
     ),
     "CURRENCY_SYMBOL": (
         "GHS",
-        "Symbol displayed with all prices",
+        "Locked to GHS -- multi-currency support isn't built yet",
+        "currency_field",
     ),
     "MAINTENANCE_MODE_ENABLED": (
         False,
@@ -548,6 +565,26 @@ CONSTANCE_ADDITIONAL_FIELDS = {
             # free-text field left open. Extend both this list and that
             # mapping together if a second cadence is ever added.
             "choices": [("weekly", "Weekly")],
+        },
+    ],
+    "currency_field": [
+        "django.forms.fields.ChoiceField",
+        {
+            "widget": "django.forms.Select",
+            # Task 36e/36h. Started as a 5-currency list (GHS + the other
+            # currencies most relevant to a Ghana-based storefront); the
+            # user asked directly what changing it away from GHS would
+            # actually do, and the honest answer was "nothing" -- no price
+            # display or Paystack API call reads this setting, and the
+            # Paystack merchant account itself is GHS-only, so the other 4
+            # choices were purely decorative and looked like real,
+            # functional options. Restricted to a single GHS entry, the
+            # same "bounded single-choice field closes a failure mode"
+            # reasoning already used by withdrawal_frequency_field above.
+            # Extend this list only alongside real multi-currency support
+            # (per-currency pricing, the Paystack currency parameter,
+            # exchange-rate-safe commission math) -- not before.
+            "choices": [("GHS", "Ghanaian Cedi (GHS)")],
         },
     ],
 }
