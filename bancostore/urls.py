@@ -30,6 +30,19 @@ urlpatterns = [
         name="robots_txt",
     ),
     path("sitemap.xml", sitemap, {"sitemaps": sitemaps}, name="sitemap"),
+    # Google Search Console domain-ownership verification (URL-prefix
+    # method) — the file's content and its exact URL path are both fixed by
+    # Google, not chosen here. Served the same way as robots.txt above
+    # (a literal-content TemplateView) rather than as a static file, since
+    # a static file living outside STATIC_URL's "static/" prefix wouldn't
+    # be reachable at the required bare root path.
+    path(
+        "google046e53e7ef60a9ba.html",
+        TemplateView.as_view(
+            template_name="google046e53e7ef60a9ba.html", content_type="text/html"
+        ),
+        name="google_site_verification",
+    ),
     path("admin/", admin.site.urls),
     # Shadows two_factor's own "account/login/" route below: same literal
     # path, listed first, so Django's resolver dispatches here instead of to
