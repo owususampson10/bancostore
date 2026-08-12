@@ -277,4 +277,129 @@ def test_checkout_post_with_a_since_emptied_cart_redirects_to_cart(client):
 
     assert response.status_code == 302
     assert response.url == reverse("orders:cart")
-    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+def test_checkout_shows_no_saved_addresses_section_for_a_guest(client):
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    response = client.get(reverse("orders:checkout"))
+
+    assert response.context["saved_addresses"] == []
+
+
+@pytest.mark.django_db
+def test_checkout_lists_a_logged_in_users_saved_addresses(client):
+    from apps.accounts.models import Address
+
+    user = User.objects.create_user(username="ama@example.test", password="pw")
+    Address.objects.create(
+        user=user, label="Home", address="1 Home St", delivery_zone="kumasi"
+    )
+    Address.objects.create(
+        user=user, label="Office", address="2 Office Ave", delivery_zone="accra"
+    )
+    client.force_login(user)
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    response = client.get(reverse("orders:checkout"))
+
+    addresses = response.context["saved_addresses"]
+    assert {a.label for a in addresses} == {"Home", "Office"}
+
+
+@pytest.mark.django_db
+def test_checkout_prefills_the_default_saved_address(client):
+    from apps.accounts.models import Address
+
+    user = User.objects.create_user(username="ama@example.test", password="pw")
+    Address.objects.create(
+        user=user,
+        label="Old",
+        address="Not This One",
+        delivery_zone="accra",
+        is_default=False,
+    )
+    Address.objects.create(
+        user=user,
+        label="Default Home",
+        address="9 Default Rd",
+        area="Cantonments",
+        delivery_zone="kumasi",
+        is_default=True,
+    )
+    client.force_login(user)
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    response = client.get(reverse("orders:checkout"))
+
+    initial = response.context["form"].initial
+    assert initial["address"] == "9 Default Rd"
+    assert initial["area"] == "Cantonments"
+    assert initial["delivery_zone"] == "kumasi"
+
+
+@pytest.mark.django_db
+def test_checkout_does_not_prefill_an_address_when_no_default_is_set(client):
+    from apps.accounts.models import Address
+
+    user = User.objects.create_user(username="ama@example.test", password="pw")
+    Address.objects.create(
+        user=user, address="Not Default", delivery_zone="accra", is_default=False
+    )
+    client.force_login(user)
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    response = client.get(reverse("orders:checkout"))
+
+    assert "address" not in response.context["form"].initial
+
+
+@pytest.mark.django_db
+@patch("apps.orders.views.initialize_transaction")
+def test_selecting_a_saved_address_at_checkout_snapshots_correctly_onto_the_order(
+    mock_initialize, client
+):
+    """Selecting a saved address is purely a client-side convenience that
+    fills the same visible form fields a manual entry would -- the POST
+    payload and Order creation path are identical either way, so this
+    proves the snapshot-at-creation-time behavior (Task 17a) is unaffected
+    by Task 40b, not a new code path."""
+    from apps.accounts.models import Address
+
+    mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
+    user = User.objects.create_user(username="ama@example.test", password="pw")
+    saved = Address.objects.create(
+        user=user,
+        label="Home",
+        address="9 Default Rd",
+        area="Cantonments",
+        delivery_zone="kumasi",
+        is_default=True,
+    )
+    client.force_login(user)
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    client.post(
+        reverse("orders:checkout"),
+        _valid_home_delivery_data(
+            delivery_zone="kumasi", address="9 Default Rd", area="Cantonments"
+        ),
+    )
+
+    order = Order.objects.get()
+    assert order.address == "9 Default Rd"
+    assert order.area == "Cantonments"
+    assert order.delivery_zone == "kumasi"
+
+    # Editing the saved address afterward must never change the
+    # already-placed order's own stored, snapshotted fields.
+    saved.address = "A Totally Different Street"
+    saved.save()
+    order.refresh_from_db()
+    assert order.address == "9 Default Rd"

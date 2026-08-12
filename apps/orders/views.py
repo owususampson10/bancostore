@@ -9,6 +9,7 @@ from django.views.decorators.http import require_POST
 
 from constance import config
 
+from apps.accounts.models import Address
 from apps.catalog.models import Product
 from apps.distributors.paystack import PaystackError, initialize_transaction
 
@@ -78,6 +79,16 @@ def checkout_view(request):
     if not cart_items:
         return redirect("orders:cart")
 
+    # Task 40b: [] for a guest, matching prefill_contact_info's own
+    # anonymous-user shape below -- no saved-address surface exists without
+    # an account, same as the wishlist/addresses pages themselves.
+    saved_addresses = (
+        list(Address.objects.filter(user=request.user))
+        if request.user.is_authenticated
+        else []
+    )
+    default_address = next((a for a in saved_addresses if a.is_default), None)
+
     payment_error = False
     if request.method == "POST":
         form = CheckoutForm(request.POST)
@@ -133,7 +144,24 @@ def checkout_view(request):
                 )
                 payment_error = True
     else:
-        form = CheckoutForm(initial=prefill_contact_info(request.user))
+        # Task 40b: a saved address is only ever a pre-fill SOURCE for these
+        # same plain form fields -- selecting one doesn't create any new
+        # code path, so create_pending_order's own snapshot-at-creation-time
+        # behavior (Task 17c) is untouched. Only an explicit is_default=True
+        # address auto-fills; with several saved and none marked default,
+        # guessing which one to silently prefill would be worse than
+        # leaving the fields blank for the customer to pick from the list.
+        initial = prefill_contact_info(request.user)
+        if default_address:
+            initial.update(
+                {
+                    "delivery_zone": default_address.delivery_zone,
+                    "address": default_address.address,
+                    "area": default_address.area,
+                    "landmark": default_address.landmark,
+                }
+            )
+        form = CheckoutForm(initial=initial)
 
     # security-and-hardening (2026-07-25): form.delivery_method.value /
     # form.delivery_zone.value echo back the RAW submitted POST value on a
@@ -156,9 +184,18 @@ def checkout_view(request):
         if submitted_method in valid_delivery_methods
         else Order.DeliveryMethod.HOME_DELIVERY
     )
-    selected_delivery_zone = (
-        submitted_zone if submitted_zone in valid_delivery_zones else ""
-    )
+    if submitted_zone in valid_delivery_zones:
+        selected_delivery_zone = submitted_zone
+    elif not form.is_bound and form.initial.get("delivery_zone"):
+        # Mirrors the plain address/area/landmark inputs, which already
+        # pick up the default address's values straight from form.initial
+        # via Django's own rendering -- the custom listbox's visible label
+        # is Alpine-driven instead (see checkout.html), so its initial
+        # value has to be threaded through here too, not just left to the
+        # hidden input's own initial-value attribute.
+        selected_delivery_zone = form.initial["delivery_zone"]
+    else:
+        selected_delivery_zone = ""
 
     cart_subtotal = sum((line.line_total for line in cart_items), start=Decimal("0"))
     return render(
@@ -187,6 +224,28 @@ def checkout_view(request):
             "delivery_zone_choices": [
                 {"value": value, "label": label}
                 for value, label in Order.DeliveryZone.choices
+            ],
+            "saved_addresses": saved_addresses,
+            "selected_saved_address_id": (
+                default_address.pk if default_address else None
+            ),
+            # Same XSS reasoning as delivery_zone_choices above: rendered
+            # via x-for from a json_script block in the template, never
+            # interpolated as a JS object literal (an admin-free-text
+            # label/address containing a quote would otherwise be able to
+            # break out of the x-data string).
+            "saved_addresses_data": [
+                {
+                    "id": address.pk,
+                    "label": address.label or address.address,
+                    "delivery_zone": address.delivery_zone,
+                    "delivery_zone_label": address.get_delivery_zone_display(),
+                    "address": address.address,
+                    "area": address.area,
+                    "landmark": address.landmark,
+                    "is_default": address.is_default,
+                }
+                for address in saved_addresses
             ],
         },
     )

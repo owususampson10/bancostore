@@ -53,6 +53,11 @@ urlpatterns = [
     # has the identical path string.
     path("account/login/", AdminLoginView.as_view(), name="admin_login"),
     path("accounts/", include("allauth.urls")),
+    # Task 40a: a deliberately distinct "addresses/" prefix, not "account/"
+    # (already the two_factor/admin-2FA namespace, per this codebase's own
+    # documented accounts/ vs account/ mix-up gotcha) or "accounts/"
+    # (allauth's own prefix above).
+    path("addresses/", include("apps.accounts.urls")),
     path("distributors/", include("apps.distributors.urls")),
     path("admin-portal/", include("apps.admin_portal.urls")),
     path("cart/", include("apps.orders.urls")),

@@ -1,13 +1,18 @@
 import logging
 
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.views.decorators.http import require_POST
 
 from django_ratelimit.core import is_ratelimited
 from two_factor.forms import AuthenticationTokenForm, BackupTokenForm
 from two_factor.views import LoginView as BaseLoginView
 
-from .forms import AdminAuthenticationForm
+from .forms import AddressForm, AdminAuthenticationForm
+from .models import Address
 
 logger = logging.getLogger(__name__)
 
@@ -140,3 +145,95 @@ class AdminLoginView(BaseLoginView):
                 self.get_user().pk,
             )
         return super().done(form_list, **kwargs)
+
+
+@login_required(login_url="account_login")
+def address_list(request):
+    """Task 40a. request.user-scoped, no id/param ever accepted -- matching
+    apps.distributors.views.earnings_history/team's established
+    no-IDOR-surface convention."""
+    addresses = Address.objects.filter(user=request.user)
+    return render(request, "accounts/address_list.html", {"addresses": addresses})
+
+
+# Task 40a (fixed 2026-08-12): sourced from the model field's own choices
+# (set from apps.orders.models.Order.DeliveryZone at class-definition time)
+# rather than re-importing Order here -- one less import edge to audit for
+# the accounts->orders cycle risk Address's own docstring already flags.
+_DELIVERY_ZONE_CHOICES = [
+    {"value": value, "label": label}
+    for value, label in Address._meta.get_field("delivery_zone").choices
+]
+_VALID_DELIVERY_ZONES = {choice["value"] for choice in _DELIVERY_ZONE_CHOICES}
+
+
+def _selected_delivery_zone(form):
+    """Same constrain-to-known-choices-before-the-template reasoning as
+    apps.orders.views.checkout_view's own selected_delivery_zone -- the
+    Alpine listbox's initial value is threaded through a json_script block
+    (never interpolated raw), but the value itself still has to be a real
+    choice, not an arbitrary bound-but-invalid submission echoed back."""
+    submitted = form.data.get("delivery_zone") if form.is_bound else ""
+    if submitted in _VALID_DELIVERY_ZONES:
+        return submitted
+    initial = form.initial.get("delivery_zone", "")
+    return initial if initial in _VALID_DELIVERY_ZONES else ""
+
+
+@login_required(login_url="account_login")
+def address_create(request):
+    if request.method == "POST":
+        form = AddressForm(request.POST)
+        if form.is_valid():
+            address = form.save(commit=False)
+            address.user = request.user
+            address.save()
+            messages.success(request, "Address saved.")
+            return redirect("accounts:address_list")
+    else:
+        form = AddressForm()
+
+    return render(
+        request,
+        "accounts/address_form.html",
+        {
+            "form": form,
+            "is_edit": False,
+            "delivery_zone_choices": _DELIVERY_ZONE_CHOICES,
+            "selected_delivery_zone": _selected_delivery_zone(form),
+        },
+    )
+
+
+@login_required(login_url="account_login")
+def address_edit(request, pk):
+    address = get_object_or_404(Address, pk=pk, user=request.user)
+    if request.method == "POST":
+        form = AddressForm(request.POST, instance=address)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Address updated.")
+            return redirect("accounts:address_list")
+    else:
+        form = AddressForm(instance=address)
+
+    return render(
+        request,
+        "accounts/address_form.html",
+        {
+            "form": form,
+            "is_edit": True,
+            "address": address,
+            "delivery_zone_choices": _DELIVERY_ZONE_CHOICES,
+            "selected_delivery_zone": _selected_delivery_zone(form),
+        },
+    )
+
+
+@login_required(login_url="account_login")
+@require_POST
+def address_delete(request, pk):
+    address = get_object_or_404(Address, pk=pk, user=request.user)
+    address.delete()
+    messages.success(request, "Address removed.")
+    return redirect("accounts:address_list")

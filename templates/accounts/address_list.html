@@ -1,0 +1,58 @@
+{% extends "base_store.html" %}
+{% block title %}My Addresses | Bancostore{% endblock %}
+{% block content %}
+{# Reuses admin_portal's shared delete-confirm modal (same accessible #}
+{# focus-trap/return-focus shape) instead of a native confirm() -- this #}
+{# codebase moved away from confirm()/alert() starting with Task 19c and #}
+{# has kept that convention for every delete action since. #}
+<div class="max-w-4xl mx-auto px-margin-mobile md:px-16 py-8 md:py-12" x-data="{ deleteOpen: false, deleteName: '', deleteUrl: '', deleteKind: 'address', deleteTrigger: null }">
+<div class="mb-8 flex items-start justify-between gap-4 flex-wrap">
+<div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-1">My Addresses</h1>
+<p class="font-body-md text-body-md text-gray-600">Save delivery addresses for faster checkout.</p>
+</div>
+<a href="{% url 'accounts:address_create' %}" class="px-6 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold hover:brightness-110 transition-all active:scale-95 flex items-center gap-2 flex-shrink-0">
+<span class="material-symbols-outlined text-[18px]">add</span>
+Add New Address
+</a>
+</div>
+
+{% if addresses %}
+<div class="space-y-4">
+{% for address in addresses %}
+<div class="bg-white rounded-xl border border-outline-variant p-6 flex items-start justify-between gap-4 flex-wrap">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<h3 class="font-bold text-on-surface">{{ address.label|default:"Address" }}</h3>
+{% if address.is_default %}
+<span class="px-2.5 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed-variant text-[10px] font-bold uppercase tracking-wide">Default</span>
+{% endif %}
+</div>
+<p class="text-sm text-gray-600">{{ address.address }}{% if address.area %}, {{ address.area }}{% endif %}</p>
+{% if address.landmark %}<p class="text-sm text-gray-600">Near {{ address.landmark }}</p>{% endif %}
+<p class="text-sm text-gray-600">{{ address.get_delivery_zone_display }}</p>
+</div>
+<div class="flex items-center gap-2 flex-shrink-0">
+<a href="{% url 'accounts:address_edit' address.pk %}" class="w-10 h-10 flex items-center justify-center rounded-full border border-outline hover:bg-surface-container transition-all" aria-label="Edit address" title="Edit address">
+<span class="material-symbols-outlined text-[18px]">edit</span>
+</a>
+<button type="button" class="w-10 h-10 flex items-center justify-center rounded-full border border-outline hover:bg-error-container hover:text-on-error-container transition-all" aria-label="Delete address" title="Delete address"
+        @click="deleteOpen = true; deleteName = '{{ address.label|default:address.address|escapejs }}'; deleteUrl = '{% url 'accounts:address_delete' address.pk %}'; deleteKind = 'address'; deleteTrigger = $el">
+<span class="material-symbols-outlined text-[18px]">delete</span>
+</button>
+</div>
+</div>
+{% endfor %}
+</div>
+{% else %}
+<div class="flex flex-col items-center justify-center text-center py-24 border border-dashed border-outline-variant rounded-xl">
+<span class="material-symbols-outlined text-primary text-[48px] mb-4" aria-hidden="true">location_on</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface mb-2">No saved addresses yet</h2>
+<p class="font-body-md text-body-md text-gray-600 mb-6 max-w-sm">Save a delivery address now so checkout is faster next time.</p>
+<a href="{% url 'accounts:address_create' %}" class="px-6 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold hover:brightness-110 transition-all active:scale-95">Add New Address</a>
+</div>
+{% endif %}
+
+{% include "admin_portal/partials/_delete_confirm_modal.html" %}
+</div>
+{% endblock %}
