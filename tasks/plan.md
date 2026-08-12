@@ -475,6 +475,145 @@ check, since SQLite's locking hides concurrency bugs CI's MySQL container would 
 `SPEC.md` Testing Strategy) — its result is recorded in `tasks/todo.md` once known, not assumed
 green here in advance.
 
+## Phase 2 (SPEC_PHASE2.md) — Tasks 39-48
+
+Not part of the original MVP plan above — scoped 2026-08-12 from `SPEC_PHASE2.md`, which itself
+grounds every feature directly in the primary source doc's Sections 10.2/10.3, 11, 12.4–12.6,
+13.5–13.8/13.10–13.12, and 4.2 (read via `python-docx`, not paraphrased). Ten features, numbered
+39-48 to match `SPEC_PHASE2.md`'s own Feature 1-10 numbering exactly, so either document can be
+read against the other with no translation. Grouped into four sub-phases by risk/coupling profile,
+not strict build priority — simple, independent customer-facing features first, money-adjacent
+merchandising features second (once first-slice conventions are re-established), then admin-facing
+reporting/compliance (the largest, most interdependent group), then the broadest cross-cutting
+feature last (Notification Template Editor touches five apps). **This ordering is a judgment call,
+not a fixed sequence — re-order freely if a different feature is more urgent.**
+
+Every task below follows this project's own vertical-slice convention (db + backend + frontend
+together, tested and live-browser-verified before the next task starts) and is broken into lettered
+sub-tasks wherever the full feature would otherwise exceed the ~5-file/single-session sizing this
+plan has held every prior task to. Full acceptance criteria, verification steps, dependencies, and
+file lists for every task/sub-task are in `tasks/todo.md`, not duplicated here — this file lists
+scope and rationale only, per its own established format above.
+
+### Phase 13: Phase 2 — Customer Account Features
+- [x] Task 39: Wishlist — save/remove products, account-page list, account-backed not session-backed
+- [x] Task 40: Saved / multiple delivery addresses
+  - [x] 40a: `Address` model + account CRUD (save, edit, delete, set default)
+  - [x] 40b: Checkout gains "choose a saved address or enter a new one," still snapshots onto
+    `Order` exactly as today — editing a saved address later must never change an already-placed
+    order (a real regression test, not just a manual check)
+- [x] Task 41: Product Reviews
+  - [x] 41a: Review submission — gated to customers with a `delivered` order for that specific
+    product, one review per customer per product (edit-in-place on resubmission)
+  - [x] 41b: Admin moderation (approve/delete, `admin_portal`) + public display (approved reviews +
+    average rating on the product page) + the 13.10 "Product Review Approval" admin toggle
+
+### Checkpoint L — after Tasks 39-41
+- [x] Test status, stated precisely rather than as one blanket claim: every targeted suite (catalog,
+  accounts, admin_portal, orders) was green at the time each task's slice was built; multiple full
+  local `pytest -q` runs were green except the one pre-existing, unrelated Task 36 regression
+  (`test_page_loads_the_shared_js_bundle_so_the_sidebar_can_actually_collapse`, confirmed pre-
+  existing before this work started); GitHub Actions CI on PR #73 (lint + real-MySQL test) both
+  passed
+- [x] Live-browser verified: wishlist survives a logout/login cycle; a saved address correctly
+  pre-fills and snapshots at checkout; a review only appears publicly after admin approval
+- [ ] Review with the user before proceeding to Phase 14
+
+### Phase 14: Phase 2 — Merchandising & Promotions (money-adjacent — elevated rigor)
+- [ ] Task 42: Promotional Banners — admin upload (image, link target, start/end date), home page
+  shows only currently-active banners with no admin action needed on expiry
+- [ ] Task 43: Discount Codes — **`doubt-driven-development` pass before 43b, matching every other
+  money-adjacent feature in this codebase**
+  - [ ] 43a: `DiscountCode` model + admin CRUD + the 13.11 settings (Discount Codes toggle, Maximum
+    Discount Per Order, Discount Applicable To)
+  - [ ] 43b: Checkout redemption — snapshotted discount amount on `Order` (never re-derived from a
+    possibly-since-expired code later), concurrency-safe usage-cap decrement (same atomic-counter
+    discipline as `Product` stock, not a naive read-then-write) — a real concurrent-redemption test
+  - [ ] 43c: Audience restriction wired to real customer/distributor role groups (`is_distributor`
+    etc.), not just `Order.pv_earned`
+- [ ] Task 44: Backorders — **`doubt-driven-development` pass before 44b**, since it changes
+  `confirm_order_payment`'s existing out-of-stock behavior (Task 17d) — a real interaction with
+  already-shipped money-adjacent code, not a green-field addition
+  - [ ] 44a: Per-`Product` backorder fields + storefront Add-to-Cart/"Ships in N days" messaging +
+    the 13.6/13.10 settings (Backorders On/Off, Backorder Message, Out of Stock Behaviour)
+  - [ ] 44b: Checkout/order-confirmation integration — a backorder-enabled item must not hit Task
+    17d's existing cancel-and-refund path; a non-backorder item's existing behavior must be
+    unchanged (regression test against Task 7/17's existing suite)
+
+### Checkpoint M — after Tasks 42-44
+- [ ] Full suite green including new elevated-rigor coverage for Task 43/44 (concurrency,
+  expiry/audience edge cases, the Task 17d interaction), CI green on real MySQL
+- [ ] Live-browser verified: a valid code reduces checkout total correctly; an expired/exhausted/
+  audience-mismatched code is rejected with a clear message, never a 500; a backordered product
+  can be ordered and does not auto-cancel
+- [ ] Review with the user before proceeding to Phase 15
+
+### Phase 15: Phase 2 — Admin Reporting & Compliance
+- [ ] Task 45: Shared CSV/PDF export utility (`export_as_csv`/`export_as_pdf`, matching
+  `bancostore/concurrency.py`'s existing shared-utility precedent) — built first since Tasks 46-47
+  depend on it; PDF path reuses the already-proven `WeasyPrint` pipeline from Task 18e (same
+  `project_weasyprint_pango_blocked_locally` local-verification caveat applies, CI-verified instead)
+- [ ] Task 46: Sales & Revenue Reporting
+  - [ ] 46a: Reporting-at-scale architecture decision — pre-aggregated rollup tables (matching the
+    PV ledger's own event-driven-aggregate precedent) vs. a scheduled Celery report-cache job vs. a
+    bounded live-query lookback window. Written up as a new ADR (`docs/decisions/0010-...md`,
+    matching Tasks 4/9/12/13/16/17/18/19/20/35's own precedent) before any report code — this is a
+    real architectural decision per `SPEC.md`'s explicit hundreds-of-thousands-of-users scale target,
+    not a detail to improvise mid-build
+  - [ ] 46b: Revenue (daily/weekly/monthly), order-per-status, and delivery-by-zone reports, wired
+    to Task 45's export utility
+  - [ ] 46c: Best-selling products + new-vs-returning customer reports, wired to Task 45
+- [ ] Task 47: Compliance Dashboard + Financial Overview — **`doubt-driven-development` pass before
+  47a**, the escrow ledger is new money-adjacent code
+  - [ ] 47a: Escrow reserve ledger — atomic `F()`-based running balance credited at order
+    confirmation (matching `Wallet.balance`'s own convention), 13.12's admin-editable Escrow
+    Reserve Percentage (not hardcoded to 5%)
+  - [ ] 47b: Retail/distributor ratio (`Order.pv_earned > 0` as the existing real signal) + the
+    13.12 Retail PV Minimum threshold + Compliance Alert Email (reuses the existing Gmail SMTP path)
+  - [ ] 47c: Financial Overview dashboard row (four numbers, all already-real underlying data —
+    smallest-scoped sub-task in this phase, matching Task 27's own dashboard-card pattern)
+  - [ ] 47d: Audit log, part 1 — add `HistoricalRecords()` to the sensitive models that are missing
+    it (Product/Category from Task 26, Platform Settings from Task 28, KYC approve/reject) — a
+    decision on which models make the cut is a Task-kickoff question, not decided in this plan
+  - [ ] 47e: Audit log, part 2 — one real `admin_portal` screen querying across every
+    `HistoricalRecords()`-tracked model (actor, timestamp, what changed), plus the 13.12 Audit Log
+    Retention Period wired as a real scheduled Celery cleanup, not decorative
+
+### Checkpoint N — after Tasks 45-47
+- [ ] Full suite green including new elevated-rigor coverage for Task 47a (escrow), CI green on
+  real MySQL
+- [ ] Live-browser verified: every report/export figure cross-checked against the database directly
+  (not just "the page/file renders"); escrow balance increases by exactly the configured percentage
+  of confirmed product revenue, checked against the database; the compliance alert email actually
+  fires when seeded data drops the ratio below threshold, and does not fire above it
+- [ ] Review with the user before proceeding to Phase 16
+
+### Phase 16: Phase 2 — Notifications & Settings Completion
+- [ ] Task 48: Notification Template Editor + Provider-Choice Settings — the broadest task in Phase
+  2, touching `apps/notifications`, `apps/accounts`, `apps/distributors`, `apps/withdrawal`,
+  `apps/commissions`; mNotify/Gmail SMTP stay the only wired providers, per direct user confirmation
+  (a `security-and-hardening` pass on template rendering is mandatory before 48a ships, given
+  admin-entered text rendering into SMS/email/HTML is a real injection surface)
+  - [ ] 48a: `NotificationTemplate` model (name/subject/body/placeholder variables) + admin CRUD in
+    `admin_portal`, with server-side escaping matching this codebase's established "constrain
+    server-side, never raw interpolation" rule (Task 17/37's Alpine `x-data`/JSON-LD precedent)
+  - [ ] 48b: Migrate the highest-traffic send-sites to render from a template — OTP codes,
+    withdrawal status (approved/rejected/paid/reversed), KYC decision
+  - [ ] 48c: Migrate the remaining send-sites — binary/matching/direct-referral bonus credited,
+    downline joined, PV-expiry warning, order status updates (Task 21d's 6 event types plus every
+    remaining auth/transactional message since Task 4)
+  - [ ] 48d: SMS Provider / Email Provider admin-editable choice fields (visibly labeled as the one
+    real wired option, matching the Currency-lock precedent from Task 36g/h — never a functional
+    no-op picker) + Sender Name / Sender Email Address moved from `.env`/hardcoded into real
+    constance settings
+
+### Checkpoint O — Phase 2 complete
+- [ ] Every one of `SPEC_PHASE2.md`'s ten Success Criteria sections met
+- [ ] Full suite green, CI green on real MySQL, every feature live-browser-verified
+- [ ] `SPEC.md` cross-references confirmed accurate (already pointing at `SPEC_PHASE2.md` as of
+  2026-08-12); `CLAUDE.md` Project State updated to record Phase 2's completion
+- [ ] Review with the user — Phase 2 sign-off
+
 ## Risks and Mitigations
 
 | Risk | Impact | Mitigation |
@@ -486,6 +625,9 @@ green here in advance.
 | Homebrew `mysql` doesn't install on this Mac (confirmed — no bottle for macOS 12, source build hits a linker failure) | Resolved | Local dev uses SQLite instead; MySQL only runs in CI (GitHub Actions, Linux, no compile issue) and production (Hostinger VPS, purchased later). See `SPEC.md` Local dev environment. |
 | SQLite's single-writer locking hides concurrency bugs in PV-ledger/wallet writes that only show up under real MySQL | Medium — could ship a bug that only appears in production | CI must run the commission/wallet/withdrawal suite against a real MySQL service container, not SQLite — see `SPEC.md` Testing Strategy |
 | Task touches more than one subsystem | Low — scope creep mid-task | Vertical slices kept to db+backend+frontend for one feature only; split further if a task needs "and" in its title |
+| Discount Codes (Task 43b) / Backorders (Task 44b) touch already-shipped, locked/idempotent checkout code (Task 17d/18b) | High — a regression here risks double-charging or breaking existing checkout | `doubt-driven-development` pass before each, per `SPEC_PHASE2.md`'s own Boundaries; regression tests against the existing Task 7/17/18 suites, not just new tests |
+| Reporting (Task 46) run as naive live aggregate queries at `SPEC.md`'s stated hundreds-of-thousands-of-users scale | Medium — slow/costly dashboard once real volume exists | Task 46a is a dedicated architecture-decision sub-task (ADR) before any report code, not improvised mid-build |
+| Notification Template Editor (Task 48a) renders admin-entered text into SMS/email/HTML | Medium — a real injection surface if unescaped | `security-and-hardening` pass mandatory before 48a ships; server-side constrain, never raw interpolation, matching Task 17/37's existing precedent |
 
 ## Open Questions (carried from `SPEC.md`, mapped to blocking tasks)
 
@@ -514,3 +656,26 @@ green here in advance.
 
 Each of these will be asked as a short question right before its blocking task starts, rather than
 all at once now.
+
+## Open Questions — Phase 2 (carried from `SPEC_PHASE2.md`, mapped to blocking tasks)
+
+Resolved via direct user confirmation before `SPEC_PHASE2.md` was written (not re-litigated here):
+scope is all ten features now; the escrow tracker (Task 47a) is internal-ledger-only, no real GCB
+Bank integration; SMS/Email provider switching (Task 48d) is an admin-editable choice field only,
+mNotify/Gmail stay the only wired providers; Wishlist (Task 39) and saved addresses (Task 40) are
+in scope.
+
+Still open, each to be asked right before its blocking task starts:
+1. **Discount code usage limit (blocks Task 43a/43b):** a global redemption cap only, or also a
+   1-per-customer default on top of it?
+2. **`MAX_PRODUCT_IMAGES` (blocks Task 44a if bundled, otherwise standalone):** stay at 5 (the
+   current shipped MVP value, Task 26) or move to the source doc's 8? Not silently changed either
+   way — it's a live-shipped value, not a fresh decision.
+3. **Reporting-at-scale design (blocks Task 46b/46c):** resolved by Task 46a's own ADR, not asked
+   separately — see that sub-task.
+4. **Which models get `HistoricalRecords()` for the audit log, and whether it needs its own
+   dedicated event-stream model instead of/alongside `simple_history` (blocks Task 47d/47e):** a
+   real design call, not a detail.
+5. **One review per customer per product vs. one per order (blocks Task 41a):** changes the
+   schema's uniqueness constraint — the source doc doesn't say, so this needs a direct answer
+   before 41a's migration is written, not an assumption baked into it.

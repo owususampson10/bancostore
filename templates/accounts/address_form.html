@@ -1,0 +1,121 @@
+{% extends "base_store.html" %}
+{% block title %}{% if is_edit %}Edit Address{% else %}Add Address{% endif %} | Bancostore{% endblock %}
+{% block content %}
+{{ delivery_zone_choices|json_script:"address-zone-choices" }}
+{{ selected_delivery_zone|json_script:"address-selected-zone" }}
+<div class="max-w-xl mx-auto px-margin-mobile md:px-16 py-8 md:py-12">
+<div class="mb-8">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-1">{% if is_edit %}Edit Address{% else %}Add New Address{% endif %}</h1>
+<p class="font-body-md text-body-md text-gray-600">Save a delivery address for faster checkout.</p>
+</div>
+
+<form method="post" class="bg-white rounded-xl border border-outline-variant p-6 space-y-5"
+      x-data="{
+        // Themed listbox for Delivery Zone, matching checkout.html/
+        // payout_settings.html's established pattern exactly -- a native
+        // select's open options list can't be restyled via CSS in any
+        // browser. Both values below come from json_script blocks above,
+        // never interpolated directly into this x-data string (same XSS
+        // reasoning as every other listbox in this codebase).
+        zoneOpen: false,
+        zoneHighlighted: -1,
+        deliveryZone: JSON.parse(document.getElementById('address-selected-zone').textContent),
+        zoneOptions: JSON.parse(document.getElementById('address-zone-choices').textContent),
+        get zoneSelectedLabel() {
+          const found = this.zoneOptions.find(o => o.value === this.deliveryZone);
+          return found ? found.label : 'Select a delivery zone';
+        },
+        openZoneList() {
+          this.zoneOpen = true;
+          this.zoneHighlighted = Math.max(this.zoneOptions.findIndex(o => o.value === this.deliveryZone), 0);
+        },
+        chooseZone(index) {
+          this.deliveryZone = this.zoneOptions[index].value;
+          this.zoneOpen = false;
+        },
+      }">
+{% csrf_token %}
+{% if form.non_field_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md">
+{{ form.non_field_errors }}
+</div>
+{% endif %}
+
+<div class="space-y-2">
+<label for="{{ form.label.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Label (optional)</label>
+{{ form.label }}
+{% if form.label.errors %}<p class="text-error text-sm">{{ form.label.errors.0 }}</p>{% endif %}
+</div>
+
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant block" id="address-delivery-zone-label">Delivery Zone</label>
+<div class="relative" @click.outside="zoneOpen = false">
+<button type="button"
+        class="w-full pl-10 pr-4 py-3 bg-white border border-outline-variant rounded-lg text-left flex items-center justify-between font-body-md text-body-md focus:ring-2 focus:ring-secondary focus:border-secondary outline-none transition-all"
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-labelledby="address-delivery-zone-label"
+        aria-controls="address-delivery-zone-listbox"
+        :aria-expanded="zoneOpen.toString()"
+        :aria-activedescendant="zoneHighlighted >= 0 ? 'address-delivery-zone-option-' + zoneHighlighted : null"
+        @click="zoneOpen ? (zoneOpen = false) : openZoneList()"
+        @keydown.down.prevent="zoneOpen ? zoneHighlighted = Math.min(zoneHighlighted + 1, zoneOptions.length - 1) : openZoneList()"
+        @keydown.up.prevent="zoneOpen ? zoneHighlighted = Math.max(zoneHighlighted - 1, 0) : openZoneList()"
+        @keydown.enter.prevent="if (zoneOpen && zoneHighlighted >= 0) chooseZone(zoneHighlighted)"
+        @keydown.escape="zoneOpen = false">
+<span :class="deliveryZone ? 'text-on-surface' : 'text-secondary'" x-text="zoneSelectedLabel">Select a delivery zone</span>
+<span class="material-symbols-outlined text-secondary transition-transform" :class="zoneOpen && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<ul x-show="zoneOpen"
+    x-cloak
+    role="listbox"
+    id="address-delivery-zone-listbox"
+    aria-labelledby="address-delivery-zone-label"
+    class="absolute z-10 mt-1 w-full bg-white border border-outline-variant rounded-lg shadow-lg overflow-hidden py-1">
+<template x-for="(option, index) in zoneOptions" :key="option.value">
+<li :id="'address-delivery-zone-option-' + index"
+    role="option"
+    :aria-selected="(deliveryZone === option.value).toString()"
+    class="px-4 py-3 text-sm cursor-pointer transition-colors"
+    :class="(zoneHighlighted === index) ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    @click="chooseZone(index)"
+    @mouseenter="zoneHighlighted = index"
+    x-text="option.label">
+</li>
+</template>
+</ul>
+</div>
+<input type="hidden" name="delivery_zone" id="{{ form.delivery_zone.id_for_label }}" :value="deliveryZone">
+{% if form.delivery_zone.errors %}<p class="text-error text-sm">{{ form.delivery_zone.errors.0 }}</p>{% endif %}
+</div>
+
+<div class="space-y-2">
+<label for="{{ form.address.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Street Address</label>
+{{ form.address }}
+{% if form.address.errors %}<p class="text-error text-sm">{{ form.address.errors.0 }}</p>{% endif %}
+</div>
+
+<div class="space-y-2">
+<label for="{{ form.area.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Area (optional)</label>
+{{ form.area }}
+{% if form.area.errors %}<p class="text-error text-sm">{{ form.area.errors.0 }}</p>{% endif %}
+</div>
+
+<div class="space-y-2">
+<label for="{{ form.landmark.id_for_label }}" class="font-label-md text-label-md text-on-surface-variant block">Nearest Landmark (optional)</label>
+{{ form.landmark }}
+{% if form.landmark.errors %}<p class="text-error text-sm">{{ form.landmark.errors.0 }}</p>{% endif %}
+</div>
+
+<div class="flex items-center gap-2">
+{{ form.is_default }}
+<label for="{{ form.is_default.id_for_label }}" class="font-body-md text-body-md text-on-surface">Set as my default address</label>
+</div>
+
+<div class="flex gap-3 pt-2">
+<a href="{% url 'accounts:address_list' %}" class="flex-1 text-center border border-outline-variant text-on-surface py-3 px-4 rounded-lg font-semibold hover:bg-surface-container-low transition-all">Cancel</a>
+<button type="submit" class="flex-1 bg-primary text-on-primary py-3 px-4 rounded-lg font-semibold hover:brightness-110 transition-all active:scale-95">{% if is_edit %}Save Changes{% else %}Save Address{% endif %}</button>
+</div>
+</form>
+</div>
+{% endblock %}

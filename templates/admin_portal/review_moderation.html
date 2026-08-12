@@ -1,0 +1,97 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Reviews — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div x-data="{ deleteOpen: false, deleteName: '', deleteUrl: '', deleteKind: 'review', deleteTrigger: null }">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface">Product Reviews</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Approve or delete customer reviews. Pending reviews are shown first.</p>
+</div>
+<a href="{% url 'admin_portal:catalog_product_list' %}" class="px-6 py-3 rounded-lg font-bold text-label-md border border-outline-variant text-on-surface-variant flex items-center gap-2 hover:bg-surface-container-low transition-all">
+<span class="material-symbols-outlined" aria-hidden="true">inventory_2</span>
+Products
+</a>
+</div>
+
+<div class="bg-white rounded-xl border border-outline-variant overflow-hidden shadow-sm">
+{% if page_obj.object_list %}
+<div class="overflow-x-auto">
+<table class="w-full min-w-[900px] text-left border-collapse">
+<thead class="bg-surface-container-low">
+<tr>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Product</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Customer</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Rating</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Review</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Status</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/30">
+{% for review in page_obj.object_list %}
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-6 py-5 font-body-md text-body-md font-semibold">{{ review.product.name }}</td>
+<td class="px-6 py-5 text-on-surface-variant font-body-md text-body-md">{{ review.user }}</td>
+<td class="px-6 py-5 text-on-surface-variant font-body-md text-body-md">{{ review.rating }}/5</td>
+<td class="px-6 py-5 text-on-surface-variant font-body-md text-body-md max-w-xs truncate">{{ review.body }}</td>
+<td class="px-6 py-5">
+{% if review.is_approved %}
+<span class="px-2.5 py-1 rounded-full font-body-md text-body-md font-semibold bg-green-50 text-green-700">Approved</span>
+{% else %}
+<span class="px-2.5 py-1 rounded-full font-body-md text-body-md font-semibold bg-surface-container-high text-on-surface-variant">Pending</span>
+{% endif %}
+</td>
+<td class="px-6 py-5">
+<div class="flex items-center gap-2">
+{% if not review.is_approved %}
+<form method="post" action="{% url 'admin_portal:review_approve' review.pk %}">
+{% csrf_token %}
+<button type="submit" class="w-9 h-9 flex items-center justify-center rounded-full border border-outline-variant text-primary hover:bg-primary/10 transition-all" aria-label="Approve review" title="Approve review">
+<span class="material-symbols-outlined text-[18px]">check</span>
+</button>
+</form>
+{% endif %}
+<button type="button" class="w-9 h-9 flex items-center justify-center rounded-full border border-outline-variant text-primary hover:bg-primary/10 transition-all" aria-label="Delete review" title="Delete review"
+        @click="deleteOpen = true; deleteName = 'This review by {{ review.user|escapejs }}'; deleteUrl = '{% url 'admin_portal:review_delete' review.pk %}'; deleteKind = 'review'; deleteTrigger = $el">
+<span class="material-symbols-outlined text-[18px]">delete</span>
+</button>
+</div>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="px-6 py-4 bg-surface-container-low border-t border-outline-variant flex flex-col sm:flex-row items-center justify-between gap-4">
+<p class="text-sm text-on-surface-variant">
+Showing {{ page_obj.start_index }} to {{ page_obj.end_index }} of {{ page_obj.paginator.count }} reviews
+</p>
+<div class="flex items-center gap-2">
+{% if page_obj.has_previous %}
+<a href="?page={{ page_obj.previous_page_number }}" class="p-2 border border-outline-variant rounded-lg hover:bg-white transition-all">
+<span class="material-symbols-outlined">chevron_left</span>
+</a>
+{% endif %}
+<span class="text-sm text-on-surface-variant px-2">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+{% if page_obj.has_next %}
+<a href="?page={{ page_obj.next_page_number }}" class="p-2 border border-outline-variant rounded-lg hover:bg-white transition-all">
+<span class="material-symbols-outlined">chevron_right</span>
+</a>
+{% endif %}
+</div>
+</div>
+{% endif %}
+{% else %}
+<div class="flex flex-col items-center justify-center text-center py-24">
+<span class="material-symbols-outlined text-primary text-[48px] mb-4" aria-hidden="true">rate_review</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface mb-2">No reviews yet</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Customer reviews will appear here once submitted.</p>
+</div>
+{% endif %}
+</div>
+
+{% include "admin_portal/partials/_delete_confirm_modal.html" %}
+</div>
+{% endblock %}

@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
 from django.db import models
 from django.utils.text import slugify
@@ -158,3 +159,76 @@ class ProductVariant(models.Model):
 
     def __str__(self):
         return f"{self.name}: {self.value}"
+
+
+class WishlistItem(models.Model):
+    """Task 39 (SPEC_PHASE2.md Feature 9). Account-backed, unlike
+    apps.orders.cart.Cart's deliberately session-based design -- the whole
+    point of a wishlist is that it survives a logout/login cycle and works
+    across devices. UniqueConstraint makes the add path idempotent
+    (get_or_create in the view never needs a pre-check query)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="wishlist_items",
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="wishlisted_by"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "product"], name="unique_wishlist_item"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user} → {self.product}"
+
+
+class Review(models.Model):
+    """Task 41a (SPEC_PHASE2.md Feature 1). One review per customer per
+    product, confirmed with the user (not one per order) -- resubmitting
+    edits the existing row in place rather than stacking a second one.
+    Unapproved by default; approval is an admin_portal action (Task 41b),
+    never automatic here."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reviews"
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="reviews"
+    )
+    rating = models.PositiveSmallIntegerField()
+    body = models.TextField()
+    is_approved = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "product"], name="unique_review_per_user_product"
+            ),
+            models.CheckConstraint(
+                check=models.Q(rating__gte=1) & models.Q(rating__lte=5),
+                name="review_rating_between_1_and_5",
+            ),
+        ]
+        # code-review-and-quality (CodeRabbit, PR #73): matches
+        # _product_detail_context's own real query shape exactly (filter by
+        # product + is_approved, order by -created_at).
+        indexes = [
+            models.Index(
+                fields=["product", "is_approved", "-created_at"],
+                name="review_pub_lookup_idx",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user} → {self.product} ({self.rating}★)"

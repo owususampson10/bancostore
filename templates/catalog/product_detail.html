@@ -80,9 +80,9 @@ Earns {{ product.pv_value }} PV for distributors
 </div>
 {% endif %}
 
-<div class="mb-8">
+<div class="mb-8 flex gap-3">
 {% if product.in_stock %}
-<form method="post" action="{% url 'orders:cart_add' product.pk %}">
+<form method="post" action="{% url 'orders:cart_add' product.pk %}" class="flex-1">
 {% csrf_token %}
 <button type="submit" class="w-full bg-primary text-on-primary rounded-full py-4 px-8 font-semibold flex items-center justify-center gap-2 hover:brightness-110 transition-all active:scale-95">
 <span class="material-symbols-outlined">shopping_cart</span>
@@ -90,7 +90,21 @@ Add to Cart
 </button>
 </form>
 {% else %}
-<span class="block text-center bg-surface-variant text-gray-600 rounded-full py-4 px-8 font-semibold">Out of Stock</span>
+<span class="flex-1 block text-center bg-surface-variant text-gray-600 rounded-full py-4 px-8 font-semibold">Out of Stock</span>
+{% endif %}
+{# Task 39: a guest gets a clear login prompt instead of a broken control -- #}
+{# never a POST form for an anonymous user. #}
+{% if user.is_authenticated %}
+<form method="post" action="{% url 'catalog:wishlist_toggle' product.pk %}">
+{% csrf_token %}
+<button type="submit" class="w-14 h-14 flex-shrink-0 flex items-center justify-center rounded-full border transition-all active:scale-95{% if in_wishlist %} border-primary text-primary{% else %} border-outline hover:bg-surface-container{% endif %}" aria-label="{% if in_wishlist %}Remove from wishlist{% else %}Add to wishlist{% endif %}" title="{% if in_wishlist %}Remove from wishlist{% else %}Add to wishlist{% endif %}">
+<span class="material-symbols-outlined"{% if in_wishlist %} style="font-variation-settings: 'FILL' 1;"{% endif %}>favorite</span>
+</button>
+</form>
+{% else %}
+<a href="{% url 'account_login' %}?next={{ request.path|urlencode }}" class="w-14 h-14 flex-shrink-0 flex items-center justify-center rounded-full border border-outline hover:bg-surface-container transition-all active:scale-95" aria-label="Log in to save to your wishlist" title="Log in to save to your wishlist">
+<span class="material-symbols-outlined">favorite</span>
+</a>
 {% endif %}
 </div>
 
@@ -111,6 +125,58 @@ Add to Cart
 <p class="text-gray-500">No description available yet.</p>
 {% endif %}
 </div>
+</section>
+
+<!-- Reviews -->
+<section class="mt-16 max-w-3xl">
+<div class="flex items-center gap-3 mb-6">
+<h2 class="text-2xl font-bold">Reviews</h2>
+{% if average_rating %}
+<div class="flex items-center gap-1">
+{% for n in "12345" %}
+<span class="material-symbols-outlined text-primary text-[18px]"{% if forloop.counter <= average_rating %} style="font-variation-settings: 'FILL' 1;"{% endif %} aria-hidden="true">star</span>
+{% endfor %}
+</div>
+<span class="text-sm text-gray-600">{{ average_rating }} out of 5 ({{ reviews|length }} review{{ reviews|length|pluralize }})</span>
+{% endif %}
+</div>
+{% if can_review %}
+<form method="post" action="{% url 'catalog:review_submit' product.pk %}" class="bg-surface-container-low rounded-xl border border-outline-variant p-6 space-y-4">
+{% csrf_token %}
+{% if review_form.non_field_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 text-sm">{{ review_form.non_field_errors }}</div>
+{% endif %}
+<div class="space-y-2">
+<label for="{{ review_form.rating.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary">Your Rating (1-5)</label>
+{{ review_form.rating }}
+{% if review_form.rating.errors %}<p class="text-error text-sm">{{ review_form.rating.errors.0 }}</p>{% endif %}
+</div>
+<div class="space-y-2">
+<label for="{{ review_form.body.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary">Your Review</label>
+{{ review_form.body }}
+{% if review_form.body.errors %}<p class="text-error text-sm">{{ review_form.body.errors.0 }}</p>{% endif %}
+</div>
+<button type="submit" class="bg-primary text-on-primary rounded-full py-3 px-8 font-semibold hover:brightness-110 transition-all active:scale-95">{% if review_form.instance.pk %}Update Review{% else %}Submit Review{% endif %}</button>
+</form>
+{% endif %}
+
+{% if reviews %}
+<div class="mt-8 space-y-6">
+{% for review in reviews %}
+<div class="border-b border-outline-variant pb-6">
+<div class="flex items-center gap-1 mb-2" role="img" aria-label="{{ review.rating }} out of 5 stars">
+{% for n in "12345" %}
+<span class="material-symbols-outlined text-primary text-[16px]"{% if forloop.counter <= review.rating %} style="font-variation-settings: 'FILL' 1;"{% endif %} aria-hidden="true">star</span>
+{% endfor %}
+</div>
+<p class="text-gray-700">{{ review.body }}</p>
+<p class="text-xs text-gray-500 mt-2">{{ review.created_at|date:"M d, Y" }}</p>
+</div>
+{% endfor %}
+</div>
+{% else %}
+<p class="text-gray-600 mt-4">No reviews yet.</p>
+{% endif %}
 </section>
 
 <!-- Related Products -->

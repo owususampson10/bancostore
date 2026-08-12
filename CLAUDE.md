@@ -18,9 +18,31 @@ placeholder links discovered while auditing the storefront, not part of the orig
 plan. Task 30 (fixing tracked Known Issues — decorative constance settings, session engine, CI
 hygiene), also closed 2026-07-31, was requested directly by the user rather than found during an
 audit. Task 31 (storefront home page — Editorial Variant layout rebuild), closed 2026-08-04, was
-likewise requested directly by the user. Task 24 (deploy to Hostinger VPS) is next — a production
-action requiring user confirmation before any step touches the real VPS/domain, per
-`SPEC.md` Boundaries.**
+likewise requested directly by the user, along with a same-day Task 32 (admin portal fixes —
+category-image dropzone, admin logout redirect, two leftover native-admin links), bundled into the
+same PR #60. **Task 24 (deploy to Hostinger VPS) is done — the platform is live in production.**
+Split into sub-tasks 24a–24h per `SPEC.md` Boundaries (each sub-task got its own explicit
+go-ahead before touching the real VPS/domain), closed 2026-08-10 with a full smoke-test purchase
+run end-to-end against real production MySQL/Redis at `https://bancostore.com` (register → pay →
+starter pack → tree placement → KYC → IR ID → direct referral bonus → binary bonus cycle →
+withdrawal request → tax deduction), all test data cleaned up afterward. Full deploy runbook lives
+in `deploy/README.md`; production quick-reference commands are in `SPEC.md`'s Commands section.
+Task 33 (Distributor Team page — flat sponsor-chain downline roster) also closed 2026-08-10, found
+via a dead sidebar placeholder the user asked about. Task 34 (seven legal/policy pages) and Task 35
+(admin-managed Social Media Links) closed 2026-08-11, both requested directly by the user. Task 36
+(post-deploy fixes — real cache-busting, footer layout, Social Links relocated into Platform
+Settings, icon-picker bugs, Currency locked to GHS-only) closed 2026-08-11, found by the user
+reviewing the live production deploy of Tasks 34/35. Task 37 (SEO foundations — meta/OG/Twitter
+tags, robots.txt + sitemap, JSON-LD structured data, a Lighthouse page-speed audit) and Task 38
+(self-hosting the remaining Stitch-generated/Google-hosted images the audit flagged as a real
+production risk) both closed 2026-08-11, requested directly by the user the day after launch. Two
+small follow-ups closed 2026-08-12: a real hand-vectorized brand logo replacing the placeholder
+wordmark, and a Google Search Console site-verification route (needed to submit Task 37b's sitemap
+to Search Console). **Phase 2 work started 2026-08-12** — `SPEC_PHASE2.md` (see `SPEC.md`'s "Out
+of scope" list for the ten deferred features it covers) is the current draft spec; Tasks 39
+(Wishlist), 40 (Saved/Multiple Delivery Addresses), and 41 (Product Reviews) are closed, shipped
+via PR #73. The remaining seven Phase 2 features (reporting/compliance, discount codes,
+promotional banners, backorders, PDF/CSV export, notification templates) have not been started.
 Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found
 no task anywhere had ever scoped a self-service order-history page for a customer or distributor,
@@ -766,6 +788,83 @@ What exists and is verified working:
   suite green; live-browser-verified end-to-end (auto-detect, color picker, save, footer render,
   delete via the shared confirm-modal) against a real `runserver` session with a throwaway staff
   account created and deleted for the check.
+- **Admin portal fixes (Task 32), bundled into the same PR as Task 31's follow-up (PR #60),**
+  closed 2026-08-05: a styled Alpine dropzone/preview widget (`CategoryImageWidget`) replacing
+  Django's raw unstyled `ClearableFileInput` on the category admin form (required
+  `FORM_RENDERER = "django.forms.renderers.TemplatesSetting"` plus `django.forms` in
+  `INSTALLED_APPS` so a custom widget template is discoverable); admin logout switched from
+  Django's raw `admin:logout` to allauth's `account_logout` so it lands on the branded admin login
+  page instead of `/admin/login/`; two leftover native-admin links fixed (admin login logo, 2FA
+  setup-complete CTA). Real bugs fixed along the way: a `ValueError` rendering an empty
+  `ImageField`'s `.url`, a mis-wired `<label>` silently blocking the file picker after clearing an
+  image, and (CodeRabbit, PR #60) the image-tile delete button being hover-only and therefore
+  unreachable on touch devices.
+- **Deploy to Hostinger VPS (Task 24), production — the platform is live.** Built as sub-tasks
+  24a–24h (VPS access hardening, base packages, DNS cutover, production secrets/`.env` +
+  `check --deploy` security fixes, app deploy, Supervisor process management, Nginx reverse proxy +
+  HTTPS, smoke test + runbook), each with its own explicit user go-ahead per `SPEC.md` Boundaries.
+  Closed 2026-08-10: `https://bancostore.com` verified live in a real browser, `deploy/README.md`
+  written as the manual deploy runbook, `SPEC.md`'s Commands section got the verified production
+  commands. One full smoke-test purchase journey (two real distributor accounts, one bootstrapped
+  as the root sponsor, one that went through every real step — Paystack payment, phone OTP, Didit
+  hosted KYC with a live selfie, admin approval, sequential IR ID assignment, direct referral bonus,
+  a real binary bonus cycle run, a withdrawal request/approval/tax computation) ran end-to-end
+  against real production MySQL/Redis, every figure checked against the database directly; all
+  smoke-test data (23 rows) deleted afterward, leaving production at zero distributors. Found and
+  fixed four real gaps no automated test would have caught: `PYTHONUNBUFFERED` missing from the
+  Supervisor configs (buffered fake-SMS log output never reaching the log file); phone OTP
+  verification only triggers at a later login, not right after registration (a documented gap, not
+  a bug); the plural `/accounts/login/` (allauth, customer) vs. singular `/account/login/`
+  (`two_factor`, admin) URL mix-up misleadingly surfacing as this project's own CSRF-failure page; a
+  brand-new admin account with zero TOTP devices landing on a bare 403 instead of a forced-setup
+  redirect (flagged for a future product decision, not silently patched). Real Paystack Transfer
+  payout still not exercised — same known, accepted `project_paystack_transfer_account_tier_blocked`
+  limitation as Task 16.
+- **Distributor Team page (Task 33)** closed 2026-08-10 — a flat roster of a distributor's full
+  sponsor-chain downline (`Distributor.sponsor`, the recruitment lineage, deliberately distinct from
+  Binary Tree's placement/spillover structure), replacing a disabled sidebar placeholder that had
+  sat since Task 15/21. Reused, not duplicated: the cycle-safe bulk-per-level BFS walk from Task 14's
+  Matching Bonus was extracted into a new public `apps.commissions.services.walk_sponsor_chain_downline_ids`,
+  capped at the existing `MAX_MATCHING_BONUS_WALK_DEPTH` ceiling. Shows full name, IR ID, rank, KYC
+  status, and date joined (`Distributor.user.date_joined` — `Distributor` itself has no date field,
+  a real gap in the original plan caught during implementation), paginated 20/page, IDOR-safe by
+  construction (no id/param ever accepted). Personal PV column deliberately left off (user-confirmed)
+  — stays on the dashboard/Binary Tree pages only.
+- **Legal/policy pages (Task 34)** and **Social Media Links (Task 35)**, both closed 2026-08-11 —
+  see their own entries above (built before the deploy/Task-24 sub-tasks landed in the todo but
+  merged after; PR #68).
+- **Post-deploy fixes (Task 36)**, closed 2026-08-11, found by the user reviewing the real production
+  deploy of Tasks 34/35: real Vite content-hashed cache-busting (root cause of legal pages looking
+  unstyled in production — browsers were serving pre-deploy assets from HTTP cache with nothing
+  forcing revalidation), footer changed to 4 equal columns (Brand/Shop/Company/Policies) with Follow
+  Us as its own full-width row, Social Links CRUD relocated from its own sidebar item into Platform
+  Settings' General tab, icon-picker bugs fixed (clipped dropdown, auto-applied default icon color
+  with a reset control), and Currency/Currency Symbol — after directly asking the user, since no
+  code anywhere reads either setting and the Paystack merchant account is GHS-only — locked to a
+  single disabled GHS-only value instead of shipping a non-functional 5-currency picker. Two
+  follow-up rounds (36f, 36g/h) fixed a leftover redundant constance field, a sticky-nav layout bug,
+  font-token inconsistencies, and finalized the GHS-lock decision via `AskUserQuestion`.
+- **SEO foundations (Task 37) and self-hosting the remaining Stitch/Google-hosted images (Task 38)**,
+  both closed 2026-08-11, requested directly by the user the day after launch. 37a: canonical/Open
+  Graph/Twitter Card meta tags sitewide, a generated 1200×630 OG share image, home page's previously-
+  missing title/description override fixed. 37b: `robots.txt` + `django.contrib.sitemaps` (products,
+  categories via static pages, all legal pages), plus a data migration setting the real production
+  `Site` domain (Django's sitemap framework silently defaulted every URL to `example.com` otherwise).
+  37c: sitewide `Organization`/`WebSite` JSON-LD (reusing Task 35's real social links) and per-product
+  `Product` JSON-LD, both serialized through a shared `bancostore/json_ld.py::dumps_for_script_tag()`
+  escaping `<`/`>`/`&` (a CodeRabbit-caught real stored-XSS-via-`</script>` gap, fixed for both
+  builders). 37d: a diagnostic-only Lighthouse audit against the live production site (home 90/91/100,
+  shop 93/100/100) surfacing the `lh3.googleusercontent.com` third-party image risk (already known to
+  have broken once in production) as the highest-impact finding, acted on immediately as Task 38 —
+  10 remaining Stitch-generated images downloaded, converted to WebP, and self-hosted (~390KB of
+  third-party requests eliminated, replaced with 264KB local), leaving zero `googleusercontent`
+  references anywhere in `templates/`. Un-subsetted Material Symbols webfont and Nginx text
+  compression/HTTP-2 flagged but deliberately not fixed (new-dependency and live-server-config
+  decisions respectively, out of scope for a same-session fix).
+- **Two small follow-ups closed 2026-08-12:** a real hand-vectorized brand logo wordmark (dark/
+  light/orange variants) replacing the earlier programmatic placeholder, and a Google Search
+  Console site-verification route (served the same way as `robots.txt`) needed to submit Task 37b's
+  sitemap to Search Console.
 - **Two full code-review + security-audit rounds** (2026-07-11/12) have run against Tasks 1–7, plus
   code-review + security-hardening passes (2026-07-13/14) against Tasks 9–11. All Critical/High
   findings are fixed (rate limiting, lockout/OTP race conditions, timing leaks, lock-contention DoS,

@@ -5093,8 +5093,6 @@ pattern this reuses all already exist and are already shipped (Task 14).
 
 **Estimated scope:** M
 
-**Not yet started.**
-
 ---
 
 ### Task 34: Legal/policy pages — Terms of Use, Privacy Policy, Cookie Policy, Disclaimer, Earnings & Income Disclosure, AI Disclaimer, Returns/Refunds/Shipping
@@ -6354,3 +6352,894 @@ codebase's own established batching convention:**
 
 All 6 fixes pushed as a single follow-up commit to PR #70, per this codebase's established "fix
 CodeRabbit findings together, not one push per finding" convention.
+
+---
+
+## Phase 13: Phase 2 — Customer Account Features
+
+Not part of the original MVP plan — scoped 2026-08-12 from `SPEC_PHASE2.md`. See that document for
+full source-doc grounding, current-state grounding, and the four scope decisions the user already
+confirmed (all ten Phase 2 features are in scope; escrow is internal-ledger-only; SMS/email
+provider switching is a labeled choice field only; Wishlist and saved addresses are included).
+
+### Task 39: Wishlist
+
+**Description:** A logged-in customer/distributor can save products to a personal list and come
+back to them later (source doc Section 4.2). Account-backed, not session-backed — the opposite of
+`apps.orders.cart.Cart`'s deliberate design, since a wishlist should survive a logout/login cycle
+and work across devices.
+
+**Acceptance criteria:**
+- [x] A logged-in user can add/remove a product to/from their wishlist from the product detail page
+- [x] A logged-in user can see their full wishlist from their account dashboard
+- [x] A guest (no account) sees a clear prompt to log in/register, not a broken or silently-ignored
+      control
+- [x] The wishlist persists across a logout/login cycle
+
+**Verification:**
+- [x] Feature tests: add, remove, duplicate-add is a no-op (not a duplicate row), guest gets a
+      clear prompt, persists across logout/login
+- [x] Live-browser verified: add a product, log out, log back in, confirm it's still there
+- [x] Full suite green, CI green on real MySQL
+
+**Dependencies:** None
+
+**Files likely touched:** `apps/catalog/models.py` (new `Wishlist`/`WishlistItem`, or a
+`ManyToManyField` if no per-item metadata is ever needed), `apps/catalog/views.py`,
+`apps/catalog/urls.py`, `templates/catalog/product_detail.html`, a new wishlist template, plus
+`tests/feature/catalog/test_wishlist.py`
+
+**Estimated scope:** M
+
+**Built:** Done 2026-08-12. `apps/catalog/models.py::WishlistItem` — a simple `user`/`product` FK
+pair with a `UniqueConstraint` (not a wrapping `Wishlist` model — nothing needed the extra layer),
+account-backed per the design decision in `SPEC_PHASE2.md` (deliberately not
+`apps.orders.cart.Cart`'s session-based pattern). One `wishlist_toggle` endpoint
+(`@login_required(login_url="account_login")`, `@require_POST`) handles both add and remove via
+`get_or_create`/`delete` — matches the product page's single heart-icon button, and always redirects
+back to the product page it came from with no `next` query param accepted, closing off the same
+open-redirect class of bug Task 17d's own CodeRabbit finding flagged for "reverse an
+attacker-controlled value." `wishlist_view` lists `request.user`'s own items only — no id/param ever
+accepted, IDOR-safe by construction, matching `earnings_history`/`binary_tree_view`/`team`'s
+established convention. UI: a heart-icon toggle button next to Add to Cart on `product_detail.html`
+(filled/`FILL 1` when already saved, outline otherwise, matching the existing icon-fill convention
+from `dashboard.html`/`cancel_membership.html`), a guest sees a real link to `account_login` instead
+of a POST form; a new `templates/catalog/wishlist.html` reuses `product_card.html`'s established
+visual language with an added remove button, plus a real empty state. Header gained a wishlist heart
+icon next to the cart icon (desktop, authenticated only) and a "Wishlist" link in the mobile menu,
+next to "My Orders" — both new, this codebase had no general customer-account-page nav grouping to
+extend. 12 feature tests in `tests/feature/catalog/test_wishlist.py` (toggle add/remove/idempotent,
+login-required on both the toggle and the list view, 404 on an inactive product, cross-user
+isolation, guest login-prompt, persistence across logout/login). Full suite green throughout: 1408
+passed, 1 skipped (the pre-existing WeasyPrint/Pango CI-only skip) — the one pre-existing failure
+(`test_page_loads_the_shared_js_bundle_so_the_sidebar_can_actually_collapse`, the already-documented
+Task 36 hashed-filename regression) is unrelated to this task, confirmed already present on `main`
+before this change. Live-browser-verified against a real `runserver` session (not just pytest, per
+this project's own standing verification convention) at 1440px and 500px: add/remove toggle on the
+product page, header icon navigation to `/wishlist/`, remove-from-wishlist-page, persistence across
+a real logout/login cycle, and the empty state — all confirmed against the database directly at
+each step, not just the UI. One real gotcha hit and fixed before verification: the new
+`WishlistItem` migration existed but had never been applied to the local SQLite dev database
+(`python manage.py migrate` was needed, separately from the test suite's own auto-migrating test
+database) — a `no such table` error on first live check, not a code bug. Test user and all wishlist
+rows deleted after verification.
+
+---
+
+### Task 40: Saved / Multiple Delivery Addresses
+
+**Description:** A logged-in customer can save multiple delivery addresses and pick one at
+checkout instead of retyping every time (source doc Section 4.2). `Order` already snapshots
+`address`/`area`/`landmark`/`delivery_zone` at checkout time (Task 17a) — that snapshot behavior
+must not change; a saved `Address` is a reusable *source* for pre-filling the checkout form, never
+a live reference an `Order` reads from later.
+
+#### 40a: `Address` model + account CRUD
+
+**Acceptance criteria:**
+- [x] A logged-in user can save, edit, and delete multiple delivery addresses from their account
+- [x] One address can be marked default (pre-selected at checkout, not required)
+- [x] Address fields mirror `Order`'s existing address shape (`address`/`area`/`landmark`/
+      `delivery_zone`) — no new addressing convention invented
+
+**Verification:**
+- [x] Feature tests: save/edit/delete, default-address selection, IDOR-safe (no user can see/edit
+      another user's saved address — no id/param ownership gap)
+- [x] Live-browser verified at 500/1440px
+- [x] Full suite green
+
+**Dependencies:** None
+
+**Files likely touched:** `apps/accounts/models.py` (new `Address`), `apps/accounts/views.py`,
+`apps/accounts/urls.py`, a new account-addresses template, `tests/feature/accounts/test_addresses.py`
+
+**Estimated scope:** M
+
+**Built:** Done 2026-08-12. `apps/accounts/models.py::Address` — `user`/`label`/`delivery_zone`/
+`address`/`area`/`landmark`/`is_default`, reusing `apps.orders.models.Order.DeliveryZone` rather than
+duplicating the choice set (imported inside the class body, not at module level, to keep the
+accounts→orders import direction obviously one-way and easy to audit for the cycle risk the reverse
+direction would raise — confirmed safe, `apps.orders.services` only imports `apps.accounts.
+permissions`, never `.models`). Single-default enforcement lives in `Address.save()`, wrapped in
+`select_for_update()` + `transaction.atomic()` (added in a CodeRabbit-driven fix on PR #73 — the
+original shipped version was a bare, unlocked `exclude().update()`) — this closes the realistic
+race (a user with an existing default switching it), but a real DB-level guarantee for the rarer
+"two concurrent first-time defaults" edge case would need a partial `UniqueConstraint(condition=
+Q(is_default=True))`, which MySQL (this project's CI/production database) doesn't support; accepted
+as a documented gap, not money-adjacent code needing the elevated concurrency rigor
+`SPEC_PHASE2.md` reserves for Discount Codes/Escrow. CRUD views
+(`address_list`/`address_create`/`address_edit`/`address_delete`) mirror `admin_portal`'s own
+create/edit-share-one-template, POST-only-delete pattern; `address_edit`/`address_delete` use
+`get_object_or_404(Address, pk=pk, user=request.user)`, IDOR-safe by construction. Mounted at a
+deliberately distinct `addresses/` URL prefix — not `account/` (already the two_factor/admin-2FA
+namespace) or `accounts/` (allauth's own prefix), per this codebase's own documented
+`/accounts/login/` vs `/account/login/` mix-up gotcha. Delete uses `admin_portal`'s existing shared
+`_delete_confirm_modal.html` partial (reused as-is from a storefront template — it has no
+admin_portal-specific markup) instead of a native `confirm()`, matching this codebase's standing
+"no confirm()/alert()" convention since Task 19c. Header gained a location-pin icon (desktop) /
+"My Addresses" link (mobile), next to Wishlist's own Task 39 entries. 9 feature tests in
+`tests/feature/accounts/test_addresses.py`. Targeted suite green (232 passed: accounts + catalog +
+orders + admin_portal) at merge; a subsequent full local `pytest -q` run (1442 passed) and GitHub
+Actions CI on PR #73 (lint + real-MySQL test) both confirmed no regressions.
+Live-browser-verified: create (with default checkbox), the DEFAULT badge rendering, and the shared
+delete-confirm modal, against a real `runserver` session.
+
+**Follow-up fix, 2026-08-12, per direct user feedback:** the Delivery Zone field shipped as a plain
+native `<select>` — inconsistent with this codebase's own established, repeated convention
+(`checkout.html`, `payout_settings.html`, `catalog_product_form.html`'s Category field) of a themed
+Alpine.js listbox for exactly this reason: a native select's open options popup can't be restyled
+via CSS in any browser. Fixed: `AddressForm.Meta.widgets["delivery_zone"]` switched to
+`forms.HiddenInput()`, and `templates/accounts/address_form.html` gained the same
+button+listbox+`json_script`-sourced-options markup `checkout.html`'s own Delivery Zone control
+uses (never a raw JS object literal an admin/customer-entered value could break out of — same XSS
+reasoning as every other listbox in this codebase). `apps/accounts/views.py` gained
+`_DELIVERY_ZONE_CHOICES` (sourced from the model field's own `choices`, itself set from
+`apps.orders.models.Order.DeliveryZone` at class-definition time — no fresh import of `Order` needed
+in `views.py`) and `_selected_delivery_zone(form)`, mirroring `checkout_view`'s own
+constrain-to-known-choices-before-the-template pattern for a bound-but-invalid resubmission. Full
+suite green throughout (1421 passed, 1 skipped; the 2 failures seen in a full run — the
+already-documented Task 36 regression and a KYC concurrency test that only fails under full-run
+SQLite lock contention — are both confirmed pre-existing/environmental via isolated reruns, unrelated
+to this fix). Live-browser-verified: the field now renders as the themed listbox with all 3 options,
+opens/selects correctly on both the create and edit forms (edit correctly pre-selects the existing
+stored zone), and a real create-and-save round-trip persisted the selected zone correctly.
+
+#### 40b: Checkout integration
+
+**Acceptance criteria:**
+- [x] A logged-in customer with saved addresses sees a "choose a saved address or enter a new one"
+      step at checkout
+- [x] Selecting a saved address correctly snapshots it onto the new `Order` exactly as a manually-
+      typed address does today (same fields, same validation)
+- [x] Guest checkout (no account) is completely unaffected
+- [x] Editing a saved address *after* an order was placed with it does not change that
+      already-placed order's stored address — a real regression test
+
+**Verification:**
+- [x] Feature tests: checkout with a saved address snapshots correctly; editing the saved address
+      afterward doesn't retroactively change the old order (the regression test above)
+- [x] Live-browser verified: full checkout flow with a saved address selected
+- [x] Full suite green, CI green on real MySQL
+
+**Dependencies:** 40a
+
+**Files likely touched:** `apps/orders/views.py` (checkout view), `templates/orders/checkout.html`,
+`tests/feature/orders/test_checkout.py`
+
+**Estimated scope:** S
+
+**Built:** Done 2026-08-12. Deliberately **not** a new submission path: selecting a saved address is
+a client-side-only convenience that fills the exact same `address`/`area`/`landmark`/`delivery_zone`
+form fields a manual entry would (proven directly by a test that submits, confirms the `Order`
+snapshotted correctly, then edits the saved `Address` afterward and confirms the already-placed
+`Order`'s own stored fields are unchanged) — `create_pending_order`'s snapshot-at-creation-time
+behavior (Task 17c) is completely untouched. `checkout_view` computes `saved_addresses` (`[]` for a
+guest) and an explicit `default_address` (only an `is_default=True` row auto-fills the form's
+`initial`; with several saved and none marked default, guessing which one to silently prefill would
+be worse than leaving the fields blank for the customer to pick from the list). The custom Alpine
+delivery-zone listbox (Task 17b) needed its own `selected_delivery_zone` threading, separate from the
+plain address/area/landmark inputs (which already pick up `form.initial` via Django's own rendering)
+— its visible label is Alpine-driven, not raw-HTML-driven. `checkout.html` gained a "Saved
+Addresses" section (cards rendered via `x-for` from a `json_script` block, matching `zoneOptions`'s
+own established XSS-safe pattern — never a raw JS object literal an admin/customer-entered label
+could break out of) with an `applySavedAddress(addr)` method that sets `deliveryMethod`/
+`deliveryZone`/the visible inputs and re-triggers the existing live delivery-fee calculation, all
+already reactive. Live-browser-verified against a real `runserver` session: added two addresses,
+confirmed the default auto-prefilled with the correct zone/fee (GHS 20, Kumasi) on page load,
+clicked the second card and confirmed the fields, zone, fee (GHS 20 → GHS 50), and total all updated
+live and correctly. 9 new feature tests in `tests/feature/orders/test_checkout.py`. Full suite green
+throughout (1421 passed, 1 skipped; the 2 failures seen mid-run — the already-documented Task 36
+hashed-filename regression, and a KYC concurrency test that failed only under the full run's SQLite
+lock contention and passed cleanly in isolation — are both confirmed pre-existing/environmental, not
+introduced by this task).
+
+---
+
+### Task 41: Product Reviews
+
+**Description:** After receiving their order, a customer can leave a star rating + written review
+on the product page; reviews need admin approval before appearing publicly (source doc Section
+10.3). `Order.status == "delivered"` (Task 18) already gives a real eligibility signal — no
+guessing needed.
+
+**Open question before 41a starts (see `tasks/plan.md` Open Questions — Phase 2, #5) — resolved
+2026-08-12, user confirmed:** one review per customer per product (edit-in-place on a repeat
+purchase), not one per order.
+
+#### 41a: Review submission + eligibility
+
+**Acceptance criteria:**
+- [x] A customer with a `delivered` order containing a given product sees a "Leave a review"
+      control for that product; a customer with no delivered order for it does not
+- [x] Submitting a review requires a star rating (1-5) and written text
+- [x] A newly-submitted review is not publicly visible until approved (see 41b)
+
+**Verification:**
+- [x] Feature tests: eligible customer can submit, ineligible customer cannot (no delivered order
+      for that product), a new review defaults to unapproved/hidden
+- [x] Full suite green
+
+**Dependencies:** None
+
+**Files likely touched:** `apps/catalog/models.py` (new `Review`), `apps/catalog/views.py`,
+`apps/catalog/urls.py`, `templates/catalog/product_detail.html`,
+`tests/feature/catalog/test_reviews.py`
+
+**Estimated scope:** M
+
+**Built:** Done 2026-08-12. `apps/catalog/models.py::Review` — `user`/`product`/`rating`/`body`/
+`is_approved`, `UniqueConstraint(user, product)` enforcing the confirmed one-per-product rule at the
+DB level, plus a `CheckConstraint` mirroring the form's own 1-5 range validation. Eligibility
+(`apps/catalog/views.py::_can_review`) queries `OrderItem.objects.filter(order__customer=user,
+order__status=Order.Status.DELIVERED, product=product)` — a real "received their order" signal
+(Task 18), not just "has ever purchased." A single `review_submit` endpoint (not separate add/edit
+routes) does an `update_or_create`-shaped upsert via `instance=` on the existing row, so resubmitting
+always edits in place; every (re)submission resets `is_approved` per the 13.10 setting (see 41b), so
+a materially different review body/rating can never coast on a prior approval. Product-detail
+context-building was extracted into a shared `_product_detail_context()` helper (used by both
+`product_detail` and `review_submit`'s invalid-form re-render) rather than duplicated — a real,
+behavior-preserving refactor, verified by the full pre-existing `tests/feature/catalog/` suite
+passing unchanged before and after. `apps.catalog.views` now imports `apps.orders.models`
+(`Order`/`OrderItem`) — checked for the reverse-direction cycle risk before adding: `apps.orders.
+models` only imports `apps.catalog.models` (not `.views`), so the new edge is safe. 11 feature tests
+in `tests/feature/catalog/test_reviews.py`. Full local suite green throughout (1442 passed, 1
+skipped, plus the one already-documented pre-existing Task 36 failure); GitHub Actions CI on PR #73
+(lint + real-MySQL test) both passed.
+
+#### 41b: Admin moderation + public display
+
+**Acceptance criteria:**
+- [x] Admin can approve or delete any review from `admin_portal`'s Catalog Management screens
+      (Task 26), not raw Django Admin
+- [x] Approved reviews + an average star rating show on the public product detail page
+- [x] The 13.10 "Product Review Approval" setting (Auto-approve vs. Manual) is a real,
+      admin-editable constance toggle — Manual by default, matching the source doc's own stated
+      current value
+
+**Verification:**
+- [x] Feature tests: admin approve/delete, average-rating calculation, auto-approve toggle actually
+      changes new-review visibility
+- [x] Live-browser verified: submit → admin approves → appears on product page
+- [x] Full suite green, CI green on real MySQL
+
+**Dependencies:** 41a
+
+**Files likely touched:** `apps/admin_portal/views.py`, `apps/admin_portal/urls.py`, a new
+admin_portal review-moderation template, `apps/platform_settings/config.py` (13.10 setting),
+`tests/feature/admin_portal/test_review_moderation.py`
+
+**Estimated scope:** M
+
+**Built:** Done 2026-08-12. New `PRODUCT_AND_INVENTORY_SETTINGS` constance group (13.10's first real
+field — `PRODUCT_REVIEW_AUTO_APPROVE_ENABLED`, `False`/Manual by default per the source doc), wired
+into `CONSTANCE_CONFIG`/`CONSTANCE_CONFIG_FIELDSETS` and given its own vertical-tab icon
+(`inventory_2`) on the Platform Settings screen (Task 28) — picked up automatically by that page's
+existing generic per-fieldset rendering/tests, confirmed via the full `test_platform_settings.py`
+suite passing unchanged. `_product_detail_context()` (41a) gained `reviews` (approved-only,
+`select_related("user")`) and `average_rating` (`Avg("rating")` over the *same* approved-only
+queryset — an unapproved review must never leak into the public average either, not just the
+visible list). `apps/admin_portal/views.py` gained a global `review_moderation_list` queue
+(pending-first ordering, matching the KYC/withdrawal/order queues' own "one queue across everything"
+convention rather than a per-product embedded list) plus POST-only `review_approve`/`review_delete`,
+all gated by the existing `is_admin_portal_staff` check. Delete uses the shared
+`_delete_confirm_modal.html` partial (same reuse as Task 40a's address deletion) rather than a
+native `confirm()`, matching this codebase's standing convention since Task 19c. A "Reviews"
+cross-link was added to `catalog_product_list.html`'s header, next to the existing Categories link.
+9 feature tests in `tests/feature/admin_portal/test_review_moderation.py`. Full suite green
+throughout (1442 passed, 1 skipped; the one failure seen in a full run is the already-documented,
+pre-existing Task 36 hashed-filename regression, confirmed unrelated). Live-browser-verified against
+a real `runserver` session: submitted a review as an eligible customer (real delivered order seeded
+via shell), confirmed it stayed unapproved and invisible publicly by default, manually approved it
+and confirmed the average-rating stars + review card rendered correctly on the product page,
+resubmitted with different text and confirmed it edited the same row in place *and* reset back to
+unapproved. The admin moderation screen itself (list rendering + approve action) was verified via a
+real Django test `Client` request through the actual URL/view/template rendering pipeline rather
+than a full real-browser session — a full real-browser check would have needed a throwaway TOTP
+device setup disproportionate to the marginal risk here, given the queue's permission gate,
+rendering, approve, delete, and POST-only enforcement are already covered by 5 dedicated passing
+tests, and the delete confirmation modal itself was already live-browser-verified identically in
+Task 40a. Test data (customer, staff, order, reviews) deleted after verification.
+
+**CodeRabbit fix round on PR #73, pushed as one follow-up commit per this codebase's established
+batching convention:** the average-rating stars never actually rendered filled — `{% if
+forloop.counter <= average_rating|floatformat:0 %}` compares an int to a *string* (`floatformat`
+always returns one), which Django's template `{% if %}` silently evaluates as False rather than
+raising, confirmed directly via a `Template.render()` shell check before fixing it to a plain
+numeric comparison (matching `review.rating`'s own already-correct comparison just below it in the
+same template). Also fixed: the success message and docstring in `review_submit` still claimed
+"always resets to unapproved," stale since 41b added the auto-approve setting — now branches on the
+actual `review.is_approved` outcome; a per-review `aria-label` for screen readers (the star icons
+were `aria-hidden`, but the row itself had no text alternative); a composite `(product, is_approved,
+-created_at)` index matching the exact query shape `_product_detail_context` uses (new migration
+`0008_review_review_pub_lookup_idx.py`); and the race-condition regression test's mock narrowed to
+only the specific lookup under test, not `Review.objects.filter` globally, so it can't silently mask
+a bug in the untested invalid-form branch. `Address.save()` also gained `select_for_update()` +
+`transaction.atomic()` around its default-clearing update (previously a bare, unlocked
+`exclude().update()`) — closes the realistic race (switching an existing default) without chasing
+a MySQL-incompatible partial-unique-constraint for the rarer "two concurrent first-time defaults"
+edge case, documented as an accepted gap in the model's own comment.
+
+**Second correction pass, same day, before this round was pushed:** two independent fresh-context
+subagent reviews (`security-auditor`, then `code-reviewer`) of this fix round itself caught that two
+of the fixes above were not actually correct as first written, both now fixed:
+1. `select_for_update()` chained directly onto `.update()` is a genuine Django no-op —
+   `.update()` compiles straight to a bulk `UPDATE` and never evaluates (fetches) the queryset at
+   all, so `FOR UPDATE` was never actually issued despite the code and this file's own prose above
+   claiming it was. Fixed by forcing the fetch via `list(...)` on the locked queryset *before* the
+   separate `.update()` call, so the row lock is genuinely acquired first.
+2. The "narrowed" race-condition test mock had the same class of bug in miniature: `with
+   patch.object(...): return queryset` un-patches on `__exit__`, which runs *before* the caller
+   ever gets the returned value — so by the time `review_submit` called `.first()`, the patch was
+   already reverted and the real row came back. The test still passed, but only because the normal
+   (non-race) code path and the intended `IntegrityError` fallback path produce an identical final
+   state, so asserting on final state alone couldn't tell them apart — the exact same class of gap
+   as the first attempted fix. Fixed by assigning `.first` directly on the fresh per-call queryset
+   instance (no context manager needed) and, since final-state assertions still couldn't
+   distinguish the two paths, adding a spy on `Review.objects.get()` (the only call inside the
+   `except IntegrityError` branch) to directly prove that branch executed.
+
+A new `test_setting_a_new_default_locks_the_existing_default_row_first` (spy-based, matching the
+review test's own pattern) closes the same gap for `Address.save()` — not a full multi-threaded
+concurrency test (still disproportionate for this feature per `SPEC_PHASE2.md`'s own scoping to
+Discount Codes/Escrow), but real proof the locking code path executes, not just that a comment
+claims it does. All fixes re-verified by the full targeted suites plus a full local run; pushed
+together in one commit, not one push per finding.
+
+---
+
+### Checkpoint L (after Tasks 39-41)
+- [x] Test status, stated precisely (CodeRabbit finding on PR #73 — the original wording here
+      conflated targeted, local-full-suite, and CI results into one blanket claim): every targeted
+      suite was green at the time its task's slice was built; multiple full local `pytest -q` runs
+      were green except one pre-existing, unrelated Task 36 regression, confirmed pre-existing
+      before this work started; GitHub Actions CI on PR #73 (lint + real-MySQL test) both passed
+- [x] Live-browser verified per task above
+- [ ] Review with the user before starting Phase 14
+
+---
+
+## Phase 14: Phase 2 — Merchandising & Promotions
+
+Money-adjacent — Tasks 43/44 get a `doubt-driven-development` pass before their money-handling
+sub-tasks, matching every other money-adjacent feature already shipped in this codebase.
+
+### Task 42: Promotional Banners
+
+**Description:** Admin uploads banners that appear on the home page, each linking to a product,
+category, or page, with a start/end date so it disappears automatically (source doc Section 11.2).
+Builds on the home page's existing Task 31 Editorial Variant sections and the image-upload/WebP
+pipeline already proven for `Category`/`Product` images (Task 7/26).
+
+**Acceptance criteria:**
+- [ ] Admin uploads a banner (image, link target, start/end date) from `admin_portal`
+- [ ] Home page shows only currently-active banners (`start_date <= now <= end_date`) — no admin
+      action needed on the end date
+- [ ] A banner linking to a specific product/category/page navigates there correctly
+
+**Verification:**
+- [ ] Feature tests: active/expired/not-yet-started banner visibility, each link-target type
+- [ ] Live-browser verified at 500/1440px
+- [ ] Full suite green
+
+**Dependencies:** None
+
+**Files likely touched:** new `apps/promotions` app (`Banner` model), `apps/promotions/views.py`,
+`apps/admin_portal/urls.py`/`views.py`, `templates/catalog/home.html`, a new admin_portal banner
+management template, `tests/feature/promotions/test_banners.py`
+
+**Estimated scope:** M
+
+---
+
+### Task 43: Discount Codes
+
+**Description:** Admin creates fixed-amount or percentage-off codes with an expiry date, an
+audience restriction (retail/distributor/everyone), and a usage limit; customer enters a code at
+checkout and the discount applies immediately (source doc Section 11.1). **Requires a
+`doubt-driven-development` pass before 43b** — this is money-adjacent code interacting with the
+existing snapshot-at-creation-time checkout flow (Task 17c/17d).
+
+#### 43a: `DiscountCode` model + admin CRUD + settings
+
+**Acceptance criteria:**
+- [ ] Admin creates a code from `admin_portal`: fixed amount or percentage off, expiry date,
+      audience restriction, total usage limit
+- [ ] 13.11's two platform-wide settings are real: Maximum Discount Per Order (a cap independent of
+      any single code's own amount), Discount Applicable To (a platform-wide default, distinct from
+      the per-code audience restriction)
+- [ ] Discount Codes global on/off toggle (13.11) is real and gates the checkout entry field
+
+**Verification:**
+- [ ] Feature tests: code creation, both discount types, expiry date stored/enforced later
+- [ ] Full suite green
+
+**Dependencies:** None
+
+**Files likely touched:** new `apps/promotions/models.py` (`DiscountCode`), `apps/admin_portal/
+views.py`/`urls.py`, a new admin_portal discount-code management template,
+`apps/platform_settings/config.py`, `tests/feature/promotions/test_discount_codes_admin.py`
+
+**Estimated scope:** M
+
+#### 43b: Checkout redemption (elevated rigor — `doubt-driven-development` first)
+
+**Acceptance criteria:**
+- [ ] A valid code at checkout reduces the order total by the correct amount, snapshotted onto the
+      `Order` the same way price/delivery fee already are (Task 17c) — never re-derived from a
+      live, possibly-since-changed/expired code afterward
+- [ ] An expired, exhausted, or audience-mismatched code is rejected with a clear message — never
+      silently ignored, never a 500
+- [ ] Maximum Discount Per Order (43a) is enforced even if a code's own discount would exceed it
+- [ ] Two customers redeeming the last unit of a usage-limited code concurrently: exactly one
+      succeeds — atomic-counter discipline matching `Product` stock decrement (Task 7), not a naive
+      read-then-write
+
+**Verification:**
+- [ ] `doubt-driven-development` review complete and findings folded in before this sub-task starts
+- [ ] Unit/feature tests for every rejection case (expired, exhausted, audience mismatch, exceeds
+      per-order cap)
+- [ ] A real concurrency test (matching `apps/wallet`'s/`apps/orders`'s existing 2-5-thread
+      convention for this exact class of race) proving the usage-limit race is closed
+- [ ] Live-browser verified: apply a valid code at checkout, confirm the total updates correctly
+- [ ] Full suite green, CI green on real MySQL (elevated-rigor money code — same bar as
+      `apps/commissions`/`apps/wallet`/`apps/withdrawal`)
+
+**Dependencies:** 43a
+
+**Files likely touched:** `apps/orders/services.py` (`create_pending_order`/
+`confirm_order_payment`), `apps/orders/views.py`, `templates/orders/checkout.html`,
+`tests/feature/orders/test_checkout_discount_codes.py` (concurrency test included)
+
+**Estimated scope:** M
+
+#### 43c: Audience restriction wired to real role groups
+
+**Acceptance criteria:**
+- [ ] A distributor-only code is rejected for a non-distributor checkout and vice versa, using the
+      customer's real role (`apps.accounts` groups / `is_distributor`, matching every other role
+      gate in this codebase) — not just `Order.pv_earned` on the current order
+
+**Verification:**
+- [ ] Feature tests: each audience restriction against each of the three user types
+- [ ] Full suite green
+
+**Dependencies:** 43b
+
+**Files likely touched:** `apps/orders/services.py`, `tests/feature/orders/
+test_checkout_discount_codes.py`
+
+**Estimated scope:** S
+
+---
+
+### Task 44: Backorders
+
+**Description:** Admin enables backorders per-product; an out-of-stock backorder-enabled product
+still shows Add to Cart with a "Ships in N days" message instead of "Out of Stock" (source doc
+Section 10.2). **Requires a `doubt-driven-development` pass before 44b** — this changes
+`confirm_order_payment`'s existing out-of-stock behavior (Task 17d currently cancels the order and
+logs it for manual admin refund follow-up), a real interaction with already-shipped money-adjacent
+code, not a green-field addition.
+
+#### 44a: Per-product backorder fields + storefront
+
+**Acceptance criteria:**
+- [ ] `Product` gains a backorder-enabled flag + shipping-estimate text (13.10's "Out of Stock
+      Behaviour" — Hide / Show Out of Stock / Allow Backorders — lives per-product, not just as a
+      single global toggle, since a real store rarely wants backorders on every product uniformly)
+- [ ] 13.6's global Backorders On/Off + Backorder Message settings are real and gate/seed the
+      per-product default
+- [ ] A backorder-enabled, out-of-stock product shows Add to Cart with the configured message
+      instead of "Out of Stock" on both the listing and detail pages
+
+**Verification:**
+- [ ] Feature tests: backorder-enabled vs. not, message rendering, global toggle interaction
+- [ ] Live-browser verified
+- [ ] Full suite green
+
+**Dependencies:** None
+
+**Files likely touched:** `apps/catalog/models.py` (`Product` fields), `apps/admin_portal/
+catalog forms/templates` (Task 26), `templates/catalog/product_detail.html`/`product_list.html`,
+`apps/platform_settings/config.py`, `tests/feature/catalog/test_backorders.py`
+
+**Estimated scope:** M
+
+#### 44b: Checkout/order-confirmation integration (elevated rigor — `doubt-driven-development` first)
+
+**Acceptance criteria:**
+- [ ] Checkout/order confirmation for a backordered item does not decrement stock below zero, does
+      not crash, and does not trigger Task 17d's existing out-of-stock auto-cancel path
+- [ ] A non-backorder-enabled out-of-stock product's existing behavior (Task 7/17d) is provably
+      unchanged — the existing test suite for that path still passes unmodified, plus a new explicit
+      regression test
+
+**Verification:**
+- [ ] `doubt-driven-development` review complete and findings folded in before this sub-task starts
+- [ ] Feature tests: backordered item completes checkout successfully; non-backorder out-of-stock
+      item still hits the existing cancel-and-refund path exactly as before
+- [ ] Full suite green including the full pre-existing `tests/feature/orders/` suite unmodified and
+      passing, CI green on real MySQL
+
+**Dependencies:** 44a
+
+**Files likely touched:** `apps/orders/services.py` (`confirm_order_payment`),
+`tests/feature/orders/test_backorders.py`
+
+**Estimated scope:** M
+
+---
+
+### Checkpoint M (after Tasks 42-44)
+- [ ] Full suite green including new elevated-rigor coverage (43b/44b), CI green on real MySQL
+- [ ] Live-browser verified per task above
+- [ ] Review with the user before starting Phase 15
+
+---
+
+## Phase 15: Phase 2 — Admin Reporting & Compliance
+
+### Task 45: Shared CSV/PDF Export Utility
+
+**Description:** One shared `export_as_csv`/`export_as_pdf` utility that every report in Task 46
+and the existing GRA withholding-tax export (Section 12.3, already shipped, not yet exportable —
+confirmed via grep, no CSV/PDF export exists on the withdrawal/tax screens today) reuses, matching
+this codebase's own repeated "extract shared, don't duplicate" convention (Task 19a, Task 33). PDF
+path reuses the already-proven `WeasyPrint` pipeline from Task 18e; CSV needs no new dependency
+(Python's own `csv` stdlib module). Built first — Task 46/47 depend on it.
+
+**Acceptance criteria:**
+- [ ] A shared `export_as_csv(rows)` / `export_as_pdf(template, context)` utility exists (location
+      TBD at kickoff — likely `bancostore/exports.py`, matching `bancostore/concurrency.py`'s
+      existing shared-utility precedent, not a per-app duplicate)
+- [ ] The existing GRA withholding-tax export screen (12.3) is wired to it as the first real
+      consumer, proving the utility end-to-end before Task 46 needs it
+
+**Verification:**
+- [ ] Unit tests for both export functions against known input/output
+- [ ] `pytest.mark.skipif` for the PDF path locally, matching Task 18e's established
+      `project_weasyprint_pango_blocked_locally` pattern; CI-verified instead
+- [ ] Exported CSV/PDF figures match the source data exactly (a real cross-check test)
+- [ ] Full suite green, CI green on real MySQL
+
+**Dependencies:** None
+
+**Files likely touched:** new `bancostore/exports.py`, `apps/admin_portal/views.py` (tax-export
+screen wiring), `tests/unit/test_exports.py`
+
+**Estimated scope:** S
+
+---
+
+### Task 46: Sales & Revenue Reporting
+
+**Description:** Total revenue (daily/weekly/monthly), commissions paid vs. revenue, best-selling
+products, new-vs-returning customers, orders per status, delivery report by zone — all exportable
+(source doc Section 12.4). Every underlying number already exists in real tables (`Order`/
+`OrderItem`, `WalletTransaction`, `Order.status`) — this is Task 27's Admin Dashboard "real query
+per number" pattern at report scale, not a new architecture.
+
+#### 46a: Reporting-at-scale architecture decision
+
+**Description:** A real design decision, not a detail — `SPEC.md`'s explicit hundreds-of-
+thousands-of-users scale target means a naive live-aggregate query per report per page load will
+not hold up the way Task 27's handful of dashboard-card queries do. Choose between pre-aggregated
+daily rollup tables (matching the PV ledger's own event-driven-aggregate precedent), a scheduled
+Celery report-cache job, or a bounded live-query lookback window — and write it up.
+
+**Acceptance criteria:**
+- [ ] A new ADR (`docs/decisions/0010-...md`, matching this codebase's existing ADR numbering)
+      records the decision and rationale, following Tasks 4/9/12/13/16/17/18/19/20/35's own
+      precedent
+- [ ] The decision is confirmed with the user before 46b/46c's implementation starts
+
+**Verification:**
+- [ ] ADR reviewed and confirmed by the user
+
+**Dependencies:** None
+
+**Files likely touched:** `docs/decisions/0010-reporting-architecture.md` (new)
+
+**Estimated scope:** XS (no feature code — a design decision + writeup)
+
+#### 46b: Revenue, order-status, and delivery-zone reports
+
+**Acceptance criteria:**
+- [ ] Admin sees total revenue by day/week/month, orders-per-status counts, and delivery fees
+      collected by zone, all with real numbers from the live database
+- [ ] Each report respects a date-range filter and returns correct numbers for that range
+      specifically (a real test, not just "the page renders")
+- [ ] Each report is exportable as CSV and PDF via Task 45's utility
+
+**Verification:**
+- [ ] Feature tests: seeded-data cross-checks per report, date-range boundary correctness
+- [ ] Live-browser verified against real `runserver`, export downloads checked against the screen
+- [ ] Full suite green
+
+**Dependencies:** 45, 46a
+
+**Files likely touched:** new `apps/reporting` app, `apps/admin_portal/urls.py`/`views.py`, new
+admin_portal report templates, `tests/feature/reporting/test_revenue_reports.py`
+
+**Estimated scope:** M
+
+#### 46c: Best-selling products + customer reports
+
+**Acceptance criteria:**
+- [ ] Admin sees a best-selling-products report and a new-vs-returning-customers report, both real
+      numbers, both exportable via Task 45
+- [ ] Commissions-paid-vs-revenue-earned figure is correct against a seeded-data cross-check
+      (reusing Task 27's own `COMMISSION_TRANSACTION_TYPES` constant, not a fresh definition)
+
+**Verification:**
+- [ ] Feature tests: seeded-data cross-checks per report
+- [ ] Live-browser verified, export downloads checked
+- [ ] Full suite green, CI green on real MySQL
+
+**Dependencies:** 45, 46a
+
+**Files likely touched:** `apps/reporting/services.py`, `apps/admin_portal/views.py`, new
+admin_portal templates, `tests/feature/reporting/test_product_and_customer_reports.py`
+
+**Estimated scope:** M
+
+---
+
+### Task 47: Compliance Dashboard + Financial Overview
+
+**Description:** Live retail-vs-distributor ratio with a below-threshold alert; an escrow reserve
+tracker (5% of product revenue, internal ledger only per user confirmation — no real GCB Bank
+integration); a full audit log; a Financial Overview summary (source doc Sections 12.5/12.6).
+**Requires a `doubt-driven-development` pass before 47a** — the escrow ledger is new money-adjacent
+code.
+
+#### 47a: Escrow reserve ledger (elevated rigor — `doubt-driven-development` first)
+
+**Acceptance criteria:**
+- [ ] An escrow balance increases by exactly the admin-configured percentage (13.12's Escrow
+      Reserve Percentage, seeded at 5% per the source doc but not hardcoded) of each confirmed
+      order's product revenue
+- [ ] The balance is a real stored running total, atomically updated at order confirmation
+      (matching `Wallet.balance`'s own `F()`-based convention, Task 12) — never a live `SUM()` over
+      all historical orders on every page load
+
+**Verification:**
+- [ ] `doubt-driven-development` review complete and findings folded in before this sub-task starts
+- [ ] Feature tests: correct percentage credit on confirmation, a concurrency test matching the
+      wallet's own established convention for this exact class of race
+- [ ] Escrow balance verified against the database directly after a real seeded order confirmation,
+      not just the UI
+- [ ] Full suite green, CI green on real MySQL
+
+**Dependencies:** None
+
+**Files likely touched:** new `apps/compliance` app (`EscrowLedger` or similar), `apps/orders/
+services.py` (`confirm_order_payment` hook), `apps/platform_settings/config.py`,
+`tests/unit/compliance/test_escrow_ledger.py`
+
+**Estimated scope:** M
+
+#### 47b: Retail/distributor ratio + threshold alert
+
+**Acceptance criteria:**
+- [ ] Admin sees a live retail-vs-distributor sales ratio, computed from `Order.pv_earned > 0` as
+      the existing real distributor-purchase signal (confirmed in `apps/orders/services.py`)
+- [ ] 13.12's Retail PV Minimum (%) is a real, admin-editable constance setting (seeded at 70% per
+      the source doc)
+- [ ] An email fires to the 13.12 Compliance Alert Email address when the ratio drops below
+      threshold (reuses the existing Gmail SMTP path, no new integration) — and does not fire when
+      above it
+
+**Verification:**
+- [ ] Feature tests: seed orders below 70% retail, confirm the alert fires; seed orders above,
+      confirm it doesn't
+- [ ] Live-browser verified (ratio display), email send confirmed via the existing test-mail
+      capture pattern this codebase already uses elsewhere
+- [ ] Full suite green
+
+**Dependencies:** None
+
+**Files likely touched:** `apps/compliance/services.py`, `apps/admin_portal/views.py`,
+`apps/platform_settings/config.py`, `tests/feature/compliance/test_retail_ratio_alert.py`
+
+**Estimated scope:** M
+
+#### 47c: Financial Overview dashboard row
+
+**Acceptance criteria:**
+- [ ] Admin sees total platform revenue to date, total commissions paid, total withholding tax
+      remitted, and the escrow balance (47a) — four real numbers, reusing Task 27's established
+      dashboard-card pattern
+
+**Verification:**
+- [ ] Feature test: seeded-data cross-check for all four numbers
+- [ ] Live-browser verified
+- [ ] Full suite green
+
+**Dependencies:** 47a
+
+**Files likely touched:** `apps/admin_portal/views.py` (dashboard extension), `templates/
+admin_portal/dashboard.html`, `tests/feature/admin_portal/test_financial_overview.py`
+
+**Estimated scope:** S
+
+#### 47d: Audit log, part 1 — model coverage
+
+**Acceptance criteria:**
+- [ ] `HistoricalRecords()` added to the sensitive models currently missing it that are worth
+      tracking — at minimum Product/Category (Task 26) and Platform Settings changes (Task 28); the
+      exact final list is a task-kickoff decision, not decided in this plan
+- [ ] KYC approve/reject decisions gain real history tracking (currently informational logging only)
+
+**Verification:**
+- [ ] Migration applies cleanly; a real approve/edit/reject action produces a queryable history
+      record with actor + timestamp + what changed
+- [ ] Full suite green, CI green on real MySQL (new migration)
+
+**Dependencies:** None
+
+**Files likely touched:** `apps/catalog/models.py`, `apps/platform_settings/models.py` (if needed),
+`apps/distributors/models.py` (KYC fields), new migrations, `tests/unit/*/test_history_tracking.py`
+
+**Estimated scope:** S
+
+#### 47e: Audit log, part 2 — admin screen + retention
+
+**Acceptance criteria:**
+- [ ] One real `admin_portal` screen queries across every `HistoricalRecords()`-tracked model
+      (actor, timestamp, what changed) — not raw Django Admin, matching this codebase's established
+      precedent
+- [ ] 13.12's Audit Log Retention Period (days) is a real, admin-editable constance setting wired to
+      a scheduled Celery cleanup job — not decorative
+
+**Verification:**
+- [ ] Feature tests: cross-model query correctness, retention job actually deletes records past the
+      configured window and leaves recent ones untouched
+- [ ] Live-browser verified
+- [ ] Full suite green, CI green on real MySQL
+
+**Dependencies:** 47d
+
+**Files likely touched:** `apps/admin_portal/views.py`/`urls.py`, new admin_portal audit-log
+template, `apps/compliance/tasks.py` (retention Celery task), `apps/platform_settings/config.py`,
+`tests/feature/admin_portal/test_audit_log.py`
+
+**Estimated scope:** M
+
+---
+
+### Checkpoint N (after Tasks 45-47)
+- [ ] Full suite green including new elevated-rigor coverage (47a), CI green on real MySQL
+- [ ] Live-browser verified per task above
+- [ ] Review with the user before starting Phase 16
+
+---
+
+## Phase 16: Phase 2 — Notifications & Settings Completion
+
+### Task 48: Notification Template Editor + Provider-Choice Settings
+
+**Description:** Admin edits the wording of every outbound notification without touching code;
+SMS/Email Provider fields exist as admin-editable choices; Sender Name/Email become real settings
+(source doc Section 13.8). The broadest task in Phase 2 — touches `apps/notifications`,
+`apps/accounts`, `apps/distributors`, `apps/withdrawal`, `apps/commissions`. Per direct user
+confirmation, mNotify/Gmail SMTP stay the only wired providers — no second real integration this
+round.
+
+#### 48a: `NotificationTemplate` model + admin CRUD (security-and-hardening pass mandatory)
+
+**Acceptance criteria:**
+- [ ] `NotificationTemplate` stores name/subject/body with placeholder variables (e.g.
+      `{{distributor_name}}`/`{{amount}}`) per notification type
+- [ ] Admin can create/edit templates from `admin_portal`
+- [ ] Placeholder substitution is server-side constrained, never raw interpolation into an
+      SMS/email/HTML rendering context (matching Task 17/37's established XSS-prevention rule for
+      this exact class of admin-entered-text-into-a-rendering-context risk)
+
+**Verification:**
+- [ ] `security-and-hardening` review complete before this sub-task ships (admin-entered text
+      rendering into SMS/email/HTML is a real injection surface)
+- [ ] Feature tests: template CRUD, placeholder substitution correctness, an admin-entered
+      malicious placeholder value (e.g. containing `</script>` or SMS injection characters) proven
+      safely escaped
+- [ ] Full suite green
+
+**Dependencies:** None
+
+**Files likely touched:** `apps/notifications/models.py` (new `NotificationTemplate`),
+`apps/admin_portal/views.py`/`urls.py`, new admin_portal template-editor screen,
+`tests/feature/notifications/test_template_editor.py`
+
+**Estimated scope:** M
+
+#### 48b: Migrate highest-traffic send-sites
+
+**Acceptance criteria:**
+- [ ] OTP codes, withdrawal status (approved/rejected/paid/reversed), and KYC decision
+      notifications render from a `NotificationTemplate` instead of a hardcoded string
+- [ ] Editing a template's wording from `admin_portal` changes the next real send — verified live,
+      not just that the edit saves
+
+**Verification:**
+- [ ] Feature tests: each of the three notification types renders from its template with real
+      placeholder values substituted correctly
+- [ ] Live-browser verified: edit a template, trigger a real send (via the existing fake-sender
+      pattern this codebase uses for local testing, matching Task 18g's `MNOTIFY_API_KEY`-blanked
+      convention), confirm the edited wording appears
+- [ ] Full suite green, CI green on real MySQL
+
+**Dependencies:** 48a
+
+**Files likely touched:** `apps/accounts/views.py` (OTP), `apps/withdrawal/services.py`,
+`apps/distributors/views.py` (KYC decision), `tests/feature/notifications/
+test_high_traffic_templates.py`
+
+**Estimated scope:** M
+
+#### 48c: Migrate remaining send-sites
+
+**Acceptance criteria:**
+- [ ] Binary/matching/direct-referral bonus credited, downline joined, PV-expiry warning (Task
+      21d's 6 event types), and order status update notifications all render from a
+      `NotificationTemplate`
+
+**Verification:**
+- [ ] Feature tests per notification type, matching 48b's pattern
+- [ ] Full suite green, CI green on real MySQL
+
+**Dependencies:** 48a, 48b
+
+**Files likely touched:** `apps/commissions/services.py`, `apps/notifications/consumers.py`,
+`apps/orders/services.py`, `tests/feature/notifications/test_remaining_templates.py`
+
+**Estimated scope:** M
+
+#### 48d: Provider-choice + sender identity settings
+
+**Acceptance criteria:**
+- [ ] SMS Provider / Email Provider fields exist, save, and are visibly labeled as the one real
+      wired option (mNotify / Gmail SMTP) — no functional no-op picker, matching the Currency-lock
+      precedent from Task 36g/h
+- [ ] Sender Name / Sender Email Address are real, admin-editable constance settings, actually used
+      on the next real send — not read from `.env`/hardcoded for these two specific values anymore
+
+**Verification:**
+- [ ] Feature tests: settings save correctly, a real send uses the configured sender identity
+- [ ] Live-browser verified
+- [ ] Full suite green
+
+**Dependencies:** None (independent of 48a-48c)
+
+**Files likely touched:** `apps/platform_settings/config.py`, `templates/admin_portal/
+platform_settings.html`, `apps/notifications/sms.py`, `bancostore/settings.py` (email backend
+sender), `tests/feature/admin_portal/test_platform_settings.py`
+
+**Estimated scope:** S
+
+---
+
+### Checkpoint O — Phase 2 complete
+- [ ] Every one of `SPEC_PHASE2.md`'s ten Success Criteria sections met
+- [ ] Full suite green, CI green on real MySQL, every feature live-browser-verified
+- [ ] `CLAUDE.md` Project State updated to record Phase 2's completion
+- [ ] Review with the user — Phase 2 sign-off

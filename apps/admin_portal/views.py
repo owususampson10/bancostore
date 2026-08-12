@@ -15,11 +15,12 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.views.decorators.http import require_POST
 
 from constance import config
 from constance.utils import get_values
 
-from apps.catalog.models import Category, Product
+from apps.catalog.models import Category, Product, Review
 from apps.catalog.services import normalize_primary_image
 from apps.commissions.models import CommissionCycleRun
 from apps.distributors.models import Distributor
@@ -1323,6 +1324,63 @@ def catalog_product_delete(request, pk):
 
 
 # ---------------------------------------------------------------------------
+# Product Reviews (Task 41b) -- a global moderation queue, matching the
+# KYC/withdrawal/order queues' own "one queue across everything, not
+# per-product" convention, rather than a review list embedded on each
+# product's own edit page.
+# ---------------------------------------------------------------------------
+
+
+@login_required(login_url="two_factor:login")
+def review_moderation_list(request):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    reviews = (
+        Review.objects.select_related("user", "product")
+        # Pending first -- that's the actual queue an admin needs to work
+        # through; already-approved reviews are shown for context/undo,
+        # not as the primary thing to act on. "-pk" tiebreaker (code-review-
+        # and-quality finding): matches order_history/team/earnings_history's
+        # own established fix for the same pagination-stability gap a bare
+        # created_at ordering has on a timestamp collision.
+        .order_by("is_approved", "-created_at", "-pk")
+    )
+    paginator = Paginator(reviews, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    return render(
+        request,
+        "admin_portal/review_moderation.html",
+        {"page_obj": page_obj, "active_nav": "catalog"},
+    )
+
+
+@login_required(login_url="two_factor:login")
+@require_POST
+def review_approve(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    review = get_object_or_404(Review, pk=pk)
+    review.is_approved = True
+    review.save(update_fields=["is_approved"])
+    messages.success(request, "Review approved.")
+    return redirect("admin_portal:review_moderation_list")
+
+
+@login_required(login_url="two_factor:login")
+@require_POST
+def review_delete(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    review = get_object_or_404(Review, pk=pk)
+    review.delete()
+    messages.success(request, "Review deleted.")
+    return redirect("admin_portal:review_moderation_list")
+
+
+# ---------------------------------------------------------------------------
 # Platform Settings (Task 28) -- a Stitch-designed front end for the
 # already-existing django-constance business-rule settings, replacing raw
 # Django Admin as the primary path (same pattern as every other admin_portal
@@ -1354,6 +1412,7 @@ _GROUP_ICONS = {
     "Withdrawal & Payout Settings": "account_balance",
     "Delivery Settings": "local_shipping",
     "Order Settings": "receipt_long",
+    "Product & Inventory Settings": "inventory_2",
     "KYC Settings": "fact_check",
     "IR ID Number Settings": "badge",
     "Payment Gateway Settings": "point_of_sale",

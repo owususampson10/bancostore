@@ -77,6 +77,19 @@ urlpatterns = [
         views.catalog_product_delete,
         name="catalog_product_delete",
     ),
+    path(
+        "catalog/reviews/", views.review_moderation_list, name="review_moderation_list"
+    ),
+    path(
+        "catalog/reviews/<int:pk>/approve/",
+        views.review_approve,
+        name="review_approve",
+    ),
+    path(
+        "catalog/reviews/<int:pk>/delete/",
+        views.review_delete,
+        name="review_delete",
+    ),
     path("settings/", views.platform_settings, name="platform_settings"),
     # Task 36c: no standalone page -- Social Links now lives inside the
     # "settings/" page's General Platform Settings tab; these three remain

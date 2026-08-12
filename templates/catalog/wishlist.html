@@ -1,0 +1,51 @@
+{% extends "base_store.html" %}
+{% load static humanize %}
+
+{% block title %}My Wishlist | Bancostore{% endblock %}
+{% block content %}
+<div class="max-w-[1440px] mx-auto px-margin-mobile md:px-16 py-8 md:py-12">
+<div class="mb-8">
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-1">My Wishlist</h1>
+<p class="font-body-md text-body-md text-gray-600">Products you've saved to come back to later.</p>
+</div>
+
+{% if items %}
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 md:gap-8">
+{% for item in items %}
+<div class="flex flex-col group relative">
+<form method="post" action="{% url 'catalog:wishlist_toggle' item.product.pk %}" class="absolute top-3 right-3 z-10">
+{% csrf_token %}
+<button type="submit" class="w-9 h-9 flex items-center justify-center rounded-full bg-surface/90 text-primary shadow-sm hover:bg-surface transition-all active:scale-95" aria-label="Remove from wishlist" title="Remove from wishlist">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">favorite</span>
+</button>
+</form>
+<a href="{% url 'catalog:product_detail' item.product.slug %}" class="bg-surface-variant rounded-xl aspect-[4/5] p-8 flex items-center justify-center relative overflow-hidden{% if not item.product.in_stock %} grayscale opacity-70{% endif %}">
+{% if item.product.primary_image %}
+<img class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" src="{{ item.product.primary_image.image.url }}" alt="{{ item.product.name }}">
+{% endif %}
+{% if not item.product.in_stock %}
+<div class="absolute inset-0 bg-surface-dim/40 flex items-center justify-center">
+<span class="bg-gray-700 text-white px-6 py-2 rounded-full font-bold text-sm">Out of Stock</span>
+</div>
+{% endif %}
+</a>
+<div class="mt-4 flex flex-col">
+<h3 class="font-bold text-lg mb-1 group-hover:text-primary transition-colors">{{ item.product.name }}</h3>
+<div class="flex justify-between items-center">
+<span class="font-bold text-on-surface">GHS {{ item.product.price|intcomma }}</span>
+<a class="text-primary font-bold text-sm hover:underline" href="{% url 'catalog:product_detail' item.product.slug %}">View</a>
+</div>
+</div>
+</div>
+{% endfor %}
+</div>
+{% else %}
+<div class="flex flex-col items-center justify-center text-center py-24 border border-dashed border-outline-variant rounded-xl">
+<span class="material-symbols-outlined text-primary text-[48px] mb-4" aria-hidden="true">favorite</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface mb-2">Your wishlist is empty</h2>
+<p class="font-body-md text-body-md text-gray-600 mb-6 max-w-sm">Save products you love from any product page and they'll show up here.</p>
+<a href="{% url 'catalog:product_list' %}" class="px-6 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold hover:brightness-110 transition-all active:scale-95">Start Shopping</a>
+</div>
+{% endif %}
+</div>
+{% endblock %}

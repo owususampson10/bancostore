@@ -13,7 +13,7 @@ from allauth.account.forms import (
 )
 from phonenumber_field.formfields import PhoneNumberField
 
-from .models import AdminProfile, CustomerProfile
+from .models import Address, AdminProfile, CustomerProfile
 
 User = get_user_model()
 
@@ -145,3 +145,37 @@ class AdminAuthenticationForm(AuthenticationForm):
                 if self.locked:
                     raise ValidationError("Account temporarily locked.")
         return super().clean()
+
+
+class AddressForm(forms.ModelForm):
+    """Task 40a (fixed 2026-08-12 per direct user feedback). delivery_zone
+    is a HiddenInput here, not a native <select> -- the visible control is
+    a themed Alpine listbox rendered entirely in the template
+    (templates/accounts/address_form.html), matching checkout.html's own
+    Delivery Zone control and payout_settings.html's mobile-money-network
+    listbox exactly, since a native select's open options popup can't be
+    restyled via CSS in any browser (this codebase's established reason
+    for every other themed dropdown)."""
+
+    class Meta:
+        model = Address
+        fields = ["label", "delivery_zone", "address", "area", "landmark", "is_default"]
+        widgets = {
+            "label": forms.TextInput(
+                attrs={"class": INPUT_CLASSES, "placeholder": "Home, Office..."}
+            ),
+            "delivery_zone": forms.HiddenInput(),
+            "address": forms.TextInput(
+                attrs={"class": INPUT_CLASSES, "placeholder": "Street address"}
+            ),
+            "area": forms.TextInput(
+                attrs={"class": INPUT_CLASSES, "placeholder": "Area/suburb"}
+            ),
+            "landmark": forms.TextInput(
+                attrs={
+                    "class": INPUT_CLASSES,
+                    "placeholder": "Nearest landmark (optional)",
+                }
+            ),
+            "is_default": forms.CheckboxInput(attrs={"class": CHECKBOX_CLASSES}),
+        }

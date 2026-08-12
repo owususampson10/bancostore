@@ -5,6 +5,7 @@
 {{ delivery_zone_choices|json_script:"delivery-zone-choices" }}
 {{ selected_delivery_method|json_script:"checkout-selected-delivery-method" }}
 {{ selected_delivery_zone|json_script:"checkout-selected-delivery-zone" }}
+{{ saved_addresses_data|json_script:"checkout-saved-addresses" }}
 <div class="max-w-[1280px] mx-auto px-margin-mobile md:px-margin-desktop py-12"
      x-data="{
        // security-and-hardening (2026-07-25): both read via JSON.parse from
@@ -56,6 +57,23 @@
        chooseZone(index) {
          this.deliveryZone = this.zoneOptions[index].value;
          this.zoneOpen = false;
+       },
+       // Task 40b: savedAddresses read via JSON.parse from the json_script
+       // block above, same XSS reasoning as zoneOptions -- an admin-free
+       // label/address string could otherwise break out of this x-data
+       // string if interpolated directly. Applying one only fills the
+       // same plain form fields a manual entry would; it's a client-side
+       // convenience only, not a new submission path (see
+       // apps.orders.views.checkout_view's own comment on this).
+       savedAddresses: JSON.parse(document.getElementById('checkout-saved-addresses').textContent),
+       selectedAddressId: {{ selected_saved_address_id|default:"null" }},
+       applySavedAddress(addr) {
+         this.deliveryMethod = 'home_delivery';
+         this.deliveryZone = addr.delivery_zone;
+         this.selectedAddressId = addr.id;
+         document.getElementById('{{ form.address.id_for_label }}').value = addr.address;
+         document.getElementById('{{ form.area.id_for_label }}').value = addr.area;
+         document.getElementById('{{ form.landmark.id_for_label }}').value = addr.landmark;
        },
      }">
 <h1 class="font-headline-lg text-headline-lg text-on-surface mb-8">Checkout</h1>
@@ -120,6 +138,32 @@ Delivery Method
 </label>
 </div>
 {% if form.delivery_method.errors %}<p class="text-error text-sm">{{ form.delivery_method.errors.0 }}</p>{% endif %}
+</section>
+
+<!-- Saved Addresses (Task 40b) -- a client-side convenience only: picking
+     one just fills the same address/area/landmark/delivery_zone fields
+     below that a manual entry would, so the POST payload and Order
+     creation path (Task 17c) are completely unaffected by this choice. -->
+<section x-show="deliveryMethod === 'home_delivery' && savedAddresses.length" x-cloak class="space-y-4">
+<h2 class="font-headline-md text-headline-md text-on-surface flex items-center gap-2 px-2">
+<span class="material-symbols-outlined text-primary" aria-hidden="true">location_on</span>
+Saved Addresses
+</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+<template x-for="addr in savedAddresses" :key="addr.id">
+<button type="button"
+        class="text-left p-4 rounded-xl border-2 transition-all"
+        :class="selectedAddressId === addr.id ? 'border-primary ring-1 ring-primary bg-primary/5' : 'border-outline-variant hover:border-outline'"
+        @click="applySavedAddress(addr)">
+<div class="flex items-center gap-2 mb-1">
+<span class="font-semibold text-on-surface" x-text="addr.label"></span>
+<span x-show="addr.is_default" class="px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed-variant text-[10px] font-bold uppercase tracking-wide">Default</span>
+</div>
+<p class="text-sm text-secondary" x-text="addr.address + (addr.area ? ', ' + addr.area : '')"></p>
+<p class="text-sm text-secondary" x-text="addr.delivery_zone_label"></p>
+</button>
+</template>
+</div>
 </section>
 
 <!-- Delivery Details (home delivery only) -->
