@@ -317,6 +317,18 @@ ORDER_SETTINGS = {
     ),
 }
 
+PRODUCT_AND_INVENTORY_SETTINGS = {
+    # Task 41b (SPEC_PHASE2.md Feature 1, source doc 13.10 "Product Review
+    # Approval"). Manual by default, matching the source doc's own stated
+    # current value -- an admin can flip this to skip moderation entirely
+    # once they trust the review volume/quality.
+    "PRODUCT_REVIEW_AUTO_APPROVE_ENABLED": (
+        False,
+        "Auto-approve new product reviews instead of requiring manual "
+        "admin approval",
+    ),
+}
+
 KYC_SETTINGS = {
     "KYC_REQUIRED": (
         True,
@@ -596,6 +608,7 @@ CONSTANCE_CONFIG = {
     **WITHDRAWAL_AND_PAYOUT_SETTINGS,
     **DELIVERY_SETTINGS,
     **ORDER_SETTINGS,
+    **PRODUCT_AND_INVENTORY_SETTINGS,
     **KYC_SETTINGS,
     **IR_ID_NUMBER_SETTINGS,
     **PAYMENT_GATEWAY_SETTINGS,
@@ -609,6 +622,7 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "Withdrawal & Payout Settings": tuple(WITHDRAWAL_AND_PAYOUT_SETTINGS),
     "Delivery Settings": tuple(DELIVERY_SETTINGS),
     "Order Settings": tuple(ORDER_SETTINGS),
+    "Product & Inventory Settings": tuple(PRODUCT_AND_INVENTORY_SETTINGS),
     "KYC Settings": tuple(KYC_SETTINGS),
     "IR ID Number Settings": tuple(IR_ID_NUMBER_SETTINGS),
     "Payment Gateway Settings": tuple(PAYMENT_GATEWAY_SETTINGS),

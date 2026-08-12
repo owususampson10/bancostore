@@ -1,12 +1,21 @@
 from decimal import Decimal, InvalidOperation
 
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db.models import Q
-from django.shortcuts import get_object_or_404, render
+from django.db import IntegrityError, transaction
+from django.db.models import Avg, Q
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
+from constance import config
+
+from apps.orders.models import Order, OrderItem
 from bancostore.json_ld import dumps_for_script_tag
 
-from .models import Category, Product
+from .forms import ReviewForm
+from .models import Category, Product, Review, WishlistItem
 
 PRODUCTS_PER_PAGE = 9
 
@@ -131,22 +140,148 @@ def _build_product_json_ld(request, product):
     return dumps_for_script_tag(data)
 
 
-def product_detail(request, slug):
-    product = get_object_or_404(
-        Product.objects.storefront_visible().prefetch_related("variants", "images"),
-        slug=slug,
+def _can_review(user, product):
+    """Task 41a. Eligibility is a delivered order containing this product
+    for this user -- Order.status == "delivered" (Task 18) is the real
+    signal the source doc asks for ("after receiving their order"), not
+    just having purchased it."""
+    return (
+        user.is_authenticated
+        and OrderItem.objects.filter(
+            order__customer=user,
+            order__status=Order.Status.DELIVERED,
+            product=product,
+        ).exists()
     )
+
+
+def _product_detail_context(request, product, review_form=None):
     related_products = (
         Product.objects.storefront_visible()
         .filter(category=product.category)
         .exclude(pk=product.pk)[:4]
     )
+    in_wishlist = (
+        request.user.is_authenticated
+        and WishlistItem.objects.filter(user=request.user, product=product).exists()
+    )
+    can_review = _can_review(request.user, product)
+    if review_form is None:
+        existing_review = (
+            Review.objects.filter(user=request.user, product=product).first()
+            if can_review
+            else None
+        )
+        review_form = ReviewForm(instance=existing_review)
+    # Task 41b: approved reviews only, both for the list and the average --
+    # an unapproved review must never leak into the public average rating
+    # either, not just the visible list.
+    approved_reviews = (
+        Review.objects.filter(product=product, is_approved=True)
+        .select_related("user")
+        .order_by("-created_at")
+    )
+    average_rating = approved_reviews.aggregate(avg=Avg("rating"))["avg"]
+    if average_rating is not None:
+        average_rating = round(average_rating, 1)
+    return {
+        "product": product,
+        "related_products": related_products,
+        "product_json_ld": _build_product_json_ld(request, product),
+        "in_wishlist": in_wishlist,
+        "can_review": can_review,
+        "review_form": review_form,
+        "reviews": approved_reviews,
+        "average_rating": average_rating,
+    }
+
+
+def product_detail(request, slug):
+    product = get_object_or_404(
+        Product.objects.storefront_visible().prefetch_related("variants", "images"),
+        slug=slug,
+    )
     return render(
         request,
         "catalog/product_detail.html",
-        {
-            "product": product,
-            "related_products": related_products,
-            "product_json_ld": _build_product_json_ld(request, product),
-        },
+        _product_detail_context(request, product),
     )
+
+
+@login_required(login_url="account_login")
+@require_POST
+def review_submit(request, product_id):
+    """Task 41a. update_or_create-shaped via instance= (not a separate
+    add/edit endpoint) -- one review per customer per product (confirmed
+    with the user), so a resubmission always edits the existing row in
+    place. Always resets is_approved=False: a materially different review
+    body/rating must not stay silently approved with never-moderated
+    content."""
+    product = get_object_or_404(Product.objects.storefront_visible(), pk=product_id)
+    if not _can_review(request.user, product):
+        raise PermissionDenied
+    existing_review = Review.objects.filter(user=request.user, product=product).first()
+    form = ReviewForm(request.POST, instance=existing_review)
+    if form.is_valid():
+        review = form.save(commit=False)
+        review.user = request.user
+        review.product = product
+        # Task 41b: the 13.10 "Product Review Approval" admin toggle --
+        # Manual (the default) means every (re)submission always goes back
+        # to unapproved for review; Auto-approve skips that entirely.
+        review.is_approved = config.PRODUCT_REVIEW_AUTO_APPROVE_ENABLED
+        try:
+            with transaction.atomic():
+                review.save()
+        except IntegrityError:
+            # code-review-and-quality finding: existing_review was None at
+            # the query above, but a concurrent submission from the same
+            # user for the same product won the race and inserted its own
+            # row first -- Review's own UniqueConstraint(user, product)
+            # turns the second INSERT into an IntegrityError instead of a
+            # silent second row. Fall back to updating the row that won,
+            # matching wishlist_toggle's own get_or_create precedent for
+            # this exact class of race, rather than a 500.
+            review = Review.objects.get(user=request.user, product=product)
+            review.rating = form.cleaned_data["rating"]
+            review.body = form.cleaned_data["body"]
+            review.is_approved = config.PRODUCT_REVIEW_AUTO_APPROVE_ENABLED
+            review.save()
+        messages.success(
+            request, "Thanks for your review! It will appear once approved."
+        )
+        return redirect("catalog:product_detail", slug=product.slug)
+    return render(
+        request,
+        "catalog/product_detail.html",
+        _product_detail_context(request, product, review_form=form),
+    )
+
+
+@login_required(login_url="account_login")
+@require_POST
+def wishlist_toggle(request, product_id):
+    """Task 39. A single toggle endpoint (not separate add/remove routes)
+    matches the product page's single heart-icon button. get_or_create
+    plus the model's own UniqueConstraint makes a rapid double-submit
+    idempotent rather than a 500. Always redirects back to the product
+    page it came from -- no `next` query param accepted, closing off the
+    open-redirect risk Task 17d's own CodeRabbit finding already flagged
+    for this exact class of "reverse an attacker-controlled value" bug."""
+    product = get_object_or_404(Product.objects.storefront_visible(), pk=product_id)
+    item, created = WishlistItem.objects.get_or_create(
+        user=request.user, product=product
+    )
+    if not created:
+        item.delete()
+    return redirect("catalog:product_detail", slug=product.slug)
+
+
+@login_required(login_url="account_login")
+def wishlist_view(request):
+    items = (
+        WishlistItem.objects.filter(user=request.user)
+        .select_related("product", "product__category")
+        .prefetch_related("product__images")
+    )
+    return render(request, "catalog/wishlist.html", {"items": items})
