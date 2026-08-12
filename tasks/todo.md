@@ -6460,9 +6460,14 @@ a live reference an `Order` reads from later.
 duplicating the choice set (imported inside the class body, not at module level, to keep the
 accounts→orders import direction obviously one-way and easy to audit for the cycle risk the reverse
 direction would raise — confirmed safe, `apps.orders.services` only imports `apps.accounts.
-permissions`, never `.models`). Single-default enforcement lives in `Address.save()` (best-effort,
-not `select_for_update`-wrapped — a low-stakes UX convenience, not money-adjacent code needing the
-elevated concurrency rigor `SPEC_PHASE2.md` reserves for Discount Codes/Escrow). CRUD views
+permissions`, never `.models`). Single-default enforcement lives in `Address.save()`, wrapped in
+`select_for_update()` + `transaction.atomic()` (added in a CodeRabbit-driven fix on PR #73 — the
+original shipped version was a bare, unlocked `exclude().update()`) — this closes the realistic
+race (a user with an existing default switching it), but a real DB-level guarantee for the rarer
+"two concurrent first-time defaults" edge case would need a partial `UniqueConstraint(condition=
+Q(is_default=True))`, which MySQL (this project's CI/production database) doesn't support; accepted
+as a documented gap, not money-adjacent code needing the elevated concurrency rigor
+`SPEC_PHASE2.md` reserves for Discount Codes/Escrow. CRUD views
 (`address_list`/`address_create`/`address_edit`/`address_delete`) mirror `admin_portal`'s own
 create/edit-share-one-template, POST-only-delete pattern; `address_edit`/`address_delete` use
 `get_object_or_404(Address, pk=pk, user=request.user)`, IDOR-safe by construction. Mounted at a
@@ -6473,7 +6478,9 @@ namespace) or `accounts/` (allauth's own prefix), per this codebase's own docume
 admin_portal-specific markup) instead of a native `confirm()`, matching this codebase's standing
 "no confirm()/alert()" convention since Task 19c. Header gained a location-pin icon (desktop) /
 "My Addresses" link (mobile), next to Wishlist's own Task 39 entries. 9 feature tests in
-`tests/feature/accounts/test_addresses.py`. Full suite green (232 passed) at merge, no regressions.
+`tests/feature/accounts/test_addresses.py`. Targeted suite green (232 passed: accounts + catalog +
+orders + admin_portal) at merge; a subsequent full local `pytest -q` run (1442 passed) and GitHub
+Actions CI on PR #73 (lint + real-MySQL test) both confirmed no regressions.
 Live-browser-verified: create (with default checkbox), the DEFAULT badge rendering, and the shared
 delete-confirm modal, against a real `runserver` session.
 
@@ -6595,7 +6602,9 @@ behavior-preserving refactor, verified by the full pre-existing `tests/feature/c
 passing unchanged before and after. `apps.catalog.views` now imports `apps.orders.models`
 (`Order`/`OrderItem`) — checked for the reverse-direction cycle risk before adding: `apps.orders.
 models` only imports `apps.catalog.models` (not `.views`), so the new edge is safe. 11 feature tests
-in `tests/feature/catalog/test_reviews.py`. Full suite green throughout, no regressions.
+in `tests/feature/catalog/test_reviews.py`. Full local suite green throughout (1442 passed, 1
+skipped, plus the one already-documented pre-existing Task 36 failure); GitHub Actions CI on PR #73
+(lint + real-MySQL test) both passed.
 
 #### 41b: Admin moderation + public display
 
@@ -6651,10 +6660,59 @@ rendering, approve, delete, and POST-only enforcement are already covered by 5 d
 tests, and the delete confirmation modal itself was already live-browser-verified identically in
 Task 40a. Test data (customer, staff, order, reviews) deleted after verification.
 
+**CodeRabbit fix round on PR #73, pushed as one follow-up commit per this codebase's established
+batching convention:** the average-rating stars never actually rendered filled — `{% if
+forloop.counter <= average_rating|floatformat:0 %}` compares an int to a *string* (`floatformat`
+always returns one), which Django's template `{% if %}` silently evaluates as False rather than
+raising, confirmed directly via a `Template.render()` shell check before fixing it to a plain
+numeric comparison (matching `review.rating`'s own already-correct comparison just below it in the
+same template). Also fixed: the success message and docstring in `review_submit` still claimed
+"always resets to unapproved," stale since 41b added the auto-approve setting — now branches on the
+actual `review.is_approved` outcome; a per-review `aria-label` for screen readers (the star icons
+were `aria-hidden`, but the row itself had no text alternative); a composite `(product, is_approved,
+-created_at)` index matching the exact query shape `_product_detail_context` uses (new migration
+`0008_review_review_pub_lookup_idx.py`); and the race-condition regression test's mock narrowed to
+only the specific lookup under test, not `Review.objects.filter` globally, so it can't silently mask
+a bug in the untested invalid-form branch. `Address.save()` also gained `select_for_update()` +
+`transaction.atomic()` around its default-clearing update (previously a bare, unlocked
+`exclude().update()`) — closes the realistic race (switching an existing default) without chasing
+a MySQL-incompatible partial-unique-constraint for the rarer "two concurrent first-time defaults"
+edge case, documented as an accepted gap in the model's own comment.
+
+**Second correction pass, same day, before this round was pushed:** two independent fresh-context
+subagent reviews (`security-auditor`, then `code-reviewer`) of this fix round itself caught that two
+of the fixes above were not actually correct as first written, both now fixed:
+1. `select_for_update()` chained directly onto `.update()` is a genuine Django no-op —
+   `.update()` compiles straight to a bulk `UPDATE` and never evaluates (fetches) the queryset at
+   all, so `FOR UPDATE` was never actually issued despite the code and this file's own prose above
+   claiming it was. Fixed by forcing the fetch via `list(...)` on the locked queryset *before* the
+   separate `.update()` call, so the row lock is genuinely acquired first.
+2. The "narrowed" race-condition test mock had the same class of bug in miniature: `with
+   patch.object(...): return queryset` un-patches on `__exit__`, which runs *before* the caller
+   ever gets the returned value — so by the time `review_submit` called `.first()`, the patch was
+   already reverted and the real row came back. The test still passed, but only because the normal
+   (non-race) code path and the intended `IntegrityError` fallback path produce an identical final
+   state, so asserting on final state alone couldn't tell them apart — the exact same class of gap
+   as the first attempted fix. Fixed by assigning `.first` directly on the fresh per-call queryset
+   instance (no context manager needed) and, since final-state assertions still couldn't
+   distinguish the two paths, adding a spy on `Review.objects.get()` (the only call inside the
+   `except IntegrityError` branch) to directly prove that branch executed.
+
+A new `test_setting_a_new_default_locks_the_existing_default_row_first` (spy-based, matching the
+review test's own pattern) closes the same gap for `Address.save()` — not a full multi-threaded
+concurrency test (still disproportionate for this feature per `SPEC_PHASE2.md`'s own scoping to
+Discount Codes/Escrow), but real proof the locking code path executes, not just that a comment
+claims it does. All fixes re-verified by the full targeted suites plus a full local run; pushed
+together in one commit, not one push per finding.
+
 ---
 
 ### Checkpoint L (after Tasks 39-41)
-- [x] Full suite green, CI green on real MySQL
+- [x] Test status, stated precisely (CodeRabbit finding on PR #73 — the original wording here
+      conflated targeted, local-full-suite, and CI results into one blanket claim): every targeted
+      suite was green at the time its task's slice was built; multiple full local `pytest -q` runs
+      were green except one pre-existing, unrelated Task 36 regression, confirmed pre-existing
+      before this work started; GitHub Actions CI on PR #73 (lint + real-MySQL test) both passed
 - [x] Live-browser verified per task above
 - [ ] Review with the user before starting Phase 14
 

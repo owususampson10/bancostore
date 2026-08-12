@@ -220,6 +220,15 @@ class Review(models.Model):
                 name="review_rating_between_1_and_5",
             ),
         ]
+        # code-review-and-quality (CodeRabbit, PR #73): matches
+        # _product_detail_context's own real query shape exactly (filter by
+        # product + is_approved, order by -created_at).
+        indexes = [
+            models.Index(
+                fields=["product", "is_approved", "-created_at"],
+                name="review_pub_lookup_idx",
+            )
+        ]
 
     def __str__(self):
         return f"{self.user} → {self.product} ({self.rating}★)"

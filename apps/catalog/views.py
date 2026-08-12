@@ -211,12 +211,15 @@ def product_detail(request, slug):
 @login_required(login_url="account_login")
 @require_POST
 def review_submit(request, product_id):
-    """Task 41a. update_or_create-shaped via instance= (not a separate
+    """Task 41a/41b. update_or_create-shaped via instance= (not a separate
     add/edit endpoint) -- one review per customer per product (confirmed
     with the user), so a resubmission always edits the existing row in
-    place. Always resets is_approved=False: a materially different review
-    body/rating must not stay silently approved with never-moderated
-    content."""
+    place. is_approved is always re-derived from the live
+    PRODUCT_REVIEW_AUTO_APPROVE_ENABLED setting on every (re)submission,
+    never carried over from the previous value: under Manual (the
+    default) that means unapproved every time, so a materially different
+    review body/rating can never stay silently approved with
+    never-moderated content."""
     product = get_object_or_404(Product.objects.storefront_visible(), pk=product_id)
     if not _can_review(request.user, product):
         raise PermissionDenied
@@ -247,9 +250,12 @@ def review_submit(request, product_id):
             review.body = form.cleaned_data["body"]
             review.is_approved = config.PRODUCT_REVIEW_AUTO_APPROVE_ENABLED
             review.save()
-        messages.success(
-            request, "Thanks for your review! It will appear once approved."
-        )
+        if review.is_approved:
+            messages.success(request, "Thanks for your review! It's now live.")
+        else:
+            messages.success(
+                request, "Thanks for your review! It will appear once approved."
+            )
         return redirect("catalog:product_detail", slug=product.slug)
     return render(
         request,

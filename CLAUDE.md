@@ -38,10 +38,11 @@ tags, robots.txt + sitemap, JSON-LD structured data, a Lighthouse page-speed aud
 production risk) both closed 2026-08-11, requested directly by the user the day after launch. Two
 small follow-ups closed 2026-08-12: a real hand-vectorized brand logo replacing the placeholder
 wordmark, and a Google Search Console site-verification route (needed to submit Task 37b's sitemap
-to Search Console). **No Phase 2 work has started** — see `SPEC.md`'s "Out of scope (defer to
-Phase 2 spec)" list (sales/revenue/compliance reporting, discount codes & promotional banners,
-product reviews, backorders, PDF/CSV export tooling, full notification template editor/multi-
-provider SMS switching UI); no Phase 2 spec exists yet either.**
+to Search Console). **Phase 2 work started 2026-08-12** — `SPEC_PHASE2.md` (see `SPEC.md`'s "Out
+of scope" list for the ten deferred features it covers) is the current draft spec; Tasks 39
+(Wishlist), 40 (Saved/Multiple Delivery Addresses), and 41 (Product Reviews) are closed, shipped
+via PR #73. The remaining seven Phase 2 features (reporting/compliance, discount codes,
+promotional banners, backorders, PDF/CSV export, notification templates) have not been started.
 Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found
 no task anywhere had ever scoped a self-service order-history page for a customer or distributor,

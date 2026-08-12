@@ -232,12 +232,54 @@ def test_a_race_between_two_first_time_submissions_updates_instead_of_erroring(
         user=user, product=product, rating=1, body="First writer wins"
     )
 
-    with patch("apps.catalog.views.Review.objects.filter") as mock_filter:
-        mock_filter.return_value.first.return_value = None
+    # Narrowed per CodeRabbit (PR #73): patching Review.objects.filter
+    # unconditionally would also affect _product_detail_context's own
+    # filter() call if the invalid-form branch were ever exercised under
+    # the same patch -- only the first lookup in review_submit needs to
+    # miss the already-real row.
+    #
+    # code-review-and-quality finding, fixed pre-merge: an earlier version
+    # of this narrowing used `with patch.object(type(queryset), "first",
+    # ...): return queryset` -- but a `return` inside a `with` block runs
+    # __exit__ (un-patching) *before* control reaches the caller, so by the
+    # time review_submit actually called .first(), the patch was already
+    # reverted and the real row was returned. That made this test pass for
+    # the wrong reason -- the IntegrityError fallback branch it exists to
+    # prove was never actually exercised. Fixed by assigning directly onto
+    # the fresh per-call queryset instance instead (no context manager,
+    # nothing to un-patch): Python allows shadowing a bound method on one
+    # instance without touching the class.
+    real_filter = Review.objects.filter
+
+    def _miss_once(*args, **kwargs):
+        queryset = real_filter(*args, **kwargs)
+        queryset.first = lambda: None
+        return queryset
+
+    # A spy on Review.objects.get, not just the final row state: the normal
+    # (non-race) path and the IntegrityError fallback path both end up with
+    # one row holding the second writer's content, so asserting only on
+    # final state can't tell them apart -- exactly how the earlier broken
+    # mock's version of this test kept passing for the wrong reason.
+    # review_submit's except-branch is the *only* code path that calls
+    # Review.objects.get(), so a call recorded here is direct proof the
+    # race-handling branch actually ran, not just that the end state looks
+    # the same as if it hadn't.
+    with (
+        patch("apps.catalog.views.Review.objects.filter", side_effect=_miss_once),
+        patch(
+            "apps.catalog.views.Review.objects.get", wraps=Review.objects.get
+        ) as mock_get,
+    ):
         response = client.post(
             reverse("catalog:review_submit", args=[product.pk]),
             {"rating": 5, "body": "Second writer's real submission"},
         )
+
+    assert mock_get.called, (
+        "Review.objects.get() was never called -- the IntegrityError fallback "
+        "branch didn't run, meaning the mocked lookup miss wasn't real"
+    )
 
     assert response.status_code == 302
     assert Review.objects.filter(user=user, product=product).count() == 1

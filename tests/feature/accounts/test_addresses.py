@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
@@ -151,3 +153,36 @@ def test_default_address_is_not_required():
     )
 
     assert address.is_default is False
+
+
+@pytest.mark.django_db
+def test_setting_a_new_default_locks_the_existing_default_row_first():
+    """code-review-and-quality finding (CodeRabbit, then a security-auditor
+    pass on the first fix attempt): a bare exclude().update() with no
+    locking, and later a select_for_update() chained directly before
+    .update() (a genuine no-op in Django -- .update() compiles to a bulk
+    UPDATE and never evaluates the queryset), both failed to actually
+    acquire a row lock before clearing the old default. This doesn't prove
+    the race is closed under real concurrency (a full multi-threaded test
+    is disproportionate for this low-stakes, non-money feature per
+    SPEC_PHASE2.md's own scoping), but it does prove the locking code path
+    that's supposed to close the realistic case (switching an existing
+    default) actually executes, not just that the model's own comment
+    claims it does."""
+    user = User.objects.create_user(username="ama@example.test", password="pw")
+    Address.objects.create(
+        user=user, address="First", delivery_zone="kumasi", is_default=True
+    )
+
+    with patch(
+        "apps.accounts.models.Address.objects.select_for_update",
+        wraps=Address.objects.select_for_update,
+    ) as mock_select_for_update:
+        Address.objects.create(
+            user=user, address="Second", delivery_zone="accra", is_default=True
+        )
+
+    assert mock_select_for_update.called, (
+        "select_for_update() was never called while setting a new default -- "
+        "the existing default row's lock was never actually requested"
+    )

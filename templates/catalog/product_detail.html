@@ -134,7 +134,7 @@ Add to Cart
 {% if average_rating %}
 <div class="flex items-center gap-1">
 {% for n in "12345" %}
-<span class="material-symbols-outlined text-primary text-[18px]"{% if forloop.counter <= average_rating|floatformat:0 %} style="font-variation-settings: 'FILL' 1;"{% endif %} aria-hidden="true">star</span>
+<span class="material-symbols-outlined text-primary text-[18px]"{% if forloop.counter <= average_rating %} style="font-variation-settings: 'FILL' 1;"{% endif %} aria-hidden="true">star</span>
 {% endfor %}
 </div>
 <span class="text-sm text-gray-600">{{ average_rating }} out of 5 ({{ reviews|length }} review{{ reviews|length|pluralize }})</span>
@@ -164,7 +164,7 @@ Add to Cart
 <div class="mt-8 space-y-6">
 {% for review in reviews %}
 <div class="border-b border-outline-variant pb-6">
-<div class="flex items-center gap-1 mb-2">
+<div class="flex items-center gap-1 mb-2" role="img" aria-label="{{ review.rating }} out of 5 stars">
 {% for n in "12345" %}
 <span class="material-symbols-outlined text-primary text-[16px]"{% if forloop.counter <= review.rating %} style="font-variation-settings: 'FILL' 1;"{% endif %} aria-hidden="true">star</span>
 {% endfor %}

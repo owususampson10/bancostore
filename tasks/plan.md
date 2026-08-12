@@ -509,7 +509,12 @@ scope and rationale only, per its own established format above.
     average rating on the product page) + the 13.10 "Product Review Approval" admin toggle
 
 ### Checkpoint L — after Tasks 39-41
-- [x] Full suite green, CI green on real MySQL
+- [x] Test status, stated precisely rather than as one blanket claim: every targeted suite (catalog,
+  accounts, admin_portal, orders) was green at the time each task's slice was built; multiple full
+  local `pytest -q` runs were green except the one pre-existing, unrelated Task 36 regression
+  (`test_page_loads_the_shared_js_bundle_so_the_sidebar_can_actually_collapse`, confirmed pre-
+  existing before this work started); GitHub Actions CI on PR #73 (lint + real-MySQL test) both
+  passed
 - [x] Live-browser verified: wishlist survives a logout/login cycle; a saved address correctly
   pre-fills and snapshots at checkout; a review only appears publicly after admin approval
 - [ ] Review with the user before proceeding to Phase 14

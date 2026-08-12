@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 
 from phonenumber_field.modelfields import PhoneNumberField
 
@@ -56,16 +56,41 @@ class Address(models.Model):
         return f"{self.label or self.address} ({self.user})"
 
     def save(self, *args, **kwargs):
-        # Best-effort single-default enforcement -- not wrapped in
-        # select_for_update/atomic, since this is a low-stakes UX
-        # convenience (which address pre-fills the checkout form), not
-        # money-adjacent code needing the elevated concurrency rigor
-        # SPEC_PHASE2.md reserves for Discount Codes/Escrow.
+        # code-review-and-quality (CodeRabbit, PR #73), then a follow-up
+        # security-auditor pass: the original bare exclude().update() had
+        # no locking at all, so two concurrent requests changing an
+        # *existing* default could both read "not yet cleared" and both
+        # end up writing a default. A first fix chained select_for_update()
+        # directly onto the .update() call -- but that's a genuine no-op in
+        # Django: .update() compiles straight to a bulk UPDATE and never
+        # evaluates (fetches) the queryset at all, so FOR UPDATE was never
+        # actually issued (caught by the security-auditor pass, not
+        # CodeRabbit's own automated review). Fixed properly here: list(...)
+        # forces the fetch, which is what actually acquires the row lock,
+        # before the separate .update() call runs against those now-locked
+        # rows. This closes the realistic race (a user already has a
+        # default and is switching it). It does NOT close the rarer edge
+        # case of two concurrent *first-time* default saves for a user with
+        # none yet -- list(...) on an empty queryset locks nothing, and a
+        # real DB-level guarantee would need a partial
+        # UniqueConstraint(condition=Q(is_default=True)), which MySQL (this
+        # project's CI/production database) doesn't support. Accepted as a
+        # documented gap, not silently unaddressed -- matches
+        # SPEC_PHASE2.md's own reservation of full concurrency rigor for
+        # Discount Codes/Escrow, not this low-stakes UX convenience.
         if self.is_default:
-            Address.objects.filter(user=self.user, is_default=True).exclude(
-                pk=self.pk
-            ).update(is_default=False)
-        super().save(*args, **kwargs)
+            with transaction.atomic():
+                list(
+                    Address.objects.select_for_update()
+                    .filter(user=self.user, is_default=True)
+                    .exclude(pk=self.pk)
+                )
+                Address.objects.filter(user=self.user, is_default=True).exclude(
+                    pk=self.pk
+                ).update(is_default=False)
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
 
 
 class AdminProfile(models.Model):

@@ -2,16 +2,18 @@
 
 ## Status
 
-Draft, Specify phase (per `agent-skills:spec-driven-development`'s gated Specify → Plan → Tasks →
-Implement workflow). Not yet broken into `tasks/plan.md`/`tasks/todo.md` tasks — that's the Plan
-phase, next, via `agent-skills:planning-and-task-breakdown`, once this document itself is reviewed.
+Plan phase complete (`tasks/plan.md`/`tasks/todo.md` carry the full Task 39-48 breakdown, per
+`agent-skills:planning-and-task-breakdown`); Implement phase in progress. **Tasks 39 (Wishlist), 40
+(Saved/Multiple Delivery Addresses), and 41 (Product Reviews) are closed**, shipped via PR #73.
+Tasks 42-48 (Banners, Discount Codes, Backorders, Reporting, Compliance, PDF/CSV Export,
+Notification Templates) have not been started — see `tasks/plan.md` Phases 14-16.
 
 **Relationship to `SPEC.md`:** `SPEC.md` remains authoritative for everything Phase 2 doesn't
 change — tech stack, local dev environment, production deploy, scale architecture, code style,
 general testing strategy, and the Boundaries that aren't superseded below. This document only
-covers what's new. `SPEC.md`'s "Out of scope (defer to Phase 2 spec)" section should be updated to
-link here once this spec is approved (flagged, not done silently — editing `SPEC.md` needs a
-heads-up per this project's own standing convention).
+covers what's new. `SPEC.md`'s "Out of scope (defer to Phase 2 spec)" section already links here
+(updated 2026-08-12, with the user's go-ahead per this project's own standing convention on editing
+`SPEC.md`).
 
 **Grounded in the primary source doc directly** (`docs/Bancostore_Features_and_Workflow_v4.docx`,
 Sections 10.2/10.3, 11, 12.4–12.6, 13.5/13.6/13.7/13.8/13.10/13.11/13.12, and 4.2), read via
@@ -23,10 +25,13 @@ not assumed from `CLAUDE.md`'s own summary.
 
 **MVP context:** Tasks 1–38 are done and live in production at `https://bancostore.com` (Task 24
 deployed 2026-08-10). Every feature below was deliberately deferred out of MVP scope, not
-forgotten — `SPEC.md`'s own "Out of scope (defer to Phase 2 spec)" list named six of the eight
-areas below; the other two (Wishlist, saved delivery addresses) were found during this spec's own
-source-doc read as real Section 4.2 features that were never built *and* never explicitly deferred
-anywhere — a genuine gap, not a decision, closed by user confirmation (see Open Questions).
+forgotten — `SPEC.md`'s own "Out of scope (defer to Phase 2 spec)" list named six broad deferred
+areas, which map to eight of the ten features below (two of those six bullets each split into two
+separate features here: "sales/revenue/compliance reporting" became Features 5+6, and "discount
+codes/promotional banners" became Features 2+3); the other two features (Wishlist, saved delivery
+addresses) were found during this spec's own source-doc read as real Section 4.2 features that were
+never built *and* never explicitly deferred anywhere — a genuine gap, not a decision, closed by
+user confirmation (see Open Questions).
 
 ## Objective
 
@@ -67,8 +72,9 @@ received and when (`Order.status == "delivered"`), so eligibility is a real quer
 
 **Business rules (from the source doc + the 13.10 settings table):**
 - A review requires a star rating + written text, tied to a specific delivered `Order`/`Product`
-  pair — one review per customer per product, not per order (a repeat buyer edits their existing
-  review rather than stacking duplicates; open question below).
+  pair — **one review per customer per product, not per order, confirmed with the user and closed**
+  (a repeat buyer edits their existing review rather than stacking duplicates; enforced at the DB
+  level via `Review`'s own `UniqueConstraint(user, product)`, Task 41a).
 - New reviews are **not** publicly visible until an admin approves them (13.10's "Product Review
   Approval" setting: Auto-approve vs. Manual — source doc's own "Current Value" is Manual; make
   this a real admin-editable constance toggle, not hardcoded to manual forever).
@@ -199,7 +205,10 @@ flagged so it isn't silently built the naive way the way the PV ledger's own ori
 document warned against once already (see `CLAUDE.md`'s "one non-obvious architectural constraint").
 
 **Success criteria:**
-- Admin sees each of the seven listed report types with real numbers from the live database.
+- Admin sees each of the six report types (revenue, commissions paid vs. revenue, best-selling
+  products, new vs. returning customers, orders per status, delivery by zone) with real numbers
+  from the live database — CSV/PDF export (Feature 7) is a shared capability applied to these six,
+  not a separate seventh report.
 - Every report is exportable as both CSV and PDF from the same screen.
 - A report scoped to a date range returns correct numbers for that range specifically (a real test,
   not just "the page renders").
@@ -431,6 +440,9 @@ not re-litigate):
 3. **SMS/Email provider switching:** admin-editable choice field only; mNotify/Gmail stay the only
    wired providers.
 4. **Wishlist + saved addresses:** included in scope (Features 9/10 above).
+5. **Review scope (resolved 2026-08-12, before Task 41a started):** one review per customer per
+   product, not one per order — edit-in-place on a repeat purchase, enforced via `Review`'s
+   `UniqueConstraint(user, product)`.
 
 Still open, flagged for the Plan phase rather than decided here:
 - Discount code: is the usage limit a global cap only, or also a 1-per-customer default?
@@ -440,9 +452,24 @@ Still open, flagged for the Plan phase rather than decided here:
 - Which existing models beyond `Order`/`Distributor`/`WithdrawalRequest` should gain
   `HistoricalRecords()` for the audit log (Feature 6), and whether the audit log needs its own
   dedicated event-stream model instead of (or alongside) `simple_history`.
-- One review per customer per product (edit-in-place on a repeat purchase) vs. one review per
-  order — the source doc doesn't say, and it changes the schema's uniqueness constraint.
-- Build order across the ten features — not decided in this document.
+- Build order across Tasks 42-48 (Phases 14-16) — not decided in this document; see `tasks/plan.md`
+  for the risk-grouping rationale used so far.
+- **The retail/distributor compliance ratio (Task 47b, flagged by CodeRabbit on PR #73):** this
+  document names `Order.pv_earned > 0` as the classifier but doesn't yet define the actual formula
+  — which `Order.status` values count in the numerator/denominator, how a refund/cancellation
+  after the fact is treated, and the monthly window's timezone/boundary. Needs a direct answer
+  before 47b's implementation, not assumed.
+- **Escrow reversal + idempotency (Task 47a, flagged by CodeRabbit on PR #73):** this document
+  specifies the credit-on-confirmation side but not what happens on a later cancellation/refund
+  (Task 18b already reverses PV for that case — does escrow reverse too?) or how a retried/replayed
+  webhook is prevented from double-crediting the same order. Needs resolution as part of 47a's own
+  `doubt-driven-development` pass, not decided here.
+- **Notification template rendering safety (Task 48a, flagged by CodeRabbit on PR #73):** the
+  Boundaries section below states one generic "constrain server-side, never raw interpolation"
+  rule, but SMS, email, and HTML are three different unsafe-character profiles (CRLF header
+  injection for email, length/control-character limits for SMS, HTML escaping for the in-app
+  channel) — 48a needs context-specific validation per channel, not one rule applied uniformly,
+  with a test per rendering context.
 
 ## Agent Skills for the Plan/Implement Phases
 

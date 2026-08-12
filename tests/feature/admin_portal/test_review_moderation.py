@@ -4,8 +4,10 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 
 import pytest
+from constance import config
 
 from apps.catalog.models import Category, Product, Review
+from apps.orders.models import Order, OrderItem
 
 User = get_user_model()
 
@@ -152,40 +154,44 @@ def test_product_detail_average_rating_is_none_with_no_approved_reviews(
 
 
 @pytest.mark.django_db
-def test_auto_approve_setting_makes_a_new_review_immediately_visible(
-    client, product, settings
-):
-    from constance import config
-
+def test_auto_approve_setting_makes_a_new_review_immediately_visible(client, product):
+    """code-review-and-quality finding, fixed pre-merge: the original test
+    set config.PRODUCT_REVIEW_AUTO_APPROVE_ENABLED directly with no
+    restore, risking leaking True into every later test in the same run
+    (matching test_direct_referral.py's own established
+    save-original/try-finally-restore convention for this exact class of
+    global constance state)."""
+    original = config.PRODUCT_REVIEW_AUTO_APPROVE_ENABLED
     config.PRODUCT_REVIEW_AUTO_APPROVE_ENABLED = True
-    user = User.objects.create_user(username="ama@example.test", password="pw")
-    from apps.orders.models import Order, OrderItem
+    try:
+        user = User.objects.create_user(username="ama@example.test", password="pw")
+        order = Order.objects.create(
+            customer=user,
+            full_name="Test Customer",
+            phone_number="+233241234567",
+            delivery_method=Order.DeliveryMethod.PICKUP,
+            subtotal=product.price,
+            delivery_fee=Decimal("0"),
+            total=product.price,
+            payment_reference="ref-auto-approve",
+            status=Order.Status.DELIVERED,
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            product_name=product.name,
+            quantity=1,
+            unit_price=product.price,
+            unit_pv=0,
+        )
+        client.force_login(user)
 
-    order = Order.objects.create(
-        customer=user,
-        full_name="Test Customer",
-        phone_number="+233241234567",
-        delivery_method=Order.DeliveryMethod.PICKUP,
-        subtotal=product.price,
-        delivery_fee=Decimal("0"),
-        total=product.price,
-        payment_reference="ref-auto-approve",
-        status=Order.Status.DELIVERED,
-    )
-    OrderItem.objects.create(
-        order=order,
-        product=product,
-        product_name=product.name,
-        quantity=1,
-        unit_price=product.price,
-        unit_pv=0,
-    )
-    client.force_login(user)
-
-    client.post(
-        reverse("catalog:review_submit", args=[product.pk]),
-        {"rating": 5, "body": "Auto approved!"},
-    )
+        client.post(
+            reverse("catalog:review_submit", args=[product.pk]),
+            {"rating": 5, "body": "Auto approved!"},
+        )
+    finally:
+        config.PRODUCT_REVIEW_AUTO_APPROVE_ENABLED = original
 
     review = Review.objects.get(user=user, product=product)
     assert review.is_approved is True
