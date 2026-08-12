@@ -71,10 +71,12 @@ received and when (`Order.status == "delivered"`), so eligibility is a real quer
 `apps/catalog` already has the `Product` detail page and admin CRUD (Task 26) to extend.
 
 **Business rules (from the source doc + the 13.10 settings table):**
-- A review requires a star rating + written text, tied to a specific delivered `Order`/`Product`
-  pair — **one review per customer per product, not per order, confirmed with the user and closed**
-  (a repeat buyer edits their existing review rather than stacking duplicates; enforced at the DB
-  level via `Review`'s own `UniqueConstraint(user, product)`, Task 41a).
+- A review requires a star rating + written text. **Eligibility and identity are two separate
+  things, per direct user confirmation (closed, not open):** a delivered `Order`/`Product` pair is
+  only what *unlocks* the review control (Task 41a's `_can_review`) — the review row itself is
+  identified by `user`/`product`, not by which order unlocked it, enforced at the DB level via
+  `Review`'s own `UniqueConstraint(user, product)`. One review per customer per product, not per
+  order: a repeat buyer edits their existing review rather than stacking duplicates.
 - New reviews are **not** publicly visible until an admin approves them (13.10's "Product Review
   Approval" setting: Auto-approve vs. Manual — source doc's own "Current Value" is Manual; make
   this a real admin-editable constance toggle, not hardcoded to manual forever).

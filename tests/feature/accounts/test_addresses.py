@@ -1,6 +1,6 @@
-from unittest.mock import patch
-
 from django.contrib.auth import get_user_model
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 import pytest
@@ -158,31 +158,52 @@ def test_default_address_is_not_required():
 @pytest.mark.django_db
 def test_setting_a_new_default_locks_the_existing_default_row_first():
     """code-review-and-quality finding (CodeRabbit, then a security-auditor
-    pass on the first fix attempt): a bare exclude().update() with no
-    locking, and later a select_for_update() chained directly before
-    .update() (a genuine no-op in Django -- .update() compiles to a bulk
-    UPDATE and never evaluates the queryset), both failed to actually
-    acquire a row lock before clearing the old default. This doesn't prove
-    the race is closed under real concurrency (a full multi-threaded test
-    is disproportionate for this low-stakes, non-money feature per
-    SPEC_PHASE2.md's own scoping), but it does prove the locking code path
-    that's supposed to close the realistic case (switching an existing
-    default) actually executes, not just that the model's own comment
-    claims it does."""
+    pass on the first fix attempt, then a CodeRabbit follow-up on the
+    second): a bare exclude().update() with no locking, then a
+    select_for_update() chained directly before .update() (a genuine no-op
+    in Django -- .update() compiles to a bulk UPDATE and never evaluates
+    the queryset), both failed to actually acquire a row lock before
+    clearing the old default. An initial regression test only asserted
+    that select_for_update() was *called* -- CodeRabbit correctly pointed
+    out that proves nothing, since the exact bug being fixed was that the
+    call happens without the queryset ever being *evaluated*. Rewritten to
+    capture the real SQL instead: the fixed code issues a genuine SELECT
+    (the locking fetch, forced via list()) before the UPDATE that clears
+    the old default; the buggy chained-onto-.update() version issues no
+    such SELECT at all. Works identically on SQLite (locally) and MySQL
+    (CI) since it only checks statement order/shape, not FOR UPDATE
+    literal text (SQLite silently drops that clause -- it doesn't support
+    row locking at all, matching bancostore/concurrency.py's own
+    documented SQLite-vs-MySQL distinction). This still doesn't prove the
+    race is closed under real concurrency (a full multi-threaded test is
+    disproportionate for this low-stakes, non-money feature per
+    SPEC_PHASE2.md's own scoping), but it proves the locking code path
+    genuinely executes as written, not just that a comment claims it
+    does."""
     user = User.objects.create_user(username="ama@example.test", password="pw")
     Address.objects.create(
         user=user, address="First", delivery_zone="kumasi", is_default=True
     )
 
-    with patch(
-        "apps.accounts.models.Address.objects.select_for_update",
-        wraps=Address.objects.select_for_update,
-    ) as mock_select_for_update:
+    with CaptureQueriesContext(connection) as ctx:
         Address.objects.create(
             user=user, address="Second", delivery_zone="accra", is_default=True
         )
 
-    assert mock_select_for_update.called, (
-        "select_for_update() was never called while setting a new default -- "
-        "the existing default row's lock was never actually requested"
+    statements = [q["sql"].strip().upper() for q in ctx.captured_queries]
+    select_index = next(
+        (i for i, sql in enumerate(statements) if sql.startswith("SELECT")), None
+    )
+    update_index = next(
+        (i for i, sql in enumerate(statements) if sql.startswith("UPDATE")), None
+    )
+    assert select_index is not None, (
+        "expected a real SELECT (the locking fetch) while setting a new "
+        "default -- none was issued, meaning select_for_update() was never "
+        "actually evaluated. Queries: " + "; ".join(statements)
+    )
+    assert update_index is not None, "expected the default-clearing UPDATE to run"
+    assert select_index < update_index, (
+        "expected the locking SELECT to run before the UPDATE that clears "
+        "the old default, not after -- got: " + "; ".join(statements)
     )
