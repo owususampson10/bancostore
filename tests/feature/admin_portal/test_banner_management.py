@@ -203,6 +203,29 @@ def test_creating_a_banner_with_end_date_before_start_date_is_rejected(staff_cli
 
 
 @pytest.mark.django_db
+def test_edit_form_pre_fills_the_existing_dates_through_the_themed_picker(
+    staff_client,
+):
+    """The date fields switched from a native <input type=date> to the
+    shared admin_portal/_date_filter_field.html themed picker (json_script
+    -> Alpine, not a plain widget-rendered value attribute) -- this is new
+    wiring in this file specifically, not covered by the POST-only edit
+    test below, so a GET regression here would otherwise ship silently."""
+    today = datetime.date.today()
+    banner = Banner.objects.create(
+        image=_make_uploaded_image(),
+        start_date=today,
+        end_date=today + datetime.timedelta(days=5),
+    )
+
+    response = staff_client.get(_edit_url(banner))
+
+    content = response.content.decode()
+    assert f'"{today.isoformat()}"' in content
+    assert f'"{(today + datetime.timedelta(days=5)).isoformat()}"' in content
+
+
+@pytest.mark.django_db
 def test_staff_can_edit_a_banners_dates(staff_client):
     today = datetime.date.today()
     banner = Banner.objects.create(

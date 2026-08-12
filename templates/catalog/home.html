@@ -68,50 +68,6 @@ Shop everyday lifestyle and wellness products — or build a business selling th
 </div>
 </section>
 
-{% if active_banners %}
-<!-- Promotional Banners (Task 42) -->
-{% comment %}
-Same horizontal-scroll accessibility bar as the Featured Products carousel
-below (tabindex + role="group" + descriptive aria-label + arrow-key
-scrollBy() handlers + visible Previous/Next buttons at every breakpoint) --
-one active banner still renders fine inside this same markup, it's just
-nothing to scroll.
-{% endcomment %}
-<section class="pb-20 md:pb-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto overflow-hidden" x-data>
-<div class="flex gap-4 overflow-x-auto snap-x snap-mandatory hide-scrollbar"
-     x-ref="bannerScroll"
-     tabindex="0"
-     role="group"
-     aria-label="Promotions, horizontally scrollable. Use the left and right arrow keys or swipe."
-     @keydown.right.prevent="$refs.bannerScroll.scrollBy({left: 400, behavior: 'smooth'})"
-     @keydown.left.prevent="$refs.bannerScroll.scrollBy({left: -400, behavior: 'smooth'})">
-{% for banner in active_banners %}
-{% with link_url=banner.get_link_url %}
-{% if link_url %}
-<a href="{{ link_url }}" class="shrink-0 w-full sm:w-[85%] lg:w-[70%] snap-center rounded-2xl overflow-hidden">
-<img src="{{ banner.image.url }}" alt="" class="w-full h-[180px] md:h-[280px] object-cover">
-</a>
-{% else %}
-<div class="shrink-0 w-full sm:w-[85%] lg:w-[70%] snap-center rounded-2xl overflow-hidden">
-<img src="{{ banner.image.url }}" alt="" class="w-full h-[180px] md:h-[280px] object-cover">
-</div>
-{% endif %}
-{% endwith %}
-{% endfor %}
-</div>
-{% if active_banners|length > 1 %}
-<div class="flex gap-3 mt-4">
-<button type="button" class="w-10 h-10 rounded-[50%] border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll promotions left" @click="$refs.bannerScroll.scrollBy({left: -400, behavior: 'smooth'})">
-<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
-</button>
-<button type="button" class="w-10 h-10 rounded-[50%] border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll promotions right" @click="$refs.bannerScroll.scrollBy({left: 400, behavior: 'smooth'})">
-<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
-</button>
-</div>
-{% endif %}
-</section>
-{% endif %}
-
 <!-- Lifestyle Photo Strip -->
 <section class="pb-20 md:pb-32 overflow-hidden">
 <div class="flex gap-4 md:gap-8 justify-center px-4 md:px-0">
@@ -124,6 +80,70 @@ nothing to scroll.
 <div class="w-24 md:w-48 h-36 md:h-64 rounded-xl overflow-hidden mt-20 flex-shrink-0 shadow-xl bg-surface-variant float-item"><img class="w-full h-full object-cover" src="{% static 'pages/home/photo-strip-personal-care.webp' %}" alt="Personal care products"></div>
 </div>
 </section>
+
+{% if active_banners %}
+<!-- Promotional Banners (Task 42) -->
+{% comment %}
+Direct user feedback: rebuilt from a horizontal-scroll strip into a real
+auto-rotating slideshow -- one full-width slide at a time, advances on a
+timer, dot indicators + manual prev/next arrows. Paused on hover/focus
+(WCAG 2.2.2 Pause/Stop/Hide -- auto-updating content must be pausable;
+pausing on interaction is the simplest correct approach here rather than
+a separate visible pause control). Every handler is a plain
+directive-string expression (x-init/@click/@mouseenter/etc.), never a
+method defined inside the x-data object literal -- the same nested-scope
+bug already found and fixed once in catalog_banner_form.html applies
+here too, so this deliberately avoids that shape entirely.
+{% endcomment %}
+<section class="pb-20 md:pb-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto"
+         x-data="{ current: 0, total: {{ active_banners|length }}, timer: null }"
+         x-init="if (total > 1) { timer = setInterval(() => { current = (current + 1) % total }, 6000) }">
+<div class="relative w-full h-[360px] md:h-[560px] rounded-2xl overflow-hidden bg-surface-variant"
+     role="region"
+     aria-roledescription="carousel"
+     aria-label="Promotions"
+     @mouseenter="clearInterval(timer)"
+     @mouseleave="if (total > 1) { timer = setInterval(() => { current = (current + 1) % total }, 6000) }"
+     @focusin="clearInterval(timer)"
+     @focusout="if (total > 1) { timer = setInterval(() => { current = (current + 1) % total }, 6000) }">
+{% for banner in active_banners %}
+{% with link_url=banner.get_link_url %}
+<div x-show="current === {{ forloop.counter0 }}"
+     x-cloak
+     x-transition:enter="transition ease-out duration-700"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     class="absolute inset-0"
+     :aria-hidden="current !== {{ forloop.counter0 }}"
+     role="group"
+     aria-roledescription="slide"
+     aria-label="{{ forloop.counter }} of {{ active_banners|length }}">
+{% if link_url %}
+<a href="{{ link_url }}" class="block w-full h-full">
+<img src="{{ banner.image.url }}" alt="" class="w-full h-full object-cover">
+</a>
+{% else %}
+<img src="{{ banner.image.url }}" alt="" class="w-full h-full object-cover">
+{% endif %}
+</div>
+{% endwith %}
+{% endfor %}
+{% if active_banners|length > 1 %}
+<button type="button" class="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-[50%] bg-white/90 hover:bg-white flex items-center justify-center shadow-lg transition-colors z-10" aria-label="Previous slide" @click="current = (current - 1 + total) % total">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+</button>
+<button type="button" class="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-[50%] bg-white/90 hover:bg-white flex items-center justify-center shadow-lg transition-colors z-10" aria-label="Next slide" @click="current = (current + 1) % total">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+</button>
+<div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-10" role="tablist" aria-label="Slides">
+{% for banner in active_banners %}
+<button type="button" role="tab" :aria-selected="current === {{ forloop.counter0 }}" class="h-2 rounded-full transition-all" :class="current === {{ forloop.counter0 }} ? 'bg-white w-6' : 'bg-white/50 w-2'" aria-label="Go to slide {{ forloop.counter }}" @click="current = {{ forloop.counter0 }}"></button>
+{% endfor %}
+</div>
+{% endif %}
+</div>
+</section>
+{% endif %}
 
 <!-- Brand Statement -->
 <section class="py-20 md:py-32 px-margin-mobile md:px-16 bg-surface-container-low text-center">

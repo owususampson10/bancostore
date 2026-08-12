@@ -55,9 +55,13 @@ class BannerForm(forms.ModelForm):
     """Task 42. link_type/product/category are all rendered as hidden
     inputs driven by a themed Alpine listbox/radio group in the template
     (matching ProductForm.category's established "no native <select>"
-    convention below) -- clean() below is the real server-side enforcement
-    that the right target field was actually filled in, regardless of what
-    the client-side JS happened to show/hide."""
+    convention below); start_date/end_date are likewise HiddenInput,
+    rendered by the shared admin_portal/_date_filter_field.html themed
+    calendar popover (already used twice on order_management_queue.html)
+    instead of a native <input type="date"> -- clean() below is the real
+    server-side enforcement that the right target field/date pair was
+    actually filled in, regardless of what the client-side JS happened to
+    show/hide."""
 
     class Meta:
         model = Banner
@@ -85,18 +89,8 @@ class BannerForm(forms.ModelForm):
             "url": forms.URLInput(
                 attrs={"class": _INPUT_CLASS, "placeholder": "https://..."}
             ),
-            # format="%Y-%m-%d" is required, not cosmetic -- Django's
-            # DateInput doesn't auto-switch to ISO format just because
-            # type="date" is set (it still renders the active locale's
-            # format by default), and a native HTML5 date input silently
-            # fails to pre-fill on edit unless its value attribute is
-            # exactly ISO 8601.
-            "start_date": forms.DateInput(
-                attrs={"class": _INPUT_CLASS, "type": "date"}, format="%Y-%m-%d"
-            ),
-            "end_date": forms.DateInput(
-                attrs={"class": _INPUT_CLASS, "type": "date"}, format="%Y-%m-%d"
-            ),
+            "start_date": forms.HiddenInput(),
+            "end_date": forms.HiddenInput(),
             "order": forms.NumberInput(attrs={"class": _INPUT_CLASS, "min": "0"}),
         }
 
