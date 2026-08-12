@@ -31,12 +31,12 @@ control cost, with a documented path to a horizontally-scaled topology (see Tech
 
 **MVP scope (this spec):** the smallest slice that lets a real distributor journey work
 end-to-end — register, get placed in the tree, generate PV, earn all three bonus types, pass
-KYC, and withdraw. Deferred to a later spec: sales/revenue reporting, compliance dashboard
-(70% retail ratio, escrow tracker), discount codes/promotional banners, product reviews,
-backorders, PDF invoice export, and CSV/PDF report exports. The Admin Settings Panel is
-in-scope but limited to the settings sections that gate MVP behavior (13.1–13.4, 13.9, 13.13,
-13.14, 13.15) — sections 13.5–13.8, 13.10–13.12 are stubbed with sane hardcoded defaults and
-revisited in the next phase.
+KYC, and withdraw. Deferred to a later spec — now written, see `SPEC_PHASE2.md`: sales/revenue
+reporting, compliance dashboard (70% retail ratio, escrow tracker), discount codes/promotional
+banners, product reviews, backorders, PDF invoice export, and CSV/PDF report exports. The Admin
+Settings Panel is in-scope but limited to the settings sections that gate MVP behavior (13.1–13.4,
+13.9, 13.13, 13.14, 13.15) — sections 13.5–13.8, 13.10–13.12 are stubbed with sane hardcoded
+defaults and revisited in `SPEC_PHASE2.md`.
 
 ### In scope (MVP)
 - Section 1 — Home page, product pages, search/filter, two purchase types (regular vs. distributor PV)
@@ -51,13 +51,15 @@ revisited in the next phase.
 - Section 12.1–12.3 — Admin: user/distributor management, commission oversight, withdrawal management (reporting/compliance dashboards deferred)
 - Section 13 (subset above) — Admin Settings Panel for MVP-relevant values
 
-### Out of scope (defer to Phase 2 spec)
+### Out of scope (deferred to Phase 2 — see `SPEC_PHASE2.md`, drafted 2026-08-12)
 - Sales/revenue/compliance reporting (12.4–12.6)
 - Discount codes & promotional banners (Section 11)
 - Product reviews (10.3)
 - Backorders
 - PDF/CSV export tooling
 - Full notification template editor, multi-provider SMS/email switching UI (hardcode one provider each for MVP)
+- Also picked up in `SPEC_PHASE2.md`, found during that spec's own source-doc read rather than
+  named here originally: Wishlist and saved/multiple delivery addresses (Section 4.2)
 
 ## Tech Stack
 
@@ -127,9 +129,9 @@ Python, zero install) via Django's `DATABASE_URL` env var, defaulting to `sqlite
 locally. Real MySQL only runs in two places: **GitHub Actions CI** (Linux runners pull the
 official `mysql:8` Docker image with no compile step — this is where the commission/wallet/PV-ledger
 elevated-rigor tests actually run against MySQL, see Testing Strategy) and **production** (the
-Hostinger VPS, purchased later — not needed yet since nothing is deployed). The Hostinger VPS is
-*not* being provisioned early to double as a dev database, to avoid an unnecessary purchase this
-early; revisit that once we're closer to needing a persistently-running environment.
+Hostinger VPS, live since Task 24's deploy, 2026-08-10 — see the Production section under Commands
+below). The Hostinger VPS was *not* provisioned early to double as a dev database, to avoid an
+unnecessary purchase before it was needed; local dev still uses SQLite day to day.
 
 SQLite and MySQL differ in ways that matter for this app — most notably, SQLite locks the whole
 database file per write (single-writer) while MySQL allows real concurrent row-level writes. Since
