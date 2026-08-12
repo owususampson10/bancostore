@@ -68,6 +68,50 @@ Shop everyday lifestyle and wellness products — or build a business selling th
 </div>
 </section>
 
+{% if active_banners %}
+<!-- Promotional Banners (Task 42) -->
+{% comment %}
+Same horizontal-scroll accessibility bar as the Featured Products carousel
+below (tabindex + role="group" + descriptive aria-label + arrow-key
+scrollBy() handlers + visible Previous/Next buttons at every breakpoint) --
+one active banner still renders fine inside this same markup, it's just
+nothing to scroll.
+{% endcomment %}
+<section class="pb-20 md:pb-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto overflow-hidden" x-data>
+<div class="flex gap-4 overflow-x-auto snap-x snap-mandatory hide-scrollbar"
+     x-ref="bannerScroll"
+     tabindex="0"
+     role="group"
+     aria-label="Promotions, horizontally scrollable. Use the left and right arrow keys or swipe."
+     @keydown.right.prevent="$refs.bannerScroll.scrollBy({left: 400, behavior: 'smooth'})"
+     @keydown.left.prevent="$refs.bannerScroll.scrollBy({left: -400, behavior: 'smooth'})">
+{% for banner in active_banners %}
+{% with link_url=banner.get_link_url %}
+{% if link_url %}
+<a href="{{ link_url }}" class="shrink-0 w-full sm:w-[85%] lg:w-[70%] snap-center rounded-2xl overflow-hidden">
+<img src="{{ banner.image.url }}" alt="" class="w-full h-[180px] md:h-[280px] object-cover">
+</a>
+{% else %}
+<div class="shrink-0 w-full sm:w-[85%] lg:w-[70%] snap-center rounded-2xl overflow-hidden">
+<img src="{{ banner.image.url }}" alt="" class="w-full h-[180px] md:h-[280px] object-cover">
+</div>
+{% endif %}
+{% endwith %}
+{% endfor %}
+</div>
+{% if active_banners|length > 1 %}
+<div class="flex gap-3 mt-4">
+<button type="button" class="w-10 h-10 rounded-[50%] border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll promotions left" @click="$refs.bannerScroll.scrollBy({left: -400, behavior: 'smooth'})">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+</button>
+<button type="button" class="w-10 h-10 rounded-[50%] border border-outline-variant flex items-center justify-center hover:bg-surface-variant transition-colors" aria-label="Scroll promotions right" @click="$refs.bannerScroll.scrollBy({left: 400, behavior: 'smooth'})">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+</button>
+</div>
+{% endif %}
+</section>
+{% endif %}
+
 <!-- Lifestyle Photo Strip -->
 <section class="pb-20 md:pb-32 overflow-hidden">
 <div class="flex gap-4 md:gap-8 justify-center px-4 md:px-0">

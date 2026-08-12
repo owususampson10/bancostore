@@ -1,3 +1,4 @@
+import datetime
 import io
 from decimal import Decimal
 
@@ -8,6 +9,7 @@ import pytest
 from PIL import Image
 
 from apps.catalog.models import Category, Product, ProductImage
+from apps.promotions.models import Banner
 
 
 def _make_uploaded_image(name="photo.jpg", color="blue"):
@@ -194,3 +196,59 @@ def test_home_featured_card_shows_primary_image_and_ghs_price(client, category):
     assert primary.image.url in content
     assert secondary.image.url not in content
     assert "GHS 1,500.00" in content
+
+
+@pytest.mark.django_db
+def test_home_shows_only_currently_active_banners(client):
+    today = datetime.date.today()
+    active = Banner.objects.create(
+        image=_make_uploaded_image("active.jpg"),
+        start_date=today - datetime.timedelta(days=1),
+        end_date=today + datetime.timedelta(days=1),
+    )
+    Banner.objects.create(
+        image=_make_uploaded_image("expired.jpg"),
+        start_date=today - datetime.timedelta(days=10),
+        end_date=today - datetime.timedelta(days=1),
+    )
+    Banner.objects.create(
+        image=_make_uploaded_image("upcoming.jpg"),
+        start_date=today + datetime.timedelta(days=1),
+        end_date=today + datetime.timedelta(days=10),
+    )
+
+    response = client.get(reverse("catalog:home"))
+
+    content = response.content.decode()
+    assert active.image.url in content
+    banners = list(response.context["active_banners"])
+    assert banners == [active]
+
+
+@pytest.mark.django_db
+def test_home_renders_with_no_active_banners(client):
+    response = client.get(reverse("catalog:home"))
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_home_banner_links_to_its_product(client, category):
+    product = Product.objects.create(
+        name="Classic Chrono", category=category, price=Decimal("1500.00")
+    )
+    today = datetime.date.today()
+    banner = Banner.objects.create(
+        image=_make_uploaded_image("banner.jpg"),
+        link_type=Banner.LinkType.PRODUCT,
+        product=product,
+        start_date=today,
+        end_date=today,
+    )
+
+    response = client.get(reverse("catalog:home"))
+
+    content = response.content.decode()
+    expected_url = reverse("catalog:product_detail", args=[product.slug])
+    assert f'href="{expected_url}"' in content
+    assert banner.image.url in content

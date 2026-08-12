@@ -80,6 +80,22 @@ urlpatterns = [
     path(
         "catalog/reviews/", views.review_moderation_list, name="review_moderation_list"
     ),
+    path("catalog/banners/", views.catalog_banner_list, name="catalog_banner_list"),
+    path(
+        "catalog/banners/add/",
+        views.catalog_banner_create,
+        name="catalog_banner_create",
+    ),
+    path(
+        "catalog/banners/<int:pk>/edit/",
+        views.catalog_banner_edit,
+        name="catalog_banner_edit",
+    ),
+    path(
+        "catalog/banners/<int:pk>/delete/",
+        views.catalog_banner_delete,
+        name="catalog_banner_delete",
+    ),
     path(
         "catalog/reviews/<int:pk>/approve/",
         views.review_approve,

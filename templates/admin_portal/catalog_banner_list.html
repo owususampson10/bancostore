@@ -1,0 +1,91 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Banners — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div x-data="{ deleteOpen: false, deleteName: '', deleteUrl: '', deleteKind: 'banner', deleteTrigger: null }">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface">Promotional Banners</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Manage the banners shown on the home page.</p>
+</div>
+<div class="flex items-center gap-3">
+<a href="{% url 'admin_portal:catalog_product_list' %}" class="px-6 py-3 rounded-lg font-bold text-label-md border border-outline-variant text-on-surface-variant flex items-center gap-2 hover:bg-surface-container-low transition-all">
+<span class="material-symbols-outlined" aria-hidden="true">inventory_2</span>
+Products
+</a>
+<a href="{% url 'admin_portal:catalog_banner_create' %}" class="bg-primary text-on-primary px-6 py-3 rounded-lg font-bold text-label-md flex items-center gap-2 shadow-sm hover:opacity-90 active:scale-95 transition-all">
+<span class="material-symbols-outlined" aria-hidden="true">add_circle</span>
+Add Banner
+</a>
+</div>
+</div>
+
+{% if banners %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="overflow-x-auto">
+<table class="w-full min-w-[800px] text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Banner</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Links To</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Window</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Status</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for banner in banners %}
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-4">
+<div class="w-20 h-12 rounded-lg bg-surface-container overflow-hidden border border-outline-variant/50 flex items-center justify-center">
+<img src="{{ banner.image.url }}" alt="" class="w-full h-full object-cover">
+</div>
+</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface">
+{% if banner.link_type == "product" %}Product: {{ banner.product.name|default:"(deleted)" }}
+{% elif banner.link_type == "category" %}Category: {{ banner.category.name|default:"(deleted)" }}
+{% elif banner.link_type == "page" %}{{ banner.url }}
+{% else %}No link{% endif %}
+</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ banner.start_date }} – {{ banner.end_date }}</td>
+<td class="px-6 py-4">
+{% if banner.pk in active_ids %}
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-800 border border-green-200 uppercase tracking-tight">Active</span>
+{% elif banner.start_date > today %}
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-200 uppercase tracking-tight">Upcoming</span>
+{% else %}
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-surface-container-high text-on-surface-variant border border-outline-variant uppercase tracking-tight">Expired</span>
+{% endif %}
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex justify-end gap-2">
+<a href="{% url 'admin_portal:catalog_banner_edit' banner.pk %}" class="p-2 hover:bg-surface-container-high rounded-lg transition-colors text-on-surface-variant" title="Edit" aria-label="Edit banner {{ banner.pk }}">
+<span class="material-symbols-outlined" aria-hidden="true">edit</span>
+</a>
+<button type="button"
+        class="p-2 hover:bg-primary/10 rounded-lg transition-colors text-primary"
+        title="Delete"
+        aria-label="Delete banner {{ banner.pk }}"
+        @click="deleteOpen = true; deleteName = 'Banner #{{ banner.pk }}'; deleteUrl = '{% url 'admin_portal:catalog_banner_delete' banner.pk %}'; deleteKind = 'banner'; deleteTrigger = $el">
+<span class="material-symbols-outlined" aria-hidden="true">delete</span>
+</button>
+</div>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-12 flex flex-col items-center text-center">
+<div class="w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-4xl text-on-surface-variant" aria-hidden="true">campaign</span>
+</div>
+<p class="font-headline-md text-headline-md text-on-surface">No banners yet.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Add your first banner to promote something on the home page.</p>
+</div>
+{% endif %}
+
+{% include "admin_portal/partials/_delete_confirm_modal.html" %}
+</div>
+{% endblock %}
