@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils import timezone
 
 import pytest
 from PIL import Image
@@ -20,7 +21,7 @@ def _make_uploaded_image(name="banner.jpg"):
 
 
 def _valid_payload(**overrides):
-    today = datetime.date.today()
+    today = timezone.localdate()
     payload = {
         "link_type": Banner.LinkType.NONE,
         "product": "",
@@ -83,7 +84,7 @@ def test_banner_list_shows_an_empty_state_with_no_banners(staff_client):
 
 @pytest.mark.django_db
 def test_banner_list_shows_existing_banners(staff_client):
-    today = datetime.date.today()
+    today = timezone.localdate()
     Banner.objects.create(
         image=_make_uploaded_image(),
         link_type=Banner.LinkType.NONE,
@@ -184,7 +185,7 @@ def test_creating_a_page_banner_without_a_url_is_rejected(staff_client):
 
 @pytest.mark.django_db
 def test_creating_a_banner_with_end_date_before_start_date_is_rejected(staff_client):
-    today = datetime.date.today()
+    today = timezone.localdate()
     payload = _valid_payload(
         start_date=today.isoformat(),
         end_date=(today - datetime.timedelta(days=1)).isoformat(),
@@ -211,7 +212,7 @@ def test_edit_form_pre_fills_the_existing_dates_through_the_themed_picker(
     -> Alpine, not a plain widget-rendered value attribute) -- this is new
     wiring in this file specifically, not covered by the POST-only edit
     test below, so a GET regression here would otherwise ship silently."""
-    today = datetime.date.today()
+    today = timezone.localdate()
     banner = Banner.objects.create(
         image=_make_uploaded_image(),
         start_date=today,
@@ -227,7 +228,7 @@ def test_edit_form_pre_fills_the_existing_dates_through_the_themed_picker(
 
 @pytest.mark.django_db
 def test_staff_can_edit_a_banners_dates(staff_client):
-    today = datetime.date.today()
+    today = timezone.localdate()
     banner = Banner.objects.create(
         image=_make_uploaded_image(),
         start_date=today,
@@ -251,7 +252,7 @@ def test_staff_can_edit_a_banners_dates(staff_client):
 
 @pytest.mark.django_db
 def test_staff_can_delete_a_banner(staff_client):
-    today = datetime.date.today()
+    today = timezone.localdate()
     banner = Banner.objects.create(
         image=_make_uploaded_image(),
         start_date=today,

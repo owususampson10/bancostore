@@ -94,18 +94,30 @@ directive-string expression (x-init/@click/@mouseenter/etc.), never a
 method defined inside the x-data object literal -- the same nested-scope
 bug already found and fixed once in catalog_banner_form.html applies
 here too, so this deliberately avoids that shape entirely.
+
+CodeRabbit finding (PR #74): hover and focus were tracked as a single
+implicit "paused" state via clearInterval()/setInterval() pairs alone --
+tabbing to the Next button while still hovering, then moving the mouse
+away, incorrectly restarted the timer because @mouseleave had no idea
+focus was still active (and vice versa for @focusout while still
+hovering). Tracked as two explicit booleans instead; the timer only
+restarts once neither is true. @focusout also checks
+$el.contains($event.relatedTarget) -- focusout fires when focus moves
+between the carousel's OWN children too (e.g. prev button -> next
+button), not just when it leaves the carousel entirely, and only the
+latter should count as "focus left."
 {% endcomment %}
 <section class="pb-20 md:pb-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto"
-         x-data="{ current: 0, total: {{ active_banners|length }}, timer: null }"
+         x-data="{ current: 0, total: {{ active_banners|length }}, timer: null, hovered: false, focused: false }"
          x-init="if (total > 1) { timer = setInterval(() => { current = (current + 1) % total }, 6000) }">
 <div class="relative w-full h-[360px] md:h-[560px] rounded-2xl overflow-hidden bg-surface-variant"
      role="region"
      aria-roledescription="carousel"
      aria-label="Promotions"
-     @mouseenter="clearInterval(timer)"
-     @mouseleave="if (total > 1) { timer = setInterval(() => { current = (current + 1) % total }, 6000) }"
-     @focusin="clearInterval(timer)"
-     @focusout="if (total > 1) { timer = setInterval(() => { current = (current + 1) % total }, 6000) }">
+     @mouseenter="hovered = true; clearInterval(timer); timer = null"
+     @mouseleave="hovered = false; if (!focused && total > 1 && !timer) { timer = setInterval(() => { current = (current + 1) % total }, 6000) }"
+     @focusin="focused = true; clearInterval(timer); timer = null"
+     @focusout="focused = $el.contains($event.relatedTarget); if (!hovered && !focused && total > 1 && !timer) { timer = setInterval(() => { current = (current + 1) % total }, 6000) }">
 {% for banner in active_banners %}
 {% with link_url=banner.get_link_url %}
 <div x-show="current === {{ forloop.counter0 }}"

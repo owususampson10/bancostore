@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils import timezone
 
 import pytest
 from PIL import Image
@@ -200,7 +201,7 @@ def test_home_featured_card_shows_primary_image_and_ghs_price(client, category):
 
 @pytest.mark.django_db
 def test_home_shows_only_currently_active_banners(client):
-    today = datetime.date.today()
+    today = timezone.localdate()
     active = Banner.objects.create(
         image=_make_uploaded_image("active.jpg"),
         start_date=today - datetime.timedelta(days=1),
@@ -237,7 +238,7 @@ def test_home_banner_links_to_its_product(client, category):
     product = Product.objects.create(
         name="Classic Chrono", category=category, price=Decimal("1500.00")
     )
-    today = datetime.date.today()
+    today = timezone.localdate()
     banner = Banner.objects.create(
         image=_make_uploaded_image("banner.jpg"),
         link_type=Banner.LinkType.PRODUCT,

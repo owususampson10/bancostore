@@ -70,15 +70,16 @@ existence as a global after calling the method. Renaming away from `open`
 (which also collides with the real `window.open()`) did NOT fix it, proving
 the bug is about nested x-data method-body scoping, not the `open` name
 specifically. Every listbox here also needs both flat state (isOpen,
-search) AND parent-scope writes (selectedProduct/selectedCategory, which
-must live on the shared outer scope since the hidden inputs below read
-them) -- flattened into ONE x-data with only directive-string expressions
-(@click="...", x-for="...", never a method/getter body) since those
-evaluate correctly against the live merged scope every time, unlike a
-closure captured once when x-data is first parsed. This is also why the
-product/category search filter below is inlined directly in the x-for
-expression rather than a computed getter.
-Product and Category share isOpen/search state (safe: only one
+search, highlighted) AND parent-scope writes (selectedProduct/
+selectedCategory, which must live on the shared outer scope since the
+hidden inputs below read them) -- flattened into ONE x-data with only
+directive-string expressions (@click="...", x-for="...", never a
+method/getter body) since those evaluate correctly against the live
+merged scope every time, unlike a closure captured once when x-data is
+first parsed. This is also why the product/category search filter and
+keyboard-navigation index below are inlined directly in each expression
+rather than a computed getter or method.
+Product and Category share isOpen/search/highlighted state (safe: only one
 listbox is ever visible at a time, gated by linkType) and both reset it on
 link_type change so switching types never leaves a stale dropdown/search
 term behind.
@@ -97,6 +98,7 @@ term behind.
        categoryOptions: [{% for c in categories %}{value: '{{ c.pk }}', label: '{{ c.name|escapejs }}'}{% if not forloop.last %}, {% endif %}{% endfor %}],
        isOpen: false,
        search: '',
+       highlighted: -1,
      }" class="space-y-4">
 
 <div>
@@ -118,8 +120,19 @@ term behind.
 
 <div x-show="linkType === 'product'" x-cloak>
 <label class="block font-label-md text-label-md text-on-surface-variant mb-2">Product</label>
-<div class="relative" @click.outside="isOpen = false; search = ''">
-<button type="button" class="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 font-body-md text-body-md focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all text-left flex items-center justify-between" role="combobox" aria-haspopup="listbox" aria-label="Product" :aria-expanded="isOpen.toString()" @click="isOpen = !isOpen; search = ''; if (isOpen) $nextTick(() => $refs.productSearch.focus())" @keydown.escape="isOpen = false; search = ''">
+{% comment %}
+CodeRabbit finding (PR #74, Major): the filtered <li role="option">
+elements had a @click handler only -- no keyboard path existed to
+select a result after typing a search term, blocking keyboard-only
+staff. Fixed with a real combobox interaction: Down/Up move `highlighted`
+through the CURRENTLY FILTERED list (recomputed inline each time, never
+a method/getter body, matching this file's established safe pattern),
+Enter selects it, and the search input's aria-activedescendant points at
+the highlighted option's id so a screen reader announces it without
+focus ever leaving the input -- the standard ARIA combobox pattern.
+{% endcomment %}
+<div class="relative" @click.outside="isOpen = false; search = ''; highlighted = -1">
+<button type="button" class="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 font-body-md text-body-md focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all text-left flex items-center justify-between" role="combobox" aria-haspopup="listbox" aria-label="Product" :aria-expanded="isOpen.toString()" @click="isOpen = !isOpen; search = ''; highlighted = 0; if (isOpen) $nextTick(() => $refs.productSearch.focus())" @keydown.escape="isOpen = false; search = ''; highlighted = -1">
 <span x-text="(productOptions.find(o => o.value === selectedProduct) || {}).label || 'Select a product'" class="truncate"></span>
 <span class="material-symbols-outlined text-secondary transition-transform" :class="isOpen && 'rotate-180'" aria-hidden="true">expand_more</span>
 </button>
@@ -127,12 +140,24 @@ term behind.
 <div class="p-2 border-b border-outline-variant shrink-0">
 <div class="relative">
 <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60 text-[18px]" aria-hidden="true">search</span>
-<input type="text" x-model="search" x-ref="productSearch" placeholder="Search products…" aria-label="Search products" class="w-full pl-8 pr-3 py-2 bg-surface-container-low rounded-lg text-body-sm font-body-sm outline-none focus:ring-1 focus:ring-primary" @click.stop @keydown.escape.stop="isOpen = false; search = ''">
+<input type="text"
+       x-model="search"
+       x-ref="productSearch"
+       placeholder="Search products…"
+       aria-label="Search products"
+       :aria-activedescendant="highlighted >= 0 ? 'product-option-' + highlighted : null"
+       class="w-full pl-8 pr-3 py-2 bg-surface-container-low rounded-lg text-body-sm font-body-sm outline-none focus:ring-1 focus:ring-primary"
+       @click.stop
+       @input="highlighted = 0"
+       @keydown.down.prevent="highlighted = Math.min(highlighted + 1, productOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase())).length - 1)"
+       @keydown.up.prevent="highlighted = Math.max(highlighted - 1, 0)"
+       @keydown.enter.prevent="const filtered = productOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase())); if (filtered[highlighted]) { selectedProduct = filtered[highlighted].value; isOpen = false; search = ''; highlighted = -1; }"
+       @keydown.escape.stop="isOpen = false; search = ''; highlighted = -1">
 </div>
 </div>
 <ul role="listbox" class="overflow-y-auto py-1">
-<template x-for="option in productOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))" :key="option.value">
-<li role="option" class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors" :class="option.value === selectedProduct ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'" @click="selectedProduct = option.value; isOpen = false; search = ''" x-text="option.label"></li>
+<template x-for="(option, index) in productOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))" :key="option.value">
+<li role="option" :id="'product-option-' + index" :aria-selected="index === highlighted" class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors" :class="index === highlighted ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'" @click="selectedProduct = option.value; isOpen = false; search = ''; highlighted = -1" @mouseenter="highlighted = index" x-text="option.label"></li>
 </template>
 <li x-show="!productOptions.some(o => o.label.toLowerCase().includes(search.toLowerCase()))" class="px-4 py-3 font-body-md text-body-md text-on-surface-variant/70">No products match "<span x-text="search"></span>".</li>
 </ul>
@@ -143,8 +168,8 @@ term behind.
 
 <div x-show="linkType === 'category'" x-cloak>
 <label class="block font-label-md text-label-md text-on-surface-variant mb-2">Category</label>
-<div class="relative" @click.outside="isOpen = false; search = ''">
-<button type="button" class="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 font-body-md text-body-md focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all text-left flex items-center justify-between" role="combobox" aria-haspopup="listbox" aria-label="Category" :aria-expanded="isOpen.toString()" @click="isOpen = !isOpen; search = ''; if (isOpen) $nextTick(() => $refs.categorySearch.focus())" @keydown.escape="isOpen = false; search = ''">
+<div class="relative" @click.outside="isOpen = false; search = ''; highlighted = -1">
+<button type="button" class="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 font-body-md text-body-md focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all text-left flex items-center justify-between" role="combobox" aria-haspopup="listbox" aria-label="Category" :aria-expanded="isOpen.toString()" @click="isOpen = !isOpen; search = ''; highlighted = 0; if (isOpen) $nextTick(() => $refs.categorySearch.focus())" @keydown.escape="isOpen = false; search = ''; highlighted = -1">
 <span x-text="(categoryOptions.find(o => o.value === selectedCategory) || {}).label || 'Select a category'" class="truncate"></span>
 <span class="material-symbols-outlined text-secondary transition-transform" :class="isOpen && 'rotate-180'" aria-hidden="true">expand_more</span>
 </button>
@@ -152,12 +177,24 @@ term behind.
 <div class="p-2 border-b border-outline-variant shrink-0">
 <div class="relative">
 <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60 text-[18px]" aria-hidden="true">search</span>
-<input type="text" x-model="search" x-ref="categorySearch" placeholder="Search categories…" aria-label="Search categories" class="w-full pl-8 pr-3 py-2 bg-surface-container-low rounded-lg text-body-sm font-body-sm outline-none focus:ring-1 focus:ring-primary" @click.stop @keydown.escape.stop="isOpen = false; search = ''">
+<input type="text"
+       x-model="search"
+       x-ref="categorySearch"
+       placeholder="Search categories…"
+       aria-label="Search categories"
+       :aria-activedescendant="highlighted >= 0 ? 'category-option-' + highlighted : null"
+       class="w-full pl-8 pr-3 py-2 bg-surface-container-low rounded-lg text-body-sm font-body-sm outline-none focus:ring-1 focus:ring-primary"
+       @click.stop
+       @input="highlighted = 0"
+       @keydown.down.prevent="highlighted = Math.min(highlighted + 1, categoryOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase())).length - 1)"
+       @keydown.up.prevent="highlighted = Math.max(highlighted - 1, 0)"
+       @keydown.enter.prevent="const filtered = categoryOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase())); if (filtered[highlighted]) { selectedCategory = filtered[highlighted].value; isOpen = false; search = ''; highlighted = -1; }"
+       @keydown.escape.stop="isOpen = false; search = ''; highlighted = -1">
 </div>
 </div>
 <ul role="listbox" class="overflow-y-auto py-1">
-<template x-for="option in categoryOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))" :key="option.value">
-<li role="option" class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors" :class="option.value === selectedCategory ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'" @click="selectedCategory = option.value; isOpen = false; search = ''" x-text="option.label"></li>
+<template x-for="(option, index) in categoryOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))" :key="option.value">
+<li role="option" :id="'category-option-' + index" :aria-selected="index === highlighted" class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors" :class="index === highlighted ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'" @click="selectedCategory = option.value; isOpen = false; search = ''; highlighted = -1" @mouseenter="highlighted = index" x-text="option.label"></li>
 </template>
 <li x-show="!categoryOptions.some(o => o.label.toLowerCase().includes(search.toLowerCase()))" class="px-4 py-3 font-body-md text-body-md text-on-surface-variant/70">No categories match "<span x-text="search"></span>".</li>
 </ul>

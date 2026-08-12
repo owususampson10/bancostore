@@ -2,6 +2,7 @@ import datetime
 from decimal import Decimal
 
 from django.urls import reverse
+from django.utils import timezone
 
 import pytest
 
@@ -10,7 +11,7 @@ from apps.promotions.models import Banner
 
 
 def _make_banner(**overrides):
-    today = datetime.date.today()
+    today = timezone.localdate()
     defaults = {
         "start_date": today - datetime.timedelta(days=1),
         "end_date": today + datetime.timedelta(days=1),
@@ -41,7 +42,7 @@ def test_active_includes_a_banner_whose_window_covers_today():
 
 @pytest.mark.django_db
 def test_active_excludes_a_banner_that_has_already_expired():
-    today = datetime.date.today()
+    today = timezone.localdate()
     _make_banner(
         start_date=today - datetime.timedelta(days=10),
         end_date=today - datetime.timedelta(days=1),
@@ -52,7 +53,7 @@ def test_active_excludes_a_banner_that_has_already_expired():
 
 @pytest.mark.django_db
 def test_active_excludes_a_banner_that_has_not_started_yet():
-    today = datetime.date.today()
+    today = timezone.localdate()
     _make_banner(
         start_date=today + datetime.timedelta(days=1),
         end_date=today + datetime.timedelta(days=10),
@@ -63,7 +64,7 @@ def test_active_excludes_a_banner_that_has_not_started_yet():
 
 @pytest.mark.django_db
 def test_active_includes_a_banner_on_its_exact_start_and_end_date():
-    today = datetime.date.today()
+    today = timezone.localdate()
     starts_today = _make_banner(
         start_date=today, end_date=today + datetime.timedelta(days=5)
     )
