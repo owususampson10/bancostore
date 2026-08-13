@@ -6761,9 +6761,16 @@ existing snapshot-at-creation-time checkout flow (Task 17c/17d).
 
 #### 43a: `DiscountCode` model + admin CRUD + settings
 
+**Design confirmed 2026-08-13 (direct user decision, real-world platform convention --
+Shopify/WooCommerce/Stripe all do it this way):** the usage limit is **two independent fields**,
+not one -- `max_uses` (a global redemption cap, matching the source doc's own "used 50 times
+total" example) and a separate `limit_one_per_customer` boolean toggle (default on) layered on
+top. The source doc's Section 11.1 only ever describes the global cap; the per-customer toggle is
+a deliberate addition, not something read out of the source text.
+
 **Acceptance criteria:**
 - [ ] Admin creates a code from `admin_portal`: fixed amount or percentage off, expiry date,
-      audience restriction, total usage limit
+      audience restriction, total usage limit (`max_uses`), "limit to one use per customer" toggle
 - [ ] 13.11's two platform-wide settings are real: Maximum Discount Per Order (a cap independent of
       any single code's own amount), Discount Applicable To (a platform-wide default, distinct from
       the per-code audience restriction)
@@ -6793,6 +6800,9 @@ views.py`/`urls.py`, a new admin_portal discount-code management template,
 - [ ] Two customers redeeming the last unit of a usage-limited code concurrently: exactly one
       succeeds — atomic-counter discipline matching `Product` stock decrement (Task 7), not a naive
       read-then-write
+- [ ] When `limit_one_per_customer` is on, a customer who already has one order using this code is
+      rejected on a second attempt — checked against `Order`, not a separate counter, so it can't
+      drift from what actually happened at checkout
 
 **Verification:**
 - [ ] `doubt-driven-development` review complete and findings folded in before this sub-task starts

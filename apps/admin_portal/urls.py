@@ -96,6 +96,22 @@ urlpatterns = [
         views.catalog_banner_delete,
         name="catalog_banner_delete",
     ),
+    path("discount-codes/", views.discount_code_list, name="discount_code_list"),
+    path(
+        "discount-codes/add/",
+        views.discount_code_create,
+        name="discount_code_create",
+    ),
+    path(
+        "discount-codes/<int:pk>/edit/",
+        views.discount_code_edit,
+        name="discount_code_edit",
+    ),
+    path(
+        "discount-codes/<int:pk>/delete/",
+        views.discount_code_delete,
+        name="discount_code_delete",
+    ),
     path(
         "catalog/reviews/<int:pk>/approve/",
         views.review_approve,

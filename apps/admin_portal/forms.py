@@ -6,7 +6,7 @@ from constance import config
 
 from apps.catalog.models import Category, Product, ProductImage, ProductVariant
 from apps.pages.models import SocialMediaLink
-from apps.promotions.models import Banner
+from apps.promotions.models import Banner, DiscountCode
 
 # Shared Tailwind classes so every plain text/number/select/textarea input
 # across the Catalog Management forms matches the admin_portal design
@@ -108,6 +108,73 @@ class BannerForm(forms.ModelForm):
         end_date = cleaned_data.get("end_date")
         if start_date and end_date and start_date > end_date:
             raise ValidationError("The end date must be on or after the start date.")
+
+        return cleaned_data
+
+
+class DiscountCodeForm(forms.ModelForm):
+    """Task 43a. `amount`'s valid range depends on `discount_type` (a
+    0-100 percentage vs. an unbounded GHS amount) -- can't be expressed
+    as a single field-level validator, so it's enforced here in clean(),
+    the same "form is the real cross-field enforcement" shape as
+    BannerForm above."""
+
+    class Meta:
+        model = DiscountCode
+        fields = [
+            "code",
+            "discount_type",
+            "amount",
+            "expiry_date",
+            "audience",
+            "max_uses",
+            "limit_one_per_customer",
+            "is_active",
+        ]
+        widgets = {
+            "code": forms.TextInput(
+                attrs={"class": _INPUT_CLASS, "placeholder": "e.g. SAVE20"}
+            ),
+            "discount_type": forms.HiddenInput(),
+            "amount": forms.NumberInput(
+                attrs={"class": _INPUT_CLASS, "step": "0.01", "min": "0"}
+            ),
+            "expiry_date": forms.HiddenInput(),
+            "audience": forms.HiddenInput(),
+            "max_uses": forms.NumberInput(attrs={"class": _INPUT_CLASS, "min": "1"}),
+            "limit_one_per_customer": forms.CheckboxInput(
+                attrs={"class": "sr-only peer"}
+            ),
+            "is_active": forms.CheckboxInput(attrs={"class": "sr-only peer"}),
+        }
+
+    def clean_code(self):
+        # Debugging finding: DiscountCode.save() normalizes to uppercase,
+        # but Django's ModelForm runs its automatic uniqueness check
+        # against the RAW submitted value during _post_clean(), which
+        # happens before save() ever executes -- "save20" never collided
+        # with an already-stored "SAVE20" at validation time, so a
+        # duplicate (differently-cased) code passed validation and only
+        # failed later as a raw, unhandled IntegrityError from save()'s
+        # own normalization. Normalizing here instead, in a field-level
+        # clean_<name> method (which Django processes before its
+        # uniqueness check), means the check runs against the same
+        # uppercase value save() would have produced anyway.
+        return self.cleaned_data["code"].upper()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        discount_type = cleaned_data.get("discount_type")
+        amount = cleaned_data.get("amount")
+        if amount is not None:
+            if amount <= 0:
+                raise ValidationError("The amount must be greater than zero.")
+            if discount_type == DiscountCode.DiscountType.PERCENTAGE and amount > 100:
+                raise ValidationError("A percentage discount cannot exceed 100.")
+
+        max_uses = cleaned_data.get("max_uses")
+        if max_uses is not None and max_uses <= 0:
+            raise ValidationError("The usage limit must be at least 1.")
 
         return cleaned_data
 

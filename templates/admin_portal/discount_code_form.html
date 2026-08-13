@@ -1,0 +1,126 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}{% if is_edit %}Edit Discount Code{% else %}Add Discount Code{% endif %} — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
+<div class="bg-white w-full max-w-lg rounded-xl shadow-2xl border border-outline-variant flex flex-col overflow-hidden max-h-[90vh]">
+<div class="px-6 py-6 border-b border-outline-variant flex justify-between items-start">
+<div>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">{% if is_edit %}Edit Discount Code{% else %}Add New Discount Code{% endif %}</h3>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">{% if is_edit %}Update this code's amount, limits, or schedule.{% else %}Create a coupon code customers can enter at checkout.{% endif %}</p>
+</div>
+<a href="{% url 'admin_portal:discount_code_list' %}" class="p-2 hover:bg-surface-container rounded-full transition-colors text-on-surface-variant" aria-label="Close">
+<span class="material-symbols-outlined" aria-hidden="true">close</span>
+</a>
+</div>
+<form method="post" class="flex-1 overflow-y-auto">
+{% csrf_token %}
+<div class="p-6 space-y-6">
+{% if form.non_field_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md">
+{{ form.non_field_errors }}
+</div>
+{% endif %}
+
+<div>
+<label for="{{ form.code.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">Code</label>
+{{ form.code }}
+<p class="text-xs text-on-surface-variant/70 mt-1">Not case-sensitive — always stored and matched in uppercase.</p>
+{% if form.code.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.code.errors|striptags }}</p>{% endif %}
+</div>
+
+{{ form.discount_type.value|default_if_none:"fixed"|json_script:"discount-type-selected" }}
+{{ form.audience.value|default_if_none:"everyone"|json_script:"discount-audience-selected" }}
+<div x-data="{
+       discountType: JSON.parse(document.getElementById('discount-type-selected').textContent),
+       audience: JSON.parse(document.getElementById('discount-audience-selected').textContent),
+       typeOptions: [
+         {value: 'fixed', label: 'Fixed Amount'},
+         {value: 'percentage', label: 'Percentage'},
+       ],
+       audienceOptions: [
+         {value: 'everyone', label: 'Everyone'},
+         {value: 'retail', label: 'Retail Only'},
+         {value: 'distributor', label: 'Distributors Only'},
+       ],
+     }" class="space-y-6">
+
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Discount Type</label>
+<div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Discount type">
+<template x-for="option in typeOptions" :key="option.value">
+<button type="button"
+        role="radio"
+        :aria-checked="discountType === option.value"
+        class="px-4 py-2 rounded-lg font-label-md text-label-md border transition-all"
+        :class="discountType === option.value ? 'bg-primary text-on-primary border-primary' : 'bg-surface text-on-surface-variant border-outline-variant hover:bg-surface-container-low'"
+        @click="discountType = option.value"
+        x-text="option.label"></button>
+</template>
+</div>
+<input type="hidden" name="{{ form.discount_type.html_name }}" :value="discountType">
+{% if form.discount_type.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.discount_type.errors|striptags }}</p>{% endif %}
+</div>
+
+<div>
+<label for="{{ form.amount.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">
+<span x-text="discountType === 'percentage' ? 'Percentage Off' : 'Amount Off (GHS)'"></span>
+</label>
+{{ form.amount }}
+{% if form.amount.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.amount.errors|striptags }}</p>{% endif %}
+</div>
+
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Applies To</label>
+<div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Applies to">
+<template x-for="option in audienceOptions" :key="option.value">
+<button type="button"
+        role="radio"
+        :aria-checked="audience === option.value"
+        class="px-4 py-2 rounded-lg font-label-md text-label-md border transition-all"
+        :class="audience === option.value ? 'bg-primary text-on-primary border-primary' : 'bg-surface text-on-surface-variant border-outline-variant hover:bg-surface-container-low'"
+        @click="audience = option.value"
+        x-text="option.label"></button>
+</template>
+</div>
+<input type="hidden" name="{{ form.audience.html_name }}" :value="audience">
+{% if form.audience.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.audience.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+
+{% include "admin_portal/_date_filter_field.html" with field_name=form.expiry_date.html_name label="Expiry Date" value=form.expiry_date.value initial_id="discount-expiry-date-initial" %}
+{% if form.expiry_date.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.expiry_date.errors|striptags }}</p>{% endif %}
+
+<div>
+<label for="{{ form.max_uses.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">Usage Limit</label>
+{{ form.max_uses }}
+<p class="text-xs text-on-surface-variant/70 mt-1">Total number of times this code can be used across all customers.</p>
+{% if form.max_uses.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.max_uses.errors|striptags }}</p>{% endif %}
+</div>
+
+<div class="flex flex-col sm:flex-row gap-6 sm:gap-12">
+<label class="min-w-0 flex items-center gap-3 cursor-pointer">
+<span class="relative shrink-0">
+{{ form.limit_one_per_customer }}
+<span class="block w-11 h-6 bg-surface-container-highest rounded-full peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full transition-colors"></span>
+</span>
+<span class="font-body-md text-body-md text-on-surface">Limit to one use per customer</span>
+</label>
+<label class="min-w-0 flex items-center gap-3 cursor-pointer">
+<span class="relative shrink-0">
+{{ form.is_active }}
+<span class="block w-11 h-6 bg-surface-container-highest rounded-full peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full transition-colors"></span>
+</span>
+<span class="font-body-md text-body-md text-on-surface">Active</span>
+</label>
+</div>
+</div>
+<div class="px-6 py-6 bg-surface-container-low border-t border-outline-variant flex justify-end gap-3">
+<a href="{% url 'admin_portal:discount_code_list' %}" class="px-6 py-2.5 rounded-lg font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors">Cancel</a>
+<button type="submit" class="px-8 py-2.5 rounded-lg font-bold bg-primary text-on-primary shadow-lg hover:opacity-90 active:scale-95 transition-all">
+{% if is_edit %}Save Changes{% else %}Save Discount Code{% endif %}
+</button>
+</div>
+</form>
+</div>
+</div>
+{% endblock %}

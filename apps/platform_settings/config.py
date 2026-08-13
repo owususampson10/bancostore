@@ -329,6 +329,34 @@ PRODUCT_AND_INVENTORY_SETTINGS = {
     ),
 }
 
+PROMOTIONS_SETTINGS = {
+    # Task 43a (source doc 13.11 "Discount & Promotions Settings"). Source
+    # doc's own stated current value is "On" -- gates the checkout entry
+    # field itself (Task 43b), independent of any single code's own
+    # is_active flag.
+    "DISCOUNT_CODES_ENABLED": (
+        True,
+        "Global on/off for discount codes at checkout",
+    ),
+    # No numeric default given in the source doc (its own "Current Value"
+    # column says only "Set by admin") -- confirmed directly with the user
+    # 2026-08-13 as a generous starter cap (GHS 500), a safety net against
+    # an accidental unlimited-discount code rather than a guess with no
+    # basis. Always admin-editable afterward.
+    "MAX_DISCOUNT_PER_ORDER": (
+        Decimal("500"),
+        "Maximum discount (GHS) a single order can receive, regardless of "
+        "what any one code's own amount would otherwise apply",
+        "non_negative_money_field",
+    ),
+    "DISCOUNT_APPLICABLE_TO": (
+        "everyone",
+        "Platform-wide default for who discount codes apply to -- "
+        "distinct from each code's own audience restriction",
+        "discount_audience_field",
+    ),
+}
+
 KYC_SETTINGS = {
     "KYC_REQUIRED": (
         True,
@@ -599,6 +627,22 @@ CONSTANCE_ADDITIONAL_FIELDS = {
             "choices": [("GHS", "Ghanaian Cedi (GHS)")],
         },
     ],
+    "discount_audience_field": [
+        "django.forms.fields.ChoiceField",
+        {
+            "widget": "django.forms.Select",
+            # Task 43a, source doc 13.11 "Discount Applicable To": "Retail
+            # customers only, distributors only, or both" -- a bounded
+            # choice, matching this file's own established reasoning for
+            # every audience-style setting (day_of_week_field,
+            # currency_field) rather than a free-text field.
+            "choices": [
+                ("everyone", "Everyone"),
+                ("retail", "Retail Customers Only"),
+                ("distributor", "Distributors Only"),
+            ],
+        },
+    ],
 }
 
 CONSTANCE_CONFIG = {
@@ -609,6 +653,7 @@ CONSTANCE_CONFIG = {
     **DELIVERY_SETTINGS,
     **ORDER_SETTINGS,
     **PRODUCT_AND_INVENTORY_SETTINGS,
+    **PROMOTIONS_SETTINGS,
     **KYC_SETTINGS,
     **IR_ID_NUMBER_SETTINGS,
     **PAYMENT_GATEWAY_SETTINGS,
@@ -623,6 +668,7 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "Delivery Settings": tuple(DELIVERY_SETTINGS),
     "Order Settings": tuple(ORDER_SETTINGS),
     "Product & Inventory Settings": tuple(PRODUCT_AND_INVENTORY_SETTINGS),
+    "Promotions Settings": tuple(PROMOTIONS_SETTINGS),
     "KYC Settings": tuple(KYC_SETTINGS),
     "IR ID Number Settings": tuple(IR_ID_NUMBER_SETTINGS),
     "Payment Gateway Settings": tuple(PAYMENT_GATEWAY_SETTINGS),

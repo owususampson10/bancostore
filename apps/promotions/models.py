@@ -1,3 +1,5 @@
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.core.files.uploadedfile import UploadedFile
 from django.db import models
 from django.urls import reverse
@@ -79,3 +81,90 @@ class Banner(models.Model):
         if self.link_type == self.LinkType.PAGE and self.url:
             return self.url
         return None
+
+
+class DiscountCode(models.Model):
+    """Task 43a (SPEC_PHASE2.md Feature 2 / source doc Section 11.1). Admin
+    creates a fixed-amount or percentage-off code with an expiry date, an
+    audience restriction, and a usage limit; a customer enters it at
+    checkout (Task 43b) and the discount applies immediately.
+
+    Usage-limit design confirmed directly with the user 2026-08-13, not
+    read out of the source doc -- Section 11.1 only ever describes a
+    global cap ("this code can only be used 50 times total"). Modeled as
+    TWO independent fields instead, matching how Shopify/WooCommerce/
+    Stripe all handle this in real e-commerce systems: max_uses (the
+    global cap the source doc describes) plus limit_one_per_customer (a
+    separate on/off toggle layered on top, default on -- the real-world
+    default for most single-use promo codes)."""
+
+    class DiscountType(models.TextChoices):
+        FIXED = "fixed", "Fixed Amount"
+        PERCENTAGE = "percentage", "Percentage"
+
+    class Audience(models.TextChoices):
+        RETAIL = "retail", "Retail Customers Only"
+        DISTRIBUTOR = "distributor", "Distributors Only"
+        EVERYONE = "everyone", "Everyone"
+
+    code = models.CharField(max_length=32, unique=True)
+    discount_type = models.CharField(max_length=10, choices=DiscountType.choices)
+    # GHS amount when discount_type=FIXED, a 0-100 percentage when
+    # discount_type=PERCENTAGE -- validated against the right range for
+    # each type in DiscountCodeForm.clean() (apps/admin_portal/forms.py),
+    # not here, matching Banner's own "form is the real enforcement"
+    # convention for a field whose valid range depends on a sibling field.
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    expiry_date = models.DateField()
+    audience = models.CharField(
+        max_length=15, choices=Audience.choices, default=Audience.EVERYONE
+    )
+    max_uses = models.PositiveIntegerField(help_text="Global cap across all customers.")
+    # Incremented atomically at redemption time (Task 43b), the same
+    # conditional-update discipline as Product.stock (Task 7) -- never a
+    # naive read-then-write, since two concurrent checkouts could
+    # otherwise both read "not yet exhausted" and both succeed.
+    times_used = models.PositiveIntegerField(default=0)
+    limit_one_per_customer = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.code
+
+    def save(self, *args, **kwargs):
+        # Case-insensitive in practice (matching Shopify/WooCommerce/
+        # Stripe): normalized to uppercase once here so every later
+        # lookup (checkout redemption, the unique constraint itself) never
+        # has to guess at or reconcile casing.
+        if self.code:
+            self.code = self.code.upper()
+        super().save(*args, **kwargs)
+
+    def calculate_discount(self, subtotal):
+        """Never returns more than `subtotal` itself -- a discount can
+        reduce an order to GHS 0, never negative. Rounded to the pesewa
+        (Decimal.quantize(..., ROUND_HALF_UP)), matching this codebase's
+        one established money-rounding convention (apps/commissions)."""
+        if self.discount_type == self.DiscountType.PERCENTAGE:
+            raw = subtotal * (self.amount / Decimal("100"))
+        else:
+            raw = self.amount
+        capped = min(raw, subtotal)
+        return capped.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    def is_redeemable(self):
+        """Active, not yet past its expiry date, and still has room under
+        its global usage cap -- the three checks that don't depend on
+        WHO is checking out (audience and per-customer-limit are Task
+        43b/43c's job, since those need the specific customer)."""
+        if not self.is_active:
+            return False
+        if self.expiry_date < timezone.localdate():
+            return False
+        if self.times_used >= self.max_uses:
+            return False
+        return True

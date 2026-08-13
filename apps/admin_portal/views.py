@@ -36,7 +36,7 @@ from apps.pages.models import SocialMediaLink
 from apps.pages.social_icons import SOCIAL_ICONS, detect_platform_from_url
 from apps.platform_settings.admin import BancostoreConstanceForm
 from apps.platform_settings.config import CONSTANCE_CONFIG, CONSTANCE_CONFIG_FIELDSETS
-from apps.promotions.models import Banner
+from apps.promotions.models import Banner, DiscountCode
 from apps.wallet.models import WalletTransaction
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
@@ -60,6 +60,7 @@ from .forms import (
     MAX_PRODUCT_IMAGES,
     BannerForm,
     CategoryForm,
+    DiscountCodeForm,
     ProductForm,
     ProductVariantFormSet,
     SocialMediaLinkForm,
@@ -1200,6 +1201,83 @@ def catalog_banner_delete(request, pk):
 
 
 # ---------------------------------------------------------------------------
+# Discount Codes (Task 43a)
+# ---------------------------------------------------------------------------
+
+
+@login_required(login_url="two_factor:login")
+def discount_code_list(request):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    codes = DiscountCode.objects.all()
+    return render(
+        request,
+        "admin_portal/discount_code_list.html",
+        {
+            "codes": codes,
+            "today": timezone.localdate(),
+            "active_nav": "catalog",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def discount_code_create(request):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    if request.method == "POST":
+        form = DiscountCodeForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Discount code created.")
+            return redirect("admin_portal:discount_code_list")
+    else:
+        form = DiscountCodeForm()
+
+    return render(
+        request,
+        "admin_portal/discount_code_form.html",
+        {"form": form, "is_edit": False, "active_nav": "catalog"},
+    )
+
+
+@login_required(login_url="two_factor:login")
+def discount_code_edit(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    code = get_object_or_404(DiscountCode, pk=pk)
+    if request.method == "POST":
+        form = DiscountCodeForm(request.POST, instance=code)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Discount code updated.")
+            return redirect("admin_portal:discount_code_list")
+    else:
+        form = DiscountCodeForm(instance=code)
+
+    return render(
+        request,
+        "admin_portal/discount_code_form.html",
+        {"form": form, "code": code, "is_edit": True, "active_nav": "catalog"},
+    )
+
+
+@login_required(login_url="two_factor:login")
+def discount_code_delete(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    code = get_object_or_404(DiscountCode, pk=pk)
+    if request.method == "POST":
+        code.delete()
+        messages.success(request, "Discount code deleted.")
+    return redirect("admin_portal:discount_code_list")
+
+
+# ---------------------------------------------------------------------------
 # Catalog Management (Task 26) -- Product CRUD
 # ---------------------------------------------------------------------------
 
@@ -1507,6 +1585,7 @@ _GROUP_ICONS = {
     "Delivery Settings": "local_shipping",
     "Order Settings": "receipt_long",
     "Product & Inventory Settings": "inventory_2",
+    "Promotions Settings": "sell",
     "KYC Settings": "fact_check",
     "IR ID Number Settings": "badge",
     "Payment Gateway Settings": "point_of_sale",

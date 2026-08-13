@@ -665,9 +665,16 @@ Bank integration; SMS/Email provider switching (Task 48d) is an admin-editable c
 mNotify/Gmail stay the only wired providers; Wishlist (Task 39) and saved addresses (Task 40) are
 in scope.
 
+Resolved 2026-08-13, directly by the user, right before Task 43 started:
+1. **Discount code usage limit (blocked Task 43a/43b):** the source doc's own Section 11.1 only
+   ever describes a global redemption cap ("this code can only be used 50 times total") — no
+   per-customer limit is mentioned there at all. Confirmed with the user as **two independent
+   settings on `DiscountCode`**, matching how Shopify/WooCommerce/Stripe handle this in real
+   e-commerce systems: a global `max_uses` total, plus a separate `limit_one_per_customer` on/off
+   toggle (default on) layered on top. The per-customer toggle is a deliberate addition beyond the
+   literal source doc text, not a misreading of it — noted here so the divergence is traceable.
+
 Still open, each to be asked right before its blocking task starts:
-1. **Discount code usage limit (blocks Task 43a/43b):** a global redemption cap only, or also a
-   1-per-customer default on top of it?
 2. **`MAX_PRODUCT_IMAGES` (blocks Task 44a if bundled, otherwise standalone):** stay at 5 (the
    current shipped MVP value, Task 26) or move to the source doc's 8? Not silently changed either
    way — it's a live-shipped value, not a fresh decision.
