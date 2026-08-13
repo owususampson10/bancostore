@@ -6859,19 +6859,32 @@ real-world precedent from Shopify/Stripe/Amazon researched first:**
 
 #### 43c: Audience restriction wired to real role groups
 
+**Built as designed, no scope changes.** Enforced inside `redeem_discount_code`
+(`apps/promotions/services.py`) using `apps.accounts.permissions.is_distributor(user)` -- the same
+real-role check `apps/orders/services.py` already uses elsewhere in this codebase, not
+`Order.pv_earned` or any other order-specific signal. Safe for a guest with no `is_authenticated`
+guard needed: Django's `AnonymousUser.groups` is an `EmptyManager`, so `is_distributor(AnonymousUser())`
+is `False`, not an error. A rejected audience-mismatched code returns the exact same generic
+message as every other rejection (`"This discount code is invalid or expired."`) rather than a
+distinct "wrong audience" message -- continuing the same existence-oracle-avoidance reasoning from
+43b's security pass, so a retail customer probing a distributor-only code can't tell the difference
+between "doesn't exist" and "exists but not for you."
+
 **Acceptance criteria:**
-- [ ] A distributor-only code is rejected for a non-distributor checkout and vice versa, using the
+- [x] A distributor-only code is rejected for a non-distributor checkout and vice versa, using the
       customer's real role (`apps.accounts` groups / `is_distributor`, matching every other role
       gate in this codebase) — not just `Order.pv_earned` on the current order
 
 **Verification:**
-- [ ] Feature tests: each audience restriction against each of the three user types
-- [ ] Full suite green
+- [x] Feature tests: each audience restriction (distributor-only/retail-only/everyone) against each
+      of the three user types (guest/non-distributor customer/distributor) -- 9 new tests in
+      `tests/feature/promotions/test_discount_code_redemption.py`
+- [x] Full suite green
 
 **Dependencies:** 43b
 
-**Files likely touched:** `apps/orders/services.py`, `tests/feature/orders/
-test_checkout_discount_codes.py`
+**Files touched:** `apps/promotions/services.py`, `tests/feature/promotions/
+test_discount_code_redemption.py`
 
 **Estimated scope:** S
 

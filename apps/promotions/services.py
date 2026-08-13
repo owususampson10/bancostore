@@ -4,6 +4,7 @@ from django.db.models import F, Q
 
 from constance import config
 
+from apps.accounts.permissions import is_distributor
 from apps.orders.models import Order
 
 from .models import DiscountCode
@@ -30,10 +31,10 @@ def redeem_discount_code(code_str, *, subtotal, user, phone_number):
     (`consume_discount_code`), matching how stock isn't decremented at order
     creation either, since most PENDING orders never get paid.
 
-    Only checks what's knowable at creation time: enabled, exists, active,
-    not expired, under the global cap, and (if `limit_one_per_customer`) not
-    already used by this same identity. Audience restriction is deliberately
-    NOT enforced here -- Task 43c's own scope, not built yet.
+    Checks what's knowable at creation time: enabled, exists, active, not
+    expired, under the global cap, the customer's real role (Task 43c) if
+    the code is audience-restricted, and (if `limit_one_per_customer`) not
+    already used by this same identity.
 
     doubt-driven-development (fresh-context adversarial review before this
     was written, 2026-08-13) found the per-customer check needs to match
@@ -71,6 +72,18 @@ def redeem_discount_code(code_str, *, subtotal, user, phone_number):
         raise InvalidDiscountCodeError("This discount code is invalid or expired.")
 
     if not code.is_redeemable():
+        raise InvalidDiscountCodeError("This discount code is invalid or expired.")
+
+    # Task 43c. is_distributor(user) is the same real-role check every
+    # other role gate in this codebase uses (apps.orders.services already
+    # imports it for the PV-crediting branch of confirm_order_payment) --
+    # never re-derived from PV or any other order-specific signal. Safe
+    # for an unauthenticated guest: Django's AnonymousUser.groups is an
+    # EmptyManager, so is_distributor(AnonymousUser()) is False, not an
+    # error.
+    if code.audience == DiscountCode.Audience.DISTRIBUTOR and not is_distributor(user):
+        raise InvalidDiscountCodeError("This discount code is invalid or expired.")
+    if code.audience == DiscountCode.Audience.RETAIL and is_distributor(user):
         raise InvalidDiscountCodeError("This discount code is invalid or expired.")
 
     if code.limit_one_per_customer:

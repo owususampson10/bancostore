@@ -2,7 +2,7 @@ import datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import AnonymousUser
+from django.contrib.auth.models import AnonymousUser, Group
 
 import pytest
 from constance import config
@@ -17,6 +17,12 @@ from apps.promotions.services import (
 )
 
 User = get_user_model()
+
+
+def _make_distributor_user():
+    user = User.objects.create_user(username="+233551234567", password="pw")
+    Group.objects.get_or_create(name="distributor")[0].user_set.add(user)
+    return user
 
 
 def _make_code(**overrides):
@@ -281,6 +287,135 @@ def test_limit_one_per_customer_off_allows_a_repeat_redemption():
     )
 
     assert result_code == code
+
+
+# ---------------------------------------------------------------------------
+# Task 43c: audience restriction
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_distributor_only_code_is_rejected_for_a_guest():
+    _make_code(audience=DiscountCode.Audience.DISTRIBUTOR)
+
+    with pytest.raises(InvalidDiscountCodeError):
+        redeem_discount_code(
+            "SAVE20",
+            subtotal=Decimal("100.00"),
+            user=AnonymousUser(),
+            phone_number="+233241234567",
+        )
+
+
+@pytest.mark.django_db
+def test_distributor_only_code_is_rejected_for_a_non_distributor_customer():
+    user = User.objects.create_user(username="ama@example.test", password="pw")
+    _make_code(audience=DiscountCode.Audience.DISTRIBUTOR)
+
+    with pytest.raises(InvalidDiscountCodeError):
+        redeem_discount_code(
+            "SAVE20",
+            subtotal=Decimal("100.00"),
+            user=user,
+            phone_number="+233241234567",
+        )
+
+
+@pytest.mark.django_db
+def test_distributor_only_code_is_redeemable_by_a_distributor():
+    distributor_user = _make_distributor_user()
+    _make_code(audience=DiscountCode.Audience.DISTRIBUTOR)
+
+    result_code, amount = redeem_discount_code(
+        "SAVE20",
+        subtotal=Decimal("100.00"),
+        user=distributor_user,
+        phone_number="+233551234567",
+    )
+
+    assert result_code.code == "SAVE20"
+    assert amount == Decimal("20.00")
+
+
+@pytest.mark.django_db
+def test_retail_only_code_is_rejected_for_a_distributor():
+    distributor_user = _make_distributor_user()
+    _make_code(audience=DiscountCode.Audience.RETAIL)
+
+    with pytest.raises(InvalidDiscountCodeError):
+        redeem_discount_code(
+            "SAVE20",
+            subtotal=Decimal("100.00"),
+            user=distributor_user,
+            phone_number="+233551234567",
+        )
+
+
+@pytest.mark.django_db
+def test_retail_only_code_is_redeemable_by_a_guest():
+    _make_code(audience=DiscountCode.Audience.RETAIL)
+
+    result_code, _amount = redeem_discount_code(
+        "SAVE20",
+        subtotal=Decimal("100.00"),
+        user=AnonymousUser(),
+        phone_number="+233241234567",
+    )
+
+    assert result_code.code == "SAVE20"
+
+
+@pytest.mark.django_db
+def test_retail_only_code_is_redeemable_by_a_non_distributor_customer():
+    user = User.objects.create_user(username="ama@example.test", password="pw")
+    _make_code(audience=DiscountCode.Audience.RETAIL)
+
+    result_code, _amount = redeem_discount_code(
+        "SAVE20", subtotal=Decimal("100.00"), user=user, phone_number="+233241234567"
+    )
+
+    assert result_code.code == "SAVE20"
+
+
+@pytest.mark.django_db
+def test_everyone_code_is_redeemable_by_a_guest():
+    _make_code(audience=DiscountCode.Audience.EVERYONE)
+
+    result_code, _amount = redeem_discount_code(
+        "SAVE20",
+        subtotal=Decimal("100.00"),
+        user=AnonymousUser(),
+        phone_number="+233241234567",
+    )
+
+    assert result_code.code == "SAVE20"
+
+
+@pytest.mark.django_db
+def test_everyone_code_is_redeemable_by_a_non_distributor_customer():
+    user = User.objects.create_user(username="ama@example.test", password="pw")
+    _make_code(audience=DiscountCode.Audience.EVERYONE)
+
+    result_code, _amount = redeem_discount_code(
+        "SAVE20", subtotal=Decimal("100.00"), user=user, phone_number="+233241234567"
+    )
+
+    assert result_code.code == "SAVE20"
+
+
+@pytest.mark.django_db
+def test_everyone_code_is_redeemable_by_a_distributor():
+    distributor_user = _make_distributor_user()
+    _make_code(audience=DiscountCode.Audience.EVERYONE)
+
+    result_code, _amount = redeem_discount_code(
+        "SAVE20",
+        subtotal=Decimal("100.00"),
+        user=distributor_user,
+        phone_number="+233551234567",
+    )
+
+    assert result_code.code == "SAVE20"
 
 
 # ---------------------------------------------------------------------------
