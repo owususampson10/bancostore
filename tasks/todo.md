@@ -6970,23 +6970,77 @@ helpers (`storefront_visible_products`, `is_backorder_eligible`, `backorder_disp
 #### 44b: Checkout/order-confirmation integration (elevated rigor — `doubt-driven-development` first)
 
 **Acceptance criteria:**
-- [ ] Checkout/order confirmation for a backordered item does not decrement stock below zero, does
+- [x] Checkout/order confirmation for a backordered item does not decrement stock below zero, does
       not crash, and does not trigger Task 17d's existing out-of-stock auto-cancel path
-- [ ] A non-backorder-enabled out-of-stock product's existing behavior (Task 7/17d) is provably
+- [x] A non-backorder-enabled out-of-stock product's existing behavior (Task 7/17d) is provably
       unchanged — the existing test suite for that path still passes unmodified, plus a new explicit
       regression test
 
+**Design, resolved via a fresh-context `doubt-driven-development` review (2026-08-13) before any
+code was written:**
+- A live re-read of `BACKORDERS_ENABLED`/`OUT_OF_STOCK_BEHAVIOUR` at `confirm_order_payment` time
+  would be asymmetrically risky (an admin disabling backorders between Paystack capturing payment
+  and a delayed webhook/callback could wrongly cancel an order the customer already paid for) — the
+  review found the live stock-quantity check is protective (prevents overselling) while a live
+  re-check of this flag has no protective purpose and can only cause harm after capture. Resolved by
+  adding `Order.backorders_allowed_at_checkout`, snapshotted once at `create_pending_order` time
+  (Task 17c) from live settings at that moment, exactly like this codebase's existing
+  price/PV/delivery-fee snapshot convention — `confirm_order_payment` reads this, never a live
+  re-check.
+- Clamping a backordered line's decrement at zero (instead of raising `InsufficientStockError`)
+  means the amount actually removed from `Product.stock` can be less than the ordered `quantity`.
+  Without recording that, `cancel_or_refund_order`'s restock logic (Task 18b, previously
+  `increment_stock(item.product, item.quantity)`) would credit `Product.stock` with units that were
+  never actually removed — a real, silent stock-inflation bug on any cancel/refund of a backordered
+  order. Resolved by adding `OrderItem.stock_decremented` (defaults to 0; set to the real decremented
+  amount at confirmation), with a DB `CheckConstraint` enforcing `stock_decremented <= quantity`, and
+  updating `cancel_or_refund_order` to restock `stock_decremented`, not `quantity`.
+- Both required a schema change (this repo's Boundaries require asking before one) — confirmed with
+  the user before building. A companion data migration
+  (`0007_backfill_stock_decremented_for_confirmed_orders`) backfills `stock_decremented = quantity`
+  for every pre-existing `OrderItem` whose `Order.confirmed_at` is already set (i.e. every order that
+  really did have its full quantity decremented under the pre-Task-44b code) — without this, a real
+  already-confirmed production order cancelled/refunded after this migration lands would silently
+  skip restocking entirely (`stock_decremented` defaulting to 0 reads as "nothing to restock").
+  Verified against local dev's real order data (32 non-pending orders, 0 mismatches after backfill).
+- The review also found an operational gap: nothing marks a confirmed order as actually
+  backordered/unfulfilled, so an admin could unknowingly advance one to "Dispatched" with no real
+  stock behind it. Per direct user decision, deferred to a follow-up task rather than expanding this
+  round's scope — not silently dropped.
+- `decrement_stock()` gained an `allow_backorder` keyword (only ever passed
+  `order.backorders_allowed_at_checkout`, never a live setting) and now returns
+  `(product, actual_quantity_decremented)` — every pre-existing caller/test ignored the return value
+  already, so this was a safe, backward-compatible contract change (verified: full pre-existing
+  `tests/feature/catalog/test_stock.py` suite passes unmodified).
+
 **Verification:**
-- [ ] `doubt-driven-development` review complete and findings folded in before this sub-task starts
-- [ ] Feature tests: backordered item completes checkout successfully; non-backorder out-of-stock
-      item still hits the existing cancel-and-refund path exactly as before
-- [ ] Full suite green including the full pre-existing `tests/feature/orders/` suite unmodified and
-      passing, CI green on real MySQL
+- [x] `doubt-driven-development` review complete (fresh-context `security-auditor` agent) and both
+      findings above folded in before implementation
+- [x] Feature/unit tests: backordered item completes checkout successfully (full stock-out and
+      partial-stock cases); non-backorder out-of-stock item still hits the existing cancel-and-refund
+      path exactly as before (regression test, live settings toggled on to prove the snapshot — not
+      a live re-check — governs the outcome); cancel/refund of a backordered order restocks only
+      `stock_decremented`, not the full ordered quantity; a fully-backordered cancel doesn't crash
+      calling `increment_stock` with 0
+- [x] Live-browser verified (2026-08-13): real cart → checkout flow created a `PENDING` order with
+      `backorders_allowed_at_checkout` correctly snapshotted; payment confirmation (Paystack mocked,
+      matching this codebase's own established convention for local verification) transitioned it to
+      `CONFIRMED` with stock correctly clamped at 0 and `stock_decremented=0` recorded; the real
+      Order Confirmed page rendered with no crash; `cancel_or_refund_order` on that same order left
+      stock at 0 (not incorrectly restocked) and transitioned to `CANCELLED` cleanly
+- [x] Full suite green including the full pre-existing `tests/feature/orders/` suite unmodified and
+      passing (340 passed for the targeted orders/catalog suites; 1560 passed, 1 skipped full-suite,
+      the one pre-existing unrelated failure tracked separately above)
 
-**Dependencies:** 44a
+**Dependencies:** 44a — **closed 2026-08-13.**
 
-**Files likely touched:** `apps/orders/services.py` (`confirm_order_payment`),
-`tests/feature/orders/test_backorders.py`
+**Files touched:** `apps/orders/models.py` (`Order.backorders_allowed_at_checkout`,
+`OrderItem.stock_decremented` + constraint), `apps/orders/migrations/0006_...py`,
+`apps/orders/migrations/0007_backfill_stock_decremented_for_confirmed_orders.py`,
+`apps/orders/services.py` (`create_pending_order`, `confirm_order_payment`,
+`cancel_or_refund_order`), `apps/catalog/services.py` (`decrement_stock`),
+`tests/unit/orders/test_services.py`, `tests/unit/orders/test_confirm_order_payment.py`,
+`tests/unit/orders/test_cancel_or_refund_order.py`
 
 **Estimated scope:** M
 

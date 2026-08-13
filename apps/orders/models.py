@@ -99,6 +99,20 @@ class Order(models.Model):
     # needing to reconstruct it from apps.pv_ledger after the fact.
     pv_earned = models.PositiveIntegerField(default=0)
 
+    # Task 44b. Snapshotted once at create_pending_order() time from the
+    # live BACKORDERS_ENABLED + OUT_OF_STOCK_BEHAVIOUR="backorder"
+    # constance settings -- confirm_order_payment reads THIS, never a
+    # live re-check of those settings, so an admin disabling backorders
+    # between Paystack capturing payment and a delayed webhook/callback
+    # confirming the order can never wrongly cancel an order the
+    # customer already paid for while backorders were on. A
+    # doubt-driven-development review (2026-08-13) flagged this
+    # asymmetry directly: unlike the live stock-quantity check (which
+    # exists to protect against overselling and is safe to re-read live),
+    # a live re-read of this flag has no protective purpose and can only
+    # ever produce customer harm after payment capture.
+    backorders_allowed_at_checkout = models.BooleanField(default=False)
+
     # Task 43b. Snapshotted once at create_pending_order() time -- never
     # re-derived from a live DiscountCode afterward, same "snapshot
     # everything" convention as subtotal/delivery_fee/total above. SET_NULL,
@@ -232,11 +246,33 @@ class OrderItem(models.Model):
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
     unit_pv = models.PositiveIntegerField(default=0)
 
+    # Task 44b. 0 until confirm_order_payment runs; from then on, the
+    # REAL amount apps.catalog.services.decrement_stock actually removed
+    # from Product.stock for this line -- equal to `quantity` unless the
+    # order's own backorders_allowed_at_checkout let a backordered line
+    # clamp instead of raising InsufficientStockError, in which case this
+    # is whatever stock was actually on hand (possibly less than
+    # `quantity`, possibly 0). cancel_or_refund_order's restock logic
+    # (Task 18b) reverses THIS, never `quantity` -- a doubt-driven-
+    # development review (2026-08-13) found that restocking the full
+    # ordered quantity for a backordered line would silently credit
+    # Product.stock with units that were never actually removed from it.
+    stock_decremented = models.PositiveIntegerField(default=0)
+
     class Meta:
         constraints = [
             models.CheckConstraint(
                 check=models.Q(quantity__gte=1) & models.Q(unit_price__gte=0),
                 name="order_item_quantity_and_price_sane",
+            ),
+            # stock_decremented can never exceed what was actually
+            # ordered -- the DB-level guarantee backing the docstring
+            # above, matching this codebase's established
+            # defense-in-depth CheckConstraint philosophy (Order's own
+            # Meta.constraints, PvDailyBucket, Wallet).
+            models.CheckConstraint(
+                check=models.Q(stock_decremented__lte=models.F("quantity")),
+                name="order_item_stock_decremented_not_over_quantity",
             ),
         ]
 

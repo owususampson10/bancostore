@@ -9,6 +9,7 @@ from django.contrib.auth.models import Group
 from django.db import connection
 
 import pytest
+from constance import config
 
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.binary_tree.services import BinaryTree
@@ -49,7 +50,13 @@ def _make_customer_user():
     return User.objects.create_user(username=phone, password="Passw0rd!")
 
 
-def _make_order(*, customer=None, email="ama@example.test", total=Decimal("450.00")):
+def _make_order(
+    *,
+    customer=None,
+    email="ama@example.test",
+    total=Decimal("450.00"),
+    backorders_allowed_at_checkout=False,
+):
     return Order.objects.create(
         customer=customer,
         full_name="Ama Mensah",
@@ -60,6 +67,7 @@ def _make_order(*, customer=None, email="ama@example.test", total=Decimal("450.0
         delivery_fee=Decimal("0"),
         total=total,
         payment_reference=f"order-test-ref-{next(_phone_seq)}",
+        backorders_allowed_at_checkout=backorders_allowed_at_checkout,
     )
 
 
@@ -426,6 +434,107 @@ def test_insufficient_stock_does_not_credit_pv_for_a_distributor_order(
     assert order.pv_earned == 0
     ledger = PvLedger.objects.filter(distributor=sponsor).first()
     assert ledger is None or ledger.left_leg_pv == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 44b: backorders_allowed_at_checkout confirms instead of cancelling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_backordered_item_confirms_instead_of_cancelling(
+    mock_verify, mock_sms, mock_mail
+):
+    product = _make_product(stock=0)
+    order = _make_order(total=Decimal("450.00"), backorders_allowed_at_checkout=True)
+    item = _add_item(order, product, quantity=3)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    item.refresh_from_db()
+    product.refresh_from_db()
+    assert order.status == Order.Status.CONFIRMED
+    assert product.stock == 0  # clamped at zero, never negative
+    assert item.stock_decremented == 0  # nothing was actually on hand
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_backordered_item_with_partial_stock_decrements_only_what_exists(
+    mock_verify, mock_sms, mock_mail
+):
+    product = _make_product(stock=2)
+    order = _make_order(total=Decimal("450.00"), backorders_allowed_at_checkout=True)
+    item = _add_item(order, product, quantity=5)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    item.refresh_from_db()
+    product.refresh_from_db()
+    assert order.status == Order.Status.CONFIRMED
+    assert product.stock == 0
+    assert item.stock_decremented == 2  # only what was actually on hand
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_fully_stocked_item_on_a_backorder_allowed_order_decrements_normally(
+    mock_verify, mock_sms, mock_mail
+):
+    """backorders_allowed_at_checkout only ever matters when stock falls
+    short -- a normal, fully-available item on the same order behaves
+    exactly as before."""
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("450.00"), backorders_allowed_at_checkout=True)
+    item = _add_item(order, product, quantity=2)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    product.refresh_from_db()
+    item.refresh_from_db()
+    assert product.stock == 3
+    assert item.stock_decremented == 2
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_insufficient_stock_still_cancels_when_backorders_not_allowed_at_checkout(
+    mock_verify, mock_sms, mock_mail
+):
+    """Regression guard for 44b's own acceptance criteria: an order NOT
+    snapshotted as backorder-allowed at checkout must hit the exact same
+    cancel path as before this task, even if an admin later turns
+    backorders on globally -- confirm_order_payment must never re-derive
+    this from a live setting."""
+    config.BACKORDERS_ENABLED = True
+    config.OUT_OF_STOCK_BEHAVIOUR = "backorder"
+    try:
+        product = _make_product(stock=0)
+        order = _make_order(total=Decimal("450.00"))  # snapshotted False
+        _add_item(order, product, quantity=1)
+        mock_verify.return_value = _success_verify(amount=45000)
+
+        confirm_order_payment(order.payment_reference)
+
+        order.refresh_from_db()
+        assert order.status == Order.Status.CANCELLED
+    finally:
+        config.BACKORDERS_ENABLED = False
+        config.OUT_OF_STOCK_BEHAVIOUR = "show"
 
 
 @pytest.mark.django_db

@@ -206,6 +206,14 @@ def create_pending_order(*, user, cart_items, form_data) -> Order:
             discount_code=discount_code,
             discount_amount=discount_amount,
             total=total,
+            # Task 44b. Snapshotted here, live, once -- see the field's
+            # own docstring (apps/orders/models.py) for why
+            # confirm_order_payment must read THIS rather than re-check
+            # these two constance settings live at confirmation time.
+            backorders_allowed_at_checkout=(
+                config.BACKORDERS_ENABLED
+                and config.OUT_OF_STOCK_BEHAVIOUR == "backorder"
+            ),
             # No pre-existing entity id to prefix with (unlike
             # reg-{token}-/pack-{distributor.pk}- elsewhere in this
             # codebase) -- an Order doesn't exist yet at reference-
@@ -338,7 +346,15 @@ def confirm_order_payment(reference: str) -> None:
 
             items = list(order.items.select_related("product").order_by("product_id"))
             for item in items:
-                decrement_stock(item.product, item.quantity)
+                # Task 44b. order.backorders_allowed_at_checkout, never a
+                # live config re-read here -- see that field's docstring.
+                _, actual_decremented = decrement_stock(
+                    item.product,
+                    item.quantity,
+                    allow_backorder=order.backorders_allowed_at_checkout,
+                )
+                item.stock_decremented = actual_decremented
+                item.save(update_fields=["stock_decremented"])
 
             # Task 43b. An atomic F() increment, no conditional/failure
             # path -- once payment is verified above, the order is always
@@ -747,7 +763,20 @@ def cancel_or_refund_order(order_id, to_status, tracking_note="", restock=None) 
                 for item in locked_order.items.select_related("product").order_by(
                     "product_id"
                 ):
-                    increment_stock(item.product, item.quantity)
+                    # Task 44b. item.stock_decremented, never
+                    # item.quantity -- for a backordered line the two can
+                    # differ (see that field's own docstring), and
+                    # restocking the full ordered quantity would credit
+                    # Product.stock with units that were never actually
+                    # removed from it. A pending order reaching here is
+                    # already a caller-bug guard above, so
+                    # stock_decremented is always populated by now; 0 is
+                    # legitimate (a fully-backordered line with nothing
+                    # to restock) and increment_stock rejects a
+                    # zero/negative quantity, so it's skipped rather than
+                    # called.
+                    if item.stock_decremented > 0:
+                        increment_stock(item.product, item.stock_decremented)
 
             # Task 43b. Symmetric with consume_discount_code at
             # confirmation, mirroring increment_stock/decrement_stock's

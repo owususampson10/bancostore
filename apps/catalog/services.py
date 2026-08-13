@@ -14,7 +14,9 @@ class InsufficientStockError(Exception):
     pass
 
 
-def decrement_stock(product: Product, quantity: int = 1) -> Product:
+def decrement_stock(
+    product: Product, quantity: int = 1, *, allow_backorder: bool = False
+) -> tuple[Product, int]:
     """Called when a sale completes. This is deliberately the basic
     mechanic only (Task 7's own scope) — the real checkout/order pipeline
     (Phase 6) will call this from within its own transaction once it
@@ -22,7 +24,26 @@ def decrement_stock(product: Product, quantity: int = 1) -> Product:
     two concurrent purchases of the last unit in stock must not both
     succeed. See bancostore/concurrency.py for why
     retry_on_lock_contention/select_for_update_nowait_if_supported are
-    needed on top of select_for_update() alone."""
+    needed on top of select_for_update() alone.
+
+    Task 44b: allow_backorder=True clamps the decrement at whatever stock
+    is actually on hand (down to zero, never negative — Product.stock is
+    a PositiveIntegerField with its own DB-level CHECK constraint, so
+    going negative isn't just undesirable, it's impossible) instead of
+    raising InsufficientStockError. Only ever pass True from a value
+    that's ALREADY been snapshotted somewhere (Order.
+    backorders_allowed_at_checkout, Task 44b) — never a live constance
+    re-read at this call site, per that field's own docstring: a
+    doubt-driven-development review found a live re-read here could
+    wrongly cancel an order the customer already paid for, if an admin
+    disables backorders between Paystack capturing payment and a delayed
+    webhook/callback actually reaching confirm_order_payment.
+
+    Returns (locked_product, actual_quantity_decremented) — the second
+    element is `quantity` unless allow_backorder clamped it, in which
+    case it's whatever was really removed from stock. A caller that
+    doesn't need to distinguish the two (every existing caller before
+    Task 44b) can simply ignore it."""
     if quantity < 1:
         raise ValueError("quantity must be at least 1")
 
@@ -32,13 +53,18 @@ def decrement_stock(product: Product, quantity: int = 1) -> Product:
                 pk=product.pk
             )
             if locked_product.stock < quantity:
-                raise InsufficientStockError(
-                    f"Cannot decrement {quantity} from stock of "
-                    f"{locked_product.stock} for {locked_product.name!r}."
-                )
-            locked_product.stock -= quantity
+                if not allow_backorder:
+                    raise InsufficientStockError(
+                        f"Cannot decrement {quantity} from stock of "
+                        f"{locked_product.stock} for {locked_product.name!r}."
+                    )
+                actual_decremented = locked_product.stock
+                locked_product.stock = 0
+            else:
+                actual_decremented = quantity
+                locked_product.stock -= quantity
             locked_product.save(update_fields=["stock"])
-        return locked_product
+        return locked_product, actual_decremented
 
     return retry_on_lock_contention(_attempt)
 

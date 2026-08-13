@@ -46,7 +46,9 @@ def _make_distributor(sponsor=None):
     return Distributor.objects.create(user=user, phone_number=phone, sponsor=sponsor)
 
 
-def _make_order(*, customer=None, total=Decimal("450.00")):
+def _make_order(
+    *, customer=None, total=Decimal("450.00"), backorders_allowed_at_checkout=False
+):
     return Order.objects.create(
         customer=customer,
         full_name="Ama Mensah",
@@ -57,6 +59,7 @@ def _make_order(*, customer=None, total=Decimal("450.00")):
         delivery_fee=Decimal("0"),
         total=total,
         payment_reference=f"order-test-ref-{next(_phone_seq)}",
+        backorders_allowed_at_checkout=backorders_allowed_at_checkout,
     )
 
 
@@ -102,6 +105,57 @@ def test_cancelling_a_confirmed_order_restores_stock_automatically(mock_sms, moc
     product.refresh_from_db()
     assert order.status == Order.Status.CANCELLED
     assert product.stock == 5
+
+
+# ---------------------------------------------------------------------------
+# Task 44b: restock uses OrderItem.stock_decremented, not quantity
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_cancelling_a_backordered_order_restocks_only_what_was_actually_taken(
+    mock_sms, mock_mail
+):
+    """product had 2 on hand, order was for 5 (backorder) -- only 2 were
+    ever actually removed from stock, so cancelling must restore 2, not
+    the full ordered 5 (which would credit 3 units that never existed)."""
+    product = _make_product(stock=2)
+    order = _make_order(total=Decimal("2250.00"), backorders_allowed_at_checkout=True)
+    _add_item(order, product, quantity=5)
+    order = _confirm(order, 225000)
+    product.refresh_from_db()
+    assert product.stock == 0  # clamped
+
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED)
+
+    product.refresh_from_db()
+    assert product.stock == 2  # not 5
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_cancelling_a_fully_backordered_order_does_not_crash_with_nothing_to_restock(
+    mock_sms, mock_mail
+):
+    """stock was 0, nothing was ever actually decremented -- restock must
+    skip this line entirely rather than call increment_stock(product, 0),
+    which increment_stock itself rejects with a ValueError."""
+    product = _make_product(stock=0)
+    order = _make_order(total=Decimal("450.00"), backorders_allowed_at_checkout=True)
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 45000)
+    product.refresh_from_db()
+    assert product.stock == 0
+
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED)  # must not raise
+
+    order.refresh_from_db()
+    product.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+    assert product.stock == 0
 
 
 @pytest.mark.django_db

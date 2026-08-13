@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser, Group
 
 import pytest
+from constance import config
 
 from apps.accounts.models import CustomerProfile
 from apps.catalog.models import Category, Product
@@ -295,6 +296,65 @@ def test_order_creation_does_not_credit_pv():
     )
 
     assert order.pv_earned == 0
+
+
+@pytest.mark.django_db
+def test_backorders_allowed_at_checkout_defaults_to_false():
+    product = _make_product()
+
+    order = create_pending_order(
+        user=AnonymousUser(),
+        cart_items=_cart_items((product, 1)),
+        form_data=_home_delivery_form_data(),
+    )
+
+    assert order.backorders_allowed_at_checkout is False
+
+
+@pytest.mark.django_db
+def test_backorders_allowed_at_checkout_snapshots_live_settings_at_creation_time():
+    """Task 44b: confirm_order_payment must never re-derive this live --
+    it reads exactly what was true at checkout, set here, once."""
+    config.BACKORDERS_ENABLED = True
+    config.OUT_OF_STOCK_BEHAVIOUR = "backorder"
+    try:
+        product = _make_product()
+
+        order = create_pending_order(
+            user=AnonymousUser(),
+            cart_items=_cart_items((product, 1)),
+            form_data=_home_delivery_form_data(),
+        )
+
+        assert order.backorders_allowed_at_checkout is True
+
+        # Live setting changing afterward must not retroactively change
+        # the already-created order's snapshot.
+        config.BACKORDERS_ENABLED = False
+        order.refresh_from_db()
+        assert order.backorders_allowed_at_checkout is True
+    finally:
+        config.BACKORDERS_ENABLED = False
+        config.OUT_OF_STOCK_BEHAVIOUR = "show"
+
+
+@pytest.mark.django_db
+def test_backorders_allowed_at_checkout_false_when_mode_is_not_backorder():
+    config.BACKORDERS_ENABLED = True
+    config.OUT_OF_STOCK_BEHAVIOUR = "hide"
+    try:
+        product = _make_product()
+
+        order = create_pending_order(
+            user=AnonymousUser(),
+            cart_items=_cart_items((product, 1)),
+            form_data=_home_delivery_form_data(),
+        )
+
+        assert order.backorders_allowed_at_checkout is False
+    finally:
+        config.BACKORDERS_ENABLED = False
+        config.OUT_OF_STOCK_BEHAVIOUR = "show"
 
 
 @pytest.mark.django_db
