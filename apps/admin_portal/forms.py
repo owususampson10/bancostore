@@ -6,6 +6,7 @@ from constance import config
 
 from apps.catalog.models import Category, Product, ProductImage, ProductVariant
 from apps.pages.models import SocialMediaLink
+from apps.promotions.models import Banner
 
 # Shared Tailwind classes so every plain text/number/select/textarea input
 # across the Catalog Management forms matches the admin_portal design
@@ -48,6 +49,67 @@ class CategoryForm(forms.ModelForm):
                 }
             ),
         }
+
+
+class BannerForm(forms.ModelForm):
+    """Task 42. link_type/product/category are all rendered as hidden
+    inputs driven by a themed Alpine listbox/radio group in the template
+    (matching ProductForm.category's established "no native <select>"
+    convention below); start_date/end_date are likewise HiddenInput,
+    rendered by the shared admin_portal/_date_filter_field.html themed
+    calendar popover (already used twice on order_management_queue.html)
+    instead of a native <input type="date"> -- clean() below is the real
+    server-side enforcement that the right target field/date pair was
+    actually filled in, regardless of what the client-side JS happened to
+    show/hide."""
+
+    class Meta:
+        model = Banner
+        fields = [
+            "image",
+            "link_type",
+            "product",
+            "category",
+            "url",
+            "start_date",
+            "end_date",
+            "order",
+        ]
+        widgets = {
+            "image": CategoryImageWidget(
+                attrs={
+                    "class": "sr-only",
+                    "x-ref": "fileInput",
+                    "@change": "onFileChange($event)",
+                }
+            ),
+            "link_type": forms.HiddenInput(),
+            "product": forms.HiddenInput(),
+            "category": forms.HiddenInput(),
+            "url": forms.URLInput(
+                attrs={"class": _INPUT_CLASS, "placeholder": "https://..."}
+            ),
+            "start_date": forms.HiddenInput(),
+            "end_date": forms.HiddenInput(),
+            "order": forms.NumberInput(attrs={"class": _INPUT_CLASS, "min": "0"}),
+        }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        link_type = cleaned_data.get("link_type")
+        if link_type == Banner.LinkType.PRODUCT and not cleaned_data.get("product"):
+            raise ValidationError("Choose a product for this banner to link to.")
+        if link_type == Banner.LinkType.CATEGORY and not cleaned_data.get("category"):
+            raise ValidationError("Choose a category for this banner to link to.")
+        if link_type == Banner.LinkType.PAGE and not cleaned_data.get("url"):
+            raise ValidationError("Enter a URL for this banner to link to.")
+
+        start_date = cleaned_data.get("start_date")
+        end_date = cleaned_data.get("end_date")
+        if start_date and end_date and start_date > end_date:
+            raise ValidationError("The end date must be on or after the start date.")
+
+        return cleaned_data
 
 
 class ProductForm(forms.ModelForm):

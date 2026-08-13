@@ -1,13 +1,16 @@
+import datetime
 import io
 from decimal import Decimal
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils import timezone
 
 import pytest
 from PIL import Image
 
 from apps.catalog.models import Category, Product, ProductImage
+from apps.promotions.models import Banner
 
 
 def _make_uploaded_image(name="photo.jpg", color="blue"):
@@ -15,6 +18,19 @@ def _make_uploaded_image(name="photo.jpg", color="blue"):
     Image.new("RGB", (600, 600), color).save(buffer, format="JPEG")
     buffer.seek(0)
     return SimpleUploadedFile(name, buffer.read(), content_type="image/jpeg")
+
+
+def _banner_anchor_tag(content, image_url):
+    """CodeRabbit finding (PR #74): asserting href and aria-label
+    independently against the whole page only proves both strings exist
+    SOMEWHERE, not that they're on the SAME anchor -- a broken href on
+    one banner could pass if a different banner's aria-label happened to
+    match. Returns the specific <a ...> opening tag that wraps this
+    banner's own image, so both attributes can be checked together."""
+    img_pos = content.index(image_url)
+    anchor_start = content.rindex("<a ", 0, img_pos)
+    anchor_end = content.index(">", anchor_start)
+    return content[anchor_start : anchor_end + 1]
 
 
 @pytest.fixture
@@ -194,3 +210,100 @@ def test_home_featured_card_shows_primary_image_and_ghs_price(client, category):
     assert primary.image.url in content
     assert secondary.image.url not in content
     assert "GHS 1,500.00" in content
+
+
+@pytest.mark.django_db
+def test_home_shows_only_currently_active_banners(client):
+    today = timezone.localdate()
+    active = Banner.objects.create(
+        image=_make_uploaded_image("active.jpg"),
+        start_date=today - datetime.timedelta(days=1),
+        end_date=today + datetime.timedelta(days=1),
+    )
+    Banner.objects.create(
+        image=_make_uploaded_image("expired.jpg"),
+        start_date=today - datetime.timedelta(days=10),
+        end_date=today - datetime.timedelta(days=1),
+    )
+    Banner.objects.create(
+        image=_make_uploaded_image("upcoming.jpg"),
+        start_date=today + datetime.timedelta(days=1),
+        end_date=today + datetime.timedelta(days=10),
+    )
+
+    response = client.get(reverse("catalog:home"))
+
+    content = response.content.decode()
+    assert active.image.url in content
+    banners = list(response.context["active_banners"])
+    assert banners == [active]
+
+
+@pytest.mark.django_db
+def test_home_renders_with_no_active_banners(client):
+    response = client.get(reverse("catalog:home"))
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_home_banner_links_to_its_product(client, category):
+    product = Product.objects.create(
+        name="Classic Chrono", category=category, price=Decimal("1500.00")
+    )
+    today = timezone.localdate()
+    banner = Banner.objects.create(
+        image=_make_uploaded_image("banner.jpg"),
+        link_type=Banner.LinkType.PRODUCT,
+        product=product,
+        start_date=today,
+        end_date=today,
+    )
+
+    response = client.get(reverse("catalog:home"))
+
+    content = response.content.decode()
+    expected_url = reverse("catalog:product_detail", args=[product.slug])
+    anchor = _banner_anchor_tag(content, banner.image.url)
+    assert f'href="{expected_url}"' in anchor
+    assert 'aria-label="View Classic Chrono"' in anchor
+
+
+@pytest.mark.django_db
+def test_home_banner_link_has_an_accessible_name_for_each_link_type(client, category):
+    """CodeRabbit finding (PR #74): the linked banner's only child was an
+    <img alt="">, so a screen reader announced the link with no
+    accessible name at all -- no way to tell what the promotion was or
+    where it led. Covers the category and custom-URL cases the earlier
+    product-only test didn't."""
+    today = timezone.localdate()
+    category_banner = Banner.objects.create(
+        image=_make_uploaded_image("category-banner.jpg"),
+        link_type=Banner.LinkType.CATEGORY,
+        category=category,
+        start_date=today,
+        end_date=today,
+        order=0,
+    )
+    page_banner = Banner.objects.create(
+        image=_make_uploaded_image("page-banner.jpg"),
+        link_type=Banner.LinkType.PAGE,
+        url="https://bancostore.com/about/",
+        start_date=today,
+        end_date=today,
+        order=1,
+    )
+
+    response = client.get(reverse("catalog:home"))
+
+    content = response.content.decode()
+    expected_category_url = (
+        reverse("catalog:product_list") + f"?category={category.slug}"
+    )
+    category_anchor = _banner_anchor_tag(content, category_banner.image.url)
+    assert f'href="{expected_category_url}"' in category_anchor
+    assert f'aria-label="Shop {category.name}"' in category_anchor
+
+    page_anchor = _banner_anchor_tag(content, page_banner.image.url)
+    assert 'href="https://bancostore.com/about/"' in page_anchor
+    assert 'aria-label="View this promotion"' in page_anchor

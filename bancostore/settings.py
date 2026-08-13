@@ -165,6 +165,7 @@ INSTALLED_APPS = [
     "apps.admin_portal",
     "apps.orders",
     "apps.pages",
+    "apps.promotions",
 ]
 
 MIDDLEWARE = [

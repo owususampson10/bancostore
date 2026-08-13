@@ -1,0 +1,243 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}{% if is_edit %}Edit Banner{% else %}Add Banner{% endif %} — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
+<div class="bg-white w-full max-w-lg rounded-xl shadow-2xl border border-outline-variant flex flex-col overflow-hidden max-h-[90vh]">
+<div class="px-6 py-6 border-b border-outline-variant flex justify-between items-start">
+<div>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">{% if is_edit %}Edit Banner{% else %}Add New Banner{% endif %}</h3>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">{% if is_edit %}Update this banner's image, link, or schedule.{% else %}Upload a banner and choose when it appears on the home page.{% endif %}</p>
+</div>
+<a href="{% url 'admin_portal:catalog_banner_list' %}" class="p-2 hover:bg-surface-container rounded-full transition-colors text-on-surface-variant" aria-label="Close">
+<span class="material-symbols-outlined" aria-hidden="true">close</span>
+</a>
+</div>
+<form method="post" enctype="multipart/form-data" class="flex-1 overflow-y-auto">
+{% csrf_token %}
+<div class="p-6 space-y-6">
+{% if form.non_field_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md">
+{{ form.non_field_errors }}
+</div>
+{% endif %}
+
+<div class="space-y-2"
+     x-data="{
+       hasImage: {{ banner.image|yesno:'true,false' }},
+       previewUrl: '{% if banner.image %}{{ banner.image.url }}{% endif %}',
+       onFileChange(event) {
+         if (event.target.files.length) {
+           this.previewUrl = URL.createObjectURL(event.target.files[0]);
+           this.hasImage = true;
+           if (this.$refs.clearCheckbox) this.$refs.clearCheckbox.checked = false;
+         }
+       },
+       removeImage() {
+         this.hasImage = false;
+         this.previewUrl = '';
+         this.$refs.fileInput.value = '';
+         if (this.$refs.clearCheckbox) this.$refs.clearCheckbox.checked = true;
+       }
+     }">
+<label class="font-label-md text-label-md text-on-surface-variant block">Banner Image</label>
+<div class="relative w-full h-32 rounded-xl overflow-hidden border-2 border-outline-variant group" x-show="hasImage" x-cloak>
+<img :src="previewUrl" alt="" class="w-full h-full object-cover">
+<div class="absolute inset-0 bg-black/40 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex items-center justify-center">
+<button type="button" class="w-10 h-10 rounded-[50%] bg-white text-primary flex items-center justify-center hover:bg-primary/10 transition-colors shadow-lg" title="Remove image" aria-label="Remove image" @click="removeImage()">
+<span class="material-symbols-outlined" aria-hidden="true">delete</span>
+</button>
+</div>
+</div>
+<label for="{{ form.image.id_for_label }}" class="w-full h-32 border-2 border-dashed border-outline-variant rounded-xl flex flex-col items-center justify-center gap-2 bg-surface hover:border-primary hover:bg-primary/5 transition-all text-on-surface-variant cursor-pointer" x-show="!hasImage" x-cloak>
+<span class="material-symbols-outlined text-primary text-[32px]" aria-hidden="true">add_photo_alternate</span>
+<span class="font-label-md text-label-md">Click to upload an image</span>
+</label>
+{{ form.image }}
+{% if form.image.errors %}<p class="text-admin-error font-label-md text-label-md">{{ form.image.errors|striptags }}</p>{% endif %}
+<p class="text-xs text-on-surface-variant/70">Recommended size: 1600 &times; 600px (a wide, letterbox shape works best). Images are cropped to fill the banner area, so keep the important part centered.</p>
+</div>
+
+{{ form.link_type.value|default_if_none:"none"|json_script:"banner-link-type-selected" }}
+{{ form.product.value|default_if_none:""|json_script:"banner-product-selected" }}
+{{ form.category.value|default_if_none:""|json_script:"banner-category-selected" }}
+{% comment %}
+Debugging finding (live-browser, javascript_tool): a state variable set only
+from inside a *method defined in the x-data object literal* (e.g.
+`openList() { isOpen = true }`) silently leaks to `window` instead of the
+component's reactive property, when that x-data is itself nested inside
+another element's x-data -- proven by watching `window.isOpen` come into
+existence as a global after calling the method. Renaming away from `open`
+(which also collides with the real `window.open()`) did NOT fix it, proving
+the bug is about nested x-data method-body scoping, not the `open` name
+specifically. Every listbox here also needs both flat state (isOpen,
+search, highlighted) AND parent-scope writes (selectedProduct/
+selectedCategory, which must live on the shared outer scope since the
+hidden inputs below read them) -- flattened into ONE x-data with only
+directive-string expressions (@click="...", x-for="...", never a
+method/getter body) since those evaluate correctly against the live
+merged scope every time, unlike a closure captured once when x-data is
+first parsed. This is also why the product/category search filter and
+keyboard-navigation index below are inlined directly in each expression
+rather than a computed getter or method.
+Product and Category share isOpen/search/highlighted state (safe: only one
+listbox is ever visible at a time, gated by linkType) and both reset it on
+link_type change so switching types never leaves a stale dropdown/search
+term behind.
+{% endcomment %}
+<div x-data="{
+       linkType: JSON.parse(document.getElementById('banner-link-type-selected').textContent),
+       selectedProduct: String(JSON.parse(document.getElementById('banner-product-selected').textContent) ?? ''),
+       selectedCategory: String(JSON.parse(document.getElementById('banner-category-selected').textContent) ?? ''),
+       linkTypeOptions: [
+         {value: 'none', label: 'No link'},
+         {value: 'product', label: 'Product'},
+         {value: 'category', label: 'Category'},
+         {value: 'page', label: 'Custom URL'},
+       ],
+       productOptions: [{% for p in products %}{value: '{{ p.pk }}', label: '{{ p.name|escapejs }}'}{% if not forloop.last %}, {% endif %}{% endfor %}],
+       categoryOptions: [{% for c in categories %}{value: '{{ c.pk }}', label: '{{ c.name|escapejs }}'}{% if not forloop.last %}, {% endif %}{% endfor %}],
+       isOpen: false,
+       search: '',
+       highlighted: -1,
+     }" class="space-y-4">
+
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Links To</label>
+<div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Links to">
+<template x-for="option in linkTypeOptions" :key="option.value">
+<button type="button"
+        role="radio"
+        :aria-checked="linkType === option.value"
+        class="px-4 py-2 rounded-lg font-label-md text-label-md border transition-all"
+        :class="linkType === option.value ? 'bg-primary text-on-primary border-primary' : 'bg-surface text-on-surface-variant border-outline-variant hover:bg-surface-container-low'"
+        @click="linkType = option.value; isOpen = false; search = ''"
+        x-text="option.label"></button>
+</template>
+</div>
+<input type="hidden" name="{{ form.link_type.html_name }}" :value="linkType">
+{% if form.link_type.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.link_type.errors|striptags }}</p>{% endif %}
+</div>
+
+<div x-show="linkType === 'product'" x-cloak>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Product</label>
+{% comment %}
+CodeRabbit finding (PR #74, Major): the filtered <li role="option">
+elements had a @click handler only -- no keyboard path existed to
+select a result after typing a search term, blocking keyboard-only
+staff. Fixed with a real combobox interaction: Down/Up move `highlighted`
+through the CURRENTLY FILTERED list (recomputed inline each time, never
+a method/getter body, matching this file's established safe pattern),
+Enter selects it, and the search input's aria-activedescendant points at
+the highlighted option's id so a screen reader announces it without
+focus ever leaving the input -- the standard ARIA combobox pattern.
+{% endcomment %}
+<div class="relative" @click.outside="isOpen = false; search = ''; highlighted = -1">
+<button type="button" class="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 font-body-md text-body-md focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all text-left flex items-center justify-between" role="combobox" aria-haspopup="listbox" aria-label="Product" :aria-expanded="isOpen.toString()" @click="isOpen = !isOpen; search = ''; highlighted = 0; if (isOpen) $nextTick(() => $refs.productSearch.focus())" @keydown.escape="isOpen = false; search = ''; highlighted = -1">
+<span x-text="(productOptions.find(o => o.value === selectedProduct) || {}).label || 'Select a product'" class="truncate"></span>
+<span class="material-symbols-outlined text-secondary transition-transform" :class="isOpen && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<div x-show="isOpen" x-cloak class="absolute z-10 mt-1 w-full max-h-72 flex flex-col bg-white border border-outline-variant rounded-xl shadow-lg overflow-hidden">
+<div class="p-2 border-b border-outline-variant shrink-0">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60 text-[18px]" aria-hidden="true">search</span>
+<input type="text"
+       x-model="search"
+       x-ref="productSearch"
+       placeholder="Search products…"
+       aria-label="Search products"
+       :aria-activedescendant="highlighted >= 0 ? 'product-option-' + highlighted : null"
+       class="w-full pl-8 pr-3 py-2 bg-surface-container-low rounded-lg text-body-sm font-body-sm outline-none focus:ring-1 focus:ring-primary"
+       @click.stop
+       @input="highlighted = 0"
+       @keydown.down.prevent="highlighted = Math.min(highlighted + 1, productOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase())).length - 1)"
+       @keydown.up.prevent="highlighted = Math.max(highlighted - 1, 0)"
+       @keydown.enter.prevent="const filtered = productOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase())); if (filtered[highlighted]) { selectedProduct = filtered[highlighted].value; isOpen = false; search = ''; highlighted = -1; }"
+       @keydown.escape.stop="isOpen = false; search = ''; highlighted = -1">
+</div>
+</div>
+<ul role="listbox" class="overflow-y-auto py-1">
+<template x-for="(option, index) in productOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))" :key="option.value">
+<li role="option" :id="'product-option-' + index" :aria-selected="index === highlighted" class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors" :class="index === highlighted ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'" @click="selectedProduct = option.value; isOpen = false; search = ''; highlighted = -1" @mouseenter="highlighted = index" x-text="option.label"></li>
+</template>
+<li x-show="!productOptions.some(o => o.label.toLowerCase().includes(search.toLowerCase()))" class="px-4 py-3 font-body-md text-body-md text-on-surface-variant/70">No products match "<span x-text="search"></span>".</li>
+</ul>
+</div>
+</div>
+{% if form.product.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.product.errors|striptags }}</p>{% endif %}
+</div>
+
+<div x-show="linkType === 'category'" x-cloak>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-2">Category</label>
+<div class="relative" @click.outside="isOpen = false; search = ''; highlighted = -1">
+<button type="button" class="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 font-body-md text-body-md focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all text-left flex items-center justify-between" role="combobox" aria-haspopup="listbox" aria-label="Category" :aria-expanded="isOpen.toString()" @click="isOpen = !isOpen; search = ''; highlighted = 0; if (isOpen) $nextTick(() => $refs.categorySearch.focus())" @keydown.escape="isOpen = false; search = ''; highlighted = -1">
+<span x-text="(categoryOptions.find(o => o.value === selectedCategory) || {}).label || 'Select a category'" class="truncate"></span>
+<span class="material-symbols-outlined text-secondary transition-transform" :class="isOpen && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<div x-show="isOpen" x-cloak class="absolute z-10 mt-1 w-full max-h-72 flex flex-col bg-white border border-outline-variant rounded-xl shadow-lg overflow-hidden">
+<div class="p-2 border-b border-outline-variant shrink-0">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60 text-[18px]" aria-hidden="true">search</span>
+<input type="text"
+       x-model="search"
+       x-ref="categorySearch"
+       placeholder="Search categories…"
+       aria-label="Search categories"
+       :aria-activedescendant="highlighted >= 0 ? 'category-option-' + highlighted : null"
+       class="w-full pl-8 pr-3 py-2 bg-surface-container-low rounded-lg text-body-sm font-body-sm outline-none focus:ring-1 focus:ring-primary"
+       @click.stop
+       @input="highlighted = 0"
+       @keydown.down.prevent="highlighted = Math.min(highlighted + 1, categoryOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase())).length - 1)"
+       @keydown.up.prevent="highlighted = Math.max(highlighted - 1, 0)"
+       @keydown.enter.prevent="const filtered = categoryOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase())); if (filtered[highlighted]) { selectedCategory = filtered[highlighted].value; isOpen = false; search = ''; highlighted = -1; }"
+       @keydown.escape.stop="isOpen = false; search = ''; highlighted = -1">
+</div>
+</div>
+<ul role="listbox" class="overflow-y-auto py-1">
+<template x-for="(option, index) in categoryOptions.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))" :key="option.value">
+<li role="option" :id="'category-option-' + index" :aria-selected="index === highlighted" class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors" :class="index === highlighted ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'" @click="selectedCategory = option.value; isOpen = false; search = ''; highlighted = -1" @mouseenter="highlighted = index" x-text="option.label"></li>
+</template>
+<li x-show="!categoryOptions.some(o => o.label.toLowerCase().includes(search.toLowerCase()))" class="px-4 py-3 font-body-md text-body-md text-on-surface-variant/70">No categories match "<span x-text="search"></span>".</li>
+</ul>
+</div>
+</div>
+{% if form.category.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.category.errors|striptags }}</p>{% endif %}
+</div>
+
+<div x-show="linkType === 'page'" x-cloak>
+<label for="{{ form.url.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">URL</label>
+{{ form.url }}
+{% if form.url.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.url.errors|striptags }}</p>{% endif %}
+</div>
+
+<input type="hidden" name="{{ form.product.html_name }}" :value="linkType === 'product' ? selectedProduct : ''">
+<input type="hidden" name="{{ form.category.html_name }}" :value="linkType === 'category' ? selectedCategory : ''">
+</div>
+
+<div class="grid grid-cols-2 gap-4">
+<div>
+{% include "admin_portal/_date_filter_field.html" with field_name=form.start_date.html_name label="Start Date" value=form.start_date.value initial_id="banner-start-date-initial" %}
+{% if form.start_date.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.start_date.errors|striptags }}</p>{% endif %}
+</div>
+<div>
+{% include "admin_portal/_date_filter_field.html" with field_name=form.end_date.html_name label="End Date" value=form.end_date.value initial_id="banner-end-date-initial" %}
+{% if form.end_date.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.end_date.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+
+<div>
+<label for="{{ form.order.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">Display Order</label>
+{{ form.order }}
+<p class="text-xs text-on-surface-variant/70 mt-1">Lower numbers show first when more than one banner is active.</p>
+{% if form.order.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.order.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+<div class="px-6 py-6 bg-surface-container-low border-t border-outline-variant flex justify-end gap-3">
+<a href="{% url 'admin_portal:catalog_banner_list' %}" class="px-6 py-2.5 rounded-lg font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors">Cancel</a>
+<button type="submit" class="px-8 py-2.5 rounded-lg font-bold bg-primary text-on-primary shadow-lg hover:opacity-90 active:scale-95 transition-all">
+{% if is_edit %}Save Changes{% else %}Save Banner{% endif %}
+</button>
+</div>
+</form>
+</div>
+</div>
+{% endblock %}

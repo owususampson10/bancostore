@@ -36,6 +36,7 @@ from apps.pages.models import SocialMediaLink
 from apps.pages.social_icons import SOCIAL_ICONS, detect_platform_from_url
 from apps.platform_settings.admin import BancostoreConstanceForm
 from apps.platform_settings.config import CONSTANCE_CONFIG, CONSTANCE_CONFIG_FIELDSETS
+from apps.promotions.models import Banner
 from apps.wallet.models import WalletTransaction
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
@@ -57,6 +58,7 @@ from .forms import (
     _INPUT_CLASS,
     _SELECT_CLASS,
     MAX_PRODUCT_IMAGES,
+    BannerForm,
     CategoryForm,
     ProductForm,
     ProductVariantFormSet,
@@ -1103,6 +1105,98 @@ def catalog_category_delete(request, pk):
                 "be deleted. Move or delete its products first.",
             )
     return redirect("admin_portal:catalog_category_list")
+
+
+# ---------------------------------------------------------------------------
+# Promotional Banners (Task 42)
+# ---------------------------------------------------------------------------
+
+
+@login_required(login_url="two_factor:login")
+def catalog_banner_list(request):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    banners = Banner.objects.select_related("product", "category")
+    active_ids = set(Banner.objects.active().values_list("pk", flat=True))
+    return render(
+        request,
+        "admin_portal/catalog_banner_list.html",
+        {
+            "banners": banners,
+            "active_ids": active_ids,
+            "today": timezone.localdate(),
+            "active_nav": "catalog",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def catalog_banner_create(request):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    if request.method == "POST":
+        form = BannerForm(request.POST, request.FILES)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Banner created.")
+            return redirect("admin_portal:catalog_banner_list")
+    else:
+        form = BannerForm()
+
+    return render(
+        request,
+        "admin_portal/catalog_banner_form.html",
+        {
+            "form": form,
+            "is_edit": False,
+            "products": Product.objects.order_by("name"),
+            "categories": Category.objects.order_by("name"),
+            "active_nav": "catalog",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def catalog_banner_edit(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    banner = get_object_or_404(Banner, pk=pk)
+    if request.method == "POST":
+        form = BannerForm(request.POST, request.FILES, instance=banner)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Banner updated.")
+            return redirect("admin_portal:catalog_banner_list")
+    else:
+        form = BannerForm(instance=banner)
+
+    return render(
+        request,
+        "admin_portal/catalog_banner_form.html",
+        {
+            "form": form,
+            "banner": banner,
+            "is_edit": True,
+            "products": Product.objects.order_by("name"),
+            "categories": Category.objects.order_by("name"),
+            "active_nav": "catalog",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def catalog_banner_delete(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    banner = get_object_or_404(Banner, pk=pk)
+    if request.method == "POST":
+        banner.delete()
+        messages.success(request, "Banner deleted.")
+    return redirect("admin_portal:catalog_banner_list")
 
 
 # ---------------------------------------------------------------------------

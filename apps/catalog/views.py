@@ -12,6 +12,7 @@ from django.views.decorators.http import require_POST
 from constance import config
 
 from apps.orders.models import Order, OrderItem
+from apps.promotions.models import Banner
 from bancostore.json_ld import dumps_for_script_tag
 
 from .forms import ReviewForm
@@ -41,6 +42,7 @@ def home(request):
     context = {
         "featured_products": featured_products,
         "categories": Category.objects.all(),
+        "active_banners": Banner.objects.active().select_related("product", "category"),
     }
     return render(request, "catalog/home.html", context)
 
