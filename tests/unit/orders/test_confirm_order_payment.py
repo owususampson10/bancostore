@@ -520,6 +520,8 @@ def test_insufficient_stock_still_cancels_when_backorders_not_allowed_at_checkou
     cancel path as before this task, even if an admin later turns
     backorders on globally -- confirm_order_payment must never re-derive
     this from a live setting."""
+    original_enabled = config.BACKORDERS_ENABLED
+    original_behaviour = config.OUT_OF_STOCK_BEHAVIOUR
     config.BACKORDERS_ENABLED = True
     config.OUT_OF_STOCK_BEHAVIOUR = "backorder"
     try:
@@ -533,8 +535,8 @@ def test_insufficient_stock_still_cancels_when_backorders_not_allowed_at_checkou
         order.refresh_from_db()
         assert order.status == Order.Status.CANCELLED
     finally:
-        config.BACKORDERS_ENABLED = False
-        config.OUT_OF_STOCK_BEHAVIOUR = "show"
+        config.BACKORDERS_ENABLED = original_enabled
+        config.OUT_OF_STOCK_BEHAVIOUR = original_behaviour
 
 
 @pytest.mark.django_db

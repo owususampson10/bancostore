@@ -315,6 +315,8 @@ def test_backorders_allowed_at_checkout_defaults_to_false():
 def test_backorders_allowed_at_checkout_snapshots_live_settings_at_creation_time():
     """Task 44b: confirm_order_payment must never re-derive this live --
     it reads exactly what was true at checkout, set here, once."""
+    original_enabled = config.BACKORDERS_ENABLED
+    original_behaviour = config.OUT_OF_STOCK_BEHAVIOUR
     config.BACKORDERS_ENABLED = True
     config.OUT_OF_STOCK_BEHAVIOUR = "backorder"
     try:
@@ -334,12 +336,14 @@ def test_backorders_allowed_at_checkout_snapshots_live_settings_at_creation_time
         order.refresh_from_db()
         assert order.backorders_allowed_at_checkout is True
     finally:
-        config.BACKORDERS_ENABLED = False
-        config.OUT_OF_STOCK_BEHAVIOUR = "show"
+        config.BACKORDERS_ENABLED = original_enabled
+        config.OUT_OF_STOCK_BEHAVIOUR = original_behaviour
 
 
 @pytest.mark.django_db
 def test_backorders_allowed_at_checkout_false_when_mode_is_not_backorder():
+    original_enabled = config.BACKORDERS_ENABLED
+    original_behaviour = config.OUT_OF_STOCK_BEHAVIOUR
     config.BACKORDERS_ENABLED = True
     config.OUT_OF_STOCK_BEHAVIOUR = "hide"
     try:
@@ -353,8 +357,8 @@ def test_backorders_allowed_at_checkout_false_when_mode_is_not_backorder():
 
         assert order.backorders_allowed_at_checkout is False
     finally:
-        config.BACKORDERS_ENABLED = False
-        config.OUT_OF_STOCK_BEHAVIOUR = "show"
+        config.BACKORDERS_ENABLED = original_enabled
+        config.OUT_OF_STOCK_BEHAVIOUR = original_behaviour
 
 
 @pytest.mark.django_db

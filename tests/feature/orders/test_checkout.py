@@ -211,7 +211,16 @@ def test_checkout_post_is_rate_limited(client):
     the first time (an invalid code creates no order, at no cost to the
     attacker) -- confirm a burst of submissions gets throttled, matching
     apps.distributors.views.login_view's own rate-limit-under-load test
-    shape (test_distributor_auth.py::test_resend_otp_is_rate_limited)."""
+    shape (test_distributor_auth.py::test_resend_otp_is_rate_limited).
+
+    No explicit rate-limit-cache reset needed here: django_ratelimit uses
+    the default cache alias (confirmed against bancostore/settings.py --
+    no RATELIMIT_USE_CACHE override exists), which tests/conftest.py's
+    autouse _clear_django_cache fixture already clears before and after
+    every test in the whole suite, so this test's own counter can never
+    leak into or be polluted by any other test (CodeRabbit, PR #75 --
+    verified false positive by running this file's full POST-test group
+    together)."""
     product = _make_product()
     _add_to_cart(client, product)
 

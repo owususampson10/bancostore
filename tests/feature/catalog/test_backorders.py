@@ -163,6 +163,26 @@ def test_product_detail_shows_out_of_stock_by_default(client):
 
 
 @pytest.mark.django_db
+def test_product_list_shows_the_configured_backorder_message_not_a_hardcoded_string(
+    client,
+):
+    """CodeRabbit (PR #75): the listing/home product card's backorder
+    overlay was hardcoded to "Available to Order" regardless of
+    BACKORDER_MESSAGE, so an admin-configured message had no effect
+    anywhere except the detail/wishlist pages."""
+    config.BACKORDERS_ENABLED = True
+    config.OUT_OF_STOCK_BEHAVIOUR = "backorder"
+    config.BACKORDER_MESSAGE = "Ships in 7 days"
+    _make_product(stock=0)
+
+    response = client.get(reverse("catalog:product_list"))
+
+    content = response.content.decode()
+    assert "Ships in 7 days" in content
+    assert "Available to Order" not in content
+
+
+@pytest.mark.django_db
 def test_product_detail_shows_backorder_message_and_add_to_cart_when_eligible(client):
     config.BACKORDERS_ENABLED = True
     config.OUT_OF_STOCK_BEHAVIOUR = "backorder"
