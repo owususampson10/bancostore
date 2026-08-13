@@ -141,6 +141,93 @@ def test_submitting_valid_checkout_as_a_logged_in_user_links_the_order_to_the_ac
 
 @pytest.mark.django_db
 @patch("apps.orders.views.initialize_transaction")
+def test_a_valid_discount_code_reduces_the_order_total(mock_initialize, client):
+    import datetime
+
+    from apps.promotions.models import DiscountCode
+
+    DiscountCode.objects.create(
+        code="SAVE20",
+        discount_type=DiscountCode.DiscountType.FIXED,
+        amount=Decimal("20.00"),
+        expiry_date=datetime.date.today() + datetime.timedelta(days=30),
+        max_uses=100,
+    )
+    mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    client.post(
+        reverse("orders:checkout"),
+        _valid_home_delivery_data(discount_code="save20"),
+    )
+
+    order = Order.objects.get()
+    assert order.discount_code.code == "SAVE20"
+    assert order.discount_amount == Decimal("20.00")
+    assert order.total == order.subtotal + order.delivery_fee - Decimal("20.00")
+    assert mock_initialize.call_args.kwargs["amount_pesewas"] == int(order.total * 100)
+
+
+@pytest.mark.django_db
+@patch("apps.orders.views.initialize_transaction")
+def test_an_invalid_discount_code_is_rejected_with_no_order_created(
+    mock_initialize, client
+):
+    mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    response = client.post(
+        reverse("orders:checkout"),
+        _valid_home_delivery_data(discount_code="NOSUCHCODE"),
+    )
+
+    assert response.status_code == 200
+    assert not Order.objects.exists()
+    assert "discount code is invalid" in response.content.decode()
+    mock_initialize.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.views.initialize_transaction")
+def test_checkout_with_no_discount_code_is_unaffected(mock_initialize, client):
+    mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    client.post(reverse("orders:checkout"), _valid_home_delivery_data())
+
+    order = Order.objects.get()
+    assert order.discount_code is None
+    assert order.discount_amount == Decimal("0")
+    assert order.total == order.subtotal + order.delivery_fee
+
+
+@pytest.mark.django_db
+def test_checkout_post_is_rate_limited(client):
+    """security-and-hardening (2026-08-13): Task 43b's discount_code field
+    made this view's POST path a free-to-retry secret-guessing surface for
+    the first time (an invalid code creates no order, at no cost to the
+    attacker) -- confirm a burst of submissions gets throttled, matching
+    apps.distributors.views.login_view's own rate-limit-under-load test
+    shape (test_distributor_auth.py::test_resend_otp_is_rate_limited)."""
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    responses = [
+        client.post(
+            reverse("orders:checkout"),
+            _valid_home_delivery_data(discount_code=f"GUESS{i}"),
+        )
+        for i in range(25)
+    ]
+
+    assert any(r.status_code == 429 for r in responses)
+
+
+@pytest.mark.django_db
+@patch("apps.orders.views.initialize_transaction")
 def test_checkout_uses_a_synthetic_email_for_paystack_when_order_email_is_blank(
     mock_initialize, client
 ):

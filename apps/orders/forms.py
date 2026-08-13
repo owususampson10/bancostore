@@ -72,6 +72,20 @@ class CheckoutForm(forms.Form):
             attrs={"class": INPUT_CLASSES, "placeholder": "e.g. Near the Shell Station"}
         ),
     )
+    # Task 43b. Real enforcement (does this code exist/still work/apply to
+    # this customer) happens server-side in
+    # apps.promotions.services.redeem_discount_code, called from
+    # create_pending_order -- this field is just UX, matching this
+    # codebase's established "form is UX, service is the real boundary"
+    # convention (see DiscountCodeForm's own docstring, apps/admin_portal/
+    # forms.py). checkout_view surfaces a rejection via form.add_error.
+    discount_code = forms.CharField(
+        max_length=32,
+        required=False,
+        widget=forms.TextInput(
+            attrs={"class": INPUT_CLASSES, "placeholder": "Enter code"}
+        ),
+    )
 
     def clean(self):
         cleaned_data = super().clean()

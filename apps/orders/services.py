@@ -18,6 +18,11 @@ from apps.catalog.services import (
 from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError, verify_transaction
 from apps.notifications.sms import send_sms
+from apps.promotions.services import (
+    consume_discount_code,
+    redeem_discount_code,
+    release_discount_code,
+)
 from apps.pv_ledger.services import (
     record_personal_pv,
     record_purchase_pv,
@@ -173,7 +178,17 @@ def create_pending_order(*, user, cart_items, form_data) -> Order:
     delivery_fee = calculate_delivery_fee(
         form_data["delivery_method"], form_data.get("delivery_zone", ""), subtotal
     )
-    total = subtotal + delivery_fee
+    # Task 43b. May raise InvalidDiscountCodeError -- deliberately left
+    # uncaught here, exactly like the empty-cart_items ValueError above;
+    # checkout_view catches it and re-renders the form with an error,
+    # never creating an Order for a rejected code.
+    discount_code, discount_amount = redeem_discount_code(
+        form_data.get("discount_code", ""),
+        subtotal=subtotal,
+        user=user,
+        phone_number=form_data["phone_number"],
+    )
+    total = subtotal + delivery_fee - discount_amount
 
     with transaction.atomic():
         order = Order.objects.create(
@@ -188,6 +203,8 @@ def create_pending_order(*, user, cart_items, form_data) -> Order:
             landmark=form_data.get("landmark", ""),
             subtotal=subtotal,
             delivery_fee=delivery_fee,
+            discount_code=discount_code,
+            discount_amount=discount_amount,
             total=total,
             # No pre-existing entity id to prefix with (unlike
             # reg-{token}-/pack-{distributor.pk}- elsewhere in this
@@ -322,6 +339,15 @@ def confirm_order_payment(reference: str) -> None:
             items = list(order.items.select_related("product").order_by("product_id"))
             for item in items:
                 decrement_stock(item.product, item.quantity)
+
+            # Task 43b. An atomic F() increment, no conditional/failure
+            # path -- once payment is verified above, the order is always
+            # honored even if a concurrent order already claimed the
+            # code's last usage slot (user-confirmed design, matching
+            # real-world platform behavior; see
+            # apps.promotions.services.consume_discount_code's docstring).
+            if order.discount_code_id is not None:
+                consume_discount_code(order.discount_code_id)
 
             # Captured once, reused for both the PV credit's date/period
             # and confirmed_at below -- record_purchase_pv/record_personal_pv
@@ -722,6 +748,16 @@ def cancel_or_refund_order(order_id, to_status, tracking_note="", restock=None) 
                     "product_id"
                 ):
                     increment_stock(item.product, item.quantity)
+
+            # Task 43b. Symmetric with consume_discount_code at
+            # confirmation, mirroring increment_stock/decrement_stock's
+            # own established symmetry above -- every CONFIRMED order
+            # reaching this function already consumed a slot at
+            # confirmation (this function only ever operates on already-
+            # paid orders, per this function's own docstring), so it must
+            # always be freed back up here, not just when restocking.
+            if locked_order.discount_code_id is not None:
+                release_discount_code(locked_order.discount_code_id)
 
             locked_order.pv_earned = 0
             locked_order.status = to_status

@@ -99,6 +99,22 @@ class Order(models.Model):
     # needing to reconstruct it from apps.pv_ledger after the fact.
     pv_earned = models.PositiveIntegerField(default=0)
 
+    # Task 43b. Snapshotted once at create_pending_order() time -- never
+    # re-derived from a live DiscountCode afterward, same "snapshot
+    # everything" convention as subtotal/delivery_fee/total above. SET_NULL,
+    # not CASCADE/PROTECT: deleting a DiscountCode must not destroy order/
+    # accounting history, mirroring Banner's product/category FK precedent
+    # (apps/promotions/models.py). discount_amount stays on the row even
+    # after discount_code is nulled out, so past figures are never lost.
+    discount_code = models.ForeignKey(
+        "promotions.DiscountCode",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="orders",
+    )
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
     payment_reference = models.CharField(max_length=100, unique=True)
     # Task 18a: the real query shape the code-review-and-quality note
     # below was waiting for now exists -- Task 18d's auto-cancel task
@@ -124,12 +140,29 @@ class Order(models.Model):
 
     class Meta:
         constraints = [
+            # Task 43b: total now accounts for discount_amount. Deliberately
+            # NOT a "discount_code IS NULL implies discount_amount = 0"
+            # constraint -- discount_code is SET_NULL on delete specifically
+            # so a deleted DiscountCode doesn't erase the historical
+            # discount_amount already charged on past orders (a
+            # doubt-driven-development finding before this migration was
+            # written: that constraint would reject the exact state this
+            # FK's on_delete choice is designed to produce). discount_amount
+            # <= subtotal is redundant with total__gte=0 given the other
+            # three clauses, but kept as explicit defense-in-depth, matching
+            # this codebase's stated CheckConstraint philosophy.
             models.CheckConstraint(
                 check=(
                     models.Q(subtotal__gte=0)
                     & models.Q(delivery_fee__gte=0)
                     & models.Q(total__gte=0)
-                    & models.Q(total=models.F("subtotal") + models.F("delivery_fee"))
+                    & models.Q(discount_amount__gte=0)
+                    & models.Q(discount_amount__lte=models.F("subtotal"))
+                    & models.Q(
+                        total=models.F("subtotal")
+                        + models.F("delivery_fee")
+                        - models.F("discount_amount")
+                    )
                 ),
                 name="order_amounts_sane",
             ),

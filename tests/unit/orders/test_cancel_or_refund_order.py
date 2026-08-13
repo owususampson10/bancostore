@@ -471,3 +471,114 @@ def test_whitespace_only_tracking_note_does_not_clear_an_existing_one(
 
     order.refresh_from_db()
     assert order.tracking_note == "Customer requested cancellation."
+
+
+# ---------------------------------------------------------------------------
+# Task 43b: discount code slot reversal
+# ---------------------------------------------------------------------------
+
+
+def _make_discount_code(**overrides):
+    from datetime import date, timedelta
+
+    from apps.promotions.models import DiscountCode
+
+    defaults = {
+        "code": "SAVE20",
+        "discount_type": DiscountCode.DiscountType.FIXED,
+        "amount": Decimal("20.00"),
+        "expiry_date": date.today() + timedelta(days=30),
+        "max_uses": 100,
+    }
+    defaults.update(overrides)
+    return DiscountCode.objects.create(**defaults)
+
+
+def _make_discounted_order(code, total=Decimal("430.00")):
+    order = _make_order(total=total)
+    order.discount_code = code
+    order.discount_amount = Decimal("20.00")
+    order.subtotal = total + Decimal("20.00")
+    order.save(update_fields=["discount_code", "discount_amount", "subtotal"])
+    return order
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_cancelling_a_confirmed_discounted_order_frees_the_usage_slot(
+    mock_sms, mock_mail
+):
+    """Symmetric with consume_discount_code at confirmation -- mirrors
+    increment_stock/decrement_stock's own established symmetry. A
+    doubt-driven-development finding before this was written: without
+    this reversal, every cancelled/refunded order that used a code
+    permanently wastes a slot from max_uses with no way to recover it."""
+    code = _make_discount_code(times_used=0)
+    product = _make_product(stock=5)
+    order = _make_discounted_order(code)
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 43000)
+    code.refresh_from_db()
+    assert code.times_used == 1  # consumed at confirmation
+
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED)
+
+    code.refresh_from_db()
+    assert code.times_used == 0
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_refunding_a_confirmed_discounted_order_frees_the_usage_slot(
+    mock_sms, mock_mail
+):
+    code = _make_discount_code(times_used=0)
+    product = _make_product(stock=5)
+    order = _make_discounted_order(code)
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 43000)
+    code.refresh_from_db()
+    assert code.times_used == 1  # consumed at confirmation
+
+    cancel_or_refund_order(order.pk, Order.Status.REFUNDED, restock=True)
+
+    code.refresh_from_db()
+    assert code.times_used == 0
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_cancelling_an_order_with_no_discount_code_touches_no_discount_code(
+    mock_sms, mock_mail
+):
+    code = _make_discount_code(times_used=3)
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 45000)
+
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED)
+
+    code.refresh_from_db()
+    assert code.times_used == 3  # unrelated code, untouched
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_freeing_a_discount_slot_never_goes_below_zero(mock_sms, mock_mail):
+    """Defensive floor, matching this codebase's established
+    times_used__gt=0-filtered update convention -- guards against any
+    future double-cancel/idempotency edge case, not reachable through the
+    normal single-call path today."""
+    from apps.promotions.services import release_discount_code
+
+    code = _make_discount_code(times_used=0)
+
+    release_discount_code(code.pk)
+
+    code.refresh_from_db()
+    assert code.times_used == 0

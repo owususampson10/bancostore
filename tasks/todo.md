@@ -6790,34 +6790,69 @@ views.py`/`urls.py`, a new admin_portal discount-code management template,
 
 #### 43b: Checkout redemption (elevated rigor — `doubt-driven-development` first)
 
+**Design finalized 2026-08-13 after a fresh-context adversarial (`security-auditor`) review of the
+original draft, which found 2 Critical + 3 High gaps before any code was written. Two of the five
+were genuine product-level judgment calls (not pure engineering), put directly to the user with the
+real-world precedent from Shopify/Stripe/Amazon researched first:**
+
+- **Usage-cap race, payment already captured:** honor the order. Once a customer has been sent to
+  pay and Paystack has captured the money, the order is never cancelled over a promo-code counting
+  technicality — matches how large platforms actually behave. `times_used` may rarely end up one or
+  two over `max_uses` right at the boundary; accepted as the cost of never voiding a real, paid
+  sale. (Reverses the originally-drafted "exactly one succeeds" design below.)
+- **Admin disables/expires a code while a customer has it on a still-unpaid order:** the code stays
+  honored for that specific order. Disabling a code only stops it applying to *new* checkouts going
+  forward — it does not retroactively revalidate `is_active`/`expiry_date` at payment-confirmation
+  time. Matches Shopify/Stripe: the discount locks in once checkout starts.
+- Two further Critical/High findings had a single unambiguous fix, folded in without needing a
+  product decision: (1) `cancel_or_refund_order` must symmetrically free the usage slot
+  (`times_used -= 1`, floor 0) when reversing a `CONFIRMED` order — the original draft left cancelled/
+  refunded orders permanently consuming a slot, and also silently made `limit_one_per_customer`
+  re-redeemable after a cancel/refund, which is correct once the slot is properly freed, not a
+  bypass. (2) the per-customer check must match `Order.customer` **or** `Order.phone_number`
+  together, regardless of whether the current checkout is guest or logged-in — the original draft's
+  two disjoint checks let the same person redeem twice by switching modes (guest, then create an
+  account and check out again, or vice versa).
+
 **Acceptance criteria:**
 - [ ] A valid code at checkout reduces the order total by the correct amount, snapshotted onto the
       `Order` the same way price/delivery fee already are (Task 17c) — never re-derived from a
       live, possibly-since-changed/expired code afterward
-- [ ] An expired, exhausted, or audience-mismatched code is rejected with a clear message — never
-      silently ignored, never a 500
+- [ ] An expired, exhausted, inactive, or invalid code is rejected at checkout submission with a
+      clear message — never silently ignored, never a 500 (audience mismatch is 43c's job, not
+      enforced here)
 - [ ] Maximum Discount Per Order (43a) is enforced even if a code's own discount would exceed it
-- [ ] Two customers redeeming the last unit of a usage-limited code concurrently: exactly one
-      succeeds — atomic-counter discipline matching `Product` stock decrement (Task 7), not a naive
-      read-then-write
-- [ ] When `limit_one_per_customer` is on, a customer who already has one order using this code is
-      rejected on a second attempt — checked against `Order`, not a separate counter, so it can't
-      drift from what actually happened at checkout
+- [ ] `DiscountCode.times_used` is only ever incremented at payment confirmation (never at pending
+      order creation, matching stock's own "most pending orders never get paid" precedent), via an
+      atomic `F()` update — and is symmetrically decremented (floor 0) when a `CONFIRMED` order using
+      it is later cancelled or refunded
+- [ ] A code exhausted or disabled/expired *after* an order was created but *before* that order's
+      payment confirms is still honored at confirmation — no re-validation of `is_active`/
+      `expiry_date`/`max_uses` happens at confirmation time, per the design decision above
+- [ ] When `limit_one_per_customer` is on, a customer who already has one **CONFIRMED** order using
+      this code is rejected on a second checkout attempt — matched against `Order.customer` OR
+      `Order.phone_number` together (not just whichever the current checkout mode uses), checked
+      against `Order` directly, not a separate counter
 
 **Verification:**
 - [ ] `doubt-driven-development` review complete and findings folded in before this sub-task starts
-- [ ] Unit/feature tests for every rejection case (expired, exhausted, audience mismatch, exceeds
-      per-order cap)
-- [ ] A real concurrency test (matching `apps/wallet`'s/`apps/orders`'s existing 2-5-thread
-      convention for this exact class of race) proving the usage-limit race is closed
+- [ ] Unit/feature tests for every rejection case (expired, exhausted, inactive, exceeds per-order
+      cap, already-used-by-this-customer via both account and phone-number matching)
+- [ ] A concurrency test proving the F()-based increment/decrement never lose an update under
+      concurrent confirm/cancel calls (matching `apps/wallet`'s 2-5-thread convention) — not a
+      rejection test, since the design now honors the race rather than blocking it
 - [ ] Live-browser verified: apply a valid code at checkout, confirm the total updates correctly
 - [ ] Full suite green, CI green on real MySQL (elevated-rigor money code — same bar as
       `apps/commissions`/`apps/wallet`/`apps/withdrawal`)
 
 **Dependencies:** 43a
 
-**Files likely touched:** `apps/orders/services.py` (`create_pending_order`/
-`confirm_order_payment`), `apps/orders/views.py`, `templates/orders/checkout.html`,
+**Files likely touched:** new `apps/promotions/services.py` (`redeem_discount_code`,
+`consume_discount_code`, `release_discount_code`), `apps/orders/services.py`
+(`create_pending_order`/`confirm_order_payment`/`cancel_or_refund_order`), `apps/orders/forms.py`
+(`CheckoutForm`), `apps/orders/views.py`, `templates/orders/checkout.html`, a new migration on
+`Order` (`discount_code` FK, `discount_amount`, updated `order_amounts_sane` `CheckConstraint`),
+`tests/feature/promotions/test_discount_code_redemption.py`,
 `tests/feature/orders/test_checkout_discount_codes.py` (concurrency test included)
 
 **Estimated scope:** M

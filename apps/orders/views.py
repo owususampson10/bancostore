@@ -8,10 +8,12 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from constance import config
+from django_ratelimit.decorators import ratelimit
 
 from apps.accounts.models import Address
 from apps.catalog.models import Product
 from apps.distributors.paystack import PaystackError, initialize_transaction
+from apps.promotions.services import InvalidDiscountCodeError
 
 from .cart import Cart
 from .forms import CheckoutForm
@@ -69,6 +71,16 @@ def cart_remove(request, product_id):
     return redirect("orders:cart")
 
 
+# security-and-hardening (2026-08-13, Task 43b): Task 43b turned this
+# view's POST path into a public secret-guessing surface for the first
+# time (a discount code) -- every rejection is free (no order is created
+# for an invalid code), so an unrated endpoint would let an attacker
+# brute-force real codes at unlimited speed. Rate matches
+# apps.distributors.views.login_view's own "20/m" per-IP precedent, the
+# closest existing shape in this codebase (a combined GET/POST view where
+# POST is a real transactional submission a genuine customer might retry
+# a few times, e.g. after a Paystack failure, not a one-shot action).
+@ratelimit(key="ip", rate="20/m", method="POST")
 def checkout_view(request):
     cart = Cart(request)
     # cart.items() itself is the source of truth here (it self-heals
@@ -93,56 +105,70 @@ def checkout_view(request):
     if request.method == "POST":
         form = CheckoutForm(request.POST)
         if form.is_valid():
-            order = create_pending_order(
-                user=request.user,
-                cart_items=cart_items,
-                form_data=form.cleaned_data,
-            )
-            # Task 17d (ADR-0005 decision 3): Order creation and Paystack
-            # initialization happen in the same step, exactly as the ADR
-            # documents it -- there's no separate decision point between
-            # confirming the order summary and being sent to pay.
-            callback_url = request.build_absolute_uri(
-                reverse("orders:order_payment_callback")
-            )
-            # Paystack requires an email on every transaction; Order.email
-            # is optional (a guest may leave it blank) -- fall back to a
-            # synthetic address that satisfies the API without claiming
-            # it's a real contact channel, mirroring
-            # pay_registration_fee's own established workaround. Never
-            # persisted onto Order.email itself.
-            email = order.email or f"{order.phone_number}@bancostore.test"
             try:
-                data = initialize_transaction(
-                    email=email,
-                    amount_pesewas=int(order.total * 100),
-                    reference=order.payment_reference,
-                    callback_url=callback_url,
+                order = create_pending_order(
+                    user=request.user,
+                    cart_items=cart_items,
+                    form_data=form.cleaned_data,
                 )
-            except PaystackError:
-                logger.exception(
-                    "checkout_view: Paystack initialize_transaction failed "
-                    "for order=%s -- the order already exists as PENDING; "
-                    "the customer can retry from this same page.",
-                    order.payment_reference,
+            except InvalidDiscountCodeError as exc:
+                # Task 43b: real enforcement lives in
+                # apps.promotions.services.redeem_discount_code -- this
+                # form field is UX only. No Order is created for a
+                # rejected code (the raise happens before
+                # Order.objects.create() inside create_pending_order).
+                form.add_error("discount_code", str(exc))
+                order = None
+
+            if order is not None:
+                # Task 17d (ADR-0005 decision 3): Order creation and
+                # Paystack initialization happen in the same step, exactly
+                # as the ADR documents it -- there's no separate decision
+                # point between confirming the order summary and being
+                # sent to pay.
+                callback_url = request.build_absolute_uri(
+                    reverse("orders:order_payment_callback")
                 )
-                payment_error = True
-            else:
-                # CodeRabbit (PR #27): every other Paystack response read
-                # in this codebase uses .get() so a malformed/unexpected
-                # shape logs and returns rather than raising --
-                # data["authorization_url"] was the one bracket-indexed
-                # read, turning a missing key into an unhandled 500 after
-                # the order already existed as PENDING.
-                authorization_url = data.get("authorization_url")
-                if authorization_url:
-                    return redirect(authorization_url)
-                logger.error(
-                    "checkout_view: Paystack initialize_transaction "
-                    "returned no authorization_url for order=%s",
-                    order.payment_reference,
-                )
-                payment_error = True
+                # Paystack requires an email on every transaction;
+                # Order.email is optional (a guest may leave it blank) --
+                # fall back to a synthetic address that satisfies the API
+                # without claiming it's a real contact channel, mirroring
+                # pay_registration_fee's own established workaround. Never
+                # persisted onto Order.email itself.
+                email = order.email or f"{order.phone_number}@bancostore.test"
+                try:
+                    data = initialize_transaction(
+                        email=email,
+                        amount_pesewas=int(order.total * 100),
+                        reference=order.payment_reference,
+                        callback_url=callback_url,
+                    )
+                except PaystackError:
+                    logger.exception(
+                        "checkout_view: Paystack initialize_transaction "
+                        "failed for order=%s -- the order already exists "
+                        "as PENDING; the customer can retry from this "
+                        "same page.",
+                        order.payment_reference,
+                    )
+                    payment_error = True
+                else:
+                    # CodeRabbit (PR #27): every other Paystack response
+                    # read in this codebase uses .get() so a malformed/
+                    # unexpected shape logs and returns rather than
+                    # raising -- data["authorization_url"] was the one
+                    # bracket-indexed read, turning a missing key into an
+                    # unhandled 500 after the order already existed as
+                    # PENDING.
+                    authorization_url = data.get("authorization_url")
+                    if authorization_url:
+                        return redirect(authorization_url)
+                    logger.error(
+                        "checkout_view: Paystack initialize_transaction "
+                        "returned no authorization_url for order=%s",
+                        order.payment_reference,
+                    )
+                    payment_error = True
     else:
         # Task 40b: a saved address is only ever a pre-fill SOURCE for these
         # same plain form fields -- selecting one doesn't create any new

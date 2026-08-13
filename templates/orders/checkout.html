@@ -261,6 +261,18 @@ Saved Addresses
 {% endfor %}
 </div>
 
+<!-- Task 43b. Server-validated on submit (apps.promotions.services.
+     redeem_discount_code, called from create_pending_order) -- no live
+     AJAX preview here, so the total above stays the pre-discount preview
+     until the order is actually placed. Paystack's own hosted checkout
+     page shows the real, final amount before any card details are
+     entered, so the customer still sees the true total before paying. -->
+<div class="border-t border-outline-variant pt-4">
+<label for="{{ form.discount_code.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary mb-1">Discount Code (Optional)</label>
+{{ form.discount_code }}
+{% for error in form.discount_code.errors %}<p class="text-error text-sm mt-1">{{ error }}</p>{% endfor %}
+</div>
+
 <div class="space-y-2 border-t border-outline-variant pt-4">
 <div class="flex justify-between text-secondary">
 <span>Subtotal</span>
