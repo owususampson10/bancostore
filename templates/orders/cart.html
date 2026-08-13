@@ -1,5 +1,5 @@
 {% extends "base_store.html" %}
-{% load humanize %}
+{% load humanize catalog_extras %}
 {% block title %}Bancostore | Your Cart{% endblock %}
 {% block content %}
 <div class="max-w-[1280px] mx-auto px-margin-mobile md:px-margin-desktop py-12">
@@ -27,7 +27,7 @@
 <h3 class="font-headline-md text-headline-md text-on-surface">{{ item.product.name }}</h3>
 <p class="font-headline-md text-headline-md text-primary whitespace-nowrap">GHS {{ item.product.price|intcomma }}</p>
 </div>
-{% if item.quantity >= item.product.stock %}
+{% if item.quantity >= item.product.stock and not item.product|is_backorder_eligible %}
 <p class="text-error text-sm mt-1">Only {{ item.product.stock }} left in stock</p>
 {% endif %}
 <div class="flex items-center justify-between mt-6">
@@ -41,7 +41,7 @@
 <form method="post" action="{% url 'orders:cart_update' item.product.pk %}">
 {% csrf_token %}
 <input type="hidden" name="quantity" value="{{ item.quantity|add:'1' }}">
-<button type="submit" class="px-3 py-1 hover:bg-surface-container-low transition-colors material-symbols-outlined text-secondary text-sm" aria-label="Increase quantity" {% if item.quantity >= item.product.stock %}disabled{% endif %}>add</button>
+<button type="submit" class="px-3 py-1 hover:bg-surface-container-low transition-colors material-symbols-outlined text-secondary text-sm" aria-label="Increase quantity" {% if item.quantity >= item.product.stock and not item.product|is_backorder_eligible %}disabled{% endif %}>add</button>
 </form>
 </div>
 <div class="flex items-center gap-4">

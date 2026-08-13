@@ -257,6 +257,18 @@ suite on this Mac, but never a false CI failure blocking a real merge. No furthe
   decision tree (severity, reachability, fix availability) — before any of these are upgraded, one
   package at a time per this project's dependency-upgrade discipline, not a bulk bump.
 
+## Known issues — surfaced by Task 44a's full-suite verification (2026-08-13)
+
+- [ ] `tests/feature/distributors/test_earnings_history.py::
+  test_page_loads_the_shared_js_bundle_so_the_sidebar_can_actually_collapse` fails on `main`
+  independent of any Task 44 change (confirmed via `git stash`): it asserts the page contains
+  `src="{% static 'assets/main.js' %}"` literally, but Task 36's real content-hashed Vite output
+  (e.g. `assets/main-C9T1orRo.js`) means that exact stable path no longer exists — the test's own
+  assumption went stale when cache-busting shipped. Needs the test updated to resolve the real
+  hashed filename (e.g. via Django's `ManifestStaticFilesStorage`/`{% static %}` resolution at test
+  time) rather than a hardcoded string. Not fixed here — unrelated to backorders, flagged as a new
+  Known Issue instead of silently patched in passing.
+
 ---
 
 ## Phase 0: Foundation
@@ -6892,36 +6904,68 @@ test_discount_code_redemption.py`
 
 ### Task 44: Backorders
 
-**Description:** Admin enables backorders per-product; an out-of-stock backorder-enabled product
-still shows Add to Cart with a "Ships in N days" message instead of "Out of Stock" (source doc
-Section 10.2). **Requires a `doubt-driven-development` pass before 44b** — this changes
-`confirm_order_payment`'s existing out-of-stock behavior (Task 17d currently cancels the order and
-logs it for manual admin refund follow-up), a real interaction with already-shipped money-adjacent
-code, not a green-field addition.
+**Description:** Admin enables backorders; an out-of-stock product still shows Add to Cart with a
+"Ships in N days"-style message instead of "Out of Stock" (source doc Section 10.2). **Requires a
+`doubt-driven-development` pass before 44b** — this changes `confirm_order_payment`'s existing
+out-of-stock behavior (Task 17d currently cancels the order and logs it for manual admin refund
+follow-up), a real interaction with already-shipped money-adjacent code, not a green-field
+addition.
 
-#### 44a: Per-product backorder fields + storefront
+**Design corrected 2026-08-13 after reading Sections 13.6/13.10 directly (`source-driven-
+development`), not trusting this breakdown's own original paraphrase below:** the source doc
+describes "Backorders On/Off", "Backorder Message", and "Out of Stock Behaviour" (Hide / Show Out
+of Stock / Allow Backorders) as single, global, store-wide settings — nothing in the doc is
+per-product. The original acceptance criteria below (a per-product backorder flag + shipping-
+estimate text) was a planning-time judgment call, not something read from the source. Put directly
+to the user with both readings laid out; confirmed **global-only**, matching the doc literally. No
+`Product` schema change as a result — this sub-task is now pure constance settings + storefront/cart
+logic.
+
+#### 44a: Global backorder settings + storefront/cart integration
 
 **Acceptance criteria:**
-- [ ] `Product` gains a backorder-enabled flag + shipping-estimate text (13.10's "Out of Stock
-      Behaviour" — Hide / Show Out of Stock / Allow Backorders — lives per-product, not just as a
-      single global toggle, since a real store rarely wants backorders on every product uniformly)
-- [ ] 13.6's global Backorders On/Off + Backorder Message settings are real and gate/seed the
-      per-product default
-- [ ] A backorder-enabled, out-of-stock product shows Add to Cart with the configured message
-      instead of "Out of Stock" on both the listing and detail pages
+- [x] Three new global constance settings: `BACKORDERS_ENABLED` (master switch, default Off),
+      `BACKORDER_MESSAGE` (admin-editable text), `OUT_OF_STOCK_BEHAVIOUR` (hide / show / backorder,
+      default "show" matching the doc's stated current value) — `OUT_OF_STOCK_BEHAVIOUR="backorder"`
+      only actually takes effect when `BACKORDERS_ENABLED` is also on; otherwise a live product falls
+      back to "show" behavior rather than silently offering backorders the admin hasn't switched on
+- [x] `OUT_OF_STOCK_BEHAVIOUR="hide"` excludes an out-of-stock product from listing/search/home AND
+      404s its detail page — "hidden" means gone everywhere, not just visually
+- [x] A backorder-eligible out-of-stock product shows Add to Cart with the configured message
+      instead of "Out of Stock" on listing, detail, and wishlist pages
+- [x] The cart (`Cart.add`/`Cart.update`) allows a backorder-eligible product's quantity to exceed
+      live stock, uncapped — a non-backorder-eligible out-of-stock product's existing capped-at-zero
+      behavior is unchanged
 
 **Verification:**
-- [ ] Feature tests: backorder-enabled vs. not, message rendering, global toggle interaction
-- [ ] Live-browser verified
-- [ ] Full suite green
+- [x] Feature tests: each `OUT_OF_STOCK_BEHAVIOUR` value, `BACKORDERS_ENABLED` off overriding a
+      `"backorder"` mode setting, cart add/update capped vs. uncapped
+- [x] Live-browser verified (2026-08-13) — caught and fixed one real gap along the way:
+      `templates/orders/cart.html`'s own `quantity >= stock` check (pre-existing, Task 17) had no
+      idea about backorder eligibility, so it showed "Only 0 left in stock" and disabled the
+      quantity "+" button for every backorder item even though `Cart.add`/`update` already allowed
+      going over stock — a real UI block on the one thing this feature is for, invisible to pytest
+      alone since it needed a real click to notice the disabled button. Fixed with a new
+      `apps.catalog.templatetags.catalog_extras.is_backorder_eligible` filter gating both checks,
+      plus a regression test.
+- [x] Full suite green (1549 passed, 1 skipped; the one pre-existing failure in
+      `test_earnings_history.py::test_page_loads_the_shared_js_bundle...` is unrelated —
+      confirmed via `git stash` to fail identically on `main` before this task's changes, caused by
+      Task 36's real content-hashed asset filenames outdating that test's hardcoded
+      `static("assets/main.js")` assumption; tracked as a new Known Issue, not fixed here since it's
+      out of this task's scope)
 
 **Dependencies:** None
 
-**Files likely touched:** `apps/catalog/models.py` (`Product` fields), `apps/admin_portal/
-catalog forms/templates` (Task 26), `templates/catalog/product_detail.html`/`product_list.html`,
-`apps/platform_settings/config.py`, `tests/feature/catalog/test_backorders.py`
+**Files likely touched:** `apps/platform_settings/config.py`, new `apps/catalog/services.py`
+helpers (`storefront_visible_products`, `is_backorder_eligible`, `backorder_display_context`),
+`apps/catalog/views.py`, `apps/orders/views.py` (`cart_add`), `apps/orders/cart.py`,
+`apps/catalog/templatetags/catalog_extras.py` (new `is_backorder_eligible` filter, for
+`templates/orders/cart.html`'s own stock check), `templates/catalog/partials/product_card.html`,
+`templates/catalog/product_detail.html`, `templates/catalog/wishlist.html`,
+`templates/orders/cart.html`, `tests/feature/catalog/test_backorders.py`
 
-**Estimated scope:** M
+**Estimated scope:** M — **closed 2026-08-13.**
 
 #### 44b: Checkout/order-confirmation integration (elevated rigor — `doubt-driven-development` first)
 

@@ -4,6 +4,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory
 
 import pytest
+from constance import config
 
 from apps.catalog.models import Category, Product
 from apps.orders.cart import Cart
@@ -310,3 +311,57 @@ def test_clear_on_an_already_empty_cart_is_a_safe_no_op():
     cart.clear()  # must not raise
 
     assert Cart(request).items() == []
+
+
+# ---------------------------------------------------------------------------
+# Task 44a: backorder-eligible quantity is uncapped
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_backorder_settings():
+    original_enabled = config.BACKORDERS_ENABLED
+    original_behaviour = config.OUT_OF_STOCK_BEHAVIOUR
+    yield
+    config.BACKORDERS_ENABLED = original_enabled
+    config.OUT_OF_STOCK_BEHAVIOUR = original_behaviour
+
+
+@pytest.mark.django_db
+def test_add_is_still_capped_at_zero_stock_when_not_backorder_eligible():
+    """Task 44a's own regression guard: the pre-existing behavior for a
+    plain out-of-stock product (Task 7) must be provably unchanged --
+    BACKORDERS_ENABLED defaults to Off, so this is the default path."""
+    product = _make_product(stock=0)
+    cart = Cart(_request_with_session())
+
+    added = cart.add(product, quantity=1)
+
+    assert added is False
+
+
+@pytest.mark.django_db
+def test_add_allows_uncapped_quantity_when_backorder_eligible():
+    config.BACKORDERS_ENABLED = True
+    config.OUT_OF_STOCK_BEHAVIOUR = "backorder"
+    product = _make_product(stock=0)
+    cart = Cart(_request_with_session())
+
+    added = cart.add(product, quantity=3)
+
+    assert added is True
+    assert cart.items()[0].quantity == 3
+
+
+@pytest.mark.django_db
+def test_update_allows_uncapped_quantity_when_backorder_eligible():
+    config.BACKORDERS_ENABLED = True
+    config.OUT_OF_STOCK_BEHAVIOUR = "backorder"
+    product = _make_product(stock=0)
+    request = _request_with_session()
+    cart = Cart(request)
+    cart.add(product, quantity=1)
+
+    cart.update(product, 5)
+
+    assert Cart(request).items()[0].quantity == 5

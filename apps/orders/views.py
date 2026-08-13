@@ -12,6 +12,7 @@ from django_ratelimit.decorators import ratelimit
 
 from apps.accounts.models import Address
 from apps.catalog.models import Product
+from apps.catalog.services import storefront_visible_products
 from apps.distributors.paystack import PaystackError, initialize_transaction
 from apps.promotions.services import InvalidDiscountCodeError
 
@@ -34,7 +35,11 @@ def cart_view(request):
 
 @require_POST
 def cart_add(request, product_id):
-    product = get_object_or_404(Product.objects.storefront_visible(), pk=product_id)
+    # Task 44a: storefront_visible_products() -- a no-op unless an admin
+    # has set OUT_OF_STOCK_BEHAVIOUR="hide", in which case a hidden
+    # out-of-stock product must be un-addable here too, consistent with
+    # it being "gone" everywhere on the storefront.
+    product = get_object_or_404(storefront_visible_products(), pk=product_id)
     added = Cart(request).add(product, quantity=1)
     if not added:
         # code-review-and-quality (2026-07-24): stock ran out between page

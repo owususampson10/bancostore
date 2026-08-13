@@ -1,5 +1,7 @@
 from django.db import transaction
 
+from constance import config
+
 from bancostore.concurrency import (
     retry_on_lock_contention,
     select_for_update_nowait_if_supported,
@@ -82,3 +84,47 @@ def increment_stock(product: Product, quantity: int = 1) -> Product:
         return locked_product
 
     return retry_on_lock_contention(_attempt)
+
+
+def is_backorder_eligible(product: Product) -> bool:
+    """Task 44a. True only for an out-of-stock product while both
+    BACKORDERS_ENABLED (the master switch) and OUT_OF_STOCK_BEHAVIOUR
+    ("backorder") agree -- a global setting, not per-product (design
+    confirmed directly with the user against the primary source doc's own
+    literal wording, reversing this task's original per-product plan).
+    Always False for an in-stock product: there's nothing to "backorder"."""
+    if product.stock > 0:
+        return False
+    return config.BACKORDERS_ENABLED and config.OUT_OF_STOCK_BEHAVIOUR == "backorder"
+
+
+def backorder_display_context() -> dict:
+    """The two pieces of context every storefront template needs to
+    decide whether an out-of-stock product shows 'Add to Cart' with the
+    admin's configured message instead of 'Out of Stock'. A single global
+    setting, so this never varies by which product is being rendered --
+    callers add it to their template context dict once per view, not
+    per-product."""
+    return {
+        "backorders_active": (
+            config.BACKORDERS_ENABLED and config.OUT_OF_STOCK_BEHAVIOUR == "backorder"
+        ),
+        "backorder_message": config.BACKORDER_MESSAGE,
+    }
+
+
+def storefront_visible_products():
+    """Task 44a. Wraps `Product.objects.storefront_visible()` with the
+    live OUT_OF_STOCK_BEHAVIOUR setting applied -- a no-op unless an admin
+    has set it to "hide", in which case an out-of-stock product is
+    excluded everywhere a storefront view uses this (listing, search,
+    home, product detail, cart_add), matching "Hide product" literally:
+    gone everywhere, not just visually. Lives here rather than as a
+    `ProductQuerySet` method on `Product` itself so `apps/catalog/models.py`
+    never needs to import constance -- this codebase's models stay free of
+    runtime-config coupling everywhere else, and this is the one queryset
+    a live setting needs to shape."""
+    queryset = Product.objects.storefront_visible()
+    if config.OUT_OF_STOCK_BEHAVIOUR == "hide":
+        queryset = queryset.exclude(stock=0)
+    return queryset

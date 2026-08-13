@@ -1,11 +1,15 @@
 {% load static humanize %}
 <div class="flex flex-col group">
-<a href="{% url 'catalog:product_detail' product.slug %}" class="bg-surface-variant rounded-xl aspect-[4/5] p-8 flex items-center justify-center relative overflow-hidden{% if not product.in_stock %} grayscale opacity-70{% endif %}">
+<a href="{% url 'catalog:product_detail' product.slug %}" class="bg-surface-variant rounded-xl aspect-[4/5] p-8 flex items-center justify-center relative overflow-hidden{% if not product.in_stock and not backorders_active %} grayscale opacity-70{% endif %}">
 {% if product.primary_image %}
 <img class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" src="{{ product.primary_image.image.url }}" alt="{{ product.name }}">
 {% endif %}
 {% if product.in_stock %}
 <div class="absolute top-4 left-4 bg-primary text-on-primary px-3 py-1 rounded-full text-[10px] font-bold">{{ product.pv_value }} PV</div>
+{% elif backorders_active %}
+<div class="absolute inset-0 bg-surface-dim/40 flex items-center justify-center">
+<span class="bg-primary text-on-primary px-6 py-2 rounded-full font-bold text-sm">Available to Order</span>
+</div>
 {% else %}
 <div class="absolute inset-0 bg-surface-dim/40 flex items-center justify-center">
 <span class="bg-gray-700 text-white px-6 py-2 rounded-full font-bold text-sm">Out of Stock</span>
@@ -17,7 +21,7 @@
 <p class="text-gray-600 text-sm mb-4">{{ product.description|truncatechars:60 }}</p>
 <div class="flex justify-between items-center">
 <span class="font-bold text-on-surface">GHS {{ product.price|intcomma }}</span>
-{% if product.in_stock %}
+{% if product.in_stock or backorders_active %}
 <a class="text-primary font-bold text-sm hover:underline" href="{% url 'catalog:product_detail' product.slug %}">View</a>
 {% else %}
 <span class="text-gray-500 text-sm">Unavailable</span>

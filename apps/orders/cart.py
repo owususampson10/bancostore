@@ -2,6 +2,7 @@ from collections import namedtuple
 from decimal import Decimal
 
 from apps.catalog.models import Product
+from apps.catalog.services import is_backorder_eligible
 
 CartLine = namedtuple("CartLine", ["product", "quantity", "line_total"])
 
@@ -40,9 +41,20 @@ class Cart:
     def add(self, product, quantity=1) -> bool:
         """Returns False if nothing was added (e.g. the product has zero
         available stock) so the caller can tell a real add apart from a
-        silent no-op, rather than always redirecting as if it succeeded."""
+        silent no-op, rather than always redirecting as if it succeeded.
+
+        Task 44a: a backorder-eligible product (out of stock, but the
+        admin has BACKORDERS_ENABLED + OUT_OF_STOCK_BEHAVIOUR="backorder"
+        live) is never capped at `product.stock` -- there's nothing
+        meaningful to cap it against, the whole point of a backorder is
+        ordering more than what's currently on hand. A plain out-of-stock
+        product (the default) keeps its existing capped-at-zero
+        behavior unchanged."""
         current = self._data.get(str(product.pk), 0)
-        new_quantity = min(current + quantity, product.stock)
+        if is_backorder_eligible(product):
+            new_quantity = current + quantity
+        else:
+            new_quantity = min(current + quantity, product.stock)
         if new_quantity <= current:
             return False
         self._data[str(product.pk)] = new_quantity
@@ -54,7 +66,11 @@ class Cart:
         # raw param -- a product gone out of stock (or deactivated) since
         # being added has product.stock=0, so an update(product, 5) would
         # otherwise store a zero-quantity line instead of removing it.
-        new_quantity = min(quantity, product.stock)
+        # Task 44a: same backorder-eligible exception as add() above.
+        if is_backorder_eligible(product):
+            new_quantity = quantity
+        else:
+            new_quantity = min(quantity, product.stock)
         if new_quantity < 1:
             self.remove(product)
             return

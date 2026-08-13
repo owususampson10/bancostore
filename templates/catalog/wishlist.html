@@ -19,13 +19,17 @@
 <span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">favorite</span>
 </button>
 </form>
-<a href="{% url 'catalog:product_detail' item.product.slug %}" class="bg-surface-variant rounded-xl aspect-[4/5] p-8 flex items-center justify-center relative overflow-hidden{% if not item.product.in_stock %} grayscale opacity-70{% endif %}">
+<a href="{% url 'catalog:product_detail' item.product.slug %}" class="bg-surface-variant rounded-xl aspect-[4/5] p-8 flex items-center justify-center relative overflow-hidden{% if not item.product.in_stock and not backorders_active %} grayscale opacity-70{% endif %}">
 {% if item.product.primary_image %}
 <img class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" src="{{ item.product.primary_image.image.url }}" alt="{{ item.product.name }}">
 {% endif %}
 {% if not item.product.in_stock %}
 <div class="absolute inset-0 bg-surface-dim/40 flex items-center justify-center">
+{% if backorders_active %}
+<span class="bg-primary text-on-primary px-6 py-2 rounded-full font-bold text-sm">{{ backorder_message }}</span>
+{% else %}
 <span class="bg-gray-700 text-white px-6 py-2 rounded-full font-bold text-sm">Out of Stock</span>
+{% endif %}
 </div>
 {% endif %}
 </a>

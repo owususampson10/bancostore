@@ -1,6 +1,19 @@
 from django import template
 
+from apps.catalog.services import is_backorder_eligible as _is_backorder_eligible
+
 register = template.Library()
+
+
+@register.filter
+def is_backorder_eligible(product):
+    """Task 44a: templates/orders/cart.html needs this per cart line to
+    stop showing "Only 0 left in stock" and disabling the quantity-increase
+    button for a backorder-eligible item -- Cart.add()/update() already
+    allow the quantity to exceed stock, but the template's own stock
+    check didn't know that, silently blocking the one thing this feature
+    is for."""
+    return _is_backorder_eligible(product)
 
 
 @register.filter

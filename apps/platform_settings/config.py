@@ -315,6 +315,20 @@ ORDER_SETTINGS = {
         "How many hours an unpaid order can stay pending before it is "
         "automatically cancelled",
     ),
+    # Task 44a (source doc 13.6). The master switch: OUT_OF_STOCK_BEHAVIOUR
+    # below can be set to "backorder" independently, but that only takes
+    # effect while this is also on -- an admin flipping the mode dropdown
+    # alone can never silently start offering backorders. Off by default,
+    # matching the doc's own stated current value.
+    "BACKORDERS_ENABLED": (
+        False,
+        "Allow customers to order out-of-stock products",
+    ),
+    "BACKORDER_MESSAGE": (
+        "This item is available for backorder and will ship soon.",
+        "Message shown instead of 'Add to Cart' when a customer orders an "
+        "out-of-stock item",
+    ),
 }
 
 PRODUCT_AND_INVENTORY_SETTINGS = {
@@ -326,6 +340,15 @@ PRODUCT_AND_INVENTORY_SETTINGS = {
         False,
         "Auto-approve new product reviews instead of requiring manual "
         "admin approval",
+    ),
+    # Task 44a (source doc 13.10 "Out of Stock Behaviour"). "show" matches
+    # the doc's own stated current value. "backorder" only actually takes
+    # effect while BACKORDERS_ENABLED (Order Settings) is also on -- see
+    # that setting's own comment.
+    "OUT_OF_STOCK_BEHAVIOUR": (
+        "show",
+        "What happens to a product when its stock reaches zero",
+        "out_of_stock_behaviour_field",
     ),
 }
 
@@ -640,6 +663,21 @@ CONSTANCE_ADDITIONAL_FIELDS = {
                 ("everyone", "Everyone"),
                 ("retail", "Retail Customers Only"),
                 ("distributor", "Distributors Only"),
+            ],
+        },
+    ],
+    "out_of_stock_behaviour_field": [
+        "django.forms.fields.ChoiceField",
+        {
+            "widget": "django.forms.Select",
+            # Task 44a, source doc 13.10 "Out of Stock Behaviour": "Hide
+            # product, show 'Out of Stock', or allow backorders" -- a
+            # bounded choice, matching this file's own established
+            # reasoning for every mode-style setting.
+            "choices": [
+                ("hide", "Hide Product"),
+                ("show", "Show 'Out of Stock'"),
+                ("backorder", "Allow Backorders"),
             ],
         },
     ],

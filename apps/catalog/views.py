@@ -17,6 +17,7 @@ from bancostore.json_ld import dumps_for_script_tag
 
 from .forms import ReviewForm
 from .models import Category, Product, Review, WishlistItem
+from .services import backorder_display_context, storefront_visible_products
 
 PRODUCTS_PER_PAGE = 9
 
@@ -35,7 +36,7 @@ DEFAULT_SORT = "newest"
 
 def home(request):
     featured_products = (
-        Product.objects.storefront_visible()
+        storefront_visible_products()
         .filter(is_featured=True)
         .order_by("-created_at")[:8]
     )
@@ -43,6 +44,7 @@ def home(request):
         "featured_products": featured_products,
         "categories": Category.objects.all(),
         "active_banners": Banner.objects.active().select_related("product", "category"),
+        **backorder_display_context(),
     }
     return render(request, "catalog/home.html", context)
 
@@ -65,7 +67,7 @@ def product_list(request):
     if sort not in SORT_OPTIONS:
         sort = DEFAULT_SORT
 
-    products = Product.objects.storefront_visible()
+    products = storefront_visible_products()
     if query:
         products = products.filter(
             Q(name__icontains=query) | Q(description__icontains=query)
@@ -94,6 +96,7 @@ def product_list(request):
         "max_price": request.GET.get("max_price", ""),
         "sort": sort,
         "querystring_no_page": querystring_no_page,
+        **backorder_display_context(),
     }
 
     template = (
@@ -159,7 +162,7 @@ def _can_review(user, product):
 
 def _product_detail_context(request, product, review_form=None):
     related_products = (
-        Product.objects.storefront_visible()
+        storefront_visible_products()
         .filter(category=product.category)
         .exclude(pk=product.pk)[:4]
     )
@@ -195,12 +198,16 @@ def _product_detail_context(request, product, review_form=None):
         "review_form": review_form,
         "reviews": approved_reviews,
         "average_rating": average_rating,
+        **backorder_display_context(),
     }
 
 
 def product_detail(request, slug):
+    # Task 44a: storefront_visible_products() -- 404s a hidden
+    # out-of-stock product ("hide" mode means gone everywhere, including a
+    # direct link to its own page, not just absent from listings).
     product = get_object_or_404(
-        Product.objects.storefront_visible().prefetch_related("variants", "images"),
+        storefront_visible_products().prefetch_related("variants", "images"),
         slug=slug,
     )
     return render(
@@ -292,4 +299,8 @@ def wishlist_view(request):
         .select_related("product", "product__category")
         .prefetch_related("product__images")
     )
-    return render(request, "catalog/wishlist.html", {"items": items})
+    return render(
+        request,
+        "catalog/wishlist.html",
+        {"items": items, **backorder_display_context()},
+    )
