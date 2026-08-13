@@ -131,7 +131,7 @@ latter should count as "focus left."
      aria-roledescription="slide"
      aria-label="{{ forloop.counter }} of {{ active_banners|length }}">
 {% if link_url %}
-<a href="{{ link_url }}" class="block w-full h-full">
+<a href="{{ link_url }}" class="block w-full h-full" aria-label="{% if banner.link_type == 'product' %}View {{ banner.product.name }}{% elif banner.link_type == 'category' %}Shop {{ banner.category.name }}{% else %}View this promotion{% endif %}">
 <img src="{{ banner.image.url }}" alt="" class="w-full h-full object-cover">
 </a>
 {% else %}

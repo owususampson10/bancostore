@@ -253,3 +253,39 @@ def test_home_banner_links_to_its_product(client, category):
     expected_url = reverse("catalog:product_detail", args=[product.slug])
     assert f'href="{expected_url}"' in content
     assert banner.image.url in content
+    assert 'aria-label="View Classic Chrono"' in content
+
+
+@pytest.mark.django_db
+def test_home_banner_link_has_an_accessible_name_for_each_link_type(client, category):
+    """CodeRabbit finding (PR #74): the linked banner's only child was an
+    <img alt="">, so a screen reader announced the link with no
+    accessible name at all -- no way to tell what the promotion was or
+    where it led. Covers the category and custom-URL cases the earlier
+    product-only test didn't."""
+    today = timezone.localdate()
+    category_banner = Banner.objects.create(
+        image=_make_uploaded_image("category-banner.jpg"),
+        link_type=Banner.LinkType.CATEGORY,
+        category=category,
+        start_date=today,
+        end_date=today,
+        order=0,
+    )
+    page_banner = Banner.objects.create(
+        image=_make_uploaded_image("page-banner.jpg"),
+        link_type=Banner.LinkType.PAGE,
+        url="https://bancostore.com/about/",
+        start_date=today,
+        end_date=today,
+        order=1,
+    )
+
+    response = client.get(reverse("catalog:home"))
+
+    content = response.content.decode()
+    assert f'aria-label="Shop {category.name}"' in content
+    assert 'aria-label="View this promotion"' in content
+    # both banners rendered, not just whichever happened to match first
+    assert category_banner.image.url in content
+    assert page_banner.image.url in content
