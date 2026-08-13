@@ -20,6 +20,19 @@ def _make_uploaded_image(name="photo.jpg", color="blue"):
     return SimpleUploadedFile(name, buffer.read(), content_type="image/jpeg")
 
 
+def _banner_anchor_tag(content, image_url):
+    """CodeRabbit finding (PR #74): asserting href and aria-label
+    independently against the whole page only proves both strings exist
+    SOMEWHERE, not that they're on the SAME anchor -- a broken href on
+    one banner could pass if a different banner's aria-label happened to
+    match. Returns the specific <a ...> opening tag that wraps this
+    banner's own image, so both attributes can be checked together."""
+    img_pos = content.index(image_url)
+    anchor_start = content.rindex("<a ", 0, img_pos)
+    anchor_end = content.index(">", anchor_start)
+    return content[anchor_start : anchor_end + 1]
+
+
 @pytest.fixture
 def category():
     return Category.objects.create(name="Watches", slug="watches")
@@ -251,9 +264,9 @@ def test_home_banner_links_to_its_product(client, category):
 
     content = response.content.decode()
     expected_url = reverse("catalog:product_detail", args=[product.slug])
-    assert f'href="{expected_url}"' in content
-    assert banner.image.url in content
-    assert 'aria-label="View Classic Chrono"' in content
+    anchor = _banner_anchor_tag(content, banner.image.url)
+    assert f'href="{expected_url}"' in anchor
+    assert 'aria-label="View Classic Chrono"' in anchor
 
 
 @pytest.mark.django_db
@@ -284,8 +297,13 @@ def test_home_banner_link_has_an_accessible_name_for_each_link_type(client, cate
     response = client.get(reverse("catalog:home"))
 
     content = response.content.decode()
-    assert f'aria-label="Shop {category.name}"' in content
-    assert 'aria-label="View this promotion"' in content
-    # both banners rendered, not just whichever happened to match first
-    assert category_banner.image.url in content
-    assert page_banner.image.url in content
+    expected_category_url = (
+        reverse("catalog:product_list") + f"?category={category.slug}"
+    )
+    category_anchor = _banner_anchor_tag(content, category_banner.image.url)
+    assert f'href="{expected_category_url}"' in category_anchor
+    assert f'aria-label="Shop {category.name}"' in category_anchor
+
+    page_anchor = _banner_anchor_tag(content, page_banner.image.url)
+    assert 'href="https://bancostore.com/about/"' in page_anchor
+    assert 'aria-label="View this promotion"' in page_anchor
