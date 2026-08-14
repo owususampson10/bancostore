@@ -212,6 +212,25 @@ def test_wishlist_shows_backorder_message_when_eligible(client):
     assert "Ships in 7 days" in response.content.decode()
 
 
+@pytest.mark.django_db
+def test_wishlist_excludes_a_hidden_out_of_stock_product(client):
+    """CodeRabbit (PR #75): OUT_OF_STOCK_BEHAVIOUR="hide" means a product
+    is gone everywhere, including a wishlist saved before it went out of
+    stock -- without this, the tile stayed visible with a detail link
+    that 404s."""
+    config.OUT_OF_STOCK_BEHAVIOUR = "hide"
+    user = User.objects.create_user(username="shopper2", password="Passw0rd!")
+    client.force_login(user)
+    product = _make_product(stock=5, name="Ghost Wishlist Product")
+    client.post(reverse("catalog:wishlist_toggle", args=[product.pk]))
+    product.stock = 0
+    product.save()
+
+    response = client.get(reverse("catalog:wishlist"))
+
+    assert product.name not in response.content.decode()
+
+
 # ---------------------------------------------------------------------------
 # cart_add view (Cart.add()/Cart.update() themselves are covered directly
 # in tests/unit/orders/test_cart.py)

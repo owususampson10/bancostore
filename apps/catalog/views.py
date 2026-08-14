@@ -299,6 +299,13 @@ def wishlist_view(request):
         .select_related("product", "product__category")
         .prefetch_related("product__images")
     )
+    # Task 44a follow-up (CodeRabbit, PR #75): OUT_OF_STOCK_BEHAVIOUR="hide"
+    # means a product is gone everywhere (storefront_visible_products()
+    # already enforces this for listing/search/home/detail) -- without this,
+    # a hidden product saved to a wishlist before it went out of stock kept
+    # showing a tile whose own detail link 404s.
+    if config.OUT_OF_STOCK_BEHAVIOUR == "hide":
+        items = items.exclude(product__stock=0)
     return render(
         request,
         "catalog/wishlist.html",
