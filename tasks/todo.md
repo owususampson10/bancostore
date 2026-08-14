@@ -6743,15 +6743,15 @@ Builds on the home page's existing Task 31 Editorial Variant sections and the im
 pipeline already proven for `Category`/`Product` images (Task 7/26).
 
 **Acceptance criteria:**
-- [ ] Admin uploads a banner (image, link target, start/end date) from `admin_portal`
-- [ ] Home page shows only currently-active banners (`start_date <= now <= end_date`) — no admin
+- [x] Admin uploads a banner (image, link target, start/end date) from `admin_portal`
+- [x] Home page shows only currently-active banners (`start_date <= now <= end_date`) — no admin
       action needed on the end date
-- [ ] A banner linking to a specific product/category/page navigates there correctly
+- [x] A banner linking to a specific product/category/page navigates there correctly
 
 **Verification:**
-- [ ] Feature tests: active/expired/not-yet-started banner visibility, each link-target type
-- [ ] Live-browser verified at 500/1440px
-- [ ] Full suite green
+- [x] Feature tests: active/expired/not-yet-started banner visibility, each link-target type
+- [x] Live-browser verified at 500/1440px
+- [x] Full suite green
 
 **Dependencies:** None
 
@@ -6759,7 +6759,11 @@ pipeline already proven for `Category`/`Product` images (Task 7/26).
 `apps/admin_portal/urls.py`/`views.py`, `templates/catalog/home.html`, a new admin_portal banner
 management template, `tests/feature/promotions/test_banners.py`
 
-**Estimated scope:** M
+**Estimated scope:** M — **closed 2026-08-13** (PR #74). Built with a real Alpine.js scoping bug
+found and fixed via live-browser verification (nested `x-data` state leaking to `window`), plus a
+follow-up round addressing direct user feedback (search filter, themed date picker, auto-rotating
+carousel) and 4 CodeRabbit findings (keyboard-accessible combobox selection, carousel pause-state
+race, timezone-consistent tests, accessible names on linked banner slides).
 
 ---
 
@@ -7047,9 +7051,15 @@ code was written:**
 ---
 
 ### Checkpoint M (after Tasks 42-44)
-- [ ] Full suite green including new elevated-rigor coverage (43b/44b), CI green on real MySQL
-- [ ] Live-browser verified per task above
-- [ ] Review with the user before starting Phase 15
+- [x] Full suite green including new elevated-rigor coverage (43b/44b), CI green on real MySQL
+      (confirmed on `main` @ `4890b0b`)
+- [x] Live-browser verified per task above
+- [x] Review with the user before starting Phase 15 — reviewed 2026-08-14; production (previously
+      8 commits behind, stuck at Task 42/`0442b9a`) deployed up to `6822e91` (Tasks 43-44 +
+      CodeRabbit fixes) as part of this review, including the 4 new migrations
+      (`orders.0005`-`0007`, `promotions.0002`), verified live (`https://bancostore.com/` and
+      `/shop/`/`/cart/` all 200, Supervisor processes clean-restarted, no new errors in
+      `daphne_error.log`)
 
 ---
 
