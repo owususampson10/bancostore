@@ -10,7 +10,7 @@ from django_celery_beat.models import IntervalSchedule
 
 from bancostore.celery_beat import sync_periodic_task_interval
 
-from .models import ReportRollupRun
+from .models import DailyOrderRollup
 from .services import compute_daily_rollup
 
 logger = logging.getLogger(__name__)
@@ -23,13 +23,30 @@ REPORT_ROLLUP_LOCK_KEY = "reporting:report_rollup_lock"
 # exist to cover cumulative per-distributor iteration time this task has
 # no equivalent of.
 REPORT_ROLLUP_LOCK_TIMEOUT_SECONDS = 10 * 60
-# A CodeRabbit-caught real gap: REPORT_ROLLUP_INTERVAL_DAYS is
-# admin-editable and can be set above 1, but this task used to compute
-# only "yesterday" every trigger -- every day between triggers other than
-# the most recent one would silently never get a rollup. Capped, not
-# unbounded, so a very long gap (e.g. Celery Beat down for months) can't
+# How far back this task looks for a missing DailyOrderRollup row, every
+# run. Bounded (never "since the dawn of time") so cost stays flat
+# regardless of how long this project has been live -- larger than
+# MAX_ROLLUP_DAYS_PER_RUN so there's real headroom to notice and recover
+# from a multi-week gap (a stuck Celery Beat, a long-unnoticed failure)
+# without needing any operator intervention beyond letting it run.
+GAP_LOOKBACK_DAYS = 45
+# A CodeRabbit-caught real gap in an earlier version of this task: it
+# used to resume from ReportRollupRun's MAX(succeeded rollup_date) --
+# corruptible by an out-of-band `backfill_report_rollup <date>` run for a
+# date NEWER than an unresolved automated failure, which would silently
+# skip the older gap forever (backfill_report_rollup calls the exact
+# same compute_daily_rollup and writes an indistinguishable
+# ReportRollupRun row, so there was no way to tell "resumed past a real
+# gap" from "caught up cleanly"). Fixed by dropping that watermark
+# entirely: this task now checks DailyOrderRollup's own rows directly
+# for what's actually missing within GAP_LOOKBACK_DAYS, so there is no
+# cursor left to corrupt -- a manual backfill for any date just fills in
+# that one date, nothing more.
+#
+# Capped, not unbounded, so a very long gap (e.g. Celery Beat down for
+# months, or this task's very first run ever against a live system) can't
 # make a single run blow past REPORT_ROLLUP_LOCK_TIMEOUT_SECONDS; the
-# remainder self-heals over subsequent scheduled runs, oldest-first.
+# remainder self-heals over subsequent scheduled runs.
 MAX_ROLLUP_DAYS_PER_RUN = 30
 
 
@@ -46,17 +63,21 @@ def _sync_report_rollup_interval():
 @shared_task
 def compute_yesterdays_rollup():
     """Task 46b (ADR-0010). Celery Beat driver, triggered every
-    REPORT_ROLLUP_INTERVAL_DAYS: computes every calendar day from the day
-    after the last successful rollup through YESTERDAY (relative to "now"
-    at trigger time), never "today" -- today's orders are still actively
-    arriving and changing status, so a genuinely complete day's numbers
-    only exist for a day that has fully elapsed. Walking forward from the
-    last success (not just "yesterday" alone) is what makes an
-    admin-configured REPORT_ROLLUP_INTERVAL_DAYS > 1 -- or a missed
-    trigger -- self-healing: every day in between still gets its own
-    rollup row on the next run, capped at MAX_ROLLUP_DAYS_PER_RUN so one
-    run can't blow past REPORT_ROLLUP_LOCK_TIMEOUT_SECONDS on a very long
-    gap (the remainder catches up over following runs). A day with no
+    REPORT_ROLLUP_INTERVAL_DAYS: computes every calendar day within
+    GAP_LOOKBACK_DAYS of YESTERDAY (relative to "now" at trigger time)
+    that DailyOrderRollup has no row for yet, never "today" -- today's
+    orders are still actively arriving and changing status, so a
+    genuinely complete day's numbers only exist for a day that has fully
+    elapsed. Stateless by design: which dates are missing is read fresh
+    from DailyOrderRollup itself every run, not from any remembered
+    cursor -- see GAP_LOOKBACK_DAYS' own comment for why a cursor-based
+    design was tried and dropped. This is what makes an admin-configured
+    REPORT_ROLLUP_INTERVAL_DAYS > 1, a missed trigger, or an out-of-band
+    manual backfill all self-healing in the same simple way: every
+    missing day within the window gets its own rollup row, most-recent-
+    missing-first (so a long-past gap can never starve "yesterday" of
+    ever being computed), capped at MAX_ROLLUP_DAYS_PER_RUN so one run
+    can't blow past REPORT_ROLLUP_LOCK_TIMEOUT_SECONDS. A day with no
     rollup row yet (today, or a day this job hasn't reached) simply has
     no report data yet -- there is no live-query fallback (a deliberate
     ADR-0010 decision: reports always read rollup rows, never scan
@@ -64,10 +85,10 @@ def compute_yesterdays_rollup():
     order-table size regardless of the requested date range).
 
     A separate, on-demand path exists for recomputing an arbitrary past
-    date (correcting a rollup after the fact, independent of this task's
-    own forward-walk): `python manage.py backfill_report_rollup <date>`,
-    calling the same compute_daily_rollup this task calls -- not
-    duplicated here.
+    date OUTSIDE GAP_LOOKBACK_DAYS (correcting a very old rollup after
+    the fact): `python manage.py backfill_report_rollup <date>`, calling
+    the same compute_daily_rollup this task calls -- not duplicated
+    here.
 
     No per-entity loop (unlike calculate_binary_bonus/
     calculate_matching_bonus in apps/commissions/tasks.py), so this
@@ -101,39 +122,36 @@ def compute_yesterdays_rollup():
             )
 
         target_date = (timezone.now() - timedelta(days=1)).date()
-        last_succeeded_date = (
-            ReportRollupRun.objects.filter(succeeded=True)
-            .order_by("-rollup_date")
-            .values_list("rollup_date", flat=True)
-            .first()
+        window_start = target_date - timedelta(days=GAP_LOOKBACK_DAYS - 1)
+        already_rolled_up = set(
+            DailyOrderRollup.objects.filter(
+                date__gte=window_start, date__lte=target_date
+            ).values_list("date", flat=True)
         )
-        start_date = (
-            last_succeeded_date + timedelta(days=1)
-            if last_succeeded_date
-            else target_date
-        )
-        if start_date > target_date:
-            start_date = target_date
 
-        dates_to_process = []
-        current = start_date
-        while current <= target_date:
-            dates_to_process.append(current)
-            current += timedelta(days=1)
+        missing_dates_newest_first = []
+        current = target_date
+        while current >= window_start:
+            if current not in already_rolled_up:
+                missing_dates_newest_first.append(current)
+            current -= timedelta(days=1)
 
-        truncated = len(dates_to_process) > MAX_ROLLUP_DAYS_PER_RUN
+        truncated = len(missing_dates_newest_first) > MAX_ROLLUP_DAYS_PER_RUN
         if truncated:
-            remaining = len(dates_to_process) - MAX_ROLLUP_DAYS_PER_RUN
-            dates_to_process = dates_to_process[:MAX_ROLLUP_DAYS_PER_RUN]
+            remaining = len(missing_dates_newest_first) - MAX_ROLLUP_DAYS_PER_RUN
             logger.warning(
-                "compute_yesterdays_rollup: %d missing day(s) exceeds the "
-                "%d-day-per-run cap -- processing the oldest %d now, the "
-                "remaining %d will catch up on subsequent scheduled runs.",
-                len(dates_to_process) + remaining,
+                "compute_yesterdays_rollup: %d missing day(s) within the "
+                "%d-day lookback window exceeds the %d-day-per-run cap -- "
+                "processing the most recent %d now, the remaining %d "
+                "(older) will catch up on subsequent scheduled runs.",
+                len(missing_dates_newest_first),
+                GAP_LOOKBACK_DAYS,
                 MAX_ROLLUP_DAYS_PER_RUN,
-                len(dates_to_process),
+                MAX_ROLLUP_DAYS_PER_RUN,
                 remaining,
             )
+
+        dates_to_process = sorted(missing_dates_newest_first[:MAX_ROLLUP_DAYS_PER_RUN])
 
         for rollup_date in dates_to_process:
             compute_daily_rollup(rollup_date)
