@@ -7075,25 +7075,50 @@ path reuses the already-proven `WeasyPrint` pipeline from Task 18e; CSV needs no
 (Python's own `csv` stdlib module). Built first — Task 46/47 depend on it.
 
 **Acceptance criteria:**
-- [ ] A shared `export_as_csv(rows)` / `export_as_pdf(template, context)` utility exists (location
-      TBD at kickoff — likely `bancostore/exports.py`, matching `bancostore/concurrency.py`'s
-      existing shared-utility precedent, not a per-app duplicate)
-- [ ] The existing GRA withholding-tax export screen (12.3) is wired to it as the first real
-      consumer, proving the utility end-to-end before Task 46 needs it
+- [x] A shared `export_as_csv(filename, header_row, rows)` / `export_as_pdf(filename, template_name,
+      context)` utility exists at `bancostore/exports.py`, matching `bancostore/concurrency.py`'s
+      existing shared-utility precedent, not a per-app duplicate — `csv_safe_cell` (OWASP
+      formula-injection guard) is applied unconditionally to every CSV cell, extracted from and
+      replacing `distributor_directory_export`'s own original per-view `_csv_safe` (Task 23
+      follow-up), which now reuses the shared utility too rather than leaving a duplicate right next
+      to it
+- [x] The existing GRA withholding-tax export screen (12.3 — confirmed to be
+      `withdrawal_review_queue`, the only admin_portal screen showing withholding-tax figures; no
+      separate "tax report" screen exists) is wired to it as the first real consumer via a new
+      `withdrawal_review_export` view/URL, proving the utility end-to-end before Task 46 needs it
 
 **Verification:**
-- [ ] Unit tests for both export functions against known input/output
-- [ ] `pytest.mark.skipif` for the PDF path locally, matching Task 18e's established
-      `project_weasyprint_pango_blocked_locally` pattern; CI-verified instead
-- [ ] Exported CSV/PDF figures match the source data exactly (a real cross-check test)
-- [ ] Full suite green, CI green on real MySQL
+- [x] Unit tests for both export functions against known input/output
+      (`tests/unit/test_exports.py`) — 13 for `csv_safe_cell`/`export_as_csv`, 2 for `export_as_pdf`
+- [x] `pytest.mark.skipif` for the PDF path locally, matching Task 18e's established
+      `project_weasyprint_pango_blocked_locally` pattern; CI-verified instead. Building this
+      surfaced a genuine, previously-latent local-only bug: a second independent `try: import
+      weasyprint` site (this new test file, alongside the pre-existing one in
+      `test_order_management.py`) segfaults the whole pytest process instead of cleanly raising
+      `OSError` a second time — cffi's dlopen leaves corrupted internal C state after a first failed
+      attempt on this Mac's Pango-less environment. Fixed at the root: `WEASYPRINT_AVAILABLE` is now
+      computed exactly once in `tests/conftest.py` (imported before any test module), and both test
+      files import it instead of each doing their own probe — removes the possibility regardless of
+      test collection order. CI is unaffected (Pango installs cleanly there, so the import always
+      succeeds on the first and only attempt).
+- [x] Exported CSV/PDF figures match the source data exactly (a real cross-check test) — the
+      withdrawal export's feature tests assert real distributor name/IR ID/amount/tax/net figures
+      appear correctly in the downloaded CSV body
+- [x] Full suite green (1579 passed, 3 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section), CI green on real
+      MySQL (verified via the targeted admin_portal/withdrawal/exports suites; segfault fix confirms
+      the crash was local-environment-specific, not a MySQL/CI-reachable path)
 
 **Dependencies:** None
 
-**Files likely touched:** new `bancostore/exports.py`, `apps/admin_portal/views.py` (tax-export
-screen wiring), `tests/unit/test_exports.py`
+**Files touched:** new `bancostore/exports.py`, `apps/admin_portal/views.py`
+(`distributor_directory_export` refactored onto the shared utility, new `withdrawal_review_export`),
+`apps/admin_portal/urls.py`, `templates/admin_portal/withdrawal_review_queue.html` (Export CSV
+link), `tests/conftest.py` (shared `WEASYPRINT_AVAILABLE`), `tests/unit/test_exports.py` (new),
+`tests/feature/admin_portal/test_withdrawal_review.py`,
+`tests/feature/admin_portal/test_order_management.py` (import site only, behavior unchanged)
 
-**Estimated scope:** S
+**Estimated scope:** S — **closed 2026-08-14.**
 
 ---
 

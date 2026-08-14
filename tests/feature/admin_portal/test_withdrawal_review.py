@@ -315,6 +315,94 @@ def test_detail_404s_for_a_request_that_is_no_longer_submitted(staff_client):
     assert response.status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# Task 45: CSV export -- the withdrawal review queue as bancostore.exports'
+# first real consumer.
+# ---------------------------------------------------------------------------
+
+
+def _export_url():
+    return reverse("admin_portal:withdrawal_review_export")
+
+
+@pytest.mark.django_db
+def test_export_csv_contains_the_pending_withdrawal_requests(staff_client):
+    distributor = _make_eligible_distributor(full_name="Ama Mensah")
+    distributor.ir_id = "IR00042"
+    distributor.save(update_fields=["ir_id"])
+    _make_submitted_request(distributor, amount=Decimal("500.00"))
+
+    response = staff_client.get(_export_url())
+
+    assert response.status_code == 200
+    assert response["Content-Type"] == "text/csv"
+    body = response.content.decode()
+    assert "Ama Mensah" in body
+    assert "IR00042" in body
+    assert "500.00" in body
+
+
+@pytest.mark.django_db
+def test_export_csv_only_includes_submitted_requests(staff_client):
+    """Matches the queue's own scope exactly (Task 23's own docstring:
+    "Only status=SUBMITTED requests belong in a review queue") -- an
+    export of this screen must never silently include an
+    already-decided request the admin has nothing left to act on."""
+    from apps.withdrawal.services import approve_withdrawal_request
+
+    pending_distributor = _make_eligible_distributor(full_name="Ama Mensah")
+    _make_submitted_request(pending_distributor, amount=Decimal("500.00"))
+    decided_distributor = _make_eligible_distributor(full_name="Kojo Antwi")
+    decided_request = _make_submitted_request(
+        decided_distributor, amount=Decimal("300.00")
+    )
+    admin_user = User.objects.create_user(username="admin-export-1", password="x")
+    approve_withdrawal_request(decided_request, reviewed_by=admin_user)
+
+    response = staff_client.get(_export_url())
+
+    body = response.content.decode()
+    assert "Ama Mensah" in body
+    assert "Kojo Antwi" not in body
+
+
+@pytest.mark.django_db
+def test_export_csv_neutralizes_formula_injection_in_distributor_name(staff_client):
+    """OWASP CSV injection, same risk class as distributor_directory_export
+    (Task 23 follow-up) -- full_name is free text a distributor sets
+    themselves at registration."""
+    distributor = _make_eligible_distributor(
+        full_name='=HYPERLINK("https://evil.example")'
+    )
+    _make_submitted_request(distributor, amount=Decimal("500.00"))
+
+    response = staff_client.get(_export_url())
+
+    body = response.content.decode()
+    assert "'=HYPERLINK" in body
+
+
+@pytest.mark.django_db
+def test_export_csv_requires_staff(client, db):
+    phone = f"+233247{next(_phone_seq):06d}"
+    user = User.objects.create_user(
+        username=phone, password="Passw0rd!", is_staff=False
+    )
+    client.force_login(user)
+
+    response = client.get(_export_url())
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_an_anonymous_user_is_redirected_to_login_for_export(client, db):
+    response = client.get(_export_url())
+
+    assert response.status_code == 302
+    assert reverse("two_factor:login") in response.url
+
+
 @pytest.mark.django_db
 def test_a_non_staff_authenticated_user_is_forbidden(client, db):
     phone = f"+233247{next(_phone_seq):06d}"

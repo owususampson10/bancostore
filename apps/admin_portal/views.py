@@ -1,4 +1,3 @@
-import csv
 from datetime import timedelta
 from decimal import Decimal
 
@@ -53,6 +52,7 @@ from bancostore.concurrency import (
     retry_on_lock_contention,
     select_for_update_nowait_if_supported,
 )
+from bancostore.exports import export_as_csv
 
 from .forms import (
     _INPUT_CLASS,
@@ -330,6 +330,57 @@ def withdrawal_review_queue(request):
 
 
 @login_required(login_url="two_factor:login")
+def withdrawal_review_export(request):
+    """Task 45: bancostore.exports.export_as_csv's first real consumer --
+    exports exactly the same SUBMITTED-only queryset withdrawal_review_queue
+    itself shows (this codebase's established "export what the screen
+    shows" convention, matching distributor_directory_export), including
+    the tax figures Section 12.3's GRA withholding-tax review needs
+    (amount/tax/net). Name-fallback logic (full_name, else the KYC-approved
+    DiditVerification's extracted_full_name, else blank) mirrors the
+    template's own `{% firstof %}` exactly -- same duplicated pattern
+    already repeated 3x across this file's other withdrawal views, not a
+    new one introduced here."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    withdrawal_requests = (
+        WithdrawalRequest.objects.filter(status=WithdrawalRequest.Status.SUBMITTED)
+        .select_related("distributor", "distributor__didit_verification")
+        .order_by("created_at")
+    )
+
+    def _rows():
+        for withdrawal_request in withdrawal_requests:
+            distributor = withdrawal_request.distributor
+            verification = getattr(distributor, "didit_verification", None)
+            display_name = distributor.full_name or (
+                verification.extracted_full_name if verification else ""
+            )
+            yield [
+                display_name,
+                distributor.ir_id or "",
+                withdrawal_request.amount,
+                withdrawal_request.tax_amount,
+                withdrawal_request.net_amount,
+                withdrawal_request.created_at.strftime("%Y-%m-%d"),
+            ]
+
+    return export_as_csv(
+        "withdrawal-requests.csv",
+        [
+            "Distributor",
+            "IR ID",
+            "Amount (GHS)",
+            "Tax (GHS)",
+            "Net Payout (GHS)",
+            "Date Submitted",
+        ],
+        _rows(),
+    )
+
+
+@login_required(login_url="two_factor:login")
 def withdrawal_review_detail(request, pk):
     """Task 23. GET shows one request's review detail; POST approves or
     rejects via the exact same apps.withdrawal.services functions the
@@ -539,49 +590,41 @@ def distributor_directory(request):
     return render(request, "admin_portal/distributor_directory.html", context)
 
 
-def _csv_safe(value):
-    """Neutralizes CSV formula injection (OWASP): full_name is free text a
-    distributor sets themselves at registration, and phone_number is
-    E.164 (always starts with "+") -- this file is one a staff admin will
-    realistically open in Excel/Sheets, and either would otherwise execute
-    or misparse as a formula on open. Checked after stripping leading
-    whitespace (a formula can be padded to dodge a naive startswith check)
-    but the quote is prefixed to the original value so nothing is lost."""
-    text = str(value)
-    if text.lstrip().startswith(("=", "+", "-", "@")):
-        return "'" + text
-    return text
-
-
 @login_required(login_url="two_factor:login")
 def distributor_directory_export(request):
     """Task 23 follow-up. Exports exactly what the current search/filter
     shows (via the same _filtered_distributors as the page itself), not
     the whole table unconditionally -- an admin who searched down to one
-    distributor and clicks Export should get that one row, not all 1,248."""
+    distributor and clicks Export should get that one row, not all 1,248.
+
+    Task 45: rebuilt on the shared bancostore.exports.export_as_csv
+    utility -- this view's own formula-injection guard (`_csv_safe`,
+    Task 23 follow-up) became that utility's `csv_safe_cell`, applied
+    unconditionally to every cell rather than by this view remembering
+    which specific columns are "risky" free text. Behavior unchanged
+    (verified: this view's own pre-existing test suite passes
+    unmodified), not a new feature."""
     if not is_admin_portal_staff(request.user):
         raise PermissionDenied
 
     distributors, _query, _status = _filtered_distributors(request)
 
-    response = HttpResponse(content_type="text/csv")
-    response["Content-Disposition"] = 'attachment; filename="distributors.csv"'
-    writer = csv.writer(response)
-    writer.writerow(
-        ["Full Name", "IR ID", "Phone Number", "Rank", "KYC Status", "Account Status"]
+    rows = (
+        [
+            distributor.full_name,
+            distributor.ir_id or "",
+            distributor.phone_number,
+            distributor.rank,
+            distributor.get_kyc_status_display(),
+            "Active" if distributor.user.is_active else "Suspended",
+        ]
+        for distributor in distributors
     )
-    for distributor in distributors:
-        writer.writerow(
-            [
-                _csv_safe(distributor.full_name),
-                distributor.ir_id or "",
-                _csv_safe(distributor.phone_number),
-                distributor.rank,
-                distributor.get_kyc_status_display(),
-                "Active" if distributor.user.is_active else "Suspended",
-            ]
-        )
-    return response
+    return export_as_csv(
+        "distributors.csv",
+        ["Full Name", "IR ID", "Phone Number", "Rank", "KYC Status", "Account Status"],
+        rows,
+    )
 
 
 @login_required(login_url="two_factor:login")

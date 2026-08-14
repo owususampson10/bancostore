@@ -10,6 +10,11 @@ urlpatterns = [
     path("kyc-review/<int:pk>/", views.kyc_review_detail, name="kyc_review_detail"),
     path("withdrawals/", views.withdrawal_review_queue, name="withdrawal_review_queue"),
     path(
+        "withdrawals/export/",
+        views.withdrawal_review_export,
+        name="withdrawal_review_export",
+    ),
+    path(
         "withdrawals/<int:pk>/",
         views.withdrawal_review_detail,
         name="withdrawal_review_detail",

@@ -11,16 +11,7 @@ import pytest
 
 from apps.catalog.models import Category, Product
 from apps.orders.models import Order, OrderItem
-
-try:
-    import weasyprint  # noqa: F401
-
-    _WEASYPRINT_AVAILABLE = True
-except OSError:
-    # WeasyPrint's own __init__ eagerly dlopen()s the system Pango
-    # library at import time -- this raises OSError, not ImportError,
-    # when Pango isn't present (source-driven-development, 2026-07-26).
-    _WEASYPRINT_AVAILABLE = False
+from tests.conftest import WEASYPRINT_AVAILABLE
 
 User = get_user_model()
 _ref_seq = count(1)
@@ -478,7 +469,7 @@ def test_invoice_template_renders_every_adr_0006_field(staff_client):
 
 @pytest.mark.django_db
 @pytest.mark.skipif(
-    not _WEASYPRINT_AVAILABLE,
+    not WEASYPRINT_AVAILABLE,
     reason=(
         "WeasyPrint's system-level Pango library isn't installed on this "
         "machine (2026-07-26: this Mac is macOS 12, an unsupported "

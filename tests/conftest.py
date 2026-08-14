@@ -9,6 +9,29 @@ from apps.notifications.sms import fake_outbox
 
 User = get_user_model()
 
+try:
+    import weasyprint  # noqa: F401
+
+    WEASYPRINT_AVAILABLE = True
+except OSError:
+    # WeasyPrint's own __init__ eagerly dlopen()s the system Pango
+    # library at import time -- this raises OSError, not ImportError,
+    # when Pango isn't present (source-driven-development, 2026-07-26;
+    # see project_weasyprint_pango_blocked_locally memory). Computed
+    # exactly ONCE here, in conftest.py (pytest always imports this
+    # before collecting any test module), rather than once per test
+    # file that needs it: Task 45 found a real, previously-latent bug
+    # by adding a second independent `try: import weasyprint` site --
+    # cffi's dlopen leaves corrupted internal C state after a first
+    # failed attempt, and a SECOND independent import attempt in the
+    # same process segfaults instead of cleanly re-raising OSError
+    # (reproduced directly: `pytest tests/unit/test_exports.py
+    # tests/feature/admin_portal/test_order_management.py` crashed the
+    # whole interpreter; either file alone, or CI where Pango installs
+    # cleanly via apt, does not). One canonical import site removes the
+    # possibility regardless of test collection order.
+    WEASYPRINT_AVAILABLE = False
+
 
 @pytest.fixture(autouse=True)
 def _clear_django_cache():
