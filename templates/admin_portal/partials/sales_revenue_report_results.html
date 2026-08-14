@@ -1,0 +1,161 @@
+{% load humanize %}
+<div id="report-results">
+
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant flex items-center gap-4">
+<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-primary flex-shrink-0">
+<span class="material-symbols-outlined" aria-hidden="true">payments</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Total Revenue</p>
+<p class="font-headline-md text-headline-md text-on-surface">GHS {{ report.revenue|floatformat:2|intcomma }}</p>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant flex items-center gap-4">
+<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-primary flex-shrink-0">
+<span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Total Orders</p>
+<p class="font-headline-md text-headline-md text-on-surface">{{ order_total|intcomma }}</p>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant flex items-center gap-4">
+<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-primary flex-shrink-0">
+<span class="material-symbols-outlined" aria-hidden="true">local_shipping</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Delivery Fees Collected</p>
+<p class="font-headline-md text-headline-md text-on-surface">GHS {{ delivery_fees_total|floatformat:2|intcomma }}</p>
+</div>
+</div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="px-6 py-4 border-b border-outline-variant">
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Revenue by {{ granularity|capfirst }}</h3>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full min-w-[320px] text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-3 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Period</th>
+<th class="px-6 py-3 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Revenue (GHS)</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for row in revenue_series %}
+<tr>
+<td class="px-6 py-3 font-body-md text-body-md text-on-surface">{{ row.period }}</td>
+<td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ row.revenue|floatformat:2|intcomma }}</td>
+</tr>
+{% empty %}
+<tr>
+<td colspan="2" class="px-6 py-8 text-center font-body-md text-body-md text-on-surface-variant">No revenue data for this range yet.</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="px-6 py-4 border-b border-outline-variant">
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Orders by Status</h3>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full min-w-[320px] text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-3 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Status</th>
+<th class="px-6 py-3 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Orders</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<tr><td class="px-6 py-3 font-body-md text-body-md text-on-surface">Pending</td><td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ report.order_status_counts.pending|intcomma }}</td></tr>
+<tr><td class="px-6 py-3 font-body-md text-body-md text-on-surface">Confirmed</td><td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ report.order_status_counts.confirmed|intcomma }}</td></tr>
+<tr><td class="px-6 py-3 font-body-md text-body-md text-on-surface">Processing</td><td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ report.order_status_counts.processing|intcomma }}</td></tr>
+<tr><td class="px-6 py-3 font-body-md text-body-md text-on-surface">Dispatched</td><td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ report.order_status_counts.dispatched|intcomma }}</td></tr>
+<tr><td class="px-6 py-3 font-body-md text-body-md text-on-surface">Delivered</td><td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ report.order_status_counts.delivered|intcomma }}</td></tr>
+<tr><td class="px-6 py-3 font-body-md text-body-md text-on-surface">Cancelled</td><td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ report.order_status_counts.cancelled|intcomma }}</td></tr>
+<tr><td class="px-6 py-3 font-body-md text-body-md text-on-surface">Refunded</td><td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ report.order_status_counts.refunded|intcomma }}</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden lg:col-span-2">
+<div class="px-6 py-4 border-b border-outline-variant">
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Delivery Fees by Zone</h3>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full min-w-[320px] text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-3 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Zone</th>
+<th class="px-6 py-3 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Fees Collected (GHS)</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<tr><td class="px-6 py-3 font-body-md text-body-md text-on-surface">Kumasi</td><td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ report.delivery_fees_by_zone.kumasi|floatformat:2|intcomma }}</td></tr>
+<tr><td class="px-6 py-3 font-body-md text-body-md text-on-surface">Accra</td><td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ report.delivery_fees_by_zone.accra|floatformat:2|intcomma }}</td></tr>
+<tr><td class="px-6 py-3 font-body-md text-body-md text-on-surface">Other Regions</td><td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ report.delivery_fees_by_zone.other_regions|floatformat:2|intcomma }}</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden lg:col-span-2">
+<div class="px-6 py-4 border-b border-outline-variant">
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Best-Selling Products</h3>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full min-w-[420px] text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-3 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Product</th>
+<th class="px-6 py-3 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Units Sold</th>
+<th class="px-6 py-3 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Revenue (GHS)</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for row in best_selling_products %}
+<tr>
+<td class="px-6 py-3 font-body-md text-body-md text-on-surface">{{ row.product_name }}</td>
+<td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ row.units_sold|intcomma }}</td>
+<td class="px-6 py-3 font-body-md text-body-md text-on-surface-variant text-right">{{ row.revenue|floatformat:2|intcomma }}</td>
+</tr>
+{% empty %}
+<tr>
+<td colspan="3" class="px-6 py-8 text-center font-body-md text-body-md text-on-surface-variant">No product sales for this range yet.</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant flex items-center gap-4">
+<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-primary flex-shrink-0">
+<span class="material-symbols-outlined" aria-hidden="true">group_add</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">New vs Returning Customers</p>
+<p class="font-headline-md text-headline-md text-on-surface">{{ customer_report.new_customers|intcomma }} <span class="font-body-md text-body-md font-normal text-on-surface-variant">new</span> · {{ customer_report.returning_customers|intcomma }} <span class="font-body-md text-body-md font-normal text-on-surface-variant">returning</span></p>
+</div>
+</div>
+
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant flex items-center gap-4">
+<div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-primary flex-shrink-0">
+<span class="material-symbols-outlined" aria-hidden="true">balance</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-secondary uppercase">Commissions vs Revenue</p>
+<p class="font-headline-md text-headline-md text-on-surface">GHS {{ commissions_report.commissions_paid|floatformat:2|intcomma }} <span class="font-body-md text-body-md font-normal text-on-surface-variant">of GHS {{ commissions_report.revenue|floatformat:2|intcomma }}</span></p>
+</div>
+</div>
+
+</div>
+</div>

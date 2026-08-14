@@ -380,6 +380,21 @@ PROMOTIONS_SETTINGS = {
     ),
 }
 
+REPORTING_SETTINGS = {
+    # Task 46b (ADR-0010). "Once a day" cadence, matching
+    # MATCHING_BONUS_INTERVAL_DAYS's own interval_days_field precedent
+    # exactly rather than inventing minutes-based granularity for
+    # something fundamentally daily -- a nightly rollup gives most of
+    # yesterday's orders (PENDING_ORDER_AUTO_CANCEL_HOURS is 24h) time to
+    # reach a stable status before this runs.
+    "REPORT_ROLLUP_INTERVAL_DAYS": (
+        1,
+        "How often the background job recomputes daily sales/revenue "
+        "report rollups",
+        "interval_days_field",
+    ),
+}
+
 KYC_SETTINGS = {
     "KYC_REQUIRED": (
         True,
@@ -692,6 +707,7 @@ CONSTANCE_CONFIG = {
     **ORDER_SETTINGS,
     **PRODUCT_AND_INVENTORY_SETTINGS,
     **PROMOTIONS_SETTINGS,
+    **REPORTING_SETTINGS,
     **KYC_SETTINGS,
     **IR_ID_NUMBER_SETTINGS,
     **PAYMENT_GATEWAY_SETTINGS,
@@ -707,6 +723,7 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "Order Settings": tuple(ORDER_SETTINGS),
     "Product & Inventory Settings": tuple(PRODUCT_AND_INVENTORY_SETTINGS),
     "Promotions Settings": tuple(PROMOTIONS_SETTINGS),
+    "Reporting Settings": tuple(REPORTING_SETTINGS),
     "KYC Settings": tuple(KYC_SETTINGS),
     "IR ID Number Settings": tuple(IR_ID_NUMBER_SETTINGS),
     "Payment Gateway Settings": tuple(PAYMENT_GATEWAY_SETTINGS),

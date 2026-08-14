@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Sales & Revenue Report {{ date_from }} to {{ date_to }}</title>
+<style>
+body { font-family: sans-serif; font-size: 11pt; color: #1a1a1a; }
+h1 { font-size: 16pt; }
+h2 { font-size: 13pt; margin-top: 1.5em; }
+table { width: 100%; border-collapse: collapse; margin-top: 0.5em; }
+th, td { border-bottom: 1px solid #ccc; padding: 0.35em; text-align: left; }
+td.amount, th.amount { text-align: right; }
+.total { font-weight: bold; }
+</style>
+</head>
+<body>
+{# Task 46b (ADR-0010). Plain, self-contained -- no Tailwind, matching
+   order_invoice.html's own precedent for WeasyPrint-rendered output. #}
+<h1>Sales & Revenue Report</h1>
+<p>{{ date_from }} to {{ date_to }}</p>
+<p class="total">Total Revenue: GHS {{ report.revenue }}</p>
+
+<h2>Revenue by {{ granularity|capfirst }}</h2>
+<table>
+<thead>
+<tr><th>Period</th><th class="amount">Revenue (GHS)</th></tr>
+</thead>
+<tbody>
+{% for row in revenue_series %}
+<tr><td>{{ row.period }}</td><td class="amount">{{ row.revenue }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>Orders by Status</h2>
+<table>
+<thead>
+<tr><th>Status</th><th class="amount">Orders</th></tr>
+</thead>
+<tbody>
+<tr><td>Pending</td><td class="amount">{{ report.order_status_counts.pending }}</td></tr>
+<tr><td>Confirmed</td><td class="amount">{{ report.order_status_counts.confirmed }}</td></tr>
+<tr><td>Processing</td><td class="amount">{{ report.order_status_counts.processing }}</td></tr>
+<tr><td>Dispatched</td><td class="amount">{{ report.order_status_counts.dispatched }}</td></tr>
+<tr><td>Delivered</td><td class="amount">{{ report.order_status_counts.delivered }}</td></tr>
+<tr><td>Cancelled</td><td class="amount">{{ report.order_status_counts.cancelled }}</td></tr>
+<tr><td>Refunded</td><td class="amount">{{ report.order_status_counts.refunded }}</td></tr>
+</tbody>
+</table>
+
+<h2>Delivery Fees by Zone</h2>
+<table>
+<thead>
+<tr><th>Zone</th><th class="amount">Fees Collected (GHS)</th></tr>
+</thead>
+<tbody>
+<tr><td>Kumasi</td><td class="amount">{{ report.delivery_fees_by_zone.kumasi }}</td></tr>
+<tr><td>Accra</td><td class="amount">{{ report.delivery_fees_by_zone.accra }}</td></tr>
+<tr><td>Other Regions</td><td class="amount">{{ report.delivery_fees_by_zone.other_regions }}</td></tr>
+</tbody>
+</table>
+
+<h2>Best-Selling Products</h2>
+<table>
+<thead>
+<tr><th>Product</th><th class="amount">Units Sold</th><th class="amount">Revenue (GHS)</th></tr>
+</thead>
+<tbody>
+{% for row in best_selling_products %}
+<tr><td>{{ row.product_name }}</td><td class="amount">{{ row.units_sold }}</td><td class="amount">{{ row.revenue }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>New vs Returning Customers</h2>
+<table>
+<tbody>
+<tr><td>New Customers</td><td class="amount">{{ customer_report.new_customers }}</td></tr>
+<tr><td>Returning Customers</td><td class="amount">{{ customer_report.returning_customers }}</td></tr>
+</tbody>
+</table>
+
+<h2>Commissions vs Revenue</h2>
+<table>
+<tbody>
+<tr><td>Revenue (GHS)</td><td class="amount">{{ commissions_report.revenue }}</td></tr>
+<tr><td>Commissions Paid (GHS)</td><td class="amount">{{ commissions_report.commissions_paid }}</td></tr>
+</tbody>
+</table>
+</body>
+</html>

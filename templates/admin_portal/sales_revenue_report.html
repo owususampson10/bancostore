@@ -1,0 +1,62 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% load humanize %}
+{% block title %}Sales & Revenue Report — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="mb-8 flex flex-wrap items-start justify-between gap-4">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface">Sales & Revenue Report</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">
+{% if last_rollup_run_at %}
+As of {{ last_rollup_run_at|date:"M j, Y \a\t g:i A" }} — figures update once daily.
+{% else %}
+No rollup has completed yet — figures will appear after the nightly report job first runs.
+{% endif %}
+</p>
+</div>
+<div class="flex gap-3">
+<a href="{% url 'admin_portal:sales_revenue_report_export_csv' %}?date_from={{ date_from|date:'Y-m-d' }}&date_to={{ date_to|date:'Y-m-d' }}&granularity={{ granularity }}" class="px-6 py-2.5 bg-white border border-outline-variant rounded-xl text-secondary font-label-md text-label-md hover:bg-surface-container transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>
+Export CSV
+</a>
+<a href="{% url 'admin_portal:sales_revenue_report_export_pdf' %}?date_from={{ date_from|date:'Y-m-d' }}&date_to={{ date_to|date:'Y-m-d' }}&granularity={{ granularity }}" class="px-6 py-2.5 bg-white border border-outline-variant rounded-xl text-secondary font-label-md text-label-md hover:bg-surface-container transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">picture_as_pdf</span>
+Export PDF
+</a>
+</div>
+</div>
+
+{% comment %}
+Real-time filtering: date/granularity changes re-fetch and swap
+#report-results, matching order_management_queue.html's own established
+htmx auto-filter pattern (no Filter button).
+{% endcomment %}
+<form id="report-filter-form"
+      hx-get="{% url 'admin_portal:sales_revenue_report' %}"
+      hx-target="#report-results"
+      hx-swap="outerHTML"
+      hx-push-url="true"
+      hx-trigger="change"
+      class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant mb-8">
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+<div class="md:col-span-3">
+{% include "admin_portal/_date_filter_field.html" with field_name="date_from" label="From" value=date_from initial_id="report-date-from-initial" %}
+</div>
+<div class="md:col-span-3">
+{% include "admin_portal/_date_filter_field.html" with field_name="date_to" label="To" value=date_to initial_id="report-date-to-initial" %}
+</div>
+<div class="md:col-span-6">
+<span class="font-label-md text-label-md text-on-surface-variant block mb-2">Group Revenue By</span>
+<div class="flex gap-2" role="radiogroup" aria-label="Group revenue by">
+{% for value, label in granularity_choices %}
+<label class="flex-1 text-center px-4 py-2.5 rounded-xl border font-label-md text-label-md cursor-pointer transition-all {% if granularity == value %}bg-primary text-on-primary border-primary{% else %}bg-white text-on-surface-variant border-outline-variant hover:bg-surface-container{% endif %}">
+<input type="radio" name="granularity" value="{{ value }}" class="sr-only" {% if granularity == value %}checked{% endif %}>
+{{ label }}
+</label>
+{% endfor %}
+</div>
+</div>
+</div>
+</form>
+
+{% include "admin_portal/partials/sales_revenue_report_results.html" %}
+{% endblock %}

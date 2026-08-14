@@ -119,6 +119,20 @@ class WalletTransaction(models.Model):
                 name="unique_wallet_reference_transaction_type",
             )
         ]
+        # Task 46b (ADR-0010): the commissions-paid-vs-revenue-earned
+        # report filters exactly this shape --
+        # transaction_type__in=COMMISSION_TRANSACTION_TYPES,
+        # created_at__range=(...) -- and no index covered either column
+        # before this, a real, pre-existing gap. transaction_type first:
+        # the report's IN-filter is always present and highly selective
+        # (commission types are a small subset of every TransactionType),
+        # narrowing the row set before the date range narrows it further.
+        indexes = [
+            models.Index(
+                fields=["transaction_type", "created_at"],
+                name="wallettxn_type_created_idx",
+            ),
+        ]
 
     def __str__(self):
         return (

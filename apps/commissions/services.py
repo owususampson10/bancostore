@@ -28,6 +28,22 @@ from bancostore.concurrency import (
 
 logger = logging.getLogger(__name__)
 
+# WalletTransaction rows that represent an actual commission payout --
+# deliberately not withdrawal debits/reversals or cooling-off refunds,
+# which move money for unrelated reasons and would inflate a number
+# meant to answer "how much did the network earn." Originally defined in
+# apps/admin_portal/views.py (Task 27, the admin dashboard's "This Week's
+# Commissions" figure); moved here (Task 46c) once apps.reporting.services
+# needed the identical constant and importing it from admin_portal/views.py
+# would have created a circular import (that module already imports FROM
+# apps.reporting.services for Task 46b) -- this module is the natural,
+# one-directional home both can depend on.
+COMMISSION_TRANSACTION_TYPES = (
+    WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+    WalletTransaction.TransactionType.BINARY_BONUS,
+    WalletTransaction.TransactionType.MATCHING_BONUS,
+)
+
 
 def calculate_direct_referral_bonus(pv: int) -> Decimal:
     """DIRECT_REFERRAL_BONUS_RATE% x PV, treating 1 PV as GHS 1 -- confirmed

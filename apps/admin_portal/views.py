@@ -22,6 +22,7 @@ from constance.utils import get_values
 from apps.catalog.models import Category, Product, Review
 from apps.catalog.services import normalize_primary_image
 from apps.commissions.models import CommissionCycleRun
+from apps.commissions.services import COMMISSION_TRANSACTION_TYPES
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
 from apps.orders.models import Order, OrderItem
@@ -36,6 +37,14 @@ from apps.pages.social_icons import SOCIAL_ICONS, detect_platform_from_url
 from apps.platform_settings.admin import BancostoreConstanceForm
 from apps.platform_settings.config import CONSTANCE_CONFIG, CONSTANCE_CONFIG_FIELDSETS
 from apps.promotions.models import Banner, DiscountCode
+from apps.reporting.models import ReportRollupRun
+from apps.reporting.services import (
+    bucket_revenue_series,
+    get_best_selling_products_report,
+    get_commissions_vs_revenue_report,
+    get_new_vs_returning_customers_report,
+    get_order_summary_report,
+)
 from apps.wallet.models import WalletTransaction
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import (
@@ -52,7 +61,7 @@ from bancostore.concurrency import (
     retry_on_lock_contention,
     select_for_update_nowait_if_supported,
 )
-from bancostore.exports import export_as_csv
+from bancostore.exports import export_as_csv, export_as_pdf
 
 from .forms import (
     _INPUT_CLASS,
@@ -102,17 +111,6 @@ LOW_STOCK_THRESHOLD = 10
 # cancelled/refunded are already done. Dispatched is excluded too -- it's
 # in transit, waiting on the courier, not on an admin action.
 ORDERS_AWAITING_ACTION_STATUSES = (Order.Status.CONFIRMED, Order.Status.PROCESSING)
-
-# WalletTransaction rows that represent an actual commission payout, for
-# the dashboard's "This Week's Commissions" figure -- deliberately not
-# withdrawal debits/reversals or cooling-off refunds, which move money
-# for unrelated reasons and would inflate a number meant to answer "how
-# much did the network earn this week."
-COMMISSION_TRANSACTION_TYPES = (
-    WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
-    WalletTransaction.TransactionType.BINARY_BONUS,
-    WalletTransaction.TransactionType.MATCHING_BONUS,
-)
 
 
 @login_required(login_url="two_factor:login")
@@ -1042,6 +1040,204 @@ def order_invoice_pdf(request, pk):
 
 
 # ---------------------------------------------------------------------------
+# Sales & Revenue Reporting (Task 46b, ADR-0010)
+# ---------------------------------------------------------------------------
+
+_REPORT_DEFAULT_RANGE_DAYS = 30
+_REPORT_GRANULARITIES = ("day", "week", "month")
+
+
+def _sales_revenue_report_params(request):
+    """Shared by the report page and both export views -- mirrors
+    _filtered_orders' own "one function, every consumer reads the same
+    filtered set" shape, so an export always matches exactly what the
+    screen currently shows. Defaults to the trailing 30 days (today
+    inclusive) when no explicit range is given, a reasonable first-visit
+    window rather than an unbounded "since the dawn of time" default.
+
+    Task 46c: also computes best-selling-products, new-vs-returning-
+    customers, and commissions-vs-revenue for the same date range --
+    one shared params function for the whole report page (46b's revenue/
+    status/zone sections plus 46c's three), not a second near-duplicate
+    helper."""
+    today = timezone.now().date()
+    date_from = parse_date(request.GET.get("date_from", "").strip()) or (
+        today - timedelta(days=_REPORT_DEFAULT_RANGE_DAYS - 1)
+    )
+    date_to = parse_date(request.GET.get("date_to", "").strip()) or today
+
+    granularity = request.GET.get("granularity", "day").strip()
+    if granularity not in _REPORT_GRANULARITIES:
+        granularity = "day"
+
+    report = get_order_summary_report(date_from, date_to)
+    revenue_series = bucket_revenue_series(
+        report["daily_series"], granularity=granularity
+    )
+    best_selling_products = get_best_selling_products_report(date_from, date_to)
+    customer_report = get_new_vs_returning_customers_report(date_from, date_to)
+    commissions_report = get_commissions_vs_revenue_report(date_from, date_to)
+
+    return (
+        date_from,
+        date_to,
+        granularity,
+        report,
+        revenue_series,
+        best_selling_products,
+        customer_report,
+        commissions_report,
+    )
+
+
+@login_required(login_url="two_factor:login")
+def sales_revenue_report(request):
+    """Task 46b (ADR-0010). Reads exclusively from DailyOrderRollup via
+    get_order_summary_report -- never a live Order-table scan, per
+    ADR-0010's own decision. A date with no rollup row yet (today, or a
+    day the nightly job hasn't reached) simply shows no data for that
+    day; there is no live fallback."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    (
+        date_from,
+        date_to,
+        granularity,
+        report,
+        revenue_series,
+        best_selling_products,
+        customer_report,
+        commissions_report,
+    ) = _sales_revenue_report_params(request)
+    last_run = (
+        ReportRollupRun.objects.filter(succeeded=True).order_by("-run_at").first()
+    )
+
+    context = {
+        "date_from": date_from,
+        "date_to": date_to,
+        "granularity": granularity,
+        "granularity_choices": [
+            ("day", "Day"),
+            ("week", "Week"),
+            ("month", "Month"),
+        ],
+        "report": report,
+        "revenue_series": revenue_series,
+        "order_total": sum(report["order_status_counts"].values()),
+        "delivery_fees_total": sum(report["delivery_fees_by_zone"].values()),
+        "best_selling_products": best_selling_products,
+        "customer_report": customer_report,
+        "commissions_report": commissions_report,
+        "last_rollup_run_at": last_run.run_at if last_run else None,
+        "active_nav": "reports",
+    }
+
+    if request.htmx:
+        return render(
+            request, "admin_portal/partials/sales_revenue_report_results.html", context
+        )
+
+    return render(request, "admin_portal/sales_revenue_report.html", context)
+
+
+@login_required(login_url="two_factor:login")
+def sales_revenue_report_export_csv(request):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    (
+        date_from,
+        date_to,
+        granularity,
+        report,
+        revenue_series,
+        best_selling_products,
+        customer_report,
+        commissions_report,
+    ) = _sales_revenue_report_params(request)
+
+    rows = [
+        ["Revenue", report["revenue"]],
+        [],
+        [f"Revenue by {granularity}"],
+        ["Period", "Revenue (GHS)"],
+        *[[row["period"], row["revenue"]] for row in revenue_series],
+        [],
+        ["Orders by Status"],
+        *[
+            [label, report["order_status_counts"][key]]
+            for key, label in [
+                ("pending", "Pending"),
+                ("confirmed", "Confirmed"),
+                ("processing", "Processing"),
+                ("dispatched", "Dispatched"),
+                ("delivered", "Delivered"),
+                ("cancelled", "Cancelled"),
+                ("refunded", "Refunded"),
+            ]
+        ],
+        [],
+        ["Delivery Fees by Zone (GHS)"],
+        ["Kumasi", report["delivery_fees_by_zone"]["kumasi"]],
+        ["Accra", report["delivery_fees_by_zone"]["accra"]],
+        ["Other Regions", report["delivery_fees_by_zone"]["other_regions"]],
+        [],
+        ["Best-Selling Products"],
+        ["Product", "Units Sold", "Revenue (GHS)"],
+        *[
+            [row["product_name"], row["units_sold"], row["revenue"]]
+            for row in best_selling_products
+        ],
+        [],
+        ["New vs Returning Customers"],
+        ["New Customers", customer_report["new_customers"]],
+        ["Returning Customers", customer_report["returning_customers"]],
+        [],
+        ["Commissions vs Revenue"],
+        ["Revenue (GHS)", commissions_report["revenue"]],
+        ["Commissions Paid (GHS)", commissions_report["commissions_paid"]],
+    ]
+    return export_as_csv(
+        f"sales-revenue-report-{date_from}-to-{date_to}.csv",
+        [f"Sales & Revenue Report: {date_from} to {date_to}"],
+        rows,
+    )
+
+
+@login_required(login_url="two_factor:login")
+def sales_revenue_report_export_pdf(request):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    (
+        date_from,
+        date_to,
+        granularity,
+        report,
+        revenue_series,
+        best_selling_products,
+        customer_report,
+        commissions_report,
+    ) = _sales_revenue_report_params(request)
+    return export_as_pdf(
+        f"sales-revenue-report-{date_from}-to-{date_to}.pdf",
+        "admin_portal/sales_revenue_report_pdf.html",
+        {
+            "date_from": date_from,
+            "date_to": date_to,
+            "granularity": granularity,
+            "report": report,
+            "revenue_series": revenue_series,
+            "best_selling_products": best_selling_products,
+            "customer_report": customer_report,
+            "commissions_report": commissions_report,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Catalog Management (Task 26) -- Category CRUD
 # ---------------------------------------------------------------------------
 
@@ -1629,6 +1825,7 @@ _GROUP_ICONS = {
     "Order Settings": "receipt_long",
     "Product & Inventory Settings": "inventory_2",
     "Promotions Settings": "sell",
+    "Reporting Settings": "monitoring",
     "KYC Settings": "fact_check",
     "IR ID Number Settings": "badge",
     "Payment Gateway Settings": "point_of_sale",

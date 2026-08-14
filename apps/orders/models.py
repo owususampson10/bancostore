@@ -140,7 +140,14 @@ class Order(models.Model):
         max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True
     )
     confirmed_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    # Task 46b (ADR-0010): indexed for the first time here -- both
+    # order_management_queue's existing admin date-range filter
+    # (_filtered_orders) and this task's new reporting rollup job scan
+    # this column, and it had no index at all before this, a real,
+    # pre-existing gap this project's own "hundreds of thousands of
+    # users" scale reasoning (see the status field's own comment above)
+    # already applies to.
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     # Task 18a (ADR-0006, Section 5.3: "Admin can update the order status
     # and add a tracking note"). Optional -- not every status update
     # needs one.

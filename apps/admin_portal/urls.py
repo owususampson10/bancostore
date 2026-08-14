@@ -49,6 +49,21 @@ urlpatterns = [
         name="order_invoice_pdf",
     ),
     path(
+        "reports/sales-revenue/",
+        views.sales_revenue_report,
+        name="sales_revenue_report",
+    ),
+    path(
+        "reports/sales-revenue/export.csv",
+        views.sales_revenue_report_export_csv,
+        name="sales_revenue_report_export_csv",
+    ),
+    path(
+        "reports/sales-revenue/export.pdf",
+        views.sales_revenue_report_export_pdf,
+        name="sales_revenue_report_export_pdf",
+    ),
+    path(
         "catalog/categories/", views.catalog_category_list, name="catalog_category_list"
     ),
     path(

@@ -7139,13 +7139,18 @@ daily rollup tables (matching the PV ledger's own event-driven-aggregate precede
 Celery report-cache job, or a bounded live-query lookback window — and write it up.
 
 **Acceptance criteria:**
-- [ ] A new ADR (`docs/decisions/0010-...md`, matching this codebase's existing ADR numbering)
-      records the decision and rationale, following Tasks 4/9/12/13/16/17/18/19/20/35's own
-      precedent
-- [ ] The decision is confirmed with the user before 46b/46c's implementation starts
+- [x] A new ADR (`docs/decisions/0010-reporting-architecture.md`, matching this codebase's existing
+      ADR numbering) records the decision and rationale, following Tasks 4/9/12/13/16/17/18/19/20/35's
+      own precedent — a hybrid: `Order.created_at` gains a missing index; revenue/orders-per-status/
+      delivery-fee-by-zone/best-selling-products are computed daily by a Celery Beat job into small
+      rollup tables (reusing the exact scheduled-job shape already proven for Binary/Matching Bonus);
+      new-vs-returning-customers and commissions-vs-revenue stay live, indexed, date-bounded queries
+      since they don't reduce to a per-day aggregate
+- [x] The decision is confirmed with the user before 46b/46c's implementation starts — confirmed
+      2026-08-14
 
 **Verification:**
-- [ ] ADR reviewed and confirmed by the user
+- [x] ADR reviewed and confirmed by the user
 
 **Dependencies:** None
 
@@ -7156,41 +7161,114 @@ Celery report-cache job, or a bounded live-query lookback window — and write i
 #### 46b: Revenue, order-status, and delivery-zone reports
 
 **Acceptance criteria:**
-- [ ] Admin sees total revenue by day/week/month, orders-per-status counts, and delivery fees
-      collected by zone, all with real numbers from the live database
-- [ ] Each report respects a date-range filter and returns correct numbers for that range
-      specifically (a real test, not just "the page renders")
-- [ ] Each report is exportable as CSV and PDF via Task 45's utility
+- [x] Admin sees total revenue by day/week/month, orders-per-status counts, and delivery fees
+      collected by zone, all with real numbers from the live database — a new
+      `admin_portal:sales_revenue_report` screen (`Reports` sidebar nav item), reading exclusively
+      from `DailyOrderRollup`/`compute_daily_rollup` (ADR-0010's own decision — never a live
+      `Order`-table scan). Day/Week/Month is a single toggle re-bucketing the same already-fetched
+      daily series in Python (`bucket_revenue_series`), not three separate SQL query variants
+- [x] Each report respects a date-range filter and returns correct numbers for that range
+      specifically (a real test, not just "the page renders") — the existing themed calendar
+      popover (`_date_filter_field.html`) reused directly, real-time htmx filtering matching
+      `order_management_queue`'s own established pattern
+- [x] Each report is exportable as CSV and PDF via Task 45's utility — both export views share the
+      exact same filtered params as the on-screen report (`_sales_revenue_report_params`), so an
+      export always matches what's currently shown
 
 **Verification:**
-- [ ] Feature tests: seeded-data cross-checks per report, date-range boundary correctness
-- [ ] Live-browser verified against real `runserver`, export downloads checked against the screen
-- [ ] Full suite green
+- [x] Feature tests: seeded-data cross-checks per report, date-range boundary correctness (26 tests
+      across `tests/unit/reporting/` and `tests/feature/reporting/`)
+- [x] Live-browser verified against real `runserver` (2026-08-14): logged in as a real admin
+      (TOTP generated from the device's own key, no new dependency added), seeded 10 days of real
+      `DailyOrderRollup` data, confirmed the revenue/orders/delivery-fee figures, the Day/Week/Month
+      toggle re-bucketing live, the date-range calendar picker re-filtering live, and the CSV
+      export's downloaded file content matching the on-screen figures exactly. PDF export confirmed
+      wired correctly (raises the exact expected, already-documented local-only `OSError: cannot
+      load library 'pango-1.0-0'` from inside `sales_revenue_report_export_pdf` itself, not a crash
+      elsewhere) — real PDF generation is CI-verified only, matching Task 18e/45's own established
+      convention
+- [x] Full suite green (1625 passed, 4 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section)
 
-**Dependencies:** 45, 46a
+**Along the way, two real gaps found and fixed, neither silently worked around:**
+- A genuine SQLite quirk: `Sum()` over a `DecimalField(decimal_places=2)` doesn't preserve the
+  original 2dp scale (a summed `Decimal("20.00")` came back as `Decimal("20")`), caught by this
+  task's own CSV export test expecting `"20.00"` and getting `"20"`. Fixed at the root in
+  `get_order_summary_report` itself (`Decimal.quantize(..., ROUND_HALF_UP)`, matching this
+  codebase's own established money-rounding convention from `apps/commissions/services.py`) rather
+  than patching the CSV/PDF/HTML templates independently — the PDF template had the identical
+  latent bug with no test yet to catch it.
+- `apps.commissions.tasks._sync_periodic_task_interval` was reused directly by the new report-rollup
+  Celery task since the behavior needed is identical (an interval-schedule sync), not just similar
+  — but it was a leading-underscore "private" name in a different app. Extracted to a new
+  `bancostore/celery_beat.py` (matching `bancostore/concurrency.py`'s own precedent for shared
+  cross-cutting infrastructure) before building on it, rather than reaching across the app boundary.
+  Verified behavior-preserving: all 197 pre-existing `apps/commissions`/`apps/withdrawal` task tests
+  pass completely unmodified after the extraction.
 
-**Files likely touched:** new `apps/reporting` app, `apps/admin_portal/urls.py`/`views.py`, new
-admin_portal report templates, `tests/feature/reporting/test_revenue_reports.py`
+**Dependencies:** 45, 46a — **closed 2026-08-14.**
+
+**Files touched:** new `apps/reporting/` app (`models.py` — `DailyOrderRollup`, `DailyProductSales`,
+`ReportRollupRun`; `services.py` — `compute_daily_rollup`, `get_order_summary_report`,
+`bucket_revenue_series`; `tasks.py` — `compute_yesterdays_rollup` Celery Beat driver; a
+`backfill_report_rollup` management command; 2 migrations including the periodic-task seed), new
+`bancostore/celery_beat.py` (extracted `sync_periodic_task_interval`), `apps/commissions/tasks.py`
+(updated to import the extracted function), `apps/withdrawal/tasks.py` (docstring reference only),
+`apps/orders/models.py` (`Order.created_at` gains a missing index), `apps/wallet/models.py`
+(`WalletTransaction` gains a `(transaction_type, created_at)` index for 46c's future use),
+`apps/platform_settings/config.py` (`REPORT_ROLLUP_INTERVAL_DAYS` setting), `apps/admin_portal/
+views.py`/`urls.py`, 3 new admin_portal templates (`sales_revenue_report.html`, its results
+partial, `sales_revenue_report_pdf.html`), `templates/admin_portal/base_dashboard.html` (Reports
+nav item), `docs/decisions/0010-reporting-architecture.md` (new ADR), plus `tests/unit/reporting/`
+(4 files) and `tests/feature/reporting/` (1 file).
 
 **Estimated scope:** M
 
 #### 46c: Best-selling products + customer reports
 
 **Acceptance criteria:**
-- [ ] Admin sees a best-selling-products report and a new-vs-returning-customers report, both real
-      numbers, both exportable via Task 45
-- [ ] Commissions-paid-vs-revenue-earned figure is correct against a seeded-data cross-check
-      (reusing Task 27's own `COMMISSION_TRANSACTION_TYPES` constant, not a fresh definition)
+- [x] Admin sees a best-selling-products report and a new-vs-returning-customers report, both real
+      numbers, both exportable via Task 45 — added as three more sections on the same
+      `sales_revenue_report` screen 46b built, sharing its date-range filter and export views (one
+      report page per the source doc's Section 12.4 grouping, not three separate screens)
+- [x] Commissions-paid-vs-revenue-earned figure is correct against a seeded-data cross-check
+      (reusing Task 27's own `COMMISSION_TRANSACTION_TYPES` constant, not a fresh definition) — the
+      constant itself was relocated from `apps/admin_portal/views.py` to `apps/commissions/
+      services.py` first (see below), then imported from there by both the dashboard and this report
 
 **Verification:**
-- [ ] Feature tests: seeded-data cross-checks per report
-- [ ] Live-browser verified, export downloads checked
-- [ ] Full suite green, CI green on real MySQL
+- [x] Feature tests: seeded-data cross-checks per report (13 unit tests in `tests/unit/reporting/
+      test_product_and_customer_reports.py`, 5 more feature tests on the report screen/exports)
+- [x] Live-browser verified (2026-08-14), export downloads checked: seeded real
+      `DailyProductSales`/`Order`/`WalletTransaction` rows, confirmed all three new sections
+      (Best-Selling Products, New vs Returning Customers, Commissions vs Revenue) render correct
+      figures on-screen — including catching that the default 30-day window also picks up
+      unrelated pre-existing dev-DB history from earlier sessions' own testing, cross-checked
+      directly against the database to confirm this is correct live-query behavior, not a bug — and
+      that the CSV export includes all three new sections matching the screen exactly. PDF export
+      confirmed wired correctly (same documented local-only Pango `OSError`, raised from the right
+      view, not a template error)
+- [x] Full suite green (1642 passed, 5 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section)
 
-**Dependencies:** 45, 46a
+**Along the way:** `COMMISSION_TRANSACTION_TYPES` (Task 27, originally defined in
+`apps/admin_portal/views.py` for the dashboard's "This Week's Commissions" figure) was relocated to
+`apps/commissions/services.py` before this report could reuse it — importing it from
+`admin_portal/views.py` directly would have created a circular import, since that module already
+imports FROM `apps.reporting.services` (Task 46b). `apps/commissions/services.py` already holds
+comparable domain constants (`MAX_MATCHING_BONUS_WALK_DEPTH`) and already imports
+`WalletTransaction`, making it a clean one-directional home. Verified behavior-preserving: all 103
+pre-existing `test_dashboard.py`/`apps/commissions` tests pass completely unmodified after the move.
 
-**Files likely touched:** `apps/reporting/services.py`, `apps/admin_portal/views.py`, new
-admin_portal templates, `tests/feature/reporting/test_product_and_customer_reports.py`
+**Dependencies:** 45, 46a — **closed 2026-08-14.**
+
+**Files touched:** `apps/reporting/services.py` (`get_best_selling_products_report`,
+`get_new_vs_returning_customers_report`, `get_commissions_vs_revenue_report`),
+`apps/commissions/services.py` (`COMMISSION_TRANSACTION_TYPES`, relocated from admin_portal),
+`apps/admin_portal/views.py` (import fix + report screen/export extensions), 2 templates
+(`sales_revenue_report_results.html` partial, `sales_revenue_report_pdf.html`), plus
+`tests/unit/reporting/test_product_and_customer_reports.py` (new) and
+`tests/feature/reporting/test_sales_revenue_report.py` (extended).
 
 **Estimated scope:** M
 

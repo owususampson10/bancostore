@@ -112,7 +112,7 @@ def _withdrawal_payout_ids_query():
 def _sync_withdrawal_day_crontab():
     """Keeps the real Celery Beat CrontabSchedule in step with the
     admin-editable WITHDRAWAL_DAY constance setting -- mirrors
-    apps.commissions.tasks._sync_periodic_task_interval's own reasoning
+    bancostore.celery_beat.sync_periodic_task_interval's own reasoning
     (a live-editable setting sitting in the same admin fieldset as other
     settings that already take effect live must not be silently
     decorative), but for a crontab schedule, not an interval one -- no
