@@ -129,3 +129,20 @@ def free_delivery_threshold(request):
         )
         threshold = 500
     return {"free_delivery_threshold": threshold}
+
+
+# CodeRabbit (PR #76) flagged that this banner degrades gracefully to the
+# seeded default on a Constance read failure while
+# apps.orders.services.calculate_delivery_fee -- the money-path -- reads
+# the same setting directly with no fallback, and asked for a shared
+# resolver unifying both. Deliberately not done: the asymmetry is correct
+# by design, not an inconsistency to fix. This banner is decorative --
+# showing a possibly-stale threshold on a real Constance/Redis outage is
+# harmless. calculate_delivery_fee computing an ORDER'S ACTUAL DELIVERY
+# FEE is money-adjacent; silently falling back to a guessed value there
+# (which the "shared resolver" fix would require) risks charging a
+# customer the wrong amount without anyone noticing, which is strictly
+# worse than the current behavior (checkout fails loudly, matching this
+# codebase's established "fail loud on the money path" convention --
+# see calculate_delivery_fee's own docstring for the identical reasoning
+# applied to an unknown delivery_zone).

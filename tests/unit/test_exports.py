@@ -79,6 +79,24 @@ def test_export_as_csv_writes_every_data_row_in_order():
     assert lines[1:] == ["First", "Second", "Third"]
 
 
+def test_export_as_csv_neutralizes_formula_injection_in_the_header_row():
+    """CodeRabbit (PR #76): every CURRENT caller passes a hardcoded, safe
+    header (a literal list of column names), but this is a general-
+    purpose shared utility -- a future caller that ever builds a header
+    dynamically shouldn't inherit an XSS-shaped gap for free just
+    because only the data rows were sanitized. A substring check, not an
+    exact line match: csv.writer itself quote-wraps and doubles the
+    embedded `"` characters in this value per standard CSV escaping
+    rules, independent of csv_safe_cell's own leading-quote prefix --
+    matching the existing data-cell version of this same test below."""
+    response = export_as_csv(
+        "widgets.csv", ['=HYPERLINK("https://evil.example")'], [["Widget"]]
+    )
+
+    lines = response.content.decode().splitlines()
+    assert lines[0].startswith("\"'=HYPERLINK")
+
+
 def test_export_as_csv_neutralizes_formula_injection_in_a_data_cell():
     """Every cell is run through csv_safe_cell -- a caller must never
     have to remember which specific columns are "risky" free text."""

@@ -33,13 +33,18 @@ def csv_safe_cell(value):
 def export_as_csv(filename, header_row, rows):
     """Returns an HttpResponse of type text/csv, attachment-disposed as
     `filename`. `rows` is an iterable of iterables (e.g. a list of lists
-    or tuples) -- every cell is passed through csv_safe_cell before
-    being written, regardless of type (str/Decimal/int/etc., all
-    stringified by csv_safe_cell itself)."""
+    or tuples) -- every cell, header row included, is passed through
+    csv_safe_cell before being written, regardless of type
+    (str/Decimal/int/etc., all stringified by csv_safe_cell itself).
+    Every current caller passes a hardcoded, safe header (a literal list
+    of column names), but this is a general-purpose shared utility --
+    sanitizing the header too (CodeRabbit, PR #76) means a future caller
+    that ever builds a header dynamically doesn't inherit an
+    injection-shaped gap for free."""
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     writer = csv.writer(response)
-    writer.writerow(header_row)
+    writer.writerow([csv_safe_cell(cell) for cell in header_row])
     for row in rows:
         writer.writerow([csv_safe_cell(cell) for cell in row])
     return response
