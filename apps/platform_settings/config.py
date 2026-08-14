@@ -260,10 +260,6 @@ WITHDRAWAL_AND_PAYOUT_SETTINGS = {
         "Tax percentage deducted from every withdrawal and sent to GRA",
         "percentage_field",
     ),
-    "ESCROW_RESERVE_RATE": (
-        Decimal("5"),
-        "Percentage of all product revenue held at GCB Bank",
-    ),
     "AUTO_APPROVE_WITHDRAWALS_ENABLED": (
         False,
         "Whether small withdrawals are approved automatically",
@@ -391,6 +387,27 @@ REPORTING_SETTINGS = {
         1,
         "How often the background job recomputes daily sales/revenue " "report rollups",
         "interval_days_field",
+    ),
+}
+
+COMPLIANCE_SETTINGS = {
+    # Task 47a. Was a plain, unbounded 2-tuple (ESCROW_RESERVE_RATE) --
+    # a doubt-driven-development review before implementation caught it
+    # missing the percentage_field bound WITHHOLDING_TAX_RATE/
+    # BINARY_BONUS_RATE/MATCHING_BONUS_RATE all already carry (an admin
+    # could otherwise type 750 or a negative value with zero validation).
+    # Also relocated here from WITHDRAWAL_AND_PAYOUT_SETTINGS -- this new
+    # fieldset is where Task 47b's compliance-alert-email and Task 47e's
+    # audit-log-retention settings will land too, not withdrawal-specific.
+    "ESCROW_RESERVE_RATE": (
+        Decimal("5"),
+        # Honesty fix, same review: the seeded help text used to say
+        # "held at GCB Bank" -- this is explicitly an internal-only
+        # compliance ledger, never a real external bank integration
+        # (user-confirmed), so the admin-facing text must say so.
+        "Percentage of product revenue held internally as a notional "
+        "compliance reserve (not a real external bank account)",
+        "percentage_field",
     ),
 }
 
@@ -707,6 +724,7 @@ CONSTANCE_CONFIG = {
     **PRODUCT_AND_INVENTORY_SETTINGS,
     **PROMOTIONS_SETTINGS,
     **REPORTING_SETTINGS,
+    **COMPLIANCE_SETTINGS,
     **KYC_SETTINGS,
     **IR_ID_NUMBER_SETTINGS,
     **PAYMENT_GATEWAY_SETTINGS,
@@ -723,6 +741,7 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "Product & Inventory Settings": tuple(PRODUCT_AND_INVENTORY_SETTINGS),
     "Promotions Settings": tuple(PROMOTIONS_SETTINGS),
     "Reporting Settings": tuple(REPORTING_SETTINGS),
+    "Compliance Settings": tuple(COMPLIANCE_SETTINGS),
     "KYC Settings": tuple(KYC_SETTINGS),
     "IR ID Number Settings": tuple(IR_ID_NUMBER_SETTINGS),
     "Payment Gateway Settings": tuple(PAYMENT_GATEWAY_SETTINGS),

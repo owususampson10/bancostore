@@ -14,6 +14,7 @@ import pytest
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.binary_tree.services import BinaryTree
 from apps.catalog.models import Category, Product
+from apps.compliance.models import EscrowLedger, EscrowTransaction
 from apps.distributors.models import Distributor
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import cancel_or_refund_order, confirm_order_payment
@@ -105,6 +106,73 @@ def test_cancelling_a_confirmed_order_restores_stock_automatically(mock_sms, moc
     product.refresh_from_db()
     assert order.status == Order.Status.CANCELLED
     assert product.stock == 5
+
+
+# ---------------------------------------------------------------------------
+# Task 47a: escrow reversal (rolling reserve)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_cancelling_a_confirmed_order_reverses_its_escrow_credit(mock_sms, mock_mail):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("1000.00"))
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 100000)
+    ledger = EscrowLedger.objects.get(pk=1)
+    assert ledger.balance == Decimal("50.00")  # 5% default rate credited
+
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED)
+
+    ledger.refresh_from_db()
+    assert ledger.balance == Decimal("0.00")
+    assert EscrowTransaction.objects.filter(
+        order_id=order.pk, transaction_type=EscrowTransaction.TransactionType.REVERSAL
+    ).exists()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_refunding_a_confirmed_order_reverses_its_escrow_credit(mock_sms, mock_mail):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("1000.00"))
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 100000)
+    ledger = EscrowLedger.objects.get(pk=1)
+    assert ledger.balance == Decimal("50.00")
+
+    cancel_or_refund_order(order.pk, Order.Status.REFUNDED, restock=True)
+
+    ledger.refresh_from_db()
+    assert ledger.balance == Decimal("0.00")
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_cancelling_an_already_cancelled_order_does_not_double_reverse_escrow(
+    mock_sms, mock_mail
+):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("1000.00"))
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 100000)
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED)
+
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED)  # idempotent no-op
+
+    ledger = EscrowLedger.objects.get(pk=1)
+    assert ledger.balance == Decimal("0.00")
+    assert (
+        EscrowTransaction.objects.filter(
+            order_id=order.pk,
+            transaction_type=EscrowTransaction.TransactionType.REVERSAL,
+        ).count()
+        == 1
+    )
 
 
 # ---------------------------------------------------------------------------

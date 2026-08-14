@@ -1826,6 +1826,7 @@ _GROUP_ICONS = {
     "Product & Inventory Settings": "inventory_2",
     "Promotions Settings": "sell",
     "Reporting Settings": "monitoring",
+    "Compliance Settings": "gavel",
     "KYC Settings": "fact_check",
     "IR ID Number Settings": "badge",
     "Payment Gateway Settings": "point_of_sale",

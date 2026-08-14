@@ -7285,26 +7285,96 @@ code.
 #### 47a: Escrow reserve ledger (elevated rigor — `doubt-driven-development` first)
 
 **Acceptance criteria:**
-- [ ] An escrow balance increases by exactly the admin-configured percentage (13.12's Escrow
+- [x] An escrow balance increases by exactly the admin-configured percentage (13.12's Escrow
       Reserve Percentage, seeded at 5% per the source doc but not hardcoded) of each confirmed
-      order's product revenue
-- [ ] The balance is a real stored running total, atomically updated at order confirmation
+      order's product revenue — resolved as NET revenue (`Order.subtotal - Order.discount_amount`,
+      never `delivery_fee`) per the `doubt-driven-development` review's own recommendation: a
+      discount reduces what the platform actually collected for products, so escrow shouldn't be
+      held against money never received. `Order.subtotal - discount_amount` can never go negative —
+      `order_amounts_sane`'s own `CheckConstraint` already enforces `discount_amount <= subtotal`.
+- [x] The balance is a real stored running total, atomically updated at order confirmation
       (matching `Wallet.balance`'s own `F()`-based convention, Task 12) — never a live `SUM()` over
       all historical orders on every page load
 
+**Beyond the original acceptance criteria — user-directed, not decided unilaterally:** asked the
+user how this class of problem is resolved in real-world systems before locking in a design.
+Real payment processors (Stripe/PayPal/Paystack's own merchant "rolling reserve" holdbacks) tie a
+reserve to the specific transaction it came from and release it if that transaction is refunded —
+a fundamentally different shape from Binary/Matching Bonus's own "never clawed back" precedent
+(those are third-party payouts, not a reserve held against a specific order's own revenue, so that
+precedent doesn't transfer). User chose the rolling-reserve model: `cancel_or_refund_order`
+(Task 18b) now reverses the exact originally-credited amount (looked up from the order's own
+`CREDIT` `EscrowTransaction` row, never recomputed from a since-changed live rate — matching
+Task 19's sponsor-bonus-reversal snapshot convention) whenever a confirmed order is
+cancelled/refunded, unconditional on `pv_earned`/restock choice, same as escrow's own credit-time
+placement.
+
 **Verification:**
-- [ ] `doubt-driven-development` review complete and findings folded in before this sub-task starts
-- [ ] Feature tests: correct percentage credit on confirmation, a concurrency test matching the
-      wallet's own established convention for this exact class of race
-- [ ] Escrow balance verified against the database directly after a real seeded order confirmation,
-      not just the UI
-- [ ] Full suite green, CI green on real MySQL
+- [x] `doubt-driven-development` review complete and findings folded in before this sub-task
+      started — **two rounds**, both pre-implementation: round 1 on the credit-path design (1
+      Critical/4 High/4 Medium/2 Low — a legitimate admin-set 0% rate would have broken checkout
+      platform-wide via an unhandled exception inside `confirm_order_payment`'s atomic block;
+      `EscrowTransaction.order` as a real FK would conflict with this project's own established
+      "audit records survive Order deletion" convention; a singleton ledger row needed a NOWAIT
+      lock unlike `Wallet`'s naturally-sharded per-distributor rows; no admin-lockdown plan, the
+      exact gap `WalletAdmin` shipped once already; a `get_or_create(pk=1)` bootstrap race, an
+      unconditional-for-every-order placement fix, a `rate_applied` snapshot field, and the
+      constance help text dishonestly claiming a real GCB Bank integration). Round 2, after the
+      user's rolling-reserve decision, reviewed the reversal mechanics specifically (2 High/5
+      Medium/1 Low — a queryset-vs-function call-shape bug in the reversal pseudocode itself; the
+      sign-only `CheckConstraint` needing a type-aware replacement once reversals introduce negative
+      amounts; an unconditional compound `UniqueConstraint(order_id, transaction_type)` instead of a
+      *conditional* one — this codebase already found and fixed the identical MySQL "conditional
+      unique indexes are silently not created" gap once on `WalletTransaction`; a documented
+      caller-lock contract; `.get()` instead of `.filter().first()` for the credit lookup, to fail
+      loud rather than silently pick one if the one-credit-per-order invariant is ever violated).
+- [x] Feature tests: correct percentage credit on confirmation (including net-of-discount and
+      delivery-fee-exclusion cases), a concurrency test matching the wallet's own established
+      convention for this exact class of race (5 threads, `retry_on_lock_contention` per attempt,
+      proving the singleton row's balance sums correctly under real contention) — 15 unit tests in
+      `tests/unit/compliance/test_escrow_ledger.py` plus feature-level tests wired into
+      `tests/unit/orders/test_confirm_order_payment.py` (guest-order escrow credit, proving it's
+      NOT gated behind the distributor-only PV block) and `tests/unit/orders/
+      test_cancel_or_refund_order.py` (cancel/refund reversal, double-cancel idempotency)
+- [x] Escrow balance verified against the database directly after a real seeded order confirmation,
+      not just the UI — every new test asserts `EscrowLedger.objects.get(pk=1).balance` directly
+- [x] Full suite green (1666 passed, 5 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section). **CI on real
+      MySQL not yet run** — pending a decision on whether to batch 47a-47e like Task 46's sub-tasks
+      or push this sub-task on its own.
 
-**Dependencies:** None
+**A real test-infrastructure bug found and fixed along the way, not silently worked around:**
+wiring `credit_escrow` into `confirm_order_payment` broke 4 pre-existing `@pytest.mark.django_db
+(transaction=True)` concurrency tests with `EscrowLedger.DoesNotExist` — Django's
+`TransactionTestCase` (what `transaction=True` uses) flushes all tables after each test, and per
+Django's own documented behavior, flush does NOT restore rows inserted by data migrations, so only
+the *first* `transaction=True` test in a pytest session still had the migration-seeded `pk=1` row.
+First attempted the documented Django fix (`serialized_rollback=True`) — this "fixed" the 4 tests
+in isolation but broke them again under the FULL suite with a `django_content_type` `UNIQUE`
+constraint collision, a known Django/pytest-django interaction gotcha when `serialized_rollback`
+is mixed with other non-serialized `TransactionTestCase`-style tests in the same session. Reverted
+that and fixed at the actual root instead: `credit_escrow` now defensively calls
+`EscrowLedger.objects.get_or_create(pk=1)` before its NOWAIT lock, mirroring
+`apps.wallet.services.credit()`'s own lazy-creation shape exactly — robust to whatever state the
+test DB happens to be in, while the migration seed remains the primary/expected mechanism in every
+real environment (migrations always precede traffic). Also fixed in passing: a stale docstring
+comment on `apps/orders/models.py::OrderCycleFailure` claiming "no delete-lock exists on
+OrderAdmin" — `OrderAdmin.has_delete_permission` already returns `False`, matching its siblings;
+the real reason `order_id` stays a plain int is that direct-shell/ORM deletion outside the admin
+UI is a real, already-documented practice in this project (Task 24's production smoke-test
+cleanup).
 
-**Files likely touched:** new `apps/compliance` app (`EscrowLedger` or similar), `apps/orders/
-services.py` (`confirm_order_payment` hook), `apps/platform_settings/config.py`,
-`tests/unit/compliance/test_escrow_ledger.py`
+**Dependencies:** None — **closed 2026-08-14.**
+
+**Files touched:** new `apps/compliance/` app (`models.py` — `EscrowLedger`, `EscrowTransaction`;
+`services.py` — `credit_escrow`, `reverse_escrow`; `admin.py` — hard-locked from the first commit;
+2 migrations including the `EscrowLedger(pk=1)` seed), `apps/orders/services.py`
+(`confirm_order_payment`/`cancel_or_refund_order` hooks), `apps/orders/models.py` (stale docstring
+fix), `apps/platform_settings/config.py` (new `COMPLIANCE_SETTINGS` fieldset — fixes the
+pre-existing `ESCROW_RESERVE_RATE` stub, which had no `percentage_field` bound and dishonest "held
+at GCB Bank" help text), `apps/admin_portal/views.py` (`_GROUP_ICONS` entry), `bancostore/
+settings.py` (`INSTALLED_APPS`), plus `tests/unit/compliance/test_escrow_ledger.py` (new),
+`tests/unit/orders/test_confirm_order_payment.py` and `test_cancel_or_refund_order.py` (extended).
 
 **Estimated scope:** M
 

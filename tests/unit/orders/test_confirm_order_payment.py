@@ -14,6 +14,7 @@ from constance import config
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.binary_tree.services import BinaryTree
 from apps.catalog.models import Category, Product
+from apps.compliance.models import EscrowLedger, EscrowTransaction
 from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError
 from apps.orders.models import Order, OrderItem
@@ -104,6 +105,36 @@ def test_guest_order_confirms_and_never_credits_pv(mock_verify, mock_sms, mock_m
     assert order.pv_earned == 0
     product.refresh_from_db()
     assert product.stock == 4
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_guest_order_still_credits_escrow_despite_never_crediting_pv(
+    mock_verify, mock_sms, mock_mail
+):
+    """Task 47a. A doubt-driven-development finding against an earlier
+    draft: escrow is "product revenue" for EVERY confirmed order, not
+    just distributor purchases -- an earlier draft would have placed the
+    credit_escrow() call inside the distributor-only PV-credit block
+    above, silently escrowing nothing for guest/customer orders. This is
+    the guest case (no PV credited at all, per the sibling test above),
+    proving escrow doesn't share that restriction."""
+    product = _make_product(stock=5)
+    order = _make_order(customer=None, total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.pv_earned == 0  # confirms this really is the no-PV case
+    ledger = EscrowLedger.objects.get(pk=1)
+    assert ledger.balance == Decimal("22.50")  # 5% default rate of 450
+    txn = EscrowTransaction.objects.get(order_id=order.pk)
+    assert txn.transaction_type == EscrowTransaction.TransactionType.CREDIT
+    assert txn.amount == Decimal("22.50")
 
 
 @pytest.mark.django_db
