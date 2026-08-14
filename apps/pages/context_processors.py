@@ -1,8 +1,9 @@
 import logging
 
-from constance import config
 from django.core.cache import cache
 from django.templatetags.static import static
+
+from constance import config
 
 from bancostore.json_ld import dumps_for_script_tag
 
