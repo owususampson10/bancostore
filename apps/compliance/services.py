@@ -1,16 +1,27 @@
 import logging
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.core.mail import send_mail
 from django.db import transaction
-from django.db.models import F
+from django.db.models import Count, F, Q
+from django.utils import timezone
 
 from constance import config
 
+from apps.orders.models import Order
 from bancostore.concurrency import select_for_update_nowait_if_supported
 
-from .models import EscrowLedger, EscrowTransaction
+from .models import ComplianceAlertState, EscrowLedger, EscrowTransaction
 
 logger = logging.getLogger(__name__)
+
+# Order.Status values that never actually collected payment -- excluded
+# from the retail/distributor ratio's denominator, matching this
+# codebase's own established exclusion set (independently defined in
+# apps.admin_portal.views.dashboard and apps.reporting.services rather
+# than a shared import -- this project's own accepted precedent for this
+# narrowly-scoped 3-tuple).
+_UNPAID_STATUSES = (Order.Status.PENDING, Order.Status.CANCELLED, Order.Status.REFUNDED)
 
 
 def credit_escrow(order) -> None:
@@ -169,3 +180,118 @@ def reverse_escrow(order_id) -> None:
         logger.info(
             "reverse_escrow: order_id=%s amount=%s", order_id, -credit_txn.amount
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 47b: retail/distributor ratio + compliance alert
+# ---------------------------------------------------------------------------
+
+
+def get_retail_distributor_ratio():
+    """Task 47b. The percentage of currently-paid orders (excludes
+    _UNPAID_STATUSES, matching this codebase's own revenue-figure
+    convention) that are genuine retail sales -- Order.pv_earned == 0,
+    the existing real distributor-purchase signal already established in
+    apps.orders.services (a distributor order earns PV, a retail order
+    never does). "Currently paid" reads live off Order.status, so a
+    since-cancelled/refunded order correctly stops counting in either
+    bucket -- and a cancelled order's pv_earned is reset to 0 by
+    apps.orders.services.cancel_or_refund_order regardless, so it could
+    never wrongly count as a distributor sale even if it weren't excluded
+    by status alone.
+
+    Returns None if there are no paid orders yet (the ratio is undefined,
+    not zero) -- callers must handle this, never divide by zero."""
+    paid_orders = Order.objects.exclude(status__in=_UNPAID_STATUSES)
+    counts = paid_orders.aggregate(
+        total=Count("pk"), retail=Count("pk", filter=Q(pv_earned=0))
+    )
+    if counts["total"] == 0:
+        return None
+    return (Decimal(counts["retail"]) / Decimal(counts["total"]) * 100).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+
+
+def check_retail_ratio_and_alert() -> None:
+    """Task 47b. Called after every order confirmation and cancellation/
+    refund (the only two events that can move the ratio) -- always
+    OUTSIDE the caller's own transaction.atomic() lock, since this sends
+    real email (external I/O), matching this codebase's established
+    "never hold a lock across external I/O for a notification" standard
+    (Task 16g).
+
+    Fires an email to COMPLIANCE_ALERT_EMAIL only on the TRANSITION from
+    above/at-threshold to below RETAIL_PV_MINIMUM_PERCENT -- not on every
+    call while still below, which would flood the configured inbox once
+    persistently below threshold. See ComplianceAlertState's own
+    docstring for the full reasoning. A blank COMPLIANCE_ALERT_EMAIL (the
+    seeded default -- no admin has configured one yet) or an email
+    failure is logged, never raised -- this must not break order
+    confirmation/cancellation, which already committed by the time this
+    runs.
+
+    **Accepted limitation, not silently missed:** the read-then-write of
+    ComplianceAlertState here is deliberately NOT lock-protected, since
+    that would mean holding a lock across the send_mail() call itself --
+    exactly what the Task 16g standard this docstring cites exists to
+    prevent. Under genuinely concurrent order confirmations landing in
+    the same narrow window, this can theoretically send one duplicate
+    alert email rather than exactly one. Unlike a double-credited wallet
+    or escrow balance, the consequence is a harmless duplicate
+    notification, not a financial/data-integrity error -- judged
+    disproportionate to add a redesign for, matching this codebase's own
+    established pattern of documenting an accepted, narrow-blast-radius
+    risk rather than engineering it away (e.g. PvDailyBucket's fungible-
+    pool limitation, Task 13/14's deferred circuit breaker)."""
+    ratio = get_retail_distributor_ratio()
+    if ratio is None:
+        return
+
+    threshold = config.RETAIL_PV_MINIMUM_PERCENT
+    currently_below = ratio < threshold
+    state, _ = ComplianceAlertState.objects.get_or_create(pk=1)
+
+    if currently_below and not state.is_below_threshold:
+        recipient = config.COMPLIANCE_ALERT_EMAIL.strip()
+        if recipient:
+            try:
+                send_mail(
+                    subject="Bancostore compliance alert: retail ratio below threshold",
+                    message=(
+                        f"The retail/distributor sales ratio has dropped to "
+                        f"{ratio}%, below the configured minimum of "
+                        f"{threshold}%. Please review distributor purchase "
+                        f"activity."
+                    ),
+                    from_email=None,
+                    recipient_list=[recipient],
+                )
+                # Only set on a genuine successful send -- the state
+                # transition below still records "we're now below
+                # threshold" regardless of delivery outcome, so a blank
+                # recipient or an SMTP failure doesn't cause this same
+                # order to be re-evaluated as a fresh transition (and
+                # therefore re-attempted) on every subsequent order while
+                # still below threshold -- matching this codebase's
+                # established "best effort, no retry storm" convention
+                # for notification delivery (_send_confirmation_notifications).
+                state.last_alert_sent_at = timezone.now()
+            except Exception:
+                logger.exception(
+                    "check_retail_ratio_and_alert: failed to send alert email " "to %s",
+                    recipient,
+                )
+        else:
+            logger.warning(
+                "check_retail_ratio_and_alert: ratio %s%% is below the %s%% "
+                "threshold but COMPLIANCE_ALERT_EMAIL is not configured -- "
+                "no alert sent.",
+                ratio,
+                threshold,
+            )
+        state.is_below_threshold = True
+        state.save(update_fields=["is_below_threshold", "last_alert_sent_at"])
+    elif not currently_below and state.is_below_threshold:
+        state.is_below_threshold = False
+        state.save(update_fields=["is_below_threshold"])

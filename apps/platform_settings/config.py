@@ -409,6 +409,21 @@ COMPLIANCE_SETTINGS = {
         "compliance reserve (not a real external bank account)",
         "percentage_field",
     ),
+    # Task 47b. 70% per the source doc (Section 13.12) -- the minimum
+    # share of paid orders that must be genuine retail sales (Order.pv_earned
+    # == 0), not distributor self-purchases, matching the real-world "70/30
+    # rule" common to anti-pyramid-scheme MLM regulation.
+    "RETAIL_PV_MINIMUM_PERCENT": (
+        Decimal("70"),
+        "Minimum percentage of paid orders that must be retail (non-"
+        "distributor) sales before a compliance alert fires",
+        "percentage_field",
+    ),
+    "COMPLIANCE_ALERT_EMAIL": (
+        "",
+        "Notified when the retail/distributor ratio drops below "
+        "Retail PV Minimum (%)",
+    ),
 }
 
 KYC_SETTINGS = {

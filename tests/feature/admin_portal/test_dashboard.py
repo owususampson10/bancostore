@@ -347,3 +347,54 @@ def test_view_all_orders_links_to_the_order_management_queue(staff_client):
     response = staff_client.get(_dashboard_url())
 
     assert reverse("admin_portal:order_management_queue").encode() in response.content
+
+
+# ---------------------------------------------------------------------------
+# Task 47b: retail/distributor ratio
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_retail_ratio_shows_no_paid_orders_yet_when_there_are_none(staff_client):
+    response = staff_client.get(_dashboard_url())
+
+    assert response.context["retail_distributor_ratio"] is None
+    assert b"No paid orders yet" in response.content
+
+
+@pytest.mark.django_db
+def test_retail_ratio_is_computed_from_paid_orders_pv_earned(staff_client):
+    _make_order(pv_earned=0)
+    _make_order(pv_earned=0)
+    _make_order(pv_earned=0)
+    _make_order(pv_earned=60)  # the one distributor purchase
+
+    response = staff_client.get(_dashboard_url())
+
+    assert response.context["retail_distributor_ratio"] == Decimal("75.00")
+    assert response.context["retail_ratio_below_threshold"] is False
+
+
+@pytest.mark.django_db
+def test_retail_ratio_below_threshold_is_flagged(staff_client):
+    _make_order(pv_earned=60)
+    _make_order(pv_earned=60)
+    _make_order(pv_earned=0)  # 1/3 retail = 33.33%, well under the 70% default
+
+    response = staff_client.get(_dashboard_url())
+
+    assert response.context["retail_distributor_ratio"] == Decimal("33.33")
+    assert response.context["retail_ratio_below_threshold"] is True
+    assert b"below threshold" in response.content
+
+
+@pytest.mark.django_db
+def test_retail_ratio_excludes_unpaid_orders(staff_client):
+    _make_order(pv_earned=0, status=Order.Status.CONFIRMED)
+    _make_order(pv_earned=60, status=Order.Status.PENDING)  # never collected payment
+    _make_order(pv_earned=60, status=Order.Status.CANCELLED)
+
+    response = staff_client.get(_dashboard_url())
+
+    # Only the one confirmed, retail order counts -- 100% retail, not 33%.
+    assert response.context["retail_distributor_ratio"] == Decimal("100.00")

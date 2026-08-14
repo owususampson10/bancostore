@@ -141,3 +141,30 @@ class EscrowTransaction(models.Model):
             f"EscrowTransaction<order_id={self.order_id} "
             f"{self.transaction_type} {self.amount}>"
         )
+
+
+class ComplianceAlertState(models.Model):
+    """Task 47b. A single platform-wide row (pk=1, lazily created via
+    get_or_create -- no dedicated seed migration needed, unlike
+    EscrowLedger: this has no concurrent-write/money-adjacent risk, it's
+    updated at most once per order confirmation/cancellation and tolerates
+    a `get_or_create` race trivially, since the worst case is one extra
+    row-creation attempt, not a lost credit).
+
+    Tracks whether the retail/distributor ratio (apps.compliance.services
+    .get_retail_distributor_ratio) is CURRENTLY below
+    RETAIL_PV_MINIMUM_PERCENT, so
+    apps.compliance.services.check_retail_ratio_and_alert can fire an
+    email only on the TRANSITION into that state -- not on every order
+    confirmed while already below threshold (which would flood the
+    configured COMPLIANCE_ALERT_EMAIL inbox once persistently below,
+    defeating the point of an alert). Clearing is_below_threshold once
+    the ratio recovers means a future dip below threshold fires a fresh
+    alert instead of staying silent forever after the first one."""
+
+    is_below_threshold = models.BooleanField(default=False)
+    last_alert_sent_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"ComplianceAlertState<is_below_threshold={self.is_below_threshold}>"

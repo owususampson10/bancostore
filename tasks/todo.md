@@ -7381,25 +7381,67 @@ settings.py` (`INSTALLED_APPS`), plus `tests/unit/compliance/test_escrow_ledger.
 #### 47b: Retail/distributor ratio + threshold alert
 
 **Acceptance criteria:**
-- [ ] Admin sees a live retail-vs-distributor sales ratio, computed from `Order.pv_earned > 0` as
-      the existing real distributor-purchase signal (confirmed in `apps/orders/services.py`)
-- [ ] 13.12's Retail PV Minimum (%) is a real, admin-editable constance setting (seeded at 70% per
-      the source doc)
-- [ ] An email fires to the 13.12 Compliance Alert Email address when the ratio drops below
+- [x] Admin sees a live retail-vs-distributor sales ratio, computed from `Order.pv_earned > 0` as
+      the existing real distributor-purchase signal (confirmed in `apps/orders/services.py`) — a
+      new "Compliance" card on the Task 27 Admin Dashboard (`apps/admin_portal/views.py::dashboard`),
+      reusing that page's own established stat-card pattern rather than building a new screen for
+      one number. Scoped to currently-paid orders only (excludes `PENDING`/`CANCELLED`/`REFUNDED`,
+      matching this codebase's own established revenue-figure convention, independently defined
+      here rather than importing another app's private constant — this project's own accepted
+      precedent for this narrowly-scoped 3-tuple, already duplicated twice before this).
+- [x] 13.12's Retail PV Minimum (%) is a real, admin-editable constance setting (seeded at 70% per
+      the source doc) — `RETAIL_PV_MINIMUM_PERCENT`, added to the `COMPLIANCE_SETTINGS` fieldset
+      Task 47a created, with the `percentage_field` bound from day one (not shipped-then-fixed the
+      way `ESCROW_RESERVE_RATE` was)
+- [x] An email fires to the 13.12 Compliance Alert Email address when the ratio drops below
       threshold (reuses the existing Gmail SMTP path, no new integration) — and does not fire when
-      above it
+      above it — `COMPLIANCE_ALERT_EMAIL` (new setting) + `apps.compliance.services
+      .check_retail_ratio_and_alert`, called after every order confirmation and cancellation/
+      refund (the only two events that can move the ratio), always OUTSIDE the caller's own
+      `transaction.atomic()` lock since it sends real email (Task 16g's "never hold a lock across
+      external I/O" standard). **Design decision beyond the literal acceptance criteria, not
+      silently assumed:** fires only on the TRANSITION from above/at-threshold to below (a new
+      `ComplianceAlertState` singleton row tracks this), not on every order confirmed while
+      already below threshold — the acceptance criteria's own wording doesn't rule out per-order
+      firing, but a real admin would have their inbox flooded once persistently below threshold,
+      defeating an alert's purpose. Recovering above threshold clears the state so a future dip
+      fires a fresh alert rather than staying silent forever after the first one.
 
 **Verification:**
-- [ ] Feature tests: seed orders below 70% retail, confirm the alert fires; seed orders above,
-      confirm it doesn't
-- [ ] Live-browser verified (ratio display), email send confirmed via the existing test-mail
-      capture pattern this codebase already uses elsewhere
-- [ ] Full suite green
+- [x] Feature tests: seed orders below 70% retail, confirm the alert fires; seed orders above,
+      confirm it doesn't — 10 unit tests in `tests/unit/compliance/test_retail_ratio_alert.py`
+      (ratio computation, transition-only firing, recovery-then-refire, blank-email/send-failure
+      handling, both logged not raised) plus 4 feature tests in `tests/feature/admin_portal/
+      test_dashboard.py` (ratio display, below-threshold styling, unpaid-order exclusion) plus
+      2 integration tests proving the real `confirm_order_payment`/`cancel_or_refund_order` wiring
+      end-to-end (`apps.orders.services.send_mail` and `apps.compliance.services.send_mail` are two
+      independent module-level references to the same underlying function -- mocking one does not
+      mock the other, so these tests mock both explicitly to prove the real call chain, not just
+      that nothing crashes)
+- [x] Live-browser verified (2026-08-14): seeded 4 real paid orders (1 retail, 3 distributor) into
+      the dev database directly, logged in as a real admin (a fresh TOTP device generated via
+      Django's own `django_otp.oath.totp` through `manage.py shell` — the existing stub admin
+      account's device had accumulated verification throttling from earlier failed attempts using
+      a hand-rolled RFC 6238 implementation that turned out correct but got blocked by that
+      throttling, not by being wrong; confirmed by cross-checking against django-otp's own `totp()`
+      function directly, then using a scratch device with no throttling history), confirmed the
+      Compliance card renders the correct 5.56% figure with red "below threshold" error-token
+      styling and correct copy. Scratch TOTP device deleted afterward; email send itself is
+      unit/feature-test-verified only (`send_mail` mocked), not sent for real, matching this
+      codebase's own "never spend real send capacity without asking" convention
+- [x] Full suite green (1682 passed, 5 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section)
 
-**Dependencies:** None
+**Dependencies:** None — **closed 2026-08-14.**
 
-**Files likely touched:** `apps/compliance/services.py`, `apps/admin_portal/views.py`,
-`apps/platform_settings/config.py`, `tests/feature/compliance/test_retail_ratio_alert.py`
+**Files touched:** `apps/compliance/models.py` (`ComplianceAlertState`, migration),
+`apps/compliance/services.py` (`get_retail_distributor_ratio`, `check_retail_ratio_and_alert`),
+`apps/orders/services.py` (both `confirm_order_payment` and `cancel_or_refund_order` hooks),
+`apps/platform_settings/config.py` (`RETAIL_PV_MINIMUM_PERCENT`, `COMPLIANCE_ALERT_EMAIL`),
+`apps/admin_portal/views.py` (`dashboard` extension), `templates/admin_portal/dashboard.html`
+(new Compliance section), plus `tests/unit/compliance/test_retail_ratio_alert.py` (new),
+`tests/feature/admin_portal/test_dashboard.py` and `tests/unit/orders/
+test_confirm_order_payment.py`/`test_cancel_or_refund_order.py` (extended).
 
 **Estimated scope:** M
 

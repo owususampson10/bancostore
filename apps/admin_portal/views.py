@@ -23,6 +23,7 @@ from apps.catalog.models import Category, Product, Review
 from apps.catalog.services import normalize_primary_image
 from apps.commissions.models import CommissionCycleRun
 from apps.commissions.services import COMMISSION_TRANSACTION_TYPES
+from apps.compliance.services import get_retail_distributor_ratio
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
 from apps.orders.models import Order, OrderItem
@@ -166,6 +167,14 @@ def dashboard(request):
 
     recent_orders = Order.objects.order_by("-created_at", "-pk")[:6]
 
+    # Task 47b. None (not 0) when there are no paid orders yet -- an
+    # undefined ratio, distinct from a genuinely-0%-retail platform.
+    retail_distributor_ratio = get_retail_distributor_ratio()
+    retail_ratio_below_threshold = (
+        retail_distributor_ratio is not None
+        and retail_distributor_ratio < config.RETAIL_PV_MINIMUM_PERCENT
+    )
+
     context = {
         "pending_kyc_count": pending_kyc_count,
         "pending_withdrawals_count": pending_withdrawals_count,
@@ -178,6 +187,9 @@ def dashboard(request):
         "orders_this_week_value": orders_this_week_value,
         "commissions_this_week": commissions_this_week,
         "recent_orders": recent_orders,
+        "retail_distributor_ratio": retail_distributor_ratio,
+        "retail_pv_minimum_percent": config.RETAIL_PV_MINIMUM_PERCENT,
+        "retail_ratio_below_threshold": retail_ratio_below_threshold,
         "active_nav": "dashboard",
     }
     return render(request, "admin_portal/dashboard.html", context)
