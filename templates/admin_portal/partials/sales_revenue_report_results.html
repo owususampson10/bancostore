@@ -1,6 +1,24 @@
 {% load humanize %}
 <div id="report-results">
 
+{% comment %}
+Task 46b/CodeRabbit fix: these export links live INSIDE the htmx-swapped
+partial (not sales_revenue_report.html's static page shell) specifically
+so a filter change updates them too -- otherwise Export CSV/PDF would
+keep exporting whatever date_from/date_to/granularity the page loaded
+with, silently ignoring the admin's new filter selection.
+{% endcomment %}
+<div class="flex justify-end gap-3 mb-6">
+<a href="{% url 'admin_portal:sales_revenue_report_export_csv' %}?date_from={{ date_from|date:'Y-m-d' }}&date_to={{ date_to|date:'Y-m-d' }}&granularity={{ granularity }}" class="px-6 py-2.5 bg-white border border-outline-variant rounded-xl text-secondary font-label-md text-label-md hover:bg-surface-container transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>
+Export CSV
+</a>
+<a href="{% url 'admin_portal:sales_revenue_report_export_pdf' %}?date_from={{ date_from|date:'Y-m-d' }}&date_to={{ date_to|date:'Y-m-d' }}&granularity={{ granularity }}" class="px-6 py-2.5 bg-white border border-outline-variant rounded-xl text-secondary font-label-md text-label-md hover:bg-surface-container transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">picture_as_pdf</span>
+Export PDF
+</a>
+</div>
+
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
 <div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant flex items-center gap-4">
 <div class="w-12 h-12 bg-primary-fixed rounded-full flex items-center justify-center text-primary flex-shrink-0">

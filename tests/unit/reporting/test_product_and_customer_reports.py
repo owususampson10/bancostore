@@ -243,6 +243,12 @@ def test_sums_only_commission_transaction_types_in_range():
         amount=Decimal("50.00"),
         created_on=date(2026, 8, 2),
     )
+    _credit_wallet(
+        distributor,
+        transaction_type=WalletTransaction.TransactionType.MATCHING_BONUS,
+        amount=Decimal("25.00"),
+        created_on=date(2026, 8, 2),
+    )
     # A withdrawal-related transaction type must never inflate this figure.
     _credit_wallet(
         distributor,
@@ -253,7 +259,7 @@ def test_sums_only_commission_transaction_types_in_range():
 
     report = get_commissions_vs_revenue_report(date(2026, 8, 1), date(2026, 8, 2))
 
-    assert report["commissions_paid"] == Decimal("150.00")
+    assert report["commissions_paid"] == Decimal("175.00")
 
 
 @pytest.mark.django_db

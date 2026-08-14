@@ -185,6 +185,37 @@ def test_product_sales_sums_units_and_revenue_across_orders():
 
 
 @pytest.mark.django_db
+def test_product_sales_groups_by_product_even_when_snapshot_names_differ():
+    """CodeRabbit-caught real bug: OrderItem.product_name is a per-order-
+    line snapshot, so a product renamed mid-day used to split into two
+    groups for the same DailyProductSales(date, product) unique
+    constraint -- bulk_create then raised an IntegrityError and rolled
+    back the whole day's rollup (compute_daily_rollup is one atomic
+    transaction)."""
+    product = _make_product(price=Decimal("450.00"))
+    order_one = _make_order(
+        status=Order.Status.CONFIRMED, created_on=TARGET_DATE, total=Decimal("450.00")
+    )
+    _add_item(order_one, product, quantity=1)
+    order_two = _make_order(
+        status=Order.Status.CONFIRMED, created_on=TARGET_DATE, total=Decimal("450.00")
+    )
+    item_two = _add_item(order_two, product, quantity=1)
+    # Simulate the product having been renamed between the two orders --
+    # item_two's snapshot no longer matches the live (or item_one's)
+    # product_name.
+    OrderItem.objects.filter(pk=item_two.pk).update(
+        product_name=f"{product.name} (Renamed)"
+    )
+
+    compute_daily_rollup(TARGET_DATE)  # must not raise
+
+    sales = DailyProductSales.objects.get(date=TARGET_DATE, product=product)
+    assert sales.units_sold == 2
+    assert sales.revenue == Decimal("900.00")
+
+
+@pytest.mark.django_db
 def test_product_sales_excludes_items_from_unpaid_orders():
     product = _make_product()
     pending = _make_order(

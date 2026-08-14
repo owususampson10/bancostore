@@ -1,8 +1,8 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
-from django.db.models import Count, F, Min, Sum
+from django.db.models import Count, Exists, F, Min, OuterRef, Sum
 from django.utils import timezone
 
 from apps.commissions.services import COMMISSION_TRANSACTION_TYPES
@@ -17,6 +17,23 @@ from .models import DailyOrderRollup, DailyProductSales, ReportRollupRun
 # "pending is unpaid, cancelled/refunded gave the money back, neither is
 # real revenue" convention exactly (Task 27).
 _UNPAID_STATUSES = (Order.Status.PENDING, Order.Status.CANCELLED, Order.Status.REFUNDED)
+
+
+def _day_start(target_date):
+    """Timezone-aware midnight for a calendar date. Used to build
+    half-open [start, end) timestamp ranges instead of filtering with
+    `created_at__date=...` -- a CodeRabbit-caught real perf gap: the
+    `__date` lookup wraps Order.created_at in a DATE() transform, which
+    MySQL cannot use the plain column index (ADR-0010) to range-scan.
+    A `created_at__gte=start` / `created_at__lt=end` pair compares the
+    column directly, so the index stays usable."""
+    return timezone.make_aware(datetime.combine(target_date, time.min))
+
+
+def _range_bounds(start_date, end_date):
+    """Half-open [start, end) timestamp bounds covering every moment of
+    every calendar day from start_date through end_date, inclusive."""
+    return _day_start(start_date), _day_start(end_date + timedelta(days=1))
 
 
 def compute_daily_rollup(target_date):
@@ -51,7 +68,8 @@ def compute_daily_rollup(target_date):
 
 
 def _compute_daily_order_rollup(target_date):
-    day_orders = Order.objects.filter(created_at__date=target_date)
+    day_start, day_end = _range_bounds(target_date, target_date)
+    day_orders = Order.objects.filter(created_at__gte=day_start, created_at__lt=day_end)
     # "Paid" orders for this day -- the same subset revenue and delivery
     # fees are both scoped to, matching _UNPAID_STATUSES' own reasoning.
     paid_orders = day_orders.exclude(status__in=_UNPAID_STATUSES)
@@ -96,13 +114,24 @@ def _compute_daily_order_rollup(target_date):
 
 
 def _compute_daily_product_sales(target_date):
-    paid_orders = Order.objects.filter(created_at__date=target_date).exclude(
-        status__in=_UNPAID_STATUSES
-    )
+    day_start, day_end = _range_bounds(target_date, target_date)
+    paid_orders = Order.objects.filter(
+        created_at__gte=day_start, created_at__lt=day_end
+    ).exclude(status__in=_UNPAID_STATUSES)
+    # Grouped by product_id ALONE, not (product_id, product_name):
+    # OrderItem.product_name is a per-order-line snapshot (see
+    # DailyProductSales' own docstring), so a product renamed mid-day
+    # would otherwise split into two groups for the same
+    # DailyProductSales(date, product) unique constraint -- a real
+    # CodeRabbit-caught bug where bulk_create would then violate that
+    # constraint and roll back the whole day's rollup. Min() picks one
+    # deterministic snapshot name for the day rather than an arbitrary
+    # "last row wins" DB-dependent choice.
     product_sales = (
         OrderItem.objects.filter(order__in=paid_orders)
-        .values("product_id", "product_name")
+        .values("product_id")
         .annotate(
+            product_name=Min("product_name"),
             units=Sum("quantity"),
             revenue=Sum(F("unit_price") * F("quantity")),
         )
@@ -303,35 +332,36 @@ def get_new_vs_returning_customers_report(start_date, end_date):
     during this window); "returning" if their earliest-ever paid order
     is before start_date. Since every customer_id considered here comes
     from an order already inside the range, their earliest order can
-    never fall after end_date -- only the lower bound needs checking."""
+    never fall after end_date -- only the lower bound needs checking.
+
+    Classification stays entirely database-side (a `returning` COUNT via
+    a correlated Exists subquery, not a Python list()/dict() of every
+    matching customer id and first-order timestamp) -- a CodeRabbit-
+    caught real memory/query-overhead gap for a wide date range with
+    many distinct customers."""
+    start_at, end_at = _range_bounds(start_date, end_date)
     orders_in_range = Order.objects.filter(
-        created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
+        created_at__gte=start_at,
+        created_at__lt=end_at,
         customer_id__isnull=False,
     ).exclude(status__in=_UNPAID_STATUSES)
 
-    customer_ids = list(
-        orders_in_range.values_list("customer_id", flat=True).distinct()
-    )
-    if not customer_ids:
+    total_customers = orders_in_range.values("customer_id").distinct().count()
+    if total_customers == 0:
         return {"new_customers": 0, "returning_customers": 0}
 
-    first_order_by_customer = dict(
-        Order.objects.filter(customer_id__in=customer_ids)
+    had_earlier_paid_order = Exists(
+        Order.objects.filter(customer_id=OuterRef("customer_id"))
         .exclude(status__in=_UNPAID_STATUSES)
-        .values("customer_id")
-        .annotate(first_order_at=Min("created_at"))
-        .values_list("customer_id", "first_order_at")
+        .filter(created_at__lt=start_at)
     )
-
-    new_count = 0
-    returning_count = 0
-    for customer_id in customer_ids:
-        first_order_at = first_order_by_customer[customer_id]
-        if first_order_at.date() >= start_date:
-            new_count += 1
-        else:
-            returning_count += 1
+    returning_count = (
+        orders_in_range.filter(had_earlier_paid_order)
+        .values("customer_id")
+        .distinct()
+        .count()
+    )
+    new_count = total_customers - returning_count
 
     return {"new_customers": new_count, "returning_customers": returning_count}
 
@@ -347,13 +377,14 @@ def get_commissions_vs_revenue_report(start_date, end_date):
     via a shared rollup table -- building a "commissions rollup" for a
     single ratio isn't worth a fifth table (ADR-0010's own "Alternatives
     Considered" reasoning against forcing every report into one shape)."""
+    start_at, end_at = _range_bounds(start_date, end_date)
     revenue = DailyOrderRollup.objects.filter(
         date__gte=start_date, date__lte=end_date
     ).aggregate(total=Sum("revenue"))["total"] or Decimal("0")
     commissions_paid = WalletTransaction.objects.filter(
         transaction_type__in=COMMISSION_TRANSACTION_TYPES,
-        created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
+        created_at__gte=start_at,
+        created_at__lt=end_at,
     ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
     return {
         "revenue": _quantize_money(revenue),

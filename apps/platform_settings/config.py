@@ -389,8 +389,7 @@ REPORTING_SETTINGS = {
     # reach a stable status before this runs.
     "REPORT_ROLLUP_INTERVAL_DAYS": (
         1,
-        "How often the background job recomputes daily sales/revenue "
-        "report rollups",
+        "How often the background job recomputes daily sales/revenue " "report rollups",
         "interval_days_field",
     ),
 }

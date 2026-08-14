@@ -265,6 +265,25 @@ def test_htmx_request_returns_only_the_results_partial(staff_client):
 
 
 @pytest.mark.django_db
+def test_export_links_reflect_the_currently_applied_filter_not_the_page_defaults(
+    staff_client,
+):
+    # CodeRabbit-caught real bug: the export links used to live outside
+    # the htmx-swapped #report-results partial, so changing the filter
+    # updated the visible report but left Export CSV/PDF pointed at
+    # whatever date range the page first loaded with.
+    response = staff_client.get(
+        _report_url(date_from="2026-08-01", date_to="2026-08-10", granularity="week"),
+        headers={"HX-Request": "true"},
+    )
+
+    body = response.content.decode()
+    assert "date_from=2026-08-01" in body
+    assert "date_to=2026-08-10" in body
+    assert "granularity=week" in body
+
+
+@pytest.mark.django_db
 def test_shows_the_last_successful_rollup_run_time(staff_client):
     ReportRollupRun.objects.create(
         rollup_date=date(2026, 8, 1),
