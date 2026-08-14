@@ -315,6 +315,7 @@ TEMPLATES = [
                 "apps.accounts.context_processors.google_login_flags",
                 "apps.pages.context_processors.social_media_links",
                 "apps.pages.context_processors.organization_json_ld",
+                "apps.pages.context_processors.free_delivery_threshold",
             ],
         },
     },

@@ -1,5 +1,6 @@
 import logging
 
+from constance import config
 from django.core.cache import cache
 from django.templatetags.static import static
 
@@ -104,3 +105,26 @@ def organization_json_ld(request):
         ],
     }
     return {"organization_json_ld": dumps_for_script_tag(data)}
+
+
+def free_delivery_threshold(request):
+    """base_store.html's site-wide announcement bar (the header banner
+    shown on every storefront page) advertised a hardcoded "GHS 1000"
+    free-shipping threshold that never matched the real, admin-editable
+    FREE_DELIVERY_THRESHOLD constance setting (seeded at GHS 500) --
+    apps.orders.views/apps.pages.views already pass the live value to
+    checkout.html/returns-refunds-shipping.html individually, but the
+    banner lives in the shared base template so it needs a global
+    context processor instead, same reasoning as google_login_flags.
+    Constance's own config object is already Redis-cached, so this reads
+    it directly rather than duplicating a cache layer.
+    """
+    try:
+        threshold = config.FREE_DELIVERY_THRESHOLD
+    except Exception:
+        logger.warning(
+            "free_delivery_threshold: could not read FREE_DELIVERY_THRESHOLD "
+            "from constance, defaulting to the setting's own seeded default"
+        )
+        threshold = 500
+    return {"free_delivery_threshold": threshold}
