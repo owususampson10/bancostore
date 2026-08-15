@@ -23,6 +23,7 @@ from apps.catalog.models import Category, Product, Review
 from apps.catalog.services import normalize_primary_image
 from apps.commissions.models import CommissionCycleRun
 from apps.commissions.services import COMMISSION_TRANSACTION_TYPES
+from apps.compliance.models import EscrowLedger
 from apps.compliance.services import get_retail_distributor_ratio
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
@@ -175,6 +176,24 @@ def dashboard(request):
         and retail_distributor_ratio < config.RETAIL_PV_MINIMUM_PERCENT
     )
 
+    # Task 47c (Financial Overview, SPEC_PHASE2.md 12.6). All-time, not
+    # "this week" like the Business Snapshot cards above -- these are
+    # cumulative totals to date. Reuses the exact same "paid" exclusion
+    # set as orders_this_week_value above.
+    total_revenue = Order.objects.exclude(
+        status__in=[Order.Status.PENDING, Order.Status.CANCELLED, Order.Status.REFUNDED]
+    ).aggregate(total=Sum("total"))["total"] or Decimal("0")
+    total_commissions_paid = WalletTransaction.objects.filter(
+        transaction_type__in=COMMISSION_TRANSACTION_TYPES,
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    # Only PAID withdrawals actually remitted tax to GRA -- a rejected or
+    # payout-failed-reversed request never really withheld anything (Task
+    # 16's reversal path credits the wallet back in full).
+    total_withholding_tax_remitted = WithdrawalRequest.objects.filter(
+        status=WithdrawalRequest.Status.PAID
+    ).aggregate(total=Sum("tax_amount"))["total"] or Decimal("0")
+    escrow_balance = EscrowLedger.objects.get(pk=1).balance
+
     context = {
         "pending_kyc_count": pending_kyc_count,
         "pending_withdrawals_count": pending_withdrawals_count,
@@ -190,6 +209,10 @@ def dashboard(request):
         "retail_distributor_ratio": retail_distributor_ratio,
         "retail_pv_minimum_percent": config.RETAIL_PV_MINIMUM_PERCENT,
         "retail_ratio_below_threshold": retail_ratio_below_threshold,
+        "total_revenue": total_revenue,
+        "total_commissions_paid": total_commissions_paid,
+        "total_withholding_tax_remitted": total_withholding_tax_remitted,
+        "escrow_balance": escrow_balance,
         "active_nav": "dashboard",
     }
     return render(request, "admin_portal/dashboard.html", context)

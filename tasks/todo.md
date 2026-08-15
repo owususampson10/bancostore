@@ -7448,19 +7448,43 @@ test_confirm_order_payment.py`/`test_cancel_or_refund_order.py` (extended).
 #### 47c: Financial Overview dashboard row
 
 **Acceptance criteria:**
-- [ ] Admin sees total platform revenue to date, total commissions paid, total withholding tax
+- [x] Admin sees total platform revenue to date, total commissions paid, total withholding tax
       remitted, and the escrow balance (47a) — four real numbers, reusing Task 27's established
-      dashboard-card pattern
+      dashboard-card pattern. All four are cumulative all-time totals (a new "Financial Overview —
+      All Time" row, distinct from the existing "Business Snapshot — This Week" row above it, on
+      the same Task 27 Admin Dashboard): revenue sums `Order.total` over currently-paid orders
+      (excludes `PENDING`/`CANCELLED`/`REFUNDED`, reusing the exact same exclusion set
+      `orders_this_week_value` already uses — SPEC_PHASE2.md's own Section 12.6 explicitly names
+      `Order.total` as the source, not a guess); commissions sums `WalletTransaction.amount` over
+      `COMMISSION_TRANSACTION_TYPES` (the same constant Task 46's own commissions-vs-revenue report
+      reuses); withholding tax sums `WithdrawalRequest.tax_amount` over `status=PAID` only — a
+      still-submitted or rejected/reversed request never actually remitted anything to GRA, matching
+      how Task 16's reversal path credits the wallet back in full on a failed payout; escrow reads
+      `EscrowLedger.objects.get(pk=1).balance` directly (Task 47a's own real stored running total,
+      never a live re-derivation)
 
 **Verification:**
-- [ ] Feature test: seeded-data cross-check for all four numbers
-- [ ] Live-browser verified
-- [ ] Full suite green
+- [x] Feature test: seeded-data cross-check for all four numbers — 4 new tests in
+      `tests/feature/admin_portal/test_dashboard.py`, each isolating one figure against seeded data
+      that also includes a deliberately-excluded row (an unpaid order, a non-commission wallet
+      transaction, a still-submitted withdrawal) to prove the exclusion logic, not just the sum
+- [x] Live-browser verified (2026-08-15): logged in as a real admin (the Task 47a/47b sessions'
+      remember-this-device cookie carried over, skipping 2FA entirely this time), confirmed the
+      Financial Overview row renders GHS 2,970.00 / GHS 2,290.95 / GHS 0.00 / GHS 0.00 against the
+      real dev database — the two zero figures are honest, not a rendering bug: no withdrawal has
+      ever reached `PAID` status and no order in this dev DB was ever confirmed through the real
+      `confirm_order_payment` path (Task 47a/47b's own dev-DB verification runs inserted `CONFIRMED`
+      orders directly via shell, bypassing `credit_escrow` entirely), cross-checked directly against
+      the database rather than assumed
+- [x] Full suite green (1686 passed, 5 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section)
 
-**Dependencies:** 47a
+**Dependencies:** 47a — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/admin_portal/views.py` (dashboard extension), `templates/
-admin_portal/dashboard.html`, `tests/feature/admin_portal/test_financial_overview.py`
+**Files touched:** `apps/admin_portal/views.py` (`dashboard` extension), `templates/admin_portal/
+dashboard.html` (new Financial Overview section, `{% load humanize %}` added), plus
+`tests/feature/admin_portal/test_dashboard.py` (extended, not a separate new file — one dashboard
+view, one test file, matching this codebase's existing convention for that page).
 
 **Estimated scope:** S
 
