@@ -1,10 +1,12 @@
 from django.contrib import admin
 
+from simple_history.admin import SimpleHistoryAdmin
+
 from .models import Category, Product, ProductImage, ProductVariant
 
 
 @admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
+class CategoryAdmin(SimpleHistoryAdmin):
     list_display = ["name", "slug"]
     prepopulated_fields = {"slug": ("name",)}
 
@@ -20,7 +22,7 @@ class ProductVariantInline(admin.TabularInline):
 
 
 @admin.register(Product)
-class ProductAdmin(admin.ModelAdmin):
+class ProductAdmin(SimpleHistoryAdmin):
     list_display = [
         "name",
         "category",

@@ -3,6 +3,8 @@ from django.core.exceptions import ValidationError
 
 from constance.admin import Config, ConstanceAdmin, ConstanceForm
 
+from .models import PlatformSettingChange
+
 
 def validate_withdrawal_amount_bounds(cleaned_data):
     """Cross-field check constance's own form doesn't provide -- each
@@ -39,3 +41,26 @@ class BancostoreConstanceAdmin(ConstanceAdmin):
 
 admin.site.unregister([Config])
 admin.site.register([Config], BancostoreConstanceAdmin)
+
+
+@admin.register(PlatformSettingChange)
+class PlatformSettingChangeAdmin(admin.ModelAdmin):
+    """Task 47d. Read-only audit trail, hard-locked from the first
+    commit -- record_setting_change (apps/platform_settings/signals.py)
+    is this table's only legitimate writer, matching every other
+    audit-trail admin registration in this codebase (WalletAdmin,
+    CommissionCycleRunAdmin, EscrowLedgerAdmin, ...)."""
+
+    list_display = ["key", "old_value", "new_value", "changed_by", "changed_at"]
+    list_filter = ["key"]
+    search_fields = ["key"]
+    readonly_fields = ["key", "old_value", "new_value", "changed_by", "changed_at"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

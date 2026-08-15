@@ -7491,20 +7491,80 @@ view, one test file, matching this codebase's existing convention for that page)
 #### 47d: Audit log, part 1 — model coverage
 
 **Acceptance criteria:**
-- [ ] `HistoricalRecords()` added to the sensitive models currently missing it that are worth
+- [x] `HistoricalRecords()` added to the sensitive models currently missing it that are worth
       tracking — at minimum Product/Category (Task 26) and Platform Settings changes (Task 28); the
-      exact final list is a task-kickoff decision, not decided in this plan
-- [ ] KYC approve/reject decisions gain real history tracking (currently informational logging only)
+      exact final list is a task-kickoff decision, not decided in this plan. Final list: `Category`
+      and `Product` (`apps/catalog/models.py`, plain addition — neither has an M2M field needing
+      special `HistoricalRecords()` config), both also upgraded to `SimpleHistoryAdmin` in Django
+      Admin (`CategoryAdmin`/`ProductAdmin`), matching Order/Distributor/WithdrawalRequest's own
+      established convention exactly. "Platform Settings changes" can't get `HistoricalRecords()`
+      at all — constance stores every setting via its own key/value backend
+      (`CONSTANCE_BACKEND=constance.backends.database.DatabaseBackend`, one shared `Constance`
+      table with just `key`/`value`, not one row per setting), so there's no per-setting model
+      instance for `HistoricalRecords()` to shadow. Built a bespoke append-only log instead: new
+      `apps/platform_settings/models.py::PlatformSettingChange` (key, old/new value as text,
+      `changed_by`, `changed_at`), populated by `apps/platform_settings/signals.py` listening to
+      constance's own `config_updated` signal (wired in `apps/platform_settings/apps.py::ready()`),
+      resolving the actor via `simple_history`'s own already-installed `HistoryRequestMiddleware`
+      thread-local context rather than inventing a second "who made this request" mechanism — the
+      exact same actor-resolution path every other audit trail in this project already uses.
+      Registered read-only and hard-locked in Django Admin (`PlatformSettingChangeAdmin`), matching
+      every other audit-trail admin registration (`WalletAdmin`, `EscrowLedgerAdmin`, ...).
+- [x] KYC approve/reject decisions gain real history tracking (currently informational logging
+      only) — **turned out to need no new production code.** `Distributor` already carries
+      `HistoricalRecords()` (Task 11) and `apps.distributors.services.approve_kyc`/`reject_kyc`
+      already write via `.save()` (never `.update()`), confirmed by reading the code directly — a
+      code comment right at the `.save()` call already said "who approved is captured separately
+      via `Distributor.history`". Verified empirically via a real shell probe (a real `.save()` DOES
+      produce a queryable `history` row) before trusting the comment, then verified again end-to-end
+      through the actual authenticated admin_portal view (proving `HistoryRequestMiddleware`
+      resolves the real actor, not just that a shell-local `.save()` creates a row with
+      `history_user=None`). This mirrors Task 21c's own "verification only, no code needed"
+      precedent in this same codebase — `SPEC_PHASE2.md`'s claim that this was "informational
+      logging only" was simply out of date by the time this task started, not a design decision
+      made here.
+
+**A real bug found and fixed along the way, not silently worked around:** the first version of the
+`PlatformSettingChange` signal receiver created 2 audit rows for 1 real settings change, and
+created spurious rows on a save that changed nothing at all. Root-caused (not guessed at) via
+temporary traceback instrumentation: `constance.base.Config.__getattr__` lazily materializes a
+setting's declared default into storage the first time it's ever *read*, not just set (`if result
+is None: result = default; setattr(self, key, default)`) — and `constance.forms.ConstanceForm
+.save()` itself reads every field this way (`current = getattr(config, name)`) before comparing it
+to the submitted value. On a `Constance` table with no rows yet (every fresh pytest test, or a
+hypothetical brand-new deploy that's never read these settings before), this fires
+`config_updated` once for every single setting as a pure storage-warming side effect, before the
+one real admin-submitted change fires its own genuine signal — constance's own documented internal
+behavior, not a bug in this codebase or in constance itself, and invisible in this project's actual
+production (every setting has already been read/materialized during Task 28's weeks of live usage,
+so this old_value=None path essentially never fires there anymore). Fixed by detecting the
+signature (`old_value is None` and `new_value` exactly equals that key's own `CONSTANCE_CONFIG`
+default) and skipping the audit write — guarded with two new regression tests
+(`test_saving_a_real_change_produces_a_queryable_audit_record`,
+`test_saving_with_no_real_changes_creates_no_audit_records`), both of which failed before the fix
+and pass after it.
 
 **Verification:**
-- [ ] Migration applies cleanly; a real approve/edit/reject action produces a queryable history
-      record with actor + timestamp + what changed
-- [ ] Full suite green, CI green on real MySQL (new migration)
+- [x] Migration applies cleanly; a real approve/edit/reject action produces a queryable history
+      record with actor + timestamp + what changed — verified for all three (Category edit, Product
+      edit, KYC approve) via real feature tests posting through the actual authenticated
+      `admin_portal` views, not `Model.objects.create()`/`.save()` called directly, so
+      `HistoryRequestMiddleware`'s actor resolution is genuinely exercised, not assumed
+- [x] Full suite green (1691 passed, 5 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section). **CI on real
+      MySQL not yet run** — pending the batch decision already tracked for 47a-47c.
 
-**Dependencies:** None
+**Dependencies:** None — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/catalog/models.py`, `apps/platform_settings/models.py` (if needed),
-`apps/distributors/models.py` (KYC fields), new migrations, `tests/unit/*/test_history_tracking.py`
+**Files touched:** `apps/catalog/models.py` (`HistoricalRecords()` on `Category`/`Product` +
+migration), `apps/catalog/admin.py` (`SimpleHistoryAdmin`), new `apps/platform_settings/models.py`
+(`PlatformSettingChange` + migration), new `apps/platform_settings/signals.py`
+(`record_setting_change`, `_is_lazy_default_materialization`), `apps/platform_settings/apps.py`
+(`ready()` wiring), `apps/platform_settings/admin.py` (`PlatformSettingChangeAdmin`), plus
+`tests/feature/admin_portal/test_catalog_management.py`, `test_kyc_review.py`, and
+`test_platform_settings.py` (all extended, not new files — matching this codebase's existing
+per-screen test-file convention rather than the originally-sketched
+`tests/unit/*/test_history_tracking.py` layout).
 
 **Estimated scope:** S
 
