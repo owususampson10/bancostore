@@ -33,13 +33,7 @@ def render_template(text: str, context: dict) -> str:
     return _PLACEHOLDER_RE.sub(_replace, text)
 
 
-def render_or_default(key: str, context: dict, *, default_body: str) -> str:
-    """Looks up the live NotificationTemplate row for `key` and renders
-    its body; falls back to `default_body` (still rendered against the
-    same context) if no row exists for that key. A missing row is a
-    real, loggable anomaly -- every key this function is ever called
-    with should have been pre-seeded -- but it must never be the reason
-    a real OTP/withdrawal/KYC notification fails to send."""
+def _lookup_or_warn(key: str):
     template = NotificationTemplate.objects.filter(key=key).first()
     if template is None:
         logger.warning(
@@ -47,5 +41,35 @@ def render_or_default(key: str, context: dict, *, default_body: str) -> str:
             "falling back to the hardcoded default. Was it deleted?",
             key,
         )
+    return template
+
+
+def render_or_default(key: str, context: dict, *, default_body: str) -> str:
+    """Looks up the live NotificationTemplate row for `key` and renders
+    its body; falls back to `default_body` (still rendered against the
+    same context) if no row exists for that key. A missing row is a
+    real, loggable anomaly -- every key this function is ever called
+    with should have been pre-seeded -- but it must never be the reason
+    a real OTP/withdrawal/KYC notification fails to send."""
+    template = _lookup_or_warn(key)
+    if template is None:
         return render_template(default_body, context)
     return render_template(template.body, context)
+
+
+def render_email_or_default(
+    key: str, context: dict, *, default_subject: str, default_body: str
+) -> tuple[str, str]:
+    """The email-shaped sibling of render_or_default -- returns
+    (subject, body), both rendered against the same context. Order
+    status update emails (Task 48c) are the first email-channel key
+    this codebase templates; every earlier key is SMS/in-app only,
+    which is why this didn't already exist."""
+    template = _lookup_or_warn(key)
+    if template is None:
+        return render_template(default_subject, context), render_template(
+            default_body, context
+        )
+    return render_template(template.subject, context), render_template(
+        template.body, context
+    )

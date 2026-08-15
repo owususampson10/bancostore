@@ -515,8 +515,15 @@ def _credit_direct_referral_bonus(distributor, reference: str) -> None:
     try:
         send_sms(
             str(distributor.sponsor.phone_number),
-            f"You've earned GHS {bonus} Direct Referral Bonus from "
-            f"{referred_name}'s purchase. Check your Bancostore wallet!",
+            render_or_default(
+                NotificationTemplate.Key.DIRECT_REFERRAL_BONUS_CREDITED_SMS,
+                {"amount": bonus, "referred_name": referred_name},
+                default_body=(
+                    "You've earned GHS {{amount}} Direct Referral Bonus from "
+                    "{{referred_name}}'s purchase. Check your Bancostore "
+                    "wallet!"
+                ),
+            ),
         )
     except Exception:
         logger.exception(
@@ -531,8 +538,14 @@ def _credit_direct_referral_bonus(distributor, reference: str) -> None:
     send_notification(
         distributor.sponsor,
         Notification.EventType.REFERRAL_BONUS_PAID,
-        f"You earned GHS {bonus} Direct Referral Bonus from "
-        f"{referred_name}'s purchase!",
+        render_or_default(
+            NotificationTemplate.Key.DIRECT_REFERRAL_BONUS_CREDITED_INAPP,
+            {"amount": bonus, "referred_name": referred_name},
+            default_body=(
+                "You earned GHS {{amount}} Direct Referral Bonus from "
+                "{{referred_name}}'s purchase!"
+            ),
+        ),
     )
 
 

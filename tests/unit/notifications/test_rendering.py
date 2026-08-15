@@ -1,7 +1,11 @@
 import pytest
 
 from apps.notifications.models import NotificationTemplate
-from apps.notifications.rendering import render_or_default, render_template
+from apps.notifications.rendering import (
+    render_email_or_default,
+    render_or_default,
+    render_template,
+)
 
 
 def test_substitutes_a_known_placeholder():
@@ -76,3 +80,37 @@ def test_render_or_default_falls_back_when_no_row_exists():
     )
 
     assert result == "Your code is 999999."
+
+
+@pytest.mark.django_db
+def test_render_email_or_default_uses_the_live_template_row():
+    NotificationTemplate.objects.filter(
+        key=NotificationTemplate.Key.ORDER_STATUS_UPDATE_EMAIL
+    ).update(subject="Custom subject: {{status}}", body="Custom body: {{status}}")
+
+    subject, body = render_email_or_default(
+        NotificationTemplate.Key.ORDER_STATUS_UPDATE_EMAIL,
+        {"status": "Dispatched"},
+        default_subject="Fallback subject",
+        default_body="Fallback body",
+    )
+
+    assert subject == "Custom subject: Dispatched"
+    assert body == "Custom body: Dispatched"
+
+
+@pytest.mark.django_db
+def test_render_email_or_default_falls_back_when_no_row_exists():
+    NotificationTemplate.objects.filter(
+        key=NotificationTemplate.Key.ORDER_STATUS_UPDATE_EMAIL
+    ).delete()
+
+    subject, body = render_email_or_default(
+        NotificationTemplate.Key.ORDER_STATUS_UPDATE_EMAIL,
+        {"status": "Dispatched"},
+        default_subject="Order is {{status}}",
+        default_body="Now {{status}}.",
+    )
+
+    assert subject == "Order is Dispatched"
+    assert body == "Now Dispatched."

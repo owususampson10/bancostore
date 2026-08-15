@@ -22,6 +22,8 @@ from apps.compliance.services import (
 )
 from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError, verify_transaction
+from apps.notifications.models import NotificationTemplate
+from apps.notifications.rendering import render_email_or_default, render_or_default
 from apps.notifications.sms import send_sms
 from apps.promotions.services import (
     consume_discount_code,
@@ -876,11 +878,15 @@ def _send_order_status_notification(order: Order) -> None:
     # committed -- or, in the unlikely case it happens to look like a
     # lock-contention OperationalError, get misread as one and re-run an
     # already-committed transaction a second time.
+    status_display = order.get_status_display()
     try:
         send_sms(
             str(order.phone_number),
-            f"Your Bancostore order {order.payment_reference} is now "
-            f"{order.get_status_display()}.",
+            render_or_default(
+                NotificationTemplate.Key.ORDER_STATUS_UPDATE_SMS,
+                {"reference": order.payment_reference, "status": status_display},
+                default_body=("Your Bancostore order {{reference}} is now {{status}}."),
+            ),
         )
     except Exception:
         logger.exception(
@@ -890,12 +896,15 @@ def _send_order_status_notification(order: Order) -> None:
 
     if order.email:
         try:
+            subject, message = render_email_or_default(
+                NotificationTemplate.Key.ORDER_STATUS_UPDATE_EMAIL,
+                {"reference": order.payment_reference, "status": status_display},
+                default_subject="Your Bancostore order is {{status}}",
+                default_body="Your order {{reference}} is now {{status}}.",
+            )
             send_mail(
-                subject=f"Your Bancostore order is {order.get_status_display()}",
-                message=(
-                    f"Your order {order.payment_reference} is now "
-                    f"{order.get_status_display()}."
-                ),
+                subject=subject,
+                message=message,
                 from_email=None,
                 recipient_list=[order.email],
             )

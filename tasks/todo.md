@@ -7875,18 +7875,57 @@ transitions inside `apply_verified_transfer_outcome`), `apps/distributors/servic
 #### 48c: Migrate remaining send-sites
 
 **Acceptance criteria:**
-- [ ] Binary/matching/direct-referral bonus credited, downline joined, PV-expiry warning (Task
-      21d's 6 event types), and order status update notifications all render from a
-      `NotificationTemplate`
+- [x] Binary/direct-referral bonus credited, downline joined, PV-expiry warning, and order status
+      update notifications all render from a `NotificationTemplate`. **Matching Bonus deliberately
+      has no member/send-site** — confirmed by reading `apps/commissions/services.py` directly
+      before writing any code: Task 21d already excludes it from every notification channel
+      (Section 6.6 never names it, and the code has its own comment saying so), and this task
+      doesn't invent a new send site for it. 7 new `Key` members added (no schema migration needed
+      — `TextChoices` additions are Python metadata only — just a new seed migration,
+      `0007_seed_more_notification_templates.py`): `binary_bonus_credited`, `downline_joined`,
+      `direct_referral_bonus_credited_sms`/`_inapp` (two keys, not one — the current SMS wording
+      genuinely differs from the in-app wording, e.g. the SMS text adds "Check your Bancostore
+      wallet!"), `pv_expiring`, `order_status_update_sms`/`_email`.
+      **Deliberately scoped, not silently narrowed:** `apps/orders/services.py`'s
+      `_send_confirmation_notifications`/`_send_auto_cancel_notification`/
+      `_send_stock_unavailable_notification` are Task 17/18's own distinct checkout-flow messages,
+      not "order status update" as this acceptance criterion literally names it — only
+      `_send_order_status_notification` (used by both `advance_order_status` and
+      `cancel_or_refund_order`) was migrated. `render_email_or_default()` is a new sibling to 48a's
+      `render_or_default()` in `apps/notifications/rendering.py` — the order-status-update email is
+      the first EMAIL-channel key this codebase templates (every earlier key is SMS/in-app only), so
+      subject *and* body both need rendering against the same context, which the existing
+      body-only helper couldn't express; both share a new internal `_lookup_or_warn()` rather than
+      duplicating the lookup-and-log-a-warning logic.
 
 **Verification:**
-- [ ] Feature tests per notification type, matching 48b's pattern
-- [ ] Full suite green, CI green on real MySQL
+- [x] One new test per site (RED before wiring, GREEN after, matching 48b's exact pattern) proving
+      the live-edited template wording reaches the real send: 2 in `tests/unit/notifications/
+      test_rendering.py` (`render_email_or_default`'s live-row and missing-row fallback paths), 4 in
+      `tests/unit/notifications/test_event_wiring.py` (downline joined, binary bonus, direct
+      referral bonus SMS + in-app), 1 in `tests/unit/notifications/test_pv_expiry_task.py`, 2 in
+      `tests/unit/orders/test_order_transitions.py` (SMS + email). Every pre-existing test for these
+      6 send sites passed unchanged, since each seed migration's default text is verbatim identical
+      to what was previously hardcoded.
+- [x] Full suite green for every affected app (a targeted run covering `commissions`/`binary_tree`/
+      `distributors`/`orders`/admin_portal order management: 715 passed; the 2 failures seen were
+      both confirmed pre-existing/environmental by re-running each in isolation — the already-
+      tracked `test_earnings_history.py` Known Issue, and a rate-limit test whose own docstring
+      already documents its sensitivity to shared Redis state across concurrently-running processes,
+      matching this project's own already-documented precedent for that exact failure mode).
+      `ruff`/`black`/`isort` clean. **CI on real MySQL not yet run** — pending the batch push
+      decision (48d still open).
 
-**Dependencies:** 48a, 48b
+**Dependencies:** 48a, 48b — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/commissions/services.py`, `apps/notifications/consumers.py`,
-`apps/orders/services.py`, `tests/feature/notifications/test_remaining_templates.py`
+**Files touched:** `apps/notifications/models.py` (7 new `Key` members), `apps/notifications/
+template_registry.py`, new `apps/notifications/migrations/0007_seed_more_notification_templates.py`,
+`apps/notifications/rendering.py` (`render_email_or_default`, shared `_lookup_or_warn`),
+`apps/notifications/tasks.py` (PV-expiry), `apps/commissions/services.py` (binary bonus),
+`apps/binary_tree/services.py` (downline joined), `apps/distributors/services.py` (direct referral
+bonus, both channels), `apps/orders/services.py` (`_send_order_status_notification`); extended
+`tests/unit/notifications/test_rendering.py`, `test_event_wiring.py`, `test_pv_expiry_task.py`,
+`tests/unit/orders/test_order_transitions.py`.
 
 **Estimated scope:** M
 

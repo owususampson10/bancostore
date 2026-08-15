@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
+from apps.notifications.models import NotificationTemplate
 from apps.orders.models import Order
 from apps.orders.services import advance_order_status
 
@@ -112,6 +113,50 @@ def test_notification_fires_on_a_real_transition(mock_sms, mock_mail):
     mock_sms.assert_called_once()
     mock_mail.assert_called_once()
     assert "Processing" in mock_sms.call_args[0][1]
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_order_status_update_uses_the_live_admin_edited_sms_wording(
+    mock_sms, mock_mail
+):
+    """Task 48c acceptance criteria: editing a template's wording from
+    admin_portal changes the next real send."""
+    template, _ = NotificationTemplate.objects.get_or_create(
+        key=NotificationTemplate.Key.ORDER_STATUS_UPDATE_SMS
+    )
+    template.body = "Custom: order {{reference}} -> {{status}}!"
+    template.save()
+    order = _make_order(status=Order.Status.CONFIRMED)
+
+    advance_order_status(order.pk, Order.Status.PROCESSING)
+
+    assert mock_sms.call_args[0][1] == (
+        f"Custom: order {order.payment_reference} -> Processing!"
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_order_status_update_uses_the_live_admin_edited_email_wording(
+    mock_sms, mock_mail
+):
+    template, _ = NotificationTemplate.objects.get_or_create(
+        key=NotificationTemplate.Key.ORDER_STATUS_UPDATE_EMAIL
+    )
+    template.subject = "Custom subject: {{status}}"
+    template.body = "Custom body: order {{reference}} -> {{status}}!"
+    template.save()
+    order = _make_order(status=Order.Status.CONFIRMED)
+
+    advance_order_status(order.pk, Order.Status.PROCESSING)
+
+    assert mock_mail.call_args.kwargs["subject"] == "Custom subject: Processing"
+    assert mock_mail.call_args.kwargs["message"] == (
+        f"Custom body: order {order.payment_reference} -> Processing!"
+    )
 
 
 @pytest.mark.django_db

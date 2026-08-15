@@ -11,7 +11,8 @@ from constance import config
 
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.distributors.models import Distributor
-from apps.notifications.models import Notification
+from apps.notifications.models import Notification, NotificationTemplate
+from apps.notifications.rendering import render_or_default
 from apps.notifications.services import send_notification
 from apps.pv_ledger.services import (
     consume_leg_pv_fifo,
@@ -294,7 +295,11 @@ def process_binary_bonus_for_distributor(distributor, run_at) -> Decimal:
             send_notification(
                 distributor,
                 Notification.EventType.BINARY_BONUS_CREDITED,
-                f"You earned GHS {actual_bonus} Binary Bonus!",
+                render_or_default(
+                    NotificationTemplate.Key.BINARY_BONUS_CREDITED,
+                    {"amount": actual_bonus},
+                    default_body="You earned GHS {{amount}} Binary Bonus!",
+                ),
             )
 
             return actual_bonus

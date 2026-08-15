@@ -18,4 +18,11 @@ PLACEHOLDERS_BY_KEY: dict[str, list[str]] = {
     Key.WITHDRAWAL_REVERSED: ["net_amount"],
     Key.KYC_APPROVED: [],
     Key.KYC_REJECTED: ["reason"],
+    Key.BINARY_BONUS_CREDITED: ["amount"],
+    Key.DOWNLINE_JOINED: ["name"],
+    Key.DIRECT_REFERRAL_BONUS_CREDITED_SMS: ["amount", "referred_name"],
+    Key.DIRECT_REFERRAL_BONUS_CREDITED_INAPP: ["amount", "referred_name"],
+    Key.PV_EXPIRING: ["pv", "expiry_date"],
+    Key.ORDER_STATUS_UPDATE_SMS: ["reference", "status"],
+    Key.ORDER_STATUS_UPDATE_EMAIL: ["reference", "status"],
 }

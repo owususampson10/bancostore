@@ -179,6 +179,35 @@ class NotificationTemplate(models.Model):
         WITHDRAWAL_REVERSED = "withdrawal_reversed", "Withdrawal Reversed (SMS)"
         KYC_APPROVED = "kyc_approved", "KYC Approved (In-App Notification)"
         KYC_REJECTED = "kyc_rejected", "KYC Rejected (In-App Notification)"
+        # Task 48c. Matching Bonus deliberately has no member here -- Task
+        # 21d already excluded it from every notification channel (Section
+        # 6.6 never names it), and this task doesn't invent a new send site
+        # for it. _send_confirmation_notifications/_send_auto_cancel_
+        # notification/_send_stock_unavailable_notification (Task 17/18's
+        # own distinct checkout-flow messages) are also deliberately out of
+        # scope -- 48c's acceptance criteria names "order status update",
+        # which is specifically apps.orders.services._send_order_status_
+        # notification (used by advance_order_status and
+        # cancel_or_refund_order), not every order-related message.
+        BINARY_BONUS_CREDITED = (
+            "binary_bonus_credited",
+            "Binary Bonus Credited (In-App Notification)",
+        )
+        DOWNLINE_JOINED = "downline_joined", "New Downline Member (In-App Notification)"
+        DIRECT_REFERRAL_BONUS_CREDITED_SMS = (
+            "direct_referral_bonus_credited_sms",
+            "Direct Referral Bonus Credited (SMS)",
+        )
+        DIRECT_REFERRAL_BONUS_CREDITED_INAPP = (
+            "direct_referral_bonus_credited_inapp",
+            "Direct Referral Bonus Credited (In-App Notification)",
+        )
+        PV_EXPIRING = "pv_expiring", "PV Approaching Expiry (In-App Notification)"
+        ORDER_STATUS_UPDATE_SMS = "order_status_update_sms", "Order Status Update (SMS)"
+        ORDER_STATUS_UPDATE_EMAIL = (
+            "order_status_update_email",
+            "Order Status Update (Email)",
+        )
 
     key = models.CharField(max_length=40, choices=Key.choices, unique=True)
     # Email-only -- blank for the SMS/in-app keys above. Whether `subject`
