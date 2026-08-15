@@ -11,6 +11,7 @@ from constance import config
 
 from apps.catalog.models import Category, Product
 from apps.distributors.models import Distributor
+from apps.notifications.email import get_sender_email
 from apps.notifications.models import NotificationTemplate
 from apps.orders.models import Order
 from apps.platform_settings.config import humanize_identifier_name
@@ -271,7 +272,7 @@ def check_retail_ratio_and_alert() -> None:
                         f"{threshold}%. Please review distributor purchase "
                         f"activity."
                     ),
-                    from_email=None,
+                    from_email=get_sender_email(),
                     recipient_list=[recipient],
                 )
                 # Only set on a genuine successful send -- the state

@@ -578,6 +578,51 @@ GENERAL_PLATFORM_SETTINGS = {
     ),
 }
 
+# Task 48d (source doc Section 13.8, SPEC_PHASE2.md Feature 8). SMS_PROVIDER/
+# EMAIL_PROVIDER are locked single-choice fields, not a functional picker --
+# mNotify (SMS) and Gmail SMTP (email) stay the only wired providers in code,
+# matching the exact "Currency" precedent from Task 36h (currency_field
+# below): a working-looking dropdown with nothing wired behind the other
+# options is a real footgun, so it's honestly locked to the one real option
+# instead. Real Arkesel/Hubtel/Mailgun integration is out of scope, per
+# direct user confirmation during Phase 2 planning.
+#
+# SENDER_NAME/SENDER_EMAIL_ADDRESS default to "" (blank), not the current
+# .env values -- blank means "use the server's configured default"
+# (settings.MNOTIFY_SENDER_ID / settings.DEFAULT_FROM_EMAIL), read live by
+# apps.notifications.sms._send_via_mnotify / apps.notifications.email
+# .get_sender_email() respectively. This is deliberate, not an oversight:
+# DEFAULT_FROM_EMAIL already has its own startup-time validation
+# (bancostore/settings.py, Task 24d) rejecting known-insecure placeholder
+# values -- moving the sender identity fully into a lazily-read runtime
+# constance field would silently bypass that guarantee. Defaulting to blank
+# keeps that validated env value as the live behavior until an admin
+# deliberately opts into overriding it, rather than requiring this
+# migration to duplicate Task 24d's own validation logic for a setting this
+# task's own scope describes as "much smaller."
+NOTIFICATION_AND_COMMUNICATION_SETTINGS = {
+    "SMS_PROVIDER": (
+        "mnotify",
+        "The SMS provider used for OTP/withdrawal/order notifications",
+        "sms_provider_field",
+    ),
+    "EMAIL_PROVIDER": (
+        "gmail_smtp",
+        "The email provider used for transactional email",
+        "email_provider_field",
+    ),
+    "SENDER_NAME": (
+        "",
+        "The SMS sender ID shown to recipients -- leave blank to use the "
+        "server's configured default",
+    ),
+    "SENDER_EMAIL_ADDRESS": (
+        "",
+        "The From address used for transactional email -- leave blank to "
+        "use the server's configured default",
+    ),
+}
+
 # Custom-bounded form fields for the small set of constance keys where an
 # unbounded admin form submission is a real risk, not just a typo the admin
 # would immediately notice -- added 2026-07-22 after a dedicated
@@ -710,6 +755,28 @@ CONSTANCE_ADDITIONAL_FIELDS = {
             "choices": [("GHS", "Ghanaian Cedi (GHS)")],
         },
     ],
+    "sms_provider_field": [
+        "django.forms.fields.ChoiceField",
+        {
+            "widget": "django.forms.Select",
+            # Task 48d. Same "bounded single-choice field, honestly locked
+            # to the one real option" reasoning as currency_field above --
+            # mNotify is the only wired SMS provider (apps.notifications
+            # .sms); extend this list only alongside a real second
+            # integration.
+            "choices": [("mnotify", "mNotify")],
+        },
+    ],
+    "email_provider_field": [
+        "django.forms.fields.ChoiceField",
+        {
+            "widget": "django.forms.Select",
+            # Task 48d. Gmail SMTP (via Django's own EMAIL_BACKEND config)
+            # is the only wired email provider; extend this list only
+            # alongside a real second integration (e.g. Mailgun).
+            "choices": [("gmail_smtp", "Gmail SMTP")],
+        },
+    ],
     "discount_audience_field": [
         "django.forms.fields.ChoiceField",
         {
@@ -776,6 +843,7 @@ CONSTANCE_CONFIG = {
     **IR_ID_NUMBER_SETTINGS,
     **PAYMENT_GATEWAY_SETTINGS,
     **GENERAL_PLATFORM_SETTINGS,
+    **NOTIFICATION_AND_COMMUNICATION_SETTINGS,
 }
 
 CONSTANCE_CONFIG_FIELDSETS = {
@@ -793,6 +861,9 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "IR ID Number Settings": tuple(IR_ID_NUMBER_SETTINGS),
     "Payment Gateway Settings": tuple(PAYMENT_GATEWAY_SETTINGS),
     "General Platform Settings": tuple(GENERAL_PLATFORM_SETTINGS),
+    "Notification & Communication Settings": tuple(
+        NOTIFICATION_AND_COMMUNICATION_SETTINGS
+    ),
 }
 
 # A plain str.title() on an underscore-joined identifier reads fine for

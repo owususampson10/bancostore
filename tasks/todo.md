@@ -7697,6 +7697,21 @@ SMS/Email Provider fields exist as admin-editable choices; Sender Name/Email bec
 confirmation, mNotify/Gmail SMTP stay the only wired providers — no second real integration this
 round.
 
+**Closed 2026-08-15 (48a-48d all done).** 20 real `NotificationTemplate` rows now govern every
+currently-wired outbound OTP/withdrawal/KYC/bonus/downline/PV-expiry/order-status notification this
+codebase sends, editable from a real `admin_portal` screen with a click-to-open detail audit trail;
+SMS/Email provider identity is real and admin-editable, honestly locked to the two providers
+actually wired in code. Also fixed, per direct user feedback after reviewing a live screenshot: the
+admin sidebar scrollbar, and a full humanization pass on the Task 47e Audit Log screen (raw
+constance keys, unspaced model labels, lowercase diff field names, and debug-style object reprs all
+replaced with real, readable text) plus a click-to-open detail modal for any audit log row. See each
+48a-48d sub-task below for full acceptance-criteria/verification detail. **Not yet done:** the
+complete whole-repo full suite (deferred across 48b-48d to avoid disrupting a live manual-testing
+`runserver` session — the targeted runs covering every touched app were all green throughout) and
+CI on real MySQL, both pending the batch push decision; Checkpoint O below is a separate, broader
+verification step (all ten `SPEC_PHASE2.md` success-criteria sections, not just this one task) not
+yet attempted.
+
 #### 48a: `NotificationTemplate` model + admin CRUD (security-and-hardening pass mandatory)
 
 **Acceptance criteria:**
@@ -7932,22 +7947,73 @@ bonus, both channels), `apps/orders/services.py` (`_send_order_status_notificati
 #### 48d: Provider-choice + sender identity settings
 
 **Acceptance criteria:**
-- [ ] SMS Provider / Email Provider fields exist, save, and are visibly labeled as the one real
+- [x] SMS Provider / Email Provider fields exist, save, and are visibly labeled as the one real
       wired option (mNotify / Gmail SMTP) — no functional no-op picker, matching the Currency-lock
-      precedent from Task 36g/h
-- [ ] Sender Name / Sender Email Address are real, admin-editable constance settings, actually used
-      on the next real send — not read from `.env`/hardcoded for these two specific values anymore
+      precedent from Task 36h exactly (`apps/platform_settings/config.py::currency_field` — a real
+      `<select>` honestly restricted to one real `choices` entry, never a fake-disabled input). New
+      `sms_provider_field`/`email_provider_field` `CONSTANCE_ADDITIONAL_FIELDS` entries, new
+      `SMS_PROVIDER`/`EMAIL_PROVIDER` settings in a new `NOTIFICATION_AND_COMMUNICATION_SETTINGS`
+      fieldset (Section 13.8's own name — no existing fieldset covered this).
+- [x] Sender Name / Sender Email Address are real, admin-editable constance settings, actually used
+      on the next real send. **Resolved a real ambiguity by reading `SPEC_PHASE2.md`'s Feature 8
+      section directly rather than guessing:** "Sender Name" and "Sender Email Address" are each ONE
+      setting covering both channels' existing config — `SENDER_NAME` maps to the pre-existing
+      `MNOTIFY_SENDER_ID` env var (SMS sender ID), `SENDER_EMAIL_ADDRESS` maps to the pre-existing
+      `DEFAULT_FROM_EMAIL` env var — not two separate Name+Email pairs per channel, which the
+      acceptance criteria's wording alone left ambiguous.
+
+**A real security tension found and resolved, not silently papered over:** `DEFAULT_FROM_EMAIL`
+already has its own startup-time validation (`bancostore/settings.py`, Task 24d) rejecting
+known-insecure placeholder values before the app will even boot in production. Moving sender email
+fully into a lazily-read runtime constance field would have silently bypassed that guarantee.
+Resolved by making both new fields optional overrides, defaulting to blank: blank means "use the
+server's already-validated default," so Task 24d's safety net stays intact for the common case
+(nothing changes until an admin deliberately opts in), while a live override still works when set.
+A new `apps/notifications/email.py::get_sender_email()` helper (`config.SENDER_EMAIL_ADDRESS or
+settings.DEFAULT_FROM_EMAIL`) centralizes this fallback in one place rather than duplicating it
+across the 6 real `send_mail()`/`EmailMessage` call sites this codebase has (`apps/accounts/
+signals.py`, `apps/compliance/services.py`, `apps/orders/services.py` ×4, `apps/pages/views.py`'s
+contact form); `apps/notifications/sms.py::_send_via_mnotify` reads `config.SENDER_NAME or
+settings.MNOTIFY_SENDER_ID` inline (only one real call site, no helper needed).
 
 **Verification:**
-- [ ] Feature tests: settings save correctly, a real send uses the configured sender identity
-- [ ] Live-browser verified
-- [ ] Full suite green
+- [x] Unit tests: `get_sender_email()`'s live-override and blank-falls-back-to-validated-default
+      paths (`tests/unit/notifications/test_email.py`); the mNotify sender field reads the same
+      override/fallback shape, verified by mocking `requests.post` and inspecting the real POST
+      payload (`tests/unit/notifications/test_sms.py`) rather than trusting the code by inspection
+      alone.
+- [x] Feature test: SMS/Email provider pickers show only the one real option and never the
+      unwired-provider names (Arkesel/Hubtel/Mailgun) anywhere on the page
+      (`tests/feature/admin_portal/test_platform_settings.py`). The pre-existing, already-generic
+      `test_page_shows_every_configuration_group`/`_valid_post_data` tests needed **no changes** —
+      both already iterate `CONSTANCE_CONFIG`/`CONSTANCE_CONFIG_FIELDSETS` dynamically, so the new
+      fieldset was automatically covered.
+- [x] Live-browser verified (2026-08-15): real TOTP admin login, the new "Notification &
+      Communication Settings" tab renders with the correct icon, `SMS Provider`/`Email Provider`
+      confirmed as real `<combobox>` elements each with exactly one real `<option>` (via the
+      accessibility tree, not just a screenshot), saved a live `Sender Name`/`Sender Email Address`
+      override through the real form, confirmed via `manage.py shell` that `get_sender_email()`
+      immediately reflected the new value, then reset both back to blank and confirmed the fallback
+      correctly restored `settings.DEFAULT_FROM_EMAIL`.
+- [x] Full suite green for every affected app (a targeted run covering `notifications`, `pages`,
+      `compliance`, and the platform-settings/dashboard admin_portal screens: 189 passed, plus a
+      separate 29-test run for `apps/accounts`' own auth/lockout-email suite). `ruff`/`black`/`isort`
+      clean. **The complete, whole-repo full suite was deliberately not run this round** — the
+      user's own `runserver` session was live and actively in use for manual testing at the time,
+      and this codebase's own documented gotcha is that a background full-suite run can silently
+      wipe that session's Redis-backed cache/session data mid-use (`tests/conftest.py`'s autouse
+      `_clear_django_cache` fixture). Deferred to the next natural full-suite run rather than
+      disrupting that session. **CI on real MySQL not yet run** — pending the batch push decision.
 
-**Dependencies:** None (independent of 48a-48c)
+**Dependencies:** None (independent of 48a-48c) — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/platform_settings/config.py`, `templates/admin_portal/
-platform_settings.html`, `apps/notifications/sms.py`, `bancostore/settings.py` (email backend
-sender), `tests/feature/admin_portal/test_platform_settings.py`
+**Files touched:** `apps/platform_settings/config.py` (`NOTIFICATION_AND_COMMUNICATION_SETTINGS`,
+`sms_provider_field`/`email_provider_field`), `apps/admin_portal/views.py` (`_GROUP_ICONS` entry),
+new `apps/notifications/email.py` (`get_sender_email`), `apps/notifications/sms.py`
+(`_send_via_mnotify`), `apps/accounts/signals.py`, `apps/compliance/services.py`,
+`apps/orders/services.py` (4 call sites), `apps/pages/views.py`; new
+`tests/unit/notifications/test_email.py`, `test_sms.py`; extended
+`tests/feature/admin_portal/test_platform_settings.py`.
 
 **Estimated scope:** S
 

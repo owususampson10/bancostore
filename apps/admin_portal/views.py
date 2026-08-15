@@ -1972,6 +1972,7 @@ _GROUP_ICONS = {
     "IR ID Number Settings": "badge",
     "Payment Gateway Settings": "point_of_sale",
     "General Platform Settings": "settings_suggest",
+    "Notification & Communication Settings": "forum",
 }
 
 

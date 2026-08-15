@@ -22,6 +22,7 @@ from apps.compliance.services import (
 )
 from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError, verify_transaction
+from apps.notifications.email import get_sender_email
 from apps.notifications.models import NotificationTemplate
 from apps.notifications.rendering import render_email_or_default, render_or_default
 from apps.notifications.sms import send_sms
@@ -543,7 +544,7 @@ def _send_auto_cancel_notification(order: Order) -> None:
                     "automatically cancelled because payment was not "
                     "completed in time."
                 ),
-                from_email=None,
+                from_email=get_sender_email(),
                 recipient_list=[order.email],
             )
         except Exception:
@@ -579,7 +580,7 @@ def _send_confirmation_notifications(order: Order) -> None:
                     f"Your order (GHS {order.total}) is confirmed. "
                     f"Reference: {order.payment_reference}"
                 ),
-                from_email=None,
+                from_email=get_sender_email(),
                 recipient_list=[order.email],
             )
         except Exception:
@@ -616,7 +617,7 @@ def _send_stock_unavailable_notification(order: Order) -> None:
                     "Your payment was received; our team will contact you "
                     "about a refund."
                 ),
-                from_email=None,
+                from_email=get_sender_email(),
                 recipient_list=[order.email],
             )
         except Exception:
@@ -905,7 +906,7 @@ def _send_order_status_notification(order: Order) -> None:
             send_mail(
                 subject=subject,
                 message=message,
-                from_email=None,
+                from_email=get_sender_email(),
                 recipient_list=[order.email],
             )
         except Exception:

@@ -1,6 +1,7 @@
 from django.conf import settings
 
 import requests
+from constance import config
 
 # Mirrors Django's django.core.mail.outbox pattern for the console/test email
 # backend — lets tests assert on what was "sent" without hitting mNotify.
@@ -20,9 +21,13 @@ def _send_via_fake_sender(phone_number: str, message: str) -> None:
 
 
 def _send_via_mnotify(phone_number: str, message: str, *, sms_type: str | None) -> None:
+    # Task 48d: SENDER_NAME defaults to blank -- "use the server's
+    # configured default" (settings.MNOTIFY_SENDER_ID) -- with a live
+    # admin override taking priority when set, mirroring
+    # apps.notifications.email.get_sender_email()'s exact fallback shape.
     payload = {
         "recipient": [phone_number],
-        "sender": settings.MNOTIFY_SENDER_ID,
+        "sender": config.SENDER_NAME or settings.MNOTIFY_SENDER_ID,
         "message": message,
         "is_schedule": False,
         "schedule_date": "",

@@ -9,6 +9,8 @@ from django.shortcuts import redirect, render
 from constance import config
 from django_ratelimit.decorators import ratelimit
 
+from apps.notifications.email import get_sender_email
+
 from .forms import ContactForm
 
 logger = logging.getLogger(__name__)
@@ -127,7 +129,7 @@ def contact(request):
                 EmailMessage(
                     subject=f"[Bancostore Contact] {form.cleaned_data['subject']}",
                     body=body,
-                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    from_email=get_sender_email(),
                     to=[recipient],
                     reply_to=[form.cleaned_data["email"]],
                 ).send()
