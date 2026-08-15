@@ -157,6 +157,24 @@ def test_editing_a_category_updates_its_name(staff_client):
 
 
 @pytest.mark.django_db
+def test_editing_a_category_produces_a_queryable_history_record(staff_client):
+    """Task 47d. A real edit through the actual admin_portal view (not
+    Category.objects.create()/.save() called directly), proving the
+    whole pipeline -- HistoricalRecords() + simple_history's
+    HistoryRequestMiddleware resolving the real authenticated actor --
+    not just that HistoricalRecords() is attached to the model."""
+    category = Category.objects.create(name="Old Name")
+
+    staff_client.post(_category_edit_url(category), {"name": "New Name"})
+
+    latest = category.history.first()
+    assert latest.name == "New Name"
+    assert latest.history_type == "~"  # changed, not created/deleted
+    assert latest.history_user == User.objects.get(username="staff_tester")
+    assert latest.history_date is not None
+
+
+@pytest.mark.django_db
 def test_creating_a_category_with_a_duplicate_name_shows_a_form_error(staff_client):
     Category.objects.create(name="Fine Jewellery")
 
@@ -502,6 +520,43 @@ def test_editing_a_product_updates_its_price(staff_client):
     assert response.status_code == 200
     product.refresh_from_db()
     assert product.price == Decimal("175.00")
+
+
+@pytest.mark.django_db
+def test_editing_a_product_produces_a_queryable_history_record(staff_client):
+    """Task 47d. Same real-pipeline proof as the Category test above,
+    for a price change specifically -- the most business-sensitive field
+    on this model."""
+    category = _make_category()
+    product = Product.objects.create(
+        name="Classic Watch", category=category, price=Decimal("100.00")
+    )
+
+    staff_client.post(
+        _product_edit_url(product),
+        {
+            "name": "Classic Watch",
+            "category": category.pk,
+            "description": "",
+            "price": "175.00",
+            "pv_value": "10",
+            "stock": "5",
+            "images-TOTAL_FORMS": "0",
+            "images-INITIAL_FORMS": "0",
+            "images-MIN_NUM_FORMS": "0",
+            "images-MAX_NUM_FORMS": "1000",
+            "variants-TOTAL_FORMS": "0",
+            "variants-INITIAL_FORMS": "0",
+            "variants-MIN_NUM_FORMS": "0",
+            "variants-MAX_NUM_FORMS": "1000",
+        },
+    )
+
+    latest = product.history.first()
+    assert latest.price == Decimal("175.00")
+    assert latest.history_type == "~"
+    assert latest.history_user == User.objects.get(username="staff_tester")
+    assert latest.history_date is not None
 
 
 @pytest.mark.django_db

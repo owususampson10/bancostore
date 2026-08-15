@@ -10,6 +10,7 @@ from constance.utils import get_values
 
 from apps.platform_settings.admin import BancostoreConstanceForm
 from apps.platform_settings.config import CONSTANCE_CONFIG, CONSTANCE_CONFIG_FIELDSETS
+from apps.platform_settings.models import PlatformSettingChange
 
 User = get_user_model()
 
@@ -195,6 +196,40 @@ def test_saving_shows_a_success_message(staff_client):
     )
 
     assert b"updated successfully" in response.content
+
+
+@pytest.mark.django_db
+def test_saving_a_real_change_produces_a_queryable_audit_record(staff_client):
+    """Task 47d. constance stores settings via its own key/value backend,
+    not a normal Django model -- PlatformSettingChange is the bespoke
+    audit log filling that gap, populated by
+    apps.platform_settings.signals.record_setting_change listening to
+    constance's config_updated signal. This is the real end-to-end path
+    (a real authenticated POST through the actual view), not a unit test
+    of the signal receiver in isolation -- proving HistoryRequestMiddleware
+    actually resolves the correct actor for this new audit trail exactly
+    the way it already does for Category/Product/Distributor/Order/
+    WithdrawalRequest's own HistoricalRecords()."""
+    staff_client.post(
+        _platform_settings_url(),
+        _valid_post_data({"BINARY_BONUS_RATE": "8.25"}),
+    )
+
+    change = PlatformSettingChange.objects.get(key="BINARY_BONUS_RATE")
+    assert change.new_value == "8.25"
+    assert change.changed_by == User.objects.get(username="staff_tester")
+    assert change.changed_at is not None
+
+
+@pytest.mark.django_db
+def test_saving_with_no_real_changes_creates_no_audit_records(staff_client):
+    """constance's own ConstanceForm.save() only calls .set() (which
+    fires config_updated) for fields that actually changed -- resubmitting
+    the exact current values must not flood the audit log with no-op
+    rows."""
+    staff_client.post(_platform_settings_url(), _valid_post_data())
+
+    assert not PlatformSettingChange.objects.exists()
 
 
 @pytest.mark.django_db

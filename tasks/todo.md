@@ -7285,113 +7285,395 @@ code.
 #### 47a: Escrow reserve ledger (elevated rigor — `doubt-driven-development` first)
 
 **Acceptance criteria:**
-- [ ] An escrow balance increases by exactly the admin-configured percentage (13.12's Escrow
+- [x] An escrow balance increases by exactly the admin-configured percentage (13.12's Escrow
       Reserve Percentage, seeded at 5% per the source doc but not hardcoded) of each confirmed
-      order's product revenue
-- [ ] The balance is a real stored running total, atomically updated at order confirmation
+      order's product revenue — resolved as NET revenue (`Order.subtotal - Order.discount_amount`,
+      never `delivery_fee`) per the `doubt-driven-development` review's own recommendation: a
+      discount reduces what the platform actually collected for products, so escrow shouldn't be
+      held against money never received. `Order.subtotal - discount_amount` can never go negative —
+      `order_amounts_sane`'s own `CheckConstraint` already enforces `discount_amount <= subtotal`.
+- [x] The balance is a real stored running total, atomically updated at order confirmation
       (matching `Wallet.balance`'s own `F()`-based convention, Task 12) — never a live `SUM()` over
       all historical orders on every page load
 
+**Beyond the original acceptance criteria — user-directed, not decided unilaterally:** asked the
+user how this class of problem is resolved in real-world systems before locking in a design.
+Real payment processors (Stripe/PayPal/Paystack's own merchant "rolling reserve" holdbacks) tie a
+reserve to the specific transaction it came from and release it if that transaction is refunded —
+a fundamentally different shape from Binary/Matching Bonus's own "never clawed back" precedent
+(those are third-party payouts, not a reserve held against a specific order's own revenue, so that
+precedent doesn't transfer). User chose the rolling-reserve model: `cancel_or_refund_order`
+(Task 18b) now reverses the exact originally-credited amount (looked up from the order's own
+`CREDIT` `EscrowTransaction` row, never recomputed from a since-changed live rate — matching
+Task 19's sponsor-bonus-reversal snapshot convention) whenever a confirmed order is
+cancelled/refunded, unconditional on `pv_earned`/restock choice, same as escrow's own credit-time
+placement.
+
 **Verification:**
-- [ ] `doubt-driven-development` review complete and findings folded in before this sub-task starts
-- [ ] Feature tests: correct percentage credit on confirmation, a concurrency test matching the
-      wallet's own established convention for this exact class of race
-- [ ] Escrow balance verified against the database directly after a real seeded order confirmation,
-      not just the UI
-- [ ] Full suite green, CI green on real MySQL
+- [x] `doubt-driven-development` review complete and findings folded in before this sub-task
+      started — **two rounds**, both pre-implementation: round 1 on the credit-path design (1
+      Critical/4 High/4 Medium/2 Low — a legitimate admin-set 0% rate would have broken checkout
+      platform-wide via an unhandled exception inside `confirm_order_payment`'s atomic block;
+      `EscrowTransaction.order` as a real FK would conflict with this project's own established
+      "audit records survive Order deletion" convention; a singleton ledger row needed a NOWAIT
+      lock unlike `Wallet`'s naturally-sharded per-distributor rows; no admin-lockdown plan, the
+      exact gap `WalletAdmin` shipped once already; a `get_or_create(pk=1)` bootstrap race, an
+      unconditional-for-every-order placement fix, a `rate_applied` snapshot field, and the
+      constance help text dishonestly claiming a real GCB Bank integration). Round 2, after the
+      user's rolling-reserve decision, reviewed the reversal mechanics specifically (2 High/5
+      Medium/1 Low — a queryset-vs-function call-shape bug in the reversal pseudocode itself; the
+      sign-only `CheckConstraint` needing a type-aware replacement once reversals introduce negative
+      amounts; an unconditional compound `UniqueConstraint(order_id, transaction_type)` instead of a
+      *conditional* one — this codebase already found and fixed the identical MySQL "conditional
+      unique indexes are silently not created" gap once on `WalletTransaction`; a documented
+      caller-lock contract; `.get()` instead of `.filter().first()` for the credit lookup, to fail
+      loud rather than silently pick one if the one-credit-per-order invariant is ever violated).
+- [x] Feature tests: correct percentage credit on confirmation (including net-of-discount and
+      delivery-fee-exclusion cases), a concurrency test matching the wallet's own established
+      convention for this exact class of race (5 threads, `retry_on_lock_contention` per attempt,
+      proving the singleton row's balance sums correctly under real contention) — 15 unit tests in
+      `tests/unit/compliance/test_escrow_ledger.py` plus feature-level tests wired into
+      `tests/unit/orders/test_confirm_order_payment.py` (guest-order escrow credit, proving it's
+      NOT gated behind the distributor-only PV block) and `tests/unit/orders/
+      test_cancel_or_refund_order.py` (cancel/refund reversal, double-cancel idempotency)
+- [x] Escrow balance verified against the database directly after a real seeded order confirmation,
+      not just the UI — every new test asserts `EscrowLedger.objects.get(pk=1).balance` directly
+- [x] Full suite green (1666 passed, 5 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section). **CI on real
+      MySQL not yet run** — pending a decision on whether to batch 47a-47e like Task 46's sub-tasks
+      or push this sub-task on its own.
 
-**Dependencies:** None
+**A real test-infrastructure bug found and fixed along the way, not silently worked around:**
+wiring `credit_escrow` into `confirm_order_payment` broke 4 pre-existing `@pytest.mark.django_db
+(transaction=True)` concurrency tests with `EscrowLedger.DoesNotExist` — Django's
+`TransactionTestCase` (what `transaction=True` uses) flushes all tables after each test, and per
+Django's own documented behavior, flush does NOT restore rows inserted by data migrations, so only
+the *first* `transaction=True` test in a pytest session still had the migration-seeded `pk=1` row.
+First attempted the documented Django fix (`serialized_rollback=True`) — this "fixed" the 4 tests
+in isolation but broke them again under the FULL suite with a `django_content_type` `UNIQUE`
+constraint collision, a known Django/pytest-django interaction gotcha when `serialized_rollback`
+is mixed with other non-serialized `TransactionTestCase`-style tests in the same session. Reverted
+that and fixed at the actual root instead: `credit_escrow` now defensively calls
+`EscrowLedger.objects.get_or_create(pk=1)` before its NOWAIT lock, mirroring
+`apps.wallet.services.credit()`'s own lazy-creation shape exactly — robust to whatever state the
+test DB happens to be in, while the migration seed remains the primary/expected mechanism in every
+real environment (migrations always precede traffic). Also fixed in passing: a stale docstring
+comment on `apps/orders/models.py::OrderCycleFailure` claiming "no delete-lock exists on
+OrderAdmin" — `OrderAdmin.has_delete_permission` already returns `False`, matching its siblings;
+the real reason `order_id` stays a plain int is that direct-shell/ORM deletion outside the admin
+UI is a real, already-documented practice in this project (Task 24's production smoke-test
+cleanup).
 
-**Files likely touched:** new `apps/compliance` app (`EscrowLedger` or similar), `apps/orders/
-services.py` (`confirm_order_payment` hook), `apps/platform_settings/config.py`,
-`tests/unit/compliance/test_escrow_ledger.py`
+**Dependencies:** None — **closed 2026-08-14.**
+
+**Files touched:** new `apps/compliance/` app (`models.py` — `EscrowLedger`, `EscrowTransaction`;
+`services.py` — `credit_escrow`, `reverse_escrow`; `admin.py` — hard-locked from the first commit;
+2 migrations including the `EscrowLedger(pk=1)` seed), `apps/orders/services.py`
+(`confirm_order_payment`/`cancel_or_refund_order` hooks), `apps/orders/models.py` (stale docstring
+fix), `apps/platform_settings/config.py` (new `COMPLIANCE_SETTINGS` fieldset — fixes the
+pre-existing `ESCROW_RESERVE_RATE` stub, which had no `percentage_field` bound and dishonest "held
+at GCB Bank" help text), `apps/admin_portal/views.py` (`_GROUP_ICONS` entry), `bancostore/
+settings.py` (`INSTALLED_APPS`), plus `tests/unit/compliance/test_escrow_ledger.py` (new),
+`tests/unit/orders/test_confirm_order_payment.py` and `test_cancel_or_refund_order.py` (extended).
 
 **Estimated scope:** M
 
 #### 47b: Retail/distributor ratio + threshold alert
 
 **Acceptance criteria:**
-- [ ] Admin sees a live retail-vs-distributor sales ratio, computed from `Order.pv_earned > 0` as
-      the existing real distributor-purchase signal (confirmed in `apps/orders/services.py`)
-- [ ] 13.12's Retail PV Minimum (%) is a real, admin-editable constance setting (seeded at 70% per
-      the source doc)
-- [ ] An email fires to the 13.12 Compliance Alert Email address when the ratio drops below
+- [x] Admin sees a live retail-vs-distributor sales ratio, computed from `Order.pv_earned > 0` as
+      the existing real distributor-purchase signal (confirmed in `apps/orders/services.py`) — a
+      new "Compliance" card on the Task 27 Admin Dashboard (`apps/admin_portal/views.py::dashboard`),
+      reusing that page's own established stat-card pattern rather than building a new screen for
+      one number. Scoped to currently-paid orders only (excludes `PENDING`/`CANCELLED`/`REFUNDED`,
+      matching this codebase's own established revenue-figure convention, independently defined
+      here rather than importing another app's private constant — this project's own accepted
+      precedent for this narrowly-scoped 3-tuple, already duplicated twice before this).
+- [x] 13.12's Retail PV Minimum (%) is a real, admin-editable constance setting (seeded at 70% per
+      the source doc) — `RETAIL_PV_MINIMUM_PERCENT`, added to the `COMPLIANCE_SETTINGS` fieldset
+      Task 47a created, with the `percentage_field` bound from day one (not shipped-then-fixed the
+      way `ESCROW_RESERVE_RATE` was)
+- [x] An email fires to the 13.12 Compliance Alert Email address when the ratio drops below
       threshold (reuses the existing Gmail SMTP path, no new integration) — and does not fire when
-      above it
+      above it — `COMPLIANCE_ALERT_EMAIL` (new setting) + `apps.compliance.services
+      .check_retail_ratio_and_alert`, called after every order confirmation and cancellation/
+      refund (the only two events that can move the ratio), always OUTSIDE the caller's own
+      `transaction.atomic()` lock since it sends real email (Task 16g's "never hold a lock across
+      external I/O" standard). **Design decision beyond the literal acceptance criteria, not
+      silently assumed:** fires only on the TRANSITION from above/at-threshold to below (a new
+      `ComplianceAlertState` singleton row tracks this), not on every order confirmed while
+      already below threshold — the acceptance criteria's own wording doesn't rule out per-order
+      firing, but a real admin would have their inbox flooded once persistently below threshold,
+      defeating an alert's purpose. Recovering above threshold clears the state so a future dip
+      fires a fresh alert rather than staying silent forever after the first one.
 
 **Verification:**
-- [ ] Feature tests: seed orders below 70% retail, confirm the alert fires; seed orders above,
-      confirm it doesn't
-- [ ] Live-browser verified (ratio display), email send confirmed via the existing test-mail
-      capture pattern this codebase already uses elsewhere
-- [ ] Full suite green
+- [x] Feature tests: seed orders below 70% retail, confirm the alert fires; seed orders above,
+      confirm it doesn't — 10 unit tests in `tests/unit/compliance/test_retail_ratio_alert.py`
+      (ratio computation, transition-only firing, recovery-then-refire, blank-email/send-failure
+      handling, both logged not raised) plus 4 feature tests in `tests/feature/admin_portal/
+      test_dashboard.py` (ratio display, below-threshold styling, unpaid-order exclusion) plus
+      2 integration tests proving the real `confirm_order_payment`/`cancel_or_refund_order` wiring
+      end-to-end (`apps.orders.services.send_mail` and `apps.compliance.services.send_mail` are two
+      independent module-level references to the same underlying function -- mocking one does not
+      mock the other, so these tests mock both explicitly to prove the real call chain, not just
+      that nothing crashes)
+- [x] Live-browser verified (2026-08-14): seeded 4 real paid orders (1 retail, 3 distributor) into
+      the dev database directly, logged in as a real admin (a fresh TOTP device generated via
+      Django's own `django_otp.oath.totp` through `manage.py shell` — the existing stub admin
+      account's device had accumulated verification throttling from earlier failed attempts using
+      a hand-rolled RFC 6238 implementation that turned out correct but got blocked by that
+      throttling, not by being wrong; confirmed by cross-checking against django-otp's own `totp()`
+      function directly, then using a scratch device with no throttling history), confirmed the
+      Compliance card renders the correct 5.56% figure with red "below threshold" error-token
+      styling and correct copy. Scratch TOTP device deleted afterward; email send itself is
+      unit/feature-test-verified only (`send_mail` mocked), not sent for real, matching this
+      codebase's own "never spend real send capacity without asking" convention
+- [x] Full suite green (1682 passed, 5 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section)
 
-**Dependencies:** None
+**Dependencies:** None — **closed 2026-08-14.**
 
-**Files likely touched:** `apps/compliance/services.py`, `apps/admin_portal/views.py`,
-`apps/platform_settings/config.py`, `tests/feature/compliance/test_retail_ratio_alert.py`
+**Files touched:** `apps/compliance/models.py` (`ComplianceAlertState`, migration),
+`apps/compliance/services.py` (`get_retail_distributor_ratio`, `check_retail_ratio_and_alert`),
+`apps/orders/services.py` (both `confirm_order_payment` and `cancel_or_refund_order` hooks),
+`apps/platform_settings/config.py` (`RETAIL_PV_MINIMUM_PERCENT`, `COMPLIANCE_ALERT_EMAIL`),
+`apps/admin_portal/views.py` (`dashboard` extension), `templates/admin_portal/dashboard.html`
+(new Compliance section), plus `tests/unit/compliance/test_retail_ratio_alert.py` (new),
+`tests/feature/admin_portal/test_dashboard.py` and `tests/unit/orders/
+test_confirm_order_payment.py`/`test_cancel_or_refund_order.py` (extended).
 
 **Estimated scope:** M
 
 #### 47c: Financial Overview dashboard row
 
 **Acceptance criteria:**
-- [ ] Admin sees total platform revenue to date, total commissions paid, total withholding tax
+- [x] Admin sees total platform revenue to date, total commissions paid, total withholding tax
       remitted, and the escrow balance (47a) — four real numbers, reusing Task 27's established
-      dashboard-card pattern
+      dashboard-card pattern. All four are cumulative all-time totals (a new "Financial Overview —
+      All Time" row, distinct from the existing "Business Snapshot — This Week" row above it, on
+      the same Task 27 Admin Dashboard): revenue sums `Order.total` over currently-paid orders
+      (excludes `PENDING`/`CANCELLED`/`REFUNDED`, reusing the exact same exclusion set
+      `orders_this_week_value` already uses — SPEC_PHASE2.md's own Section 12.6 explicitly names
+      `Order.total` as the source, not a guess); commissions sums `WalletTransaction.amount` over
+      `COMMISSION_TRANSACTION_TYPES` (the same constant Task 46's own commissions-vs-revenue report
+      reuses); withholding tax sums `WithdrawalRequest.tax_amount` over `status=PAID` only — a
+      still-submitted or rejected/reversed request never actually remitted anything to GRA, matching
+      how Task 16's reversal path credits the wallet back in full on a failed payout; escrow reads
+      `EscrowLedger.objects.get(pk=1).balance` directly (Task 47a's own real stored running total,
+      never a live re-derivation)
 
 **Verification:**
-- [ ] Feature test: seeded-data cross-check for all four numbers
-- [ ] Live-browser verified
-- [ ] Full suite green
+- [x] Feature test: seeded-data cross-check for all four numbers — 4 new tests in
+      `tests/feature/admin_portal/test_dashboard.py`, each isolating one figure against seeded data
+      that also includes a deliberately-excluded row (an unpaid order, a non-commission wallet
+      transaction, a still-submitted withdrawal) to prove the exclusion logic, not just the sum
+- [x] Live-browser verified (2026-08-15): logged in as a real admin (the Task 47a/47b sessions'
+      remember-this-device cookie carried over, skipping 2FA entirely this time), confirmed the
+      Financial Overview row renders GHS 2,970.00 / GHS 2,290.95 / GHS 0.00 / GHS 0.00 against the
+      real dev database — the two zero figures are honest, not a rendering bug: no withdrawal has
+      ever reached `PAID` status and no order in this dev DB was ever confirmed through the real
+      `confirm_order_payment` path (Task 47a/47b's own dev-DB verification runs inserted `CONFIRMED`
+      orders directly via shell, bypassing `credit_escrow` entirely), cross-checked directly against
+      the database rather than assumed
+- [x] Full suite green (1686 passed, 5 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section)
 
-**Dependencies:** 47a
+**Dependencies:** 47a — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/admin_portal/views.py` (dashboard extension), `templates/
-admin_portal/dashboard.html`, `tests/feature/admin_portal/test_financial_overview.py`
+**Files touched:** `apps/admin_portal/views.py` (`dashboard` extension), `templates/admin_portal/
+dashboard.html` (new Financial Overview section, `{% load humanize %}` added), plus
+`tests/feature/admin_portal/test_dashboard.py` (extended, not a separate new file — one dashboard
+view, one test file, matching this codebase's existing convention for that page).
 
 **Estimated scope:** S
 
 #### 47d: Audit log, part 1 — model coverage
 
 **Acceptance criteria:**
-- [ ] `HistoricalRecords()` added to the sensitive models currently missing it that are worth
+- [x] `HistoricalRecords()` added to the sensitive models currently missing it that are worth
       tracking — at minimum Product/Category (Task 26) and Platform Settings changes (Task 28); the
-      exact final list is a task-kickoff decision, not decided in this plan
-- [ ] KYC approve/reject decisions gain real history tracking (currently informational logging only)
+      exact final list is a task-kickoff decision, not decided in this plan. Final list: `Category`
+      and `Product` (`apps/catalog/models.py`, plain addition — neither has an M2M field needing
+      special `HistoricalRecords()` config), both also upgraded to `SimpleHistoryAdmin` in Django
+      Admin (`CategoryAdmin`/`ProductAdmin`), matching Order/Distributor/WithdrawalRequest's own
+      established convention exactly. "Platform Settings changes" can't get `HistoricalRecords()`
+      at all — constance stores every setting via its own key/value backend
+      (`CONSTANCE_BACKEND=constance.backends.database.DatabaseBackend`, one shared `Constance`
+      table with just `key`/`value`, not one row per setting), so there's no per-setting model
+      instance for `HistoricalRecords()` to shadow. Built a bespoke append-only log instead: new
+      `apps/platform_settings/models.py::PlatformSettingChange` (key, old/new value as text,
+      `changed_by`, `changed_at`), populated by `apps/platform_settings/signals.py` listening to
+      constance's own `config_updated` signal (wired in `apps/platform_settings/apps.py::ready()`),
+      resolving the actor via `simple_history`'s own already-installed `HistoryRequestMiddleware`
+      thread-local context rather than inventing a second "who made this request" mechanism — the
+      exact same actor-resolution path every other audit trail in this project already uses.
+      Registered read-only and hard-locked in Django Admin (`PlatformSettingChangeAdmin`), matching
+      every other audit-trail admin registration (`WalletAdmin`, `EscrowLedgerAdmin`, ...).
+- [x] KYC approve/reject decisions gain real history tracking (currently informational logging
+      only) — **turned out to need no new production code.** `Distributor` already carries
+      `HistoricalRecords()` (Task 11) and `apps.distributors.services.approve_kyc`/`reject_kyc`
+      already write via `.save()` (never `.update()`), confirmed by reading the code directly — a
+      code comment right at the `.save()` call already said "who approved is captured separately
+      via `Distributor.history`". Verified empirically via a real shell probe (a real `.save()` DOES
+      produce a queryable `history` row) before trusting the comment, then verified again end-to-end
+      through the actual authenticated admin_portal view (proving `HistoryRequestMiddleware`
+      resolves the real actor, not just that a shell-local `.save()` creates a row with
+      `history_user=None`). This mirrors Task 21c's own "verification only, no code needed"
+      precedent in this same codebase — `SPEC_PHASE2.md`'s claim that this was "informational
+      logging only" was simply out of date by the time this task started, not a design decision
+      made here.
+
+**A real bug found and fixed along the way, not silently worked around:** the first version of the
+`PlatformSettingChange` signal receiver created 2 audit rows for 1 real settings change, and
+created spurious rows on a save that changed nothing at all. Root-caused (not guessed at) via
+temporary traceback instrumentation: `constance.base.Config.__getattr__` lazily materializes a
+setting's declared default into storage the first time it's ever *read*, not just set (`if result
+is None: result = default; setattr(self, key, default)`) — and `constance.forms.ConstanceForm
+.save()` itself reads every field this way (`current = getattr(config, name)`) before comparing it
+to the submitted value. On a `Constance` table with no rows yet (every fresh pytest test, or a
+hypothetical brand-new deploy that's never read these settings before), this fires
+`config_updated` once for every single setting as a pure storage-warming side effect, before the
+one real admin-submitted change fires its own genuine signal — constance's own documented internal
+behavior, not a bug in this codebase or in constance itself, and invisible in this project's actual
+production (every setting has already been read/materialized during Task 28's weeks of live usage,
+so this old_value=None path essentially never fires there anymore). Fixed by detecting the
+signature (`old_value is None` and `new_value` exactly equals that key's own `CONSTANCE_CONFIG`
+default) and skipping the audit write — guarded with two new regression tests
+(`test_saving_a_real_change_produces_a_queryable_audit_record`,
+`test_saving_with_no_real_changes_creates_no_audit_records`), both of which failed before the fix
+and pass after it.
 
 **Verification:**
-- [ ] Migration applies cleanly; a real approve/edit/reject action produces a queryable history
-      record with actor + timestamp + what changed
-- [ ] Full suite green, CI green on real MySQL (new migration)
+- [x] Migration applies cleanly; a real approve/edit/reject action produces a queryable history
+      record with actor + timestamp + what changed — verified for all three (Category edit, Product
+      edit, KYC approve) via real feature tests posting through the actual authenticated
+      `admin_portal` views, not `Model.objects.create()`/`.save()` called directly, so
+      `HistoryRequestMiddleware`'s actor resolution is genuinely exercised, not assumed
+- [x] Full suite green (1691 passed, 5 skipped; the one pre-existing unrelated failure is the same
+      `test_earnings_history.py` one tracked in this file's Known Issues section). **CI on real
+      MySQL not yet run** — pending the batch decision already tracked for 47a-47c.
 
-**Dependencies:** None
+**Dependencies:** None — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/catalog/models.py`, `apps/platform_settings/models.py` (if needed),
-`apps/distributors/models.py` (KYC fields), new migrations, `tests/unit/*/test_history_tracking.py`
+**Files touched:** `apps/catalog/models.py` (`HistoricalRecords()` on `Category`/`Product` +
+migration), `apps/catalog/admin.py` (`SimpleHistoryAdmin`), new `apps/platform_settings/models.py`
+(`PlatformSettingChange` + migration), new `apps/platform_settings/signals.py`
+(`record_setting_change`, `_is_lazy_default_materialization`), `apps/platform_settings/apps.py`
+(`ready()` wiring), `apps/platform_settings/admin.py` (`PlatformSettingChangeAdmin`), plus
+`tests/feature/admin_portal/test_catalog_management.py`, `test_kyc_review.py`, and
+`test_platform_settings.py` (all extended, not new files — matching this codebase's existing
+per-screen test-file convention rather than the originally-sketched
+`tests/unit/*/test_history_tracking.py` layout).
 
 **Estimated scope:** S
 
 #### 47e: Audit log, part 2 — admin screen + retention
 
 **Acceptance criteria:**
-- [ ] One real `admin_portal` screen queries across every `HistoricalRecords()`-tracked model
+- [x] One real `admin_portal` screen queries across every `HistoricalRecords()`-tracked model
       (actor, timestamp, what changed) — not raw Django Admin, matching this codebase's established
-      precedent
-- [ ] 13.12's Audit Log Retention Period (days) is a real, admin-editable constance setting wired to
-      a scheduled Celery cleanup job — not decorative
+      precedent. New `apps/admin_portal/views.py::audit_log` + `templates/admin_portal/audit_log.html`,
+      wired into the sidebar as "Audit Log" (`history` icon, between Reports and Settings). Reuses
+      `_date_filter_field.html`'s themed calendar popover inside a plain `<form method="get">` with
+      an explicit "Filter" button — deliberately NOT full htmx real-time filtering, matching
+      `commission_oversight`'s own established simplicity for a read-only observability screen (no
+      filter there at all) rather than inventing a third filter-UI pattern in this codebase.
+      `apps/compliance/services.py::get_unified_audit_log()` does the real work: merges all 5
+      `HistoricalRecords()`-tracked models (Category, Product, Distributor, Order,
+      WithdrawalRequest) with Task 47d's bespoke `PlatformSettingChange` log (not
+      `HistoricalRecords()`-based, but the same audit-log initiative per `SPEC_PHASE2.md`'s own
+      framing) into one timestamp-sorted list — each source independently bounded by
+      `date_from`/`date_to` (never unbounded) before merging in Python, defaulting to the trailing
+      30 days when no range is given. Uses `simple_history`'s real `diff_against()`/`ModelDelta` API
+      for "what changed" (`"field: old → new"` per changed field, matching `PlatformSettingChange`'s
+      own display shape), not hand-rolled diffing.
+- [x] 13.12's Audit Log Retention Period (days) is a real, admin-editable constance setting wired to
+      a scheduled Celery cleanup job — not decorative. `AUDIT_LOG_RETENTION_PERIOD_DAYS` (default
+      365, no source-doc-specified default found — a reasonable, defensible, admin-editable starting
+      point matching this file's own convention elsewhere) added to `COMPLIANCE_SETTINGS`, using a
+      new bounded `retention_days_field` constance field type (`min_value=30`) — a deliberate,
+      documented deviation from this project's other unbounded "how many days" settings
+      (`PV_CARRY_FORWARD_EXPIRY_DAYS` etc.), since those only govern a business calculation while
+      this one governs real deletion of audit rows: a 0/negative value would be an un-undoable
+      data-loss footgun. `apps/compliance/tasks.py::cleanup_expired_audit_records` is a daily Celery
+      Beat job (seeded via `apps/compliance/migrations/0004_seed_audit_cleanup_periodic_task.py`,
+      mirroring `apps/distributors/migrations/0004_seed_cleanup_periodic_task.py`'s exact shape) —
+      a straight bulk `.filter(history_date__lt=cutoff).delete()` per table, matching
+      `cleanup_expired_pending_registrations`'s simpler shape rather than the heavier
+      `OrderCycleRun`/`Failure` audit-trail pattern, since a bulk delete has no per-row failure mode
+      to isolate and is naturally idempotent under overlapping runs. Reads
+      `config.AUDIT_LOG_RETENTION_PERIOD_DAYS` live on every run, never a cached/hardcoded value.
+
+**Two real bugs found and fixed along the way, not silently worked around:**
+1. `history_row.get_prev_record()` doesn't exist as a callable — `simple_history` exposes it as a
+   `prev_record` **property** (confirmed by reading the library source directly after an
+   `AttributeError`). Fixed to `history_row.prev_record` (no parens).
+2. `str(history_row.history_object)` can raise `User.DoesNotExist` when a historical row's
+   snapshotted FK (e.g. `Distributor.user_id`) points to a since-deleted row — `history_object`'s
+   reconstruction doesn't cache the related object, so `Distributor.__str__`'s `self.user` access
+   triggers a fresh, live re-query. Caught live via a real dev-DB smoke test (not a pre-written
+   test) against genuinely orphaned rows left over from earlier sub-tasks' own test data, and
+   re-confirmed rendering correctly during this task's own live-browser verification pass ("Order
+   #61 confirmed" and "Distributor #47/#50 (related record deleted)" both appeared correctly on the
+   real screen). Fixed with `_safe_object_repr()`, wrapping the `str()` call in try/except with a
+   safe fallback (`f"{model_label} #{pk} (related record deleted)"`) — the same "an audit record
+   must survive deletion of what it references" reasoning already established by
+   `OrderCycleFailure`/`CommissionCycleFailure`'s plain-int FKs.
+
+**A real gotcha hit during live-browser verification, not a bug in this task's own code:** logging
+in as a freshly-created throwaway admin test account skipped the mandatory TOTP step entirely and
+landed on a bare 403, even with a `confirmed=True` `TOTPDevice` in place. Root-caused (not guessed
+at): `two_factor.utils.default_device()` only recognizes a device whose `name` is literally
+`"default"` — a device named anything else (e.g. `"verify-device"`) is invisible to
+`has_token_step()`, so the wizard silently completes after just the password step. Not a bug in
+this codebase's own 2FA design (Task 4-6's `ADMIN_2FA_ENABLED`/mandatory-2FA guarantee is untouched
+and still enforced for every device actually named `"default"`, which is what `SetupView`'s real
+setup flow always creates) — purely an artifact of how the throwaway verification device was
+created by hand via `manage.py shell`. Fixed by naming the device `"default"` and, per direct user
+correction, by verifying against this project's own pre-existing seeded `stub_admin` account
+(`apps/accounts/management/commands/seed_roles.py`, `bancostore-dev-only`) instead of a new
+one-off account — matching this file's own established live-browser-verification convention from
+every earlier sub-task in this session.
 
 **Verification:**
-- [ ] Feature tests: cross-model query correctness, retention job actually deletes records past the
-      configured window and leaves recent ones untouched
-- [ ] Live-browser verified
-- [ ] Full suite green, CI green on real MySQL
+- [x] Feature tests: cross-model query correctness (9 tests,
+      `tests/feature/admin_portal/test_audit_log.py`) — a `PlatformSettingChange` row and a
+      `Product` history row both appear on the same merged/sorted list, newest-first ordering,
+      date-range filtering excludes out-of-range rows, empty state, pagination at 20/page, staff-only
+      + anonymous-redirect guards. Retention job tests (3 tests,
+      `tests/unit/compliance/test_audit_log_cleanup.py`) — deletes history older than the configured
+      window across all 6 sources, keeps recent rows untouched, and respects a live admin-lowered
+      window (proving it reads the setting live, not a hardcoded constant).
+- [x] Live-browser verified (2026-08-15): real TOTP admin login (`stub_admin`), the Audit Log screen
+      rendered real merged data across every source — a `PlatformSettingChange` row
+      (`WITHHOLDING_TAX_RATE`), a `Product` price change (`price: 99.00 → 120.00`) and creation, a
+      `Category` rename showing `"name: Live Verify Category → Live Verify Category Renamed"`,
+      correctly sorted newest-first; pagination confirmed across real data (426 entries, 22 pages,
+      `?page=2` showed genuinely different/older rows); date-range filter confirmed both directions
+      (a narrow out-of-range window correctly rendered the empty state; the picker's own `From`/`To`
+      fields correctly reflected the submitted query-string values back). All throwaway
+      verification data (`Live Verify Category`/`Product`) deleted afterward.
+- [x] Full suite green (1702 passed, 5 skipped; the 2 failures seen in one full run were both
+      confirmed pre-existing and unrelated by re-running each in isolation — the already-tracked
+      `test_earnings_history.py` Known Issue, and a `test_kyc_review.py` concurrency test that
+      passed cleanly alone, matching this project's own already-documented SQLite
+      `"database table is locked"` flakiness). `npm run build` run after the new template (Tailwind
+      class-scanning gotcha). **CI on real MySQL not yet run** — pending the batch push decision
+      already tracked for 47a-47d.
 
-**Dependencies:** 47d
+**Dependencies:** 47d — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/admin_portal/views.py`/`urls.py`, new admin_portal audit-log
-template, `apps/compliance/tasks.py` (retention Celery task), `apps/platform_settings/config.py`,
-`tests/feature/admin_portal/test_audit_log.py`
+**Files touched:** `apps/platform_settings/config.py` (`AUDIT_LOG_RETENTION_PERIOD_DAYS` +
+`retention_days_field`), new `apps/compliance/tasks.py`
+(`cleanup_expired_audit_records`), new `apps/compliance/migrations/0004_seed_audit_cleanup_periodic_task.py`,
+`apps/compliance/services.py` (`get_unified_audit_log`, `_normalize_historical_row`,
+`_safe_object_repr`, `_day_start`, `_HISTORY_TRACKED_MODELS`), `apps/admin_portal/views.py`
+(`audit_log`), `apps/admin_portal/urls.py`, new `templates/admin_portal/audit_log.html`,
+`templates/admin_portal/base_dashboard.html` (sidebar nav item), new
+`tests/feature/admin_portal/test_audit_log.py`, new `tests/unit/compliance/test_audit_log_cleanup.py`.
+
+**Estimated scope:** M
 
 **Estimated scope:** M
 

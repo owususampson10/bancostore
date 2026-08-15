@@ -8,6 +8,7 @@ from django.utils import timezone
 import pytest
 
 from apps.catalog.models import Category, Product
+from apps.compliance.models import EscrowLedger
 from apps.distributors.models import DiditVerification, Distributor
 from apps.orders.models import Order
 from apps.wallet.models import Wallet, WalletTransaction
@@ -347,3 +348,151 @@ def test_view_all_orders_links_to_the_order_management_queue(staff_client):
     response = staff_client.get(_dashboard_url())
 
     assert reverse("admin_portal:order_management_queue").encode() in response.content
+
+
+# ---------------------------------------------------------------------------
+# Task 47b: retail/distributor ratio
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_retail_ratio_shows_no_paid_orders_yet_when_there_are_none(staff_client):
+    response = staff_client.get(_dashboard_url())
+
+    assert response.context["retail_distributor_ratio"] is None
+    assert b"No paid orders yet" in response.content
+
+
+@pytest.mark.django_db
+def test_retail_ratio_is_computed_from_paid_orders_pv_earned(staff_client):
+    _make_order(pv_earned=0)
+    _make_order(pv_earned=0)
+    _make_order(pv_earned=0)
+    _make_order(pv_earned=60)  # the one distributor purchase
+
+    response = staff_client.get(_dashboard_url())
+
+    assert response.context["retail_distributor_ratio"] == Decimal("75.00")
+    assert response.context["retail_ratio_below_threshold"] is False
+
+
+@pytest.mark.django_db
+def test_retail_ratio_below_threshold_is_flagged(staff_client):
+    _make_order(pv_earned=60)
+    _make_order(pv_earned=60)
+    _make_order(pv_earned=0)  # 1/3 retail = 33.33%, well under the 70% default
+
+    response = staff_client.get(_dashboard_url())
+
+    assert response.context["retail_distributor_ratio"] == Decimal("33.33")
+    assert response.context["retail_ratio_below_threshold"] is True
+    assert b"below threshold" in response.content
+
+
+@pytest.mark.django_db
+def test_retail_ratio_excludes_unpaid_orders(staff_client):
+    _make_order(pv_earned=0, status=Order.Status.CONFIRMED)
+    _make_order(pv_earned=60, status=Order.Status.PENDING)  # never collected payment
+    _make_order(pv_earned=60, status=Order.Status.CANCELLED)
+
+    response = staff_client.get(_dashboard_url())
+
+    # Only the one confirmed, retail order counts -- 100% retail, not 33%.
+    assert response.context["retail_distributor_ratio"] == Decimal("100.00")
+
+
+# ---------------------------------------------------------------------------
+# Task 47c: Financial Overview (all-time)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_total_revenue_sums_only_paid_orders_all_time(staff_client):
+    _make_order(total=Decimal("500.00"), status=Order.Status.CONFIRMED)
+    _make_order(total=Decimal("300.00"), status=Order.Status.DELIVERED)
+    _make_order(total=Decimal("999.00"), status=Order.Status.PENDING)  # unpaid
+    _make_order(
+        total=Decimal("999.00"), status=Order.Status.CANCELLED
+    )  # refunded/never paid
+
+    response = staff_client.get(_dashboard_url())
+
+    assert response.context["total_revenue"] == Decimal("800.00")
+
+
+@pytest.mark.django_db
+def test_total_commissions_paid_sums_commission_transaction_types_all_time(
+    staff_client,
+):
+    distributor = _make_distributor()
+    _make_wallet_transaction(
+        distributor,
+        amount=Decimal("100.00"),
+        transaction_type=WalletTransaction.TransactionType.BINARY_BONUS,
+    )
+    _make_wallet_transaction(
+        distributor,
+        amount=Decimal("50.00"),
+        transaction_type=WalletTransaction.TransactionType.MATCHING_BONUS,
+    )
+    # Not a commission -- must not be counted.
+    _make_wallet_transaction(
+        distributor,
+        amount=Decimal("9999.00"),
+        transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT,
+    )
+
+    response = staff_client.get(_dashboard_url())
+
+    assert response.context["total_commissions_paid"] == Decimal("150.00")
+
+
+@pytest.mark.django_db
+def test_total_withholding_tax_remitted_counts_only_paid_withdrawals(staff_client):
+    distributor = _make_distributor()
+    WithdrawalRequest.objects.create(
+        distributor=distributor,
+        amount=Decimal("2000.00"),
+        tax_amount=Decimal("20.00"),
+        net_amount=Decimal("1980.00"),
+        status=WithdrawalRequest.Status.PAID,
+    )
+    # A still-submitted request hasn't actually remitted anything to GRA
+    # yet -- its tax_amount must not be counted.
+    WithdrawalRequest.objects.create(
+        distributor=distributor,
+        amount=Decimal("999.00"),
+        tax_amount=Decimal("9.99"),
+        net_amount=Decimal("989.01"),
+        status=WithdrawalRequest.Status.SUBMITTED,
+    )
+
+    response = staff_client.get(_dashboard_url())
+
+    assert response.context["total_withholding_tax_remitted"] == Decimal("20.00")
+
+
+@pytest.mark.django_db
+def test_escrow_balance_reflects_the_live_ledger(staff_client):
+    ledger, _ = EscrowLedger.objects.get_or_create(pk=1)
+    EscrowLedger.objects.filter(pk=1).update(balance=Decimal("123.45"))
+
+    response = staff_client.get(_dashboard_url())
+
+    assert response.context["escrow_balance"] == Decimal("123.45")
+    assert b"123.45" in response.content
+
+
+@pytest.mark.django_db
+def test_dashboard_survives_a_missing_escrow_ledger_row(staff_client):
+    """CodeRabbit-caught regression: the seeded pk=1 EscrowLedger row is
+    documented as legitimately-absent-capable (same reasoning as
+    credit_escrow/reverse_escrow's own defensive get_or_create) -- a hard
+    .get(pk=1) would 500 the whole dashboard instead of just showing
+    GHS 0.00 for this one card."""
+    EscrowLedger.objects.filter(pk=1).delete()
+
+    response = staff_client.get(_dashboard_url())
+
+    assert response.status_code == 200
+    assert response.context["escrow_balance"] == Decimal("0")

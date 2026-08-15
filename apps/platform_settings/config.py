@@ -260,10 +260,6 @@ WITHDRAWAL_AND_PAYOUT_SETTINGS = {
         "Tax percentage deducted from every withdrawal and sent to GRA",
         "percentage_field",
     ),
-    "ESCROW_RESERVE_RATE": (
-        Decimal("5"),
-        "Percentage of all product revenue held at GCB Bank",
-    ),
     "AUTO_APPROVE_WITHDRAWALS_ENABLED": (
         False,
         "Whether small withdrawals are approved automatically",
@@ -391,6 +387,56 @@ REPORTING_SETTINGS = {
         1,
         "How often the background job recomputes daily sales/revenue " "report rollups",
         "interval_days_field",
+    ),
+}
+
+COMPLIANCE_SETTINGS = {
+    # Task 47a. Was a plain, unbounded 2-tuple (ESCROW_RESERVE_RATE) --
+    # a doubt-driven-development review before implementation caught it
+    # missing the percentage_field bound WITHHOLDING_TAX_RATE/
+    # BINARY_BONUS_RATE/MATCHING_BONUS_RATE all already carry (an admin
+    # could otherwise type 750 or a negative value with zero validation).
+    # Also relocated here from WITHDRAWAL_AND_PAYOUT_SETTINGS -- this new
+    # fieldset is where Task 47b's compliance-alert-email and Task 47e's
+    # audit-log-retention settings will land too, not withdrawal-specific.
+    "ESCROW_RESERVE_RATE": (
+        Decimal("5"),
+        # Honesty fix, same review: the seeded help text used to say
+        # "held at GCB Bank" -- this is explicitly an internal-only
+        # compliance ledger, never a real external bank integration
+        # (user-confirmed), so the admin-facing text must say so.
+        "Percentage of product revenue held internally as a notional "
+        "compliance reserve (not a real external bank account)",
+        "percentage_field",
+    ),
+    # Task 47b. 70% per the source doc (Section 13.12) -- the minimum
+    # share of paid orders that must be genuine retail sales (Order.pv_earned
+    # == 0), not distributor self-purchases, matching the real-world "70/30
+    # rule" common to anti-pyramid-scheme MLM regulation.
+    "RETAIL_PV_MINIMUM_PERCENT": (
+        Decimal("70"),
+        "Minimum percentage of paid orders that must be retail (non-"
+        "distributor) sales before a compliance alert fires",
+        "percentage_field",
+    ),
+    "COMPLIANCE_ALERT_EMAIL": (
+        "",
+        "Notified when the retail/distributor ratio drops below "
+        "Retail PV Minimum (%)",
+    ),
+    # Task 47e, source doc 13.12 "Audit Log Retention Period (days)". No
+    # source-doc-specified default was found -- 365 days (1 year) is a
+    # reasonable, defensible starting point for a compliance-adjacent
+    # record, admin-editable like every other seeded value in this file.
+    # Governs apps.compliance.tasks.cleanup_expired_audit_records, a
+    # daily Celery Beat job deleting HistoricalRecords() rows (Category/
+    # Product/Distributor/Order/WithdrawalRequest) and PlatformSettingChange
+    # rows older than this window.
+    "AUDIT_LOG_RETENTION_PERIOD_DAYS": (
+        365,
+        "How many days of audit log history to retain before scheduled "
+        "cleanup deletes it",
+        "retention_days_field",
     ),
 }
 
@@ -695,6 +741,24 @@ CONSTANCE_ADDITIONAL_FIELDS = {
             ],
         },
     ],
+    "retention_days_field": [
+        "django.forms.fields.IntegerField",
+        {
+            "widget": "django.forms.NumberInput",
+            # Task 47e. This project's other "how many days" settings
+            # (PV_CARRY_FORWARD_EXPIRY_DAYS, PV_EXPIRY_WARNING_DAYS) are
+            # plain unbounded IntegerFields -- fine there, since they only
+            # govern a business CALCULATION. This one governs actual
+            # DELETION of audit-log rows (apps.compliance.tasks
+            # .cleanup_expired_audit_records): a 0 or negative value would
+            # be a real, un-undoable data-loss footgun, not just a
+            # miscalculation. 30 days is a floor generous enough that no
+            # plausible legitimate retention policy would ever need to go
+            # below it, closing the fat-fingered-zero failure mode at its
+            # source rather than only in the cleanup task's own code.
+            "min_value": 30,
+        },
+    ],
 }
 
 CONSTANCE_CONFIG = {
@@ -707,6 +771,7 @@ CONSTANCE_CONFIG = {
     **PRODUCT_AND_INVENTORY_SETTINGS,
     **PROMOTIONS_SETTINGS,
     **REPORTING_SETTINGS,
+    **COMPLIANCE_SETTINGS,
     **KYC_SETTINGS,
     **IR_ID_NUMBER_SETTINGS,
     **PAYMENT_GATEWAY_SETTINGS,
@@ -723,6 +788,7 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "Product & Inventory Settings": tuple(PRODUCT_AND_INVENTORY_SETTINGS),
     "Promotions Settings": tuple(PROMOTIONS_SETTINGS),
     "Reporting Settings": tuple(REPORTING_SETTINGS),
+    "Compliance Settings": tuple(COMPLIANCE_SETTINGS),
     "KYC Settings": tuple(KYC_SETTINGS),
     "IR ID Number Settings": tuple(IR_ID_NUMBER_SETTINGS),
     "Payment Gateway Settings": tuple(PAYMENT_GATEWAY_SETTINGS),

@@ -15,6 +15,11 @@ from apps.catalog.services import (
     decrement_stock,
     increment_stock,
 )
+from apps.compliance.services import (
+    check_retail_ratio_and_alert,
+    credit_escrow,
+    reverse_escrow,
+)
 from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError, verify_transaction
 from apps.notifications.sms import send_sms
@@ -385,6 +390,16 @@ def confirm_order_payment(reference: str) -> None:
                         record_personal_pv(distributor, pv_amount, today=now.date())
                         pv_earned = pv_amount
 
+            # Task 47a. Unconditional -- outside the distributor-only
+            # block above, since "product revenue" applies to every
+            # confirmed order (guest, customer, distributor alike), not
+            # just distributor purchases. Safe against the
+            # InsufficientStockError rollback path by construction: a
+            # failed stock decrement earlier in this same block rolls
+            # back the entire atomic transaction before this line is
+            # ever reached, so no partial escrow-credited state exists.
+            credit_escrow(order)
+
             if not is_legal_order_status_transition(
                 order.status, Order.Status.CONFIRMED
             ):
@@ -400,6 +415,9 @@ def confirm_order_payment(reference: str) -> None:
             order.confirmed_at = now
             order.save(update_fields=["pv_earned", "status", "confirmed_at"])
         _send_confirmation_notifications(order)
+        # Task 47b. Outside the lock -- see check_retail_ratio_and_alert's
+        # own docstring.
+        check_retail_ratio_and_alert()
 
     try:
         retry_on_lock_contention(_attempt)
@@ -758,6 +776,14 @@ def cancel_or_refund_order(order_id, to_status, tracking_note="", restock=None) 
             if locked_order.pv_earned > 0:
                 _reverse_ancestor_pv(locked_order, order_id)
 
+            # Task 47a. Unconditional -- unlike the PV reversal above,
+            # escrow is credited for every confirmed order regardless of
+            # pv_earned. Relies on this function's own Order-row NOWAIT
+            # lock (already held above) to make a concurrent double-call
+            # for the same order_id unreachable -- see reverse_escrow's
+            # own docstring for the full caller contract.
+            reverse_escrow(order_id)
+
             should_restock = to_status == Order.Status.CANCELLED or restock
             if should_restock:
                 for item in locked_order.items.select_related("product").order_by(
@@ -794,6 +820,11 @@ def cancel_or_refund_order(order_id, to_status, tracking_note="", restock=None) 
                 locked_order.tracking_note = tracking_note
             locked_order.save(update_fields=["pv_earned", "status", "tracking_note"])
         _send_order_status_notification(locked_order)
+        # Task 47b. Outside the lock -- see check_retail_ratio_and_alert's
+        # own docstring. A cancellation/refund can move the ratio in
+        # either direction (pv_earned resets to 0, and the order drops
+        # out of the paid denominator entirely).
+        check_retail_ratio_and_alert()
 
     retry_on_lock_contention(_attempt)
 

@@ -14,6 +14,7 @@ from constance import config
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.binary_tree.services import BinaryTree
 from apps.catalog.models import Category, Product
+from apps.compliance.models import ComplianceAlertState, EscrowLedger, EscrowTransaction
 from apps.distributors.models import Distributor
 from apps.distributors.paystack import PaystackError
 from apps.orders.models import Order, OrderItem
@@ -104,6 +105,72 @@ def test_guest_order_confirms_and_never_credits_pv(mock_verify, mock_sms, mock_m
     assert order.pv_earned == 0
     product.refresh_from_db()
     assert product.stock == 4
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_guest_order_still_credits_escrow_despite_never_crediting_pv(
+    mock_verify, mock_sms, mock_mail
+):
+    """Task 47a. A doubt-driven-development finding against an earlier
+    draft: escrow is "product revenue" for EVERY confirmed order, not
+    just distributor purchases -- an earlier draft would have placed the
+    credit_escrow() call inside the distributor-only PV-credit block
+    above, silently escrowing nothing for guest/customer orders. This is
+    the guest case (no PV credited at all, per the sibling test above),
+    proving escrow doesn't share that restriction."""
+    product = _make_product(stock=5)
+    order = _make_order(customer=None, total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.pv_earned == 0  # confirms this really is the no-PV case
+    ledger = EscrowLedger.objects.get(pk=1)
+    assert ledger.balance == Decimal("22.50")  # 5% default rate of 450
+    txn = EscrowTransaction.objects.get(order_id=order.pk)
+    assert txn.transaction_type == EscrowTransaction.TransactionType.CREDIT
+    assert txn.amount == Decimal("22.50")
+
+
+@pytest.mark.django_db
+@patch("apps.compliance.services.send_mail")
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+@patch("apps.orders.services.verify_transaction")
+def test_confirming_an_order_that_drops_the_ratio_below_threshold_fires_an_alert(
+    mock_verify, mock_sms, mock_order_mail, mock_compliance_mail
+):
+    """Task 47b. apps.orders.services.send_mail (order confirmation
+    emails) and apps.compliance.services.send_mail (the compliance
+    alert) are two independent module-level references to
+    django.core.mail.send_mail -- mocking one does not mock the other,
+    so this test proves the real end-to-end wiring, not just that
+    confirming an order doesn't crash."""
+    config.COMPLIANCE_ALERT_EMAIL = "compliance@bancostore.test"
+    sponsor = _make_distributor()
+    distributor = _make_distributor()
+    BinaryTree.place_distributor(sponsor, distributor, leg=BinaryTreeEdge.Leg.RIGHT)
+    product = _make_product(stock=5, pv_value=60)
+    # A prior distributor order already tips the ratio below 70% once
+    # this new one confirms too (0% retail among 2 paid orders).
+    _make_order(customer=distributor.user, total=Decimal("450.00"))
+    Order.objects.filter(customer=distributor.user).update(
+        status=Order.Status.CONFIRMED, pv_earned=60
+    )
+    order = _make_order(customer=distributor.user, total=Decimal("450.00"))
+    _add_item(order, product, quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    mock_compliance_mail.assert_called_once()
+    state = ComplianceAlertState.objects.get(pk=1)
+    assert state.is_below_threshold is True
 
 
 @pytest.mark.django_db

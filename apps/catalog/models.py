@@ -3,6 +3,8 @@ from django.core.files.uploadedfile import UploadedFile
 from django.db import models
 from django.utils.text import slugify
 
+from simple_history.models import HistoricalRecords
+
 from bancostore.media import resize_and_convert_to_webp
 
 
@@ -18,6 +20,11 @@ class Category(models.Model):
         help_text="Shown on the storefront's category tile (Task 8). Optional — "
         "categories without one render as a plain text tile.",
     )
+    # Task 47d. Real category CRUD (Task 26) had no audit trail at all --
+    # mirroring Product/Distributor/Order/WithdrawalRequest's own
+    # established HistoricalRecords() convention exactly, no M2M fields
+    # here to need special config.
+    history = HistoricalRecords()
 
     class Meta:
         verbose_name_plural = "categories"
@@ -74,6 +81,10 @@ class Product(models.Model):
     is_featured = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Task 47d. Price/stock/category-assignment/active-status changes are
+    # real business-sensitive actions with no audit trail until now --
+    # same convention as Category's own history field above.
+    history = HistoricalRecords()
 
     class Meta:
         ordering = ["-created_at"]

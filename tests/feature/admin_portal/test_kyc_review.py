@@ -179,6 +179,29 @@ def test_approving_from_the_detail_screen_matches_the_django_admin_action_result
 
 
 @pytest.mark.django_db
+def test_approving_kyc_produces_a_queryable_history_record_with_the_real_actor(
+    staff_client,
+):
+    """Task 47d verification: Distributor already carries HistoricalRecords()
+    (Task 11) and approve_kyc already writes via .save() (not .update()),
+    so this needed no new production code -- only proof that the real,
+    request-driven path (this exact view, not a bare service-function call
+    in a shell with no request context) resolves the actual admin as
+    history_user via HistoryRequestMiddleware, and that the transition is
+    genuinely queryable with a timestamp."""
+    distributor = _make_distributor()
+    _make_verification(distributor)
+
+    staff_client.post(_detail_url(distributor), {"action": "approve"})
+
+    latest = distributor.history.first()
+    assert latest.kyc_status == Distributor.KycStatus.APPROVED
+    assert latest.history_type == "~"
+    assert latest.history_user == User.objects.get(username="staff_tester")
+    assert latest.history_date is not None
+
+
+@pytest.mark.django_db
 def test_rejecting_from_the_detail_screen_requires_a_reason(staff_client):
     distributor = _make_distributor()
     _make_verification(distributor)

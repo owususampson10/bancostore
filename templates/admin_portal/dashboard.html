@@ -1,4 +1,5 @@
 {% extends "admin_portal/base_dashboard.html" %}
+{% load humanize %}
 {% block title %}Bancostore Admin Portal | Dashboard{% endblock %}
 {% block content %}
 <div class="mb-8">
@@ -83,6 +84,70 @@
 </div>
 <div class="p-2 rounded-lg bg-white text-on-surface-variant">
 <span class="material-symbols-outlined" aria-hidden="true">account_balance_wallet</span>
+</div>
+</div>
+</div>
+</div>
+
+<!-- Compliance -->
+<div class="mb-8">
+<h3 class="font-headline-sm text-headline-sm text-on-surface mb-4">Compliance</h3>
+<div class="bg-white p-6 rounded-xl border {% if retail_ratio_below_threshold %}border-error/40{% else %}border-outline-variant{% endif %} shadow-sm flex items-center justify-between">
+<div class="flex items-center gap-4">
+<div class="p-2 rounded-lg {% if retail_ratio_below_threshold %}bg-error/10 text-error{% else %}bg-surface-container-low text-on-surface-variant{% endif %}">
+<span class="material-symbols-outlined" aria-hidden="true">gavel</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wide">Retail / Distributor Ratio</p>
+{% if retail_distributor_ratio is not None %}
+<h4 class="font-headline-md text-headline-md {% if retail_ratio_below_threshold %}text-error{% else %}text-on-surface{% endif %} font-bold">{{ retail_distributor_ratio }}% retail</h4>
+<p class="text-xs text-on-surface-variant mt-1">Minimum required: {{ retail_pv_minimum_percent }}%{% if retail_ratio_below_threshold %} — below threshold{% endif %}</p>
+{% else %}
+<h4 class="font-headline-md text-headline-md text-on-surface-variant font-bold">No paid orders yet</h4>
+{% endif %}
+</div>
+</div>
+</div>
+</div>
+
+<!-- Financial Overview -->
+<div class="mb-8">
+<h3 class="font-headline-sm text-headline-sm text-on-surface mb-4">Financial Overview — All Time</h3>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/50 flex items-start justify-between">
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">Total Revenue</p>
+<h4 class="font-headline-md text-headline-md text-on-surface font-bold">GHS {{ total_revenue|floatformat:2|intcomma }}</h4>
+</div>
+<div class="p-2 rounded-lg bg-white text-on-surface-variant">
+<span class="material-symbols-outlined" aria-hidden="true">payments</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/50 flex items-start justify-between">
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">Total Commissions Paid</p>
+<h4 class="font-headline-md text-headline-md text-on-surface font-bold">GHS {{ total_commissions_paid|floatformat:2|intcomma }}</h4>
+</div>
+<div class="p-2 rounded-lg bg-white text-on-surface-variant">
+<span class="material-symbols-outlined" aria-hidden="true">account_balance_wallet</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/50 flex items-start justify-between">
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">Withholding Tax Remitted</p>
+<h4 class="font-headline-md text-headline-md text-on-surface font-bold">GHS {{ total_withholding_tax_remitted|floatformat:2|intcomma }}</h4>
+</div>
+<div class="p-2 rounded-lg bg-white text-on-surface-variant">
+<span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/50 flex items-start justify-between">
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">Escrow Reserve Balance</p>
+<h4 class="font-headline-md text-headline-md text-on-surface font-bold">GHS {{ escrow_balance|floatformat:2|intcomma }}</h4>
+</div>
+<div class="p-2 rounded-lg bg-white text-on-surface-variant">
+<span class="material-symbols-outlined" aria-hidden="true">savings</span>
 </div>
 </div>
 </div>

@@ -10,10 +10,12 @@ from django.contrib.auth.models import Group
 from django.db import connection
 
 import pytest
+from constance import config
 
 from apps.binary_tree.models import BinaryTreeEdge
 from apps.binary_tree.services import BinaryTree
 from apps.catalog.models import Category, Product
+from apps.compliance.models import ComplianceAlertState, EscrowLedger, EscrowTransaction
 from apps.distributors.models import Distributor
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import cancel_or_refund_order, confirm_order_payment
@@ -105,6 +107,112 @@ def test_cancelling_a_confirmed_order_restores_stock_automatically(mock_sms, moc
     product.refresh_from_db()
     assert order.status == Order.Status.CANCELLED
     assert product.stock == 5
+
+
+# ---------------------------------------------------------------------------
+# Task 47a: escrow reversal (rolling reserve)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_cancelling_a_confirmed_order_reverses_its_escrow_credit(mock_sms, mock_mail):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("1000.00"))
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 100000)
+    ledger = EscrowLedger.objects.get(pk=1)
+    assert ledger.balance == Decimal("50.00")  # 5% default rate credited
+
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED)
+
+    ledger.refresh_from_db()
+    assert ledger.balance == Decimal("0.00")
+    assert EscrowTransaction.objects.filter(
+        order_id=order.pk, transaction_type=EscrowTransaction.TransactionType.REVERSAL
+    ).exists()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_refunding_a_confirmed_order_reverses_its_escrow_credit(mock_sms, mock_mail):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("1000.00"))
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 100000)
+    ledger = EscrowLedger.objects.get(pk=1)
+    assert ledger.balance == Decimal("50.00")
+
+    cancel_or_refund_order(order.pk, Order.Status.REFUNDED, restock=True)
+
+    ledger.refresh_from_db()
+    assert ledger.balance == Decimal("0.00")
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_cancelling_an_already_cancelled_order_does_not_double_reverse_escrow(
+    mock_sms, mock_mail
+):
+    product = _make_product(stock=5)
+    order = _make_order(total=Decimal("1000.00"))
+    _add_item(order, product, quantity=1)
+    order = _confirm(order, 100000)
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED)
+
+    cancel_or_refund_order(order.pk, Order.Status.CANCELLED)  # idempotent no-op
+
+    ledger = EscrowLedger.objects.get(pk=1)
+    assert ledger.balance == Decimal("0.00")
+    assert (
+        EscrowTransaction.objects.filter(
+            order_id=order.pk,
+            transaction_type=EscrowTransaction.TransactionType.REVERSAL,
+        ).count()
+        == 1
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 47b: cancelling/refunding an order can move the retail ratio
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@patch("apps.compliance.services.send_mail")
+@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_sms")
+def test_cancelling_a_distributor_order_can_recover_the_ratio_above_threshold(
+    mock_sms, mock_order_mail, mock_compliance_mail
+):
+    """A confirmed distributor order and a confirmed retail order give a
+    50% ratio, below the 70% default -- cancelling the DISTRIBUTOR order
+    removes it from the paid denominator entirely, recovering the ratio
+    to 100% (1 retail / 1 remaining paid order)."""
+    config.COMPLIANCE_ALERT_EMAIL = "compliance@bancostore.test"
+    sponsor = _make_distributor()
+    distributor = _make_distributor()
+    BinaryTree.place_distributor(sponsor, distributor, leg=BinaryTreeEdge.Leg.RIGHT)
+    product = _make_product(stock=10, pv_value=60)
+    distributor_order = _make_order(customer=distributor.user, total=Decimal("450.00"))
+    _add_item(distributor_order, product, quantity=1)
+    distributor_order = _confirm(distributor_order, 45000)
+    assert (
+        distributor_order.pv_earned == 60
+    )  # confirms this really is the distributor case
+
+    retail_order = _make_order(total=Decimal("450.00"))
+    _add_item(retail_order, product, quantity=1)
+    retail_order = _confirm(retail_order, 45000)
+    mock_compliance_mail.assert_called_once()  # 50% ratio already alerted
+
+    cancel_or_refund_order(distributor_order.pk, Order.Status.CANCELLED)
+
+    state = ComplianceAlertState.objects.get(pk=1)
+    assert state.is_below_threshold is False
 
 
 # ---------------------------------------------------------------------------

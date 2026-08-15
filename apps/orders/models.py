@@ -336,8 +336,11 @@ class OrderCycleFailure(models.Model):
     Deliberately not a ForeignKey to Order, mirroring
     CommissionCycleFailure/WithdrawalCycleFailure's own reasoning: the
     audit record must survive even if the underlying Order row is later
-    deleted (no delete-lock exists on OrderAdmin the way WalletAdmin/
-    WithdrawalRequestAdmin/CommissionCycleRunAdmin have)."""
+    deleted. OrderAdmin.has_delete_permission does return False like its
+    siblings -- but direct-shell/ORM deletion of Order rows outside that
+    admin UI is a real, already-documented practice in this project (see
+    CLAUDE.md's Task 24 production smoke-test cleanup), so this stays a
+    plain int, not a real FK, regardless of the admin-UI lockdown."""
 
     cycle_run = models.ForeignKey(
         OrderCycleRun, on_delete=models.CASCADE, related_name="failures"

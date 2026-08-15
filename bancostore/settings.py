@@ -167,6 +167,7 @@ INSTALLED_APPS = [
     "apps.pages",
     "apps.promotions",
     "apps.reporting",
+    "apps.compliance",
 ]
 
 MIDDLEWARE = [

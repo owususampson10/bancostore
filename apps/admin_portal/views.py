@@ -23,6 +23,8 @@ from apps.catalog.models import Category, Product, Review
 from apps.catalog.services import normalize_primary_image
 from apps.commissions.models import CommissionCycleRun
 from apps.commissions.services import COMMISSION_TRANSACTION_TYPES
+from apps.compliance.models import EscrowLedger
+from apps.compliance.services import get_retail_distributor_ratio, get_unified_audit_log
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
 from apps.orders.models import Order, OrderItem
@@ -166,6 +168,39 @@ def dashboard(request):
 
     recent_orders = Order.objects.order_by("-created_at", "-pk")[:6]
 
+    # Task 47b. None (not 0) when there are no paid orders yet -- an
+    # undefined ratio, distinct from a genuinely-0%-retail platform.
+    retail_distributor_ratio = get_retail_distributor_ratio()
+    retail_ratio_below_threshold = (
+        retail_distributor_ratio is not None
+        and retail_distributor_ratio < config.RETAIL_PV_MINIMUM_PERCENT
+    )
+
+    # Task 47c (Financial Overview, SPEC_PHASE2.md 12.6). All-time, not
+    # "this week" like the Business Snapshot cards above -- these are
+    # cumulative totals to date. Reuses the exact same "paid" exclusion
+    # set as orders_this_week_value above.
+    total_revenue = Order.objects.exclude(
+        status__in=[Order.Status.PENDING, Order.Status.CANCELLED, Order.Status.REFUNDED]
+    ).aggregate(total=Sum("total"))["total"] or Decimal("0")
+    total_commissions_paid = WalletTransaction.objects.filter(
+        transaction_type__in=COMMISSION_TRANSACTION_TYPES,
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    # Only PAID withdrawals actually remitted tax to GRA -- a rejected or
+    # payout-failed-reversed request never really withheld anything (Task
+    # 16's reversal path credits the wallet back in full).
+    total_withholding_tax_remitted = WithdrawalRequest.objects.filter(
+        status=WithdrawalRequest.Status.PAID
+    ).aggregate(total=Sum("tax_amount"))["total"] or Decimal("0")
+    # A read-only fallback, not get_or_create -- this is a GET view and
+    # must never write. Mirrors credit_escrow/reverse_escrow's own "the
+    # pk=1 row may legitimately be absent" reasoning without the side
+    # effect: a hard .get(pk=1) would 500 the whole dashboard the moment
+    # that row is missing, instead of just showing GHS 0.00.
+    escrow_balance = EscrowLedger.objects.filter(pk=1).values_list(
+        "balance", flat=True
+    ).first() or Decimal("0")
+
     context = {
         "pending_kyc_count": pending_kyc_count,
         "pending_withdrawals_count": pending_withdrawals_count,
@@ -178,6 +213,13 @@ def dashboard(request):
         "orders_this_week_value": orders_this_week_value,
         "commissions_this_week": commissions_this_week,
         "recent_orders": recent_orders,
+        "retail_distributor_ratio": retail_distributor_ratio,
+        "retail_pv_minimum_percent": config.RETAIL_PV_MINIMUM_PERCENT,
+        "retail_ratio_below_threshold": retail_ratio_below_threshold,
+        "total_revenue": total_revenue,
+        "total_commissions_paid": total_commissions_paid,
+        "total_withholding_tax_remitted": total_withholding_tax_remitted,
+        "escrow_balance": escrow_balance,
         "active_nav": "dashboard",
     }
     return render(request, "admin_portal/dashboard.html", context)
@@ -771,6 +813,41 @@ def commission_cycle_detail(request, pk):
             "cycle_run": cycle_run,
             "failures": failures,
             "active_nav": "commissions",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def audit_log(request):
+    """Task 47e. Read-only, cross-model observability -- presentation
+    only, no service-layer changes, matching commission_oversight's own
+    established shape above (Paginator(20), no htmx real-time filtering,
+    date-range only -- the acceptance criteria names no other filter).
+    get_unified_audit_log (apps.compliance.services) does the real work:
+    merging every HistoricalRecords()-tracked model's history with
+    PlatformSettingChange into one timestamp-sorted list, already bounded
+    by the requested date range before this view ever sees it.
+
+    Paginator works identically on the returned plain list as it does on
+    a queryset elsewhere in this codebase -- no special-casing needed."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    date_from = parse_date(request.GET.get("date_from", "").strip())
+    date_to = parse_date(request.GET.get("date_to", "").strip())
+
+    entries = get_unified_audit_log(date_from=date_from, date_to=date_to)
+    paginator = Paginator(entries, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    return render(
+        request,
+        "admin_portal/audit_log.html",
+        {
+            "page_obj": page_obj,
+            "date_from": date_from,
+            "date_to": date_to,
+            "active_nav": "audit_log",
         },
     )
 
@@ -1826,6 +1903,7 @@ _GROUP_ICONS = {
     "Product & Inventory Settings": "inventory_2",
     "Promotions Settings": "sell",
     "Reporting Settings": "monitoring",
+    "Compliance Settings": "gavel",
     "KYC Settings": "fact_check",
     "IR ID Number Settings": "badge",
     "Payment Gateway Settings": "point_of_sale",
