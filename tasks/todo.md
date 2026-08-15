@@ -7571,23 +7571,109 @@ per-screen test-file convention rather than the originally-sketched
 #### 47e: Audit log, part 2 — admin screen + retention
 
 **Acceptance criteria:**
-- [ ] One real `admin_portal` screen queries across every `HistoricalRecords()`-tracked model
+- [x] One real `admin_portal` screen queries across every `HistoricalRecords()`-tracked model
       (actor, timestamp, what changed) — not raw Django Admin, matching this codebase's established
-      precedent
-- [ ] 13.12's Audit Log Retention Period (days) is a real, admin-editable constance setting wired to
-      a scheduled Celery cleanup job — not decorative
+      precedent. New `apps/admin_portal/views.py::audit_log` + `templates/admin_portal/audit_log.html`,
+      wired into the sidebar as "Audit Log" (`history` icon, between Reports and Settings). Reuses
+      `_date_filter_field.html`'s themed calendar popover inside a plain `<form method="get">` with
+      an explicit "Filter" button — deliberately NOT full htmx real-time filtering, matching
+      `commission_oversight`'s own established simplicity for a read-only observability screen (no
+      filter there at all) rather than inventing a third filter-UI pattern in this codebase.
+      `apps/compliance/services.py::get_unified_audit_log()` does the real work: merges all 5
+      `HistoricalRecords()`-tracked models (Category, Product, Distributor, Order,
+      WithdrawalRequest) with Task 47d's bespoke `PlatformSettingChange` log (not
+      `HistoricalRecords()`-based, but the same audit-log initiative per `SPEC_PHASE2.md`'s own
+      framing) into one timestamp-sorted list — each source independently bounded by
+      `date_from`/`date_to` (never unbounded) before merging in Python, defaulting to the trailing
+      30 days when no range is given. Uses `simple_history`'s real `diff_against()`/`ModelDelta` API
+      for "what changed" (`"field: old → new"` per changed field, matching `PlatformSettingChange`'s
+      own display shape), not hand-rolled diffing.
+- [x] 13.12's Audit Log Retention Period (days) is a real, admin-editable constance setting wired to
+      a scheduled Celery cleanup job — not decorative. `AUDIT_LOG_RETENTION_PERIOD_DAYS` (default
+      365, no source-doc-specified default found — a reasonable, defensible, admin-editable starting
+      point matching this file's own convention elsewhere) added to `COMPLIANCE_SETTINGS`, using a
+      new bounded `retention_days_field` constance field type (`min_value=30`) — a deliberate,
+      documented deviation from this project's other unbounded "how many days" settings
+      (`PV_CARRY_FORWARD_EXPIRY_DAYS` etc.), since those only govern a business calculation while
+      this one governs real deletion of audit rows: a 0/negative value would be an un-undoable
+      data-loss footgun. `apps/compliance/tasks.py::cleanup_expired_audit_records` is a daily Celery
+      Beat job (seeded via `apps/compliance/migrations/0004_seed_audit_cleanup_periodic_task.py`,
+      mirroring `apps/distributors/migrations/0004_seed_cleanup_periodic_task.py`'s exact shape) —
+      a straight bulk `.filter(history_date__lt=cutoff).delete()` per table, matching
+      `cleanup_expired_pending_registrations`'s simpler shape rather than the heavier
+      `OrderCycleRun`/`Failure` audit-trail pattern, since a bulk delete has no per-row failure mode
+      to isolate and is naturally idempotent under overlapping runs. Reads
+      `config.AUDIT_LOG_RETENTION_PERIOD_DAYS` live on every run, never a cached/hardcoded value.
+
+**Two real bugs found and fixed along the way, not silently worked around:**
+1. `history_row.get_prev_record()` doesn't exist as a callable — `simple_history` exposes it as a
+   `prev_record` **property** (confirmed by reading the library source directly after an
+   `AttributeError`). Fixed to `history_row.prev_record` (no parens).
+2. `str(history_row.history_object)` can raise `User.DoesNotExist` when a historical row's
+   snapshotted FK (e.g. `Distributor.user_id`) points to a since-deleted row — `history_object`'s
+   reconstruction doesn't cache the related object, so `Distributor.__str__`'s `self.user` access
+   triggers a fresh, live re-query. Caught live via a real dev-DB smoke test (not a pre-written
+   test) against genuinely orphaned rows left over from earlier sub-tasks' own test data, and
+   re-confirmed rendering correctly during this task's own live-browser verification pass ("Order
+   #61 confirmed" and "Distributor #47/#50 (related record deleted)" both appeared correctly on the
+   real screen). Fixed with `_safe_object_repr()`, wrapping the `str()` call in try/except with a
+   safe fallback (`f"{model_label} #{pk} (related record deleted)"`) — the same "an audit record
+   must survive deletion of what it references" reasoning already established by
+   `OrderCycleFailure`/`CommissionCycleFailure`'s plain-int FKs.
+
+**A real gotcha hit during live-browser verification, not a bug in this task's own code:** logging
+in as a freshly-created throwaway admin test account skipped the mandatory TOTP step entirely and
+landed on a bare 403, even with a `confirmed=True` `TOTPDevice` in place. Root-caused (not guessed
+at): `two_factor.utils.default_device()` only recognizes a device whose `name` is literally
+`"default"` — a device named anything else (e.g. `"verify-device"`) is invisible to
+`has_token_step()`, so the wizard silently completes after just the password step. Not a bug in
+this codebase's own 2FA design (Task 4-6's `ADMIN_2FA_ENABLED`/mandatory-2FA guarantee is untouched
+and still enforced for every device actually named `"default"`, which is what `SetupView`'s real
+setup flow always creates) — purely an artifact of how the throwaway verification device was
+created by hand via `manage.py shell`. Fixed by naming the device `"default"` and, per direct user
+correction, by verifying against this project's own pre-existing seeded `stub_admin` account
+(`apps/accounts/management/commands/seed_roles.py`, `bancostore-dev-only`) instead of a new
+one-off account — matching this file's own established live-browser-verification convention from
+every earlier sub-task in this session.
 
 **Verification:**
-- [ ] Feature tests: cross-model query correctness, retention job actually deletes records past the
-      configured window and leaves recent ones untouched
-- [ ] Live-browser verified
-- [ ] Full suite green, CI green on real MySQL
+- [x] Feature tests: cross-model query correctness (9 tests,
+      `tests/feature/admin_portal/test_audit_log.py`) — a `PlatformSettingChange` row and a
+      `Product` history row both appear on the same merged/sorted list, newest-first ordering,
+      date-range filtering excludes out-of-range rows, empty state, pagination at 20/page, staff-only
+      + anonymous-redirect guards. Retention job tests (3 tests,
+      `tests/unit/compliance/test_audit_log_cleanup.py`) — deletes history older than the configured
+      window across all 6 sources, keeps recent rows untouched, and respects a live admin-lowered
+      window (proving it reads the setting live, not a hardcoded constant).
+- [x] Live-browser verified (2026-08-15): real TOTP admin login (`stub_admin`), the Audit Log screen
+      rendered real merged data across every source — a `PlatformSettingChange` row
+      (`WITHHOLDING_TAX_RATE`), a `Product` price change (`price: 99.00 → 120.00`) and creation, a
+      `Category` rename showing `"name: Live Verify Category → Live Verify Category Renamed"`,
+      correctly sorted newest-first; pagination confirmed across real data (426 entries, 22 pages,
+      `?page=2` showed genuinely different/older rows); date-range filter confirmed both directions
+      (a narrow out-of-range window correctly rendered the empty state; the picker's own `From`/`To`
+      fields correctly reflected the submitted query-string values back). All throwaway
+      verification data (`Live Verify Category`/`Product`) deleted afterward.
+- [x] Full suite green (1702 passed, 5 skipped; the 2 failures seen in one full run were both
+      confirmed pre-existing and unrelated by re-running each in isolation — the already-tracked
+      `test_earnings_history.py` Known Issue, and a `test_kyc_review.py` concurrency test that
+      passed cleanly alone, matching this project's own already-documented SQLite
+      `"database table is locked"` flakiness). `npm run build` run after the new template (Tailwind
+      class-scanning gotcha). **CI on real MySQL not yet run** — pending the batch push decision
+      already tracked for 47a-47d.
 
-**Dependencies:** 47d
+**Dependencies:** 47d — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/admin_portal/views.py`/`urls.py`, new admin_portal audit-log
-template, `apps/compliance/tasks.py` (retention Celery task), `apps/platform_settings/config.py`,
-`tests/feature/admin_portal/test_audit_log.py`
+**Files touched:** `apps/platform_settings/config.py` (`AUDIT_LOG_RETENTION_PERIOD_DAYS` +
+`retention_days_field`), new `apps/compliance/tasks.py`
+(`cleanup_expired_audit_records`), new `apps/compliance/migrations/0004_seed_audit_cleanup_periodic_task.py`,
+`apps/compliance/services.py` (`get_unified_audit_log`, `_normalize_historical_row`,
+`_safe_object_repr`, `_day_start`, `_HISTORY_TRACKED_MODELS`), `apps/admin_portal/views.py`
+(`audit_log`), `apps/admin_portal/urls.py`, new `templates/admin_portal/audit_log.html`,
+`templates/admin_portal/base_dashboard.html` (sidebar nav item), new
+`tests/feature/admin_portal/test_audit_log.py`, new `tests/unit/compliance/test_audit_log_cleanup.py`.
+
+**Estimated scope:** M
 
 **Estimated scope:** M
 

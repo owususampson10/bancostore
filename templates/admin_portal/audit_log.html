@@ -1,0 +1,90 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Audit Log — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">Audit Log</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Every tracked change to Products, Categories, Distributors, Orders, Withdrawal Requests, and Platform Settings — who changed what, and when.</p>
+</div>
+
+{% comment %}
+Task 47e. A plain GET filter form, not real-time htmx -- matching
+commission_oversight's own established simplicity for a read-only
+observability screen (no filter at all there); this one adds only the
+date range the acceptance criteria implies ("actor, timestamp, what
+changed"), not a full real-time filter system beyond what was asked.
+{% endcomment %}
+<form method="get" class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant mb-8">
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+<div class="md:col-span-4">
+{% include "admin_portal/_date_filter_field.html" with field_name="date_from" label="From" value=date_from initial_id="audit-date-from-initial" %}
+</div>
+<div class="md:col-span-4">
+{% include "admin_portal/_date_filter_field.html" with field_name="date_to" label="To" value=date_to initial_id="audit-date-to-initial" %}
+</div>
+<div class="md:col-span-4">
+<button type="submit" class="w-full h-[42px] px-6 bg-primary text-on-primary rounded-xl font-label-md text-label-md hover:opacity-90 transition-opacity">Filter</button>
+</div>
+</div>
+</form>
+
+{% if page_obj.object_list %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="overflow-x-auto">
+<table class="w-full min-w-[900px] text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Model</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Record</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Action</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">What Changed</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Actor</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">When</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for entry in page_obj.object_list %}
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-4">
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-surface-container-high text-on-surface-variant">{{ entry.model }}</span>
+</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface">{{ entry.object_repr }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ entry.action }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">
+{% for field in entry.changed_fields %}
+<div>{{ field }}</div>
+{% endfor %}
+</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ entry.actor|default:"System" }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant whitespace-nowrap">{{ entry.timestamp|date:"M j, Y \a\t g:i A" }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="px-6 py-4 bg-surface-container-low border-t border-outline-variant flex items-center justify-between">
+<span class="font-body-md text-body-md text-on-surface-variant">Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} entries</span>
+<div class="flex items-center gap-2">
+{% if page_obj.has_previous %}
+<a href="?date_from={{ date_from|date:'Y-m-d' }}&date_to={{ date_to|date:'Y-m-d' }}&page={{ page_obj.previous_page_number }}" aria-label="Previous page" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>
+</a>
+{% endif %}
+<span class="font-label-md text-label-md text-on-surface-variant px-2">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+{% if page_obj.has_next %}
+<a href="?date_from={{ date_from|date:'Y-m-d' }}&date_to={{ date_to|date:'Y-m-d' }}&page={{ page_obj.next_page_number }}" aria-label="Next page" class="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant text-secondary hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
+</a>
+{% endif %}
+</div>
+</div>
+{% endif %}
+</div>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-12 flex flex-col items-center text-center">
+<span class="material-symbols-outlined text-5xl text-on-surface-variant mb-3" aria-hidden="true">history</span>
+<p class="font-headline-md text-headline-md text-on-surface">No audit entries in this range.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Try a wider date range, or check back once a tracked change happens.</p>
+</div>
+{% endif %}
+{% endblock %}

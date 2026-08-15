@@ -424,6 +424,20 @@ COMPLIANCE_SETTINGS = {
         "Notified when the retail/distributor ratio drops below "
         "Retail PV Minimum (%)",
     ),
+    # Task 47e, source doc 13.12 "Audit Log Retention Period (days)". No
+    # source-doc-specified default was found -- 365 days (1 year) is a
+    # reasonable, defensible starting point for a compliance-adjacent
+    # record, admin-editable like every other seeded value in this file.
+    # Governs apps.compliance.tasks.cleanup_expired_audit_records, a
+    # daily Celery Beat job deleting HistoricalRecords() rows (Category/
+    # Product/Distributor/Order/WithdrawalRequest) and PlatformSettingChange
+    # rows older than this window.
+    "AUDIT_LOG_RETENTION_PERIOD_DAYS": (
+        365,
+        "How many days of audit log history to retain before scheduled "
+        "cleanup deletes it",
+        "retention_days_field",
+    ),
 }
 
 KYC_SETTINGS = {
@@ -725,6 +739,24 @@ CONSTANCE_ADDITIONAL_FIELDS = {
                 ("show", "Show 'Out of Stock'"),
                 ("backorder", "Allow Backorders"),
             ],
+        },
+    ],
+    "retention_days_field": [
+        "django.forms.fields.IntegerField",
+        {
+            "widget": "django.forms.NumberInput",
+            # Task 47e. This project's other "how many days" settings
+            # (PV_CARRY_FORWARD_EXPIRY_DAYS, PV_EXPIRY_WARNING_DAYS) are
+            # plain unbounded IntegerFields -- fine there, since they only
+            # govern a business CALCULATION. This one governs actual
+            # DELETION of audit-log rows (apps.compliance.tasks
+            # .cleanup_expired_audit_records): a 0 or negative value would
+            # be a real, un-undoable data-loss footgun, not just a
+            # miscalculation. 30 days is a floor generous enough that no
+            # plausible legitimate retention policy would ever need to go
+            # below it, closing the fat-fingered-zero failure mode at its
+            # source rather than only in the cleanup task's own code.
+            "min_value": 30,
         },
     ],
 }

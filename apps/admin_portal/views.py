@@ -24,7 +24,7 @@ from apps.catalog.services import normalize_primary_image
 from apps.commissions.models import CommissionCycleRun
 from apps.commissions.services import COMMISSION_TRANSACTION_TYPES
 from apps.compliance.models import EscrowLedger
-from apps.compliance.services import get_retail_distributor_ratio
+from apps.compliance.services import get_retail_distributor_ratio, get_unified_audit_log
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
 from apps.orders.models import Order, OrderItem
@@ -806,6 +806,41 @@ def commission_cycle_detail(request, pk):
             "cycle_run": cycle_run,
             "failures": failures,
             "active_nav": "commissions",
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+def audit_log(request):
+    """Task 47e. Read-only, cross-model observability -- presentation
+    only, no service-layer changes, matching commission_oversight's own
+    established shape above (Paginator(20), no htmx real-time filtering,
+    date-range only -- the acceptance criteria names no other filter).
+    get_unified_audit_log (apps.compliance.services) does the real work:
+    merging every HistoricalRecords()-tracked model's history with
+    PlatformSettingChange into one timestamp-sorted list, already bounded
+    by the requested date range before this view ever sees it.
+
+    Paginator works identically on the returned plain list as it does on
+    a queryset elsewhere in this codebase -- no special-casing needed."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    date_from = parse_date(request.GET.get("date_from", "").strip())
+    date_to = parse_date(request.GET.get("date_to", "").strip())
+
+    entries = get_unified_audit_log(date_from=date_from, date_to=date_to)
+    paginator = Paginator(entries, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    return render(
+        request,
+        "admin_portal/audit_log.html",
+        {
+            "page_obj": page_obj,
+            "date_from": date_from,
+            "date_to": date_to,
+            "active_nav": "audit_log",
         },
     )
 

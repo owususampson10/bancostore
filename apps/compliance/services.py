@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.mail import send_mail
@@ -8,7 +9,11 @@ from django.utils import timezone
 
 from constance import config
 
+from apps.catalog.models import Category, Product
+from apps.distributors.models import Distributor
 from apps.orders.models import Order
+from apps.platform_settings.models import PlatformSettingChange
+from apps.withdrawal.models import WithdrawalRequest
 from bancostore.concurrency import select_for_update_nowait_if_supported
 
 from .models import ComplianceAlertState, EscrowLedger, EscrowTransaction
@@ -295,3 +300,140 @@ def check_retail_ratio_and_alert() -> None:
     elif not currently_below and state.is_below_threshold:
         state.is_below_threshold = False
         state.save(update_fields=["is_below_threshold"])
+
+
+# ---------------------------------------------------------------------------
+# Task 47e: unified audit log
+# ---------------------------------------------------------------------------
+
+# Every HistoricalRecords()-tracked model in this codebase (apps.compliance
+# .tasks.cleanup_expired_audit_records deletes from these same 5 tables plus
+# PlatformSettingChange -- keep both lists in sync if a 6th model is ever
+# tracked).
+_HISTORY_TRACKED_MODELS = {
+    "Category": Category,
+    "Product": Product,
+    "Distributor": Distributor,
+    "Order": Order,
+    "WithdrawalRequest": WithdrawalRequest,
+}
+
+
+def _day_start(target_date):
+    """Timezone-aware midnight for a calendar date -- half-open [start,
+    end) bounds instead of a `__date` lookup, matching the exact
+    apps.reporting.services precedent (Task 46): `__date` wraps the
+    indexed timestamp column in a DATE() transform MySQL can't use for
+    an index range scan."""
+    return timezone.make_aware(datetime.combine(target_date, time.min))
+
+
+def _normalize_historical_row(model_label, history_row):
+    """One HistoricalRecords() row -> a plain dict shaped like a
+    PlatformSettingChange entry, so both sources can be merged and
+    sorted together. Uses simple_history's own diff_against()/ModelDelta
+    API for "what changed" -- not a hand-rolled diff.
+
+    Known, accepted tradeoff: reading .prev_record issues one extra query
+    per row (an N+1 shape) -- acceptable for a bounded, paginated
+    admin-only screen, not something this task engineers a prefetch
+    solution for."""
+    if history_row.history_type == "+":
+        changed_fields = ["created"]
+    elif history_row.history_type == "-":
+        changed_fields = ["deleted"]
+    else:
+        # A property, not a method -- simple_history exposes these as
+        # `prev_record`/`next_record` (django-simple-history's own
+        # get_extra_fields() attaches them via `property(get_next_record)`),
+        # despite the underlying function being named get_prev_record.
+        prev = history_row.prev_record
+        if prev:
+            # "field: old → new" per changed field, matching
+            # PlatformSettingChange's own "old → new" display shape
+            # below -- .changes (not just .changed_fields) carries the
+            # actual old/new values, not just which fields moved.
+            changed_fields = [
+                f"{change.field}: {change.old} → {change.new}"
+                for change in history_row.diff_against(prev).changes
+            ]
+        else:
+            changed_fields = []
+    return {
+        "model": model_label,
+        "object_repr": _safe_object_repr(model_label, history_row),
+        "action": history_row.get_history_type_display(),
+        "actor": history_row.history_user,
+        "timestamp": history_row.history_date,
+        "changed_fields": changed_fields,
+    }
+
+
+def _safe_object_repr(model_label, history_row):
+    """A real bug caught live (not in a test) while first exercising this
+    function: history_object reconstructs a plain instance from THIS
+    row's own field values, but calling str() on it can still trigger a
+    FRESH, LIVE FK lookup (e.g. Distributor.__str__ reads self.user,
+    Django's related-object descriptor re-queries User by the stored
+    user_id rather than using any cached value) -- and raises
+    User.DoesNotExist if that related row was deleted since this
+    historical snapshot was taken. An audit-log row surviving the
+    deletion of what it references is the whole point of this table
+    (same reasoning as OrderCycleFailure/CommissionCycleFailure's
+    plain-int FKs) -- it must never crash the WHOLE screen because of
+    one now-dangling reference on one row."""
+    try:
+        return str(history_row.history_object)
+    except Exception:
+        pk = getattr(history_row.history_object, "pk", "?")
+        return f"{model_label} #{pk} (related record deleted)"
+
+
+def get_unified_audit_log(*, date_from=None, date_to=None):
+    """Task 47e. Merges every HistoricalRecords()-tracked model's history
+    with PlatformSettingChange (Task 47d's own bespoke audit log for
+    constance settings -- not HistoricalRecords()-based, but the same
+    audit-log initiative per SPEC_PHASE2.md's own framing) into one
+    timestamp-sorted list.
+
+    Each source query is independently bounded by date_from/date_to
+    (never unbounded) before merging in Python -- this project's own
+    established "sum/merge a small, already-bounded dataset in memory
+    rather than a cross-model SQL UNION" precedent
+    (apps.reporting.services.bucket_revenue_series does the same for a
+    single model's rollup rows). Defaults to the trailing 30 days when
+    no range is given, mirroring apps.admin_portal.views
+    ._sales_revenue_report_params's own default-range reasoning."""
+    today = timezone.now().date()
+    if date_from is None:
+        date_from = today - timedelta(days=29)
+    if date_to is None:
+        date_to = today
+    start_at, end_at = _day_start(date_from), _day_start(date_to + timedelta(days=1))
+
+    entries = []
+
+    changes = PlatformSettingChange.objects.filter(
+        changed_at__gte=start_at, changed_at__lt=end_at
+    )
+    for change in changes:
+        entries.append(
+            {
+                "model": "Platform Setting",
+                "object_repr": change.key,
+                "action": "Changed",
+                "actor": change.changed_by,
+                "timestamp": change.changed_at,
+                "changed_fields": [f"{change.old_value} → {change.new_value}"],
+            }
+        )
+
+    for label, model in _HISTORY_TRACKED_MODELS.items():
+        rows = model.history.filter(
+            history_date__gte=start_at, history_date__lt=end_at
+        ).select_related("history_user")
+        for row in rows:
+            entries.append(_normalize_historical_row(label, row))
+
+    entries.sort(key=lambda entry: entry["timestamp"], reverse=True)
+    return entries
