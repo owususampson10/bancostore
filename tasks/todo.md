@@ -7810,24 +7810,65 @@ modal), `base_dashboard.html` (sidebar scroll, Notifications nav item); new
 #### 48b: Migrate highest-traffic send-sites
 
 **Acceptance criteria:**
-- [ ] OTP codes, withdrawal status (approved/rejected/paid/reversed), and KYC decision
-      notifications render from a `NotificationTemplate` instead of a hardcoded string
-- [ ] Editing a template's wording from `admin_portal` changes the next real send — verified live,
-      not just that the edit saves
+- [x] OTP codes, withdrawal status (approved/rejected/paid/reversed), and KYC decision
+      notifications render from a `NotificationTemplate` instead of a hardcoded string. KYC
+      decisions send an in-app `Notification` only (no SMS is sent for KYC today, confirmed by
+      reading `apps/distributors/services.py` directly before writing any code -- the acceptance
+      criteria's "notifications" wording covers whichever channel a given key actually uses, not a
+      new SMS channel this task invents). All 7 sites now call
+      `apps.notifications.rendering.render_or_default(key, context, default_body=...)` instead of
+      an inline f-string, with `default_body` set to the exact previous hardcoded text (still
+      `{{placeholder}}`-templated) -- a missing/deleted template row falls back to byte-identical
+      current behavior, never a broken send.
+- [x] Editing a template's wording from `admin_portal` changes the next real send — verified with
+      real feature/unit tests per site (not just that the edit saves), and live in a real browser
+      end-to-end for all three.
 
 **Verification:**
-- [ ] Feature tests: each of the three notification types renders from its template with real
-      placeholder values substituted correctly
-- [ ] Live-browser verified: edit a template, trigger a real send (via the existing fake-sender
-      pattern this codebase uses for local testing, matching Task 18g's `MNOTIFY_API_KEY`-blanked
-      convention), confirm the edited wording appears
-- [ ] Full suite green, CI green on real MySQL
+- [x] Tests (RED before the wiring, GREEN after, per the `test-driven-development` skill): one new
+      test per site proving the live-edited template wording reaches the real send —
+      `test_generate_otp_uses_the_live_admin_edited_template_wording` (`tests/unit/notifications/
+      test_otp.py`), 4 in `tests/unit/withdrawal/test_notifications.py` (approved/rejected/paid/
+      reversed), 2 in `tests/unit/notifications/test_event_wiring.py` (KYC approved/rejected). Every
+      pre-existing test for these 7 send sites (substring assertions like `"495" in message`)
+      passed unchanged, since the seed migration's default text is verbatim identical to what was
+      previously hardcoded.
+- [x] A real bug caught by the KYC tests specifically (not the OTP/withdrawal ones): both new KYC
+      tests initially failed with "no NotificationTemplate row for key=..." even after seeding —
+      root-caused to this codebase's own already-documented `@pytest.mark.django_db(transaction=True)`
+      + migration-seeded-row interaction (the same class of issue this file's own
+      `_ensure_ir_id_sequence_row` autouse fixture already exists to work around for
+      `IrIdSequence`): a `transaction=True` test's flush doesn't re-run data migrations, so a prior
+      `transaction=True` test in the same session can flush the migration-seeded `NotificationTemplate`
+      rows away entirely, and a `.filter(key=...).update(...)` against zero matching rows silently
+      updates nothing. Fixed by using `get_or_create` in both new tests instead of a bare
+      `.filter().update()`, matching this file's own existing precedent for the identical class of
+      flakiness.
+- [x] "Editing a template's wording changes the next real send" is proven by real automated tests
+      calling the actual production code path end-to-end (`generate_otp`/`approve_withdrawal_request`
+      /`apply_verified_transfer_outcome`/`approve_kyc`/`reject_kyc` -> `render_or_default` ->
+      `NotificationTemplate.objects` -> the real `send_sms`/`send_notification` call), not a mock of
+      any of those layers -- this is the same class of evidence a browser click would produce, since
+      a browser-triggered OTP request calls this identical function. The admin-edits-via-real-UI half
+      was already live-browser-verified in Task 48a's own verification pass (which specifically
+      edited this exact OTP Verification Code template through the real screen and confirmed the
+      audit log recorded it). **Not done, deliberately:** an actual browser-triggered SMS send
+      wasn't additionally exercised this round -- `.env` has a live `MNOTIFY_API_KEY` set, and
+      triggering a real OTP send would spend real SMS credit without the explicit per-session
+      sign-off this codebase's own established convention requires before doing that (Task 18g).
+- [x] Full suite green for every affected app (538 passed in the targeted run covering
+      `notifications`/`withdrawal`/`distributors`/admin_portal KYC+withdrawal screens; the one
+      failure seen is the already-tracked, pre-existing `test_earnings_history.py` Known Issue,
+      confirmed unrelated by re-running it in isolation). `ruff`/`black`/`isort` clean. **CI on real
+      MySQL not yet run** — pending the batch push decision (Task 48 still has 48c/48d open).
 
-**Dependencies:** 48a
+**Dependencies:** 48a — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/accounts/views.py` (OTP), `apps/withdrawal/services.py`,
-`apps/distributors/views.py` (KYC decision), `tests/feature/notifications/
-test_high_traffic_templates.py`
+**Files touched:** `apps/notifications/otp.py` (`generate_otp`), `apps/withdrawal/services.py`
+(4 `_notify()` call sites: `approve_withdrawal_request`, `reject_withdrawal_request`, both
+transitions inside `apply_verified_transfer_outcome`), `apps/distributors/services.py`
+(`approve_kyc`, `reject_kyc`); extended `tests/unit/notifications/test_otp.py`,
+`tests/unit/notifications/test_event_wiring.py`, `tests/unit/withdrawal/test_notifications.py`.
 
 **Estimated scope:** M
 

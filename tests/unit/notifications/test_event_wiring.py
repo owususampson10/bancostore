@@ -20,7 +20,7 @@ from apps.distributors.services import (
     approve_kyc,
     reject_kyc,
 )
-from apps.notifications.models import Notification
+from apps.notifications.models import Notification, NotificationTemplate
 from apps.pv_ledger.models import MonthlyPersonalPv, PvDailyBucket
 from apps.wallet.models import Wallet, WalletTransaction
 
@@ -184,6 +184,47 @@ def test_a_rejected_kyc_notifies_the_distributor():
         distributor=distributor, event_type=Notification.EventType.KYC_DECIDED
     )
     assert "Blurry ID photo" in notification.message
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_approved_kyc_uses_the_live_admin_edited_template_wording():
+    """Task 48b acceptance criteria: editing a template's wording from
+    admin_portal changes the next real send -- not just that the edit
+    saves. get_or_create rather than a plain filter().update(), matching
+    this file's own _ensure_ir_id_sequence_row fixture's precedent just
+    above: a transaction=True test can flush a migration-seeded row
+    away entirely (flush doesn't re-run data migrations), so a filter()
+    with zero matching rows would silently update nothing."""
+    template, _ = NotificationTemplate.objects.get_or_create(
+        key=NotificationTemplate.Key.KYC_APPROVED
+    )
+    template.body = "Custom wording: you're verified!"
+    template.save()
+    distributor = _make_distributor(kyc_status=Distributor.KycStatus.PENDING)
+
+    approve_kyc(distributor)
+
+    notification = Notification.objects.get(
+        distributor=distributor, event_type=Notification.EventType.KYC_DECIDED
+    )
+    assert notification.message == "Custom wording: you're verified!"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_rejected_kyc_uses_the_live_admin_edited_template_wording():
+    template, _ = NotificationTemplate.objects.get_or_create(
+        key=NotificationTemplate.Key.KYC_REJECTED
+    )
+    template.body = "Custom wording: not approved -- {{reason}}"
+    template.save()
+    distributor = _make_distributor(kyc_status=Distributor.KycStatus.PENDING)
+
+    reject_kyc(distributor, reason="Blurry ID photo")
+
+    notification = Notification.objects.get(
+        distributor=distributor, event_type=Notification.EventType.KYC_DECIDED
+    )
+    assert notification.message == "Custom wording: not approved -- Blurry ID photo"
 
 
 @pytest.mark.django_db(transaction=True)

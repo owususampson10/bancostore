@@ -17,7 +17,8 @@ from constance import config
 
 from apps.binary_tree.services import AlreadyPlacedError, BinaryTree
 from apps.commissions.services import calculate_direct_referral_bonus
-from apps.notifications.models import Notification
+from apps.notifications.models import Notification, NotificationTemplate
+from apps.notifications.rendering import render_or_default
 from apps.notifications.services import send_notification
 from apps.notifications.sms import send_sms
 from apps.pv_ledger.services import record_personal_pv, record_purchase_pv
@@ -860,7 +861,11 @@ def approve_kyc(distributor) -> None:
         send_notification(
             distributor,
             Notification.EventType.KYC_DECIDED,
-            "Your KYC verification has been approved!",
+            render_or_default(
+                NotificationTemplate.Key.KYC_APPROVED,
+                {},
+                default_body="Your KYC verification has been approved!",
+            ),
         )
 
 
@@ -910,5 +915,9 @@ def reject_kyc(distributor, reason: str) -> None:
         send_notification(
             distributor,
             Notification.EventType.KYC_DECIDED,
-            f"Your KYC verification was rejected: {reason}",
+            render_or_default(
+                NotificationTemplate.Key.KYC_REJECTED,
+                {"reason": reason},
+                default_body="Your KYC verification was rejected: {{reason}}",
+            ),
         )

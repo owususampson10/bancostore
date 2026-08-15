@@ -5,6 +5,7 @@ from django.utils import timezone
 import pytest
 from constance import config
 
+from apps.notifications.models import NotificationTemplate
 from apps.notifications.otp import generate_otp, verify_otp
 from apps.notifications.sms import fake_outbox
 
@@ -28,6 +29,25 @@ def test_generate_otp_sends_an_sms_with_the_code():
     assert fake_outbox, "no SMS was sent via the fake sender"
     assert fake_outbox[-1]["phone_number"] == "+233241234567"
     assert otp.code in fake_outbox[-1]["message"]
+
+
+@pytest.mark.django_db
+def test_generate_otp_uses_the_live_admin_edited_template_wording():
+    """Task 48b acceptance criteria: editing a template's wording from
+    admin_portal changes the next real send -- not just that the edit
+    saves. OTP_CODE is pre-seeded by migration 0006_seed_notification_
+    templates, so this updates that already-existing row."""
+    NotificationTemplate.objects.filter(key=NotificationTemplate.Key.OTP_CODE).update(
+        body="Custom wording, code {{code}}, valid {{expiry_minutes}} min."
+    )
+
+    otp = generate_otp("+233241234567", purpose="registration")
+
+    message = fake_outbox[-1]["message"]
+    assert message == (
+        f"Custom wording, code {otp.code}, valid "
+        f"{config.OTP_CODE_EXPIRY_MINUTES} min."
+    )
 
 
 @pytest.mark.django_db

@@ -11,7 +11,8 @@ from bancostore.concurrency import (
     select_for_update_nowait_if_supported,
 )
 
-from .models import OTPCode
+from .models import NotificationTemplate, OTPCode
+from .rendering import render_or_default
 from .sms import send_sms
 
 
@@ -23,10 +24,20 @@ def generate_otp(phone_number: str, *, purpose: str) -> OTPCode:
         code=code,
         expires_at=timezone.now() + timedelta(minutes=config.OTP_CODE_EXPIRY_MINUTES),
     )
+    # Task 48b: admin-editable wording, falling back to this exact
+    # hardcoded default if the NotificationTemplate row is ever missing
+    # -- an OTP send must never fail because of a template lookup.
+    message = render_or_default(
+        NotificationTemplate.Key.OTP_CODE,
+        {"code": code, "expiry_minutes": config.OTP_CODE_EXPIRY_MINUTES},
+        default_body=(
+            "Your Bancostore verification code is {{code}}. It expires in "
+            "{{expiry_minutes}} minutes."
+        ),
+    )
     send_sms(
         phone_number,
-        f"Your Bancostore verification code is {code}. It expires in "
-        f"{config.OTP_CODE_EXPIRY_MINUTES} minutes.",
+        message,
         sms_type="otp",
     )
     return otp
