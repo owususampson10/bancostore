@@ -1,0 +1,37 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Notification Templates — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">Notification Templates</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Edit the wording of every outbound OTP, withdrawal, and KYC notification without a code change.</p>
+</div>
+
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<div class="overflow-x-auto">
+<table class="w-full min-w-[900px] text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Notification</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Preview</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Last Updated</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+{% for tmpl in templates %}
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface font-bold">{{ tmpl.get_key_display }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant max-w-md truncate">{{ tmpl.body }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant whitespace-nowrap">{{ tmpl.updated_at|date:"M j, Y g:i A" }}</td>
+<td class="px-6 py-4 text-right">
+<a href="{% url 'admin_portal:notification_template_edit' tmpl.pk %}" class="p-2 hover:bg-surface-container-high rounded-lg transition-colors text-on-surface-variant inline-flex" title="Edit" aria-label="Edit {{ tmpl.get_key_display }}">
+<span class="material-symbols-outlined" aria-hidden="true">edit</span>
+</a>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+{% endblock %}

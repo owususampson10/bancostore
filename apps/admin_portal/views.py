@@ -27,6 +27,8 @@ from apps.compliance.models import EscrowLedger
 from apps.compliance.services import get_retail_distributor_ratio, get_unified_audit_log
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
+from apps.notifications.models import NotificationTemplate
+from apps.notifications.template_registry import PLACEHOLDERS_BY_KEY
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import (
     ADVANCEABLE_STATUSES,
@@ -37,7 +39,11 @@ from apps.orders.services import (
 from apps.pages.models import SocialMediaLink
 from apps.pages.social_icons import SOCIAL_ICONS, detect_platform_from_url
 from apps.platform_settings.admin import BancostoreConstanceForm
-from apps.platform_settings.config import CONSTANCE_CONFIG, CONSTANCE_CONFIG_FIELDSETS
+from apps.platform_settings.config import (
+    CONSTANCE_CONFIG,
+    CONSTANCE_CONFIG_FIELDSETS,
+    humanize_identifier_name,
+)
 from apps.promotions.models import Banner, DiscountCode
 from apps.reporting.models import ReportRollupRun
 from apps.reporting.services import (
@@ -72,6 +78,7 @@ from .forms import (
     BannerForm,
     CategoryForm,
     DiscountCodeForm,
+    NotificationTemplateForm,
     ProductForm,
     ProductVariantFormSet,
     SocialMediaLinkForm,
@@ -839,6 +846,11 @@ def audit_log(request):
     entries = get_unified_audit_log(date_from=date_from, date_to=date_to)
     paginator = Paginator(entries, 20)
     page_obj = paginator.get_page(request.GET.get("page"))
+    # Task 48: a stable per-row id for the click-to-open detail modal's
+    # json_script lookup -- only needs to be unique within this one page
+    # (not globally), so the page's own row index is enough.
+    for index, entry in enumerate(page_obj.object_list):
+        entry["row_id"] = f"audit-entry-{index}"
 
     return render(
         request,
@@ -1594,6 +1606,58 @@ def discount_code_delete(request, pk):
 
 
 # ---------------------------------------------------------------------------
+# Notification Templates (Task 48a)
+# ---------------------------------------------------------------------------
+
+
+@login_required(login_url="two_factor:login")
+def notification_template_list(request):
+    """List + edit only -- no create/delete. Every NotificationTemplate.Key
+    is pre-seeded by migration (0006_seed_notification_templates), so
+    there's no freeform "new key" for an admin to create, and deleting a
+    row would leave a real send site's render_or_default() lookup
+    falling back to its hardcoded default rather than the admin's own
+    edited wording -- a silent regression, not a safe no-op, so this
+    screen doesn't offer that action at all."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    templates = NotificationTemplate.objects.all()
+    return render(
+        request,
+        "admin_portal/notification_template_list.html",
+        {"templates": templates, "active_nav": "notifications"},
+    )
+
+
+@login_required(login_url="two_factor:login")
+def notification_template_edit(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    template = get_object_or_404(NotificationTemplate, pk=pk)
+    if request.method == "POST":
+        form = NotificationTemplateForm(request.POST, instance=template)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Notification template updated.")
+            return redirect("admin_portal:notification_template_list")
+    else:
+        form = NotificationTemplateForm(instance=template)
+
+    return render(
+        request,
+        "admin_portal/notification_template_form.html",
+        {
+            "form": form,
+            "template": template,
+            "placeholders": PLACEHOLDERS_BY_KEY.get(template.key, []),
+            "active_nav": "notifications",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Catalog Management (Task 26) -- Product CRUD
 # ---------------------------------------------------------------------------
 
@@ -1910,31 +1974,6 @@ _GROUP_ICONS = {
     "General Platform Settings": "settings_suggest",
 }
 
-# A plain str.title() on an underscore-joined constant name reads fine for
-# ordinary words ("Distributor Login Method") but mangles the acronyms
-# scattered through this file's own setting names ("Otp", "Kyc", "Pv",
-# "Ir Id" instead of "OTP", "KYC", "PV", "IR ID") -- corrected here rather
-# than leaving the raw constant name on screen, which is what actually
-# prompted this normalization (a bare "DISTRIBUTOR_LOGIN_METHOD" reads as
-# code, not a setting a non-technical admin can recognize).
-_LABEL_WORD_OVERRIDES = {
-    "Otp": "OTP",
-    "Kyc": "KYC",
-    "Pv": "PV",
-    "Ir": "IR",
-    "Id": "ID",
-    "Sms": "SMS",
-    "Whatsapp": "WhatsApp",
-    # str.title() capitalizes only the letter right after the digit --
-    # "ADMIN_2FA_ENABLED".title() comes out "Admin 2Fa Enabled", not "2FA".
-    "2Fa": "2FA",
-}
-
-
-def _humanize_setting_name(name):
-    words = name.replace("_", " ").title().split(" ")
-    return " ".join(_LABEL_WORD_OVERRIDES.get(word, word) for word in words)
-
 
 def _style_constance_form_fields(form):
     """Constance builds its own field widgets per Python type (BooleanField/
@@ -2000,7 +2039,7 @@ def _constance_field_context(name, options, form):
     is_locked_currency = name in _LOCKED_CURRENCY_SETTINGS
     context = {
         "name": name,
-        "label": _humanize_setting_name(name),
+        "label": humanize_identifier_name(name),
         "help_text": options[1],
         "form_field": bound_field,
         "is_checkbox": isinstance(widget, forms.CheckboxInput),

@@ -134,6 +134,16 @@ urlpatterns = [
         name="discount_code_delete",
     ),
     path(
+        "notification-templates/",
+        views.notification_template_list,
+        name="notification_template_list",
+    ),
+    path(
+        "notification-templates/<int:pk>/edit/",
+        views.notification_template_edit,
+        name="notification_template_edit",
+    ),
+    path(
         "catalog/reviews/<int:pk>/approve/",
         views.review_approve,
         name="review_approve",

@@ -62,7 +62,7 @@ destructive actions/validation) is unaffected.
 </button>
 </div>
 
-<nav class="flex-1 space-y-1 px-3">
+<nav class="flex-1 space-y-1 px-3 overflow-y-auto">
 {% url 'admin_portal:dashboard' as dashboard_url %}
 {% url 'admin_portal:kyc_review_queue' as kyc_review_url %}
 {% url 'admin_portal:withdrawal_review_queue' as withdrawals_url %}
@@ -72,6 +72,7 @@ destructive actions/validation) is unaffected.
 {% url 'admin_portal:catalog_product_list' as catalog_url %}
 {% url 'admin_portal:sales_revenue_report' as reports_url %}
 {% url 'admin_portal:audit_log' as audit_log_url %}
+{% url 'admin_portal:notification_template_list' as notification_templates_url %}
 {% url 'admin_portal:platform_settings' as platform_settings_url %}
 {% url 'account_logout' as logout_url %}
 {% include "distributors/_sidebar_nav_item.html" with href=dashboard_url icon="dashboard" label="Dashboard" nav_key="dashboard" active_nav=active_nav %}
@@ -83,6 +84,7 @@ destructive actions/validation) is unaffected.
 {% include "distributors/_sidebar_nav_item.html" with href=catalog_url icon="category" label="Catalog" nav_key="catalog" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=reports_url icon="monitoring" label="Reports" nav_key="reports" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=audit_log_url icon="history" label="Audit Log" nav_key="audit_log" active_nav=active_nav %}
+{% include "distributors/_sidebar_nav_item.html" with href=notification_templates_url icon="mail" label="Notifications" nav_key="notifications" active_nav=active_nav %}
 {% include "distributors/_sidebar_nav_item.html" with href=platform_settings_url icon="settings" label="Settings" nav_key="platform_settings" active_nav=active_nav %}
 <div class="pt-4 mt-4 border-t border-outline-variant/50">
 {% include "distributors/_sidebar_nav_item.html" with href=logout_url icon="logout" label="Log Out" danger=True confirm="logoutConfirmOpen = true" %}

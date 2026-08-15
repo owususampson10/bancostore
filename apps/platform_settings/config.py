@@ -794,3 +794,32 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "Payment Gateway Settings": tuple(PAYMENT_GATEWAY_SETTINGS),
     "General Platform Settings": tuple(GENERAL_PLATFORM_SETTINGS),
 }
+
+# A plain str.title() on an underscore-joined identifier reads fine for
+# ordinary words ("Distributor Login Method") but mangles the acronyms
+# scattered through this codebase's own setting/field names ("Otp", "Kyc",
+# "Pv", "Ir Id" instead of "OTP", "KYC", "PV", "IR ID") -- corrected here
+# rather than leaving the raw identifier on screen, which is what actually
+# prompted this (a bare "DISTRIBUTOR_LOGIN_METHOD" reads as code, not a
+# setting a non-technical admin can recognize). Originally built for Task
+# 28's Platform Settings screen (constance keys are UPPER_SNAKE_CASE);
+# reused as-is by Task 47e/48's Audit Log screen for model field names
+# (lower_snake_case) -- str.title() is case-insensitive to the input, so
+# the same word-override table applies to both without change.
+_LABEL_WORD_OVERRIDES = {
+    "Otp": "OTP",
+    "Kyc": "KYC",
+    "Pv": "PV",
+    "Ir": "IR",
+    "Id": "ID",
+    "Sms": "SMS",
+    "Whatsapp": "WhatsApp",
+    # str.title() capitalizes only the letter right after the digit --
+    # "ADMIN_2FA_ENABLED".title() comes out "Admin 2Fa Enabled", not "2FA".
+    "2Fa": "2FA",
+}
+
+
+def humanize_identifier_name(name):
+    words = name.replace("_", " ").title().split(" ")
+    return " ".join(_LABEL_WORD_OVERRIDES.get(word, word) for word in words)
