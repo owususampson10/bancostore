@@ -7700,26 +7700,110 @@ round.
 #### 48a: `NotificationTemplate` model + admin CRUD (security-and-hardening pass mandatory)
 
 **Acceptance criteria:**
-- [ ] `NotificationTemplate` stores name/subject/body with placeholder variables (e.g.
-      `{{distributor_name}}`/`{{amount}}`) per notification type
-- [ ] Admin can create/edit templates from `admin_portal`
-- [ ] Placeholder substitution is server-side constrained, never raw interpolation into an
-      SMS/email/HTML rendering context (matching Task 17/37's established XSS-prevention rule for
-      this exact class of admin-entered-text-into-a-rendering-context risk)
+- [x] `NotificationTemplate` stores subject/body with placeholder variables per notification type.
+      `key` is a closed `TextChoices` enum (7 members: `otp_code`, 4 `withdrawal_*` states,
+      2 `kyc_*` decisions), not a freeform name field -- a call site looks a template up by a fixed
+      `Key` member, so editing wording is possible but inventing a new notification type no code
+      path reads is not. `apps/notifications/template_registry.py::PLACEHOLDERS_BY_KEY` is the
+      single source of truth for which `{{name}}` variables each key supports.
+- [x] Admin can edit templates from `admin_portal` (list + edit, not create/delete -- a deliberate,
+      documented scope narrowing: every real `Key` is pre-seeded by migration, so "create" has
+      nothing left to create once seeded, and "delete" would leave a real send site's
+      `render_or_default()` lookup silently falling back to its hardcoded default instead of the
+      admin's own edited wording, a regression, not a safe no-op).
+- [x] Placeholder substitution is server-side constrained, never raw interpolation. A `doubt-driven-
+      development`-style pre-implementation security review (via the `security-and-hardening`
+      skill) confirmed the design: `apps/notifications/rendering.py::render_template()` is a
+      bespoke regex substitution (`\{\{\s*(\w+)\s*\}\}`) that can only ever emit values explicitly
+      passed in by the caller's own context dict -- never attribute/method access, never code
+      execution, regardless of what an admin writes in `body`/`subject`. Deliberately not
+      `str.format(**dict)` or an f-string, both of which allow attribute/index access through the
+      format spec (e.g. `{0.__class__}`) when the TEMPLATE STRING itself, not just the substituted
+      values, comes from an admin rather than a developer. A name with no matching context key is
+      left as a literal `{{name}}` rather than raising, matching this codebase's "a notification
+      failure must never break the business operation it describes" philosophy elsewhere.
+
+**Two real findings from that review, both fixed before shipping:**
+1. This governs real customer-facing financial/KYC wording, the same class of admin-editable
+   content Task 47d/47e already built a real audit trail for (Category/Product/
+   `PlatformSettingChange`) -- added `HistoricalRecords()` and wired `NotificationTemplate` into
+   the same unified audit log rather than leaving it untracked.
+2. `subject` is admin-entered text passed to Django's `send_mail()`, which already raises
+   `BadHeaderError` on an embedded `\r`/`\n` (classic email header injection) -- but every real send
+   site wraps that call in its own best-effort `try/except`, which would silently swallow that
+   exception and quietly break that notification type at every future send instead of surfacing the
+   mistake to the admin who made it. Fixed by rejecting embedded line breaks in
+   `NotificationTemplateForm.clean()` at save time, with a clear admin-facing error.
 
 **Verification:**
-- [ ] `security-and-hardening` review complete before this sub-task ships (admin-entered text
-      rendering into SMS/email/HTML is a real injection surface)
-- [ ] Feature tests: template CRUD, placeholder substitution correctness, an admin-entered
-      malicious placeholder value (e.g. containing `</script>` or SMS injection characters) proven
-      safely escaped
-- [ ] Full suite green
+- [x] `security-and-hardening` review complete before this sub-task shipped (see above).
+- [x] Feature tests (9, `tests/feature/admin_portal/test_notification_template_management.py`):
+      list/edit CRUD, an unknown-placeholder edit rejected with the exact expected error text, a
+      declared-placeholder edit accepted, a newline-in-subject edit rejected, an edit produces a
+      queryable `history` row for the audit log. Unit tests (9,
+      `tests/unit/notifications/test_rendering.py`): known-placeholder substitution, an unknown
+      placeholder left literal (not raised), a `{{code.__class__.__init__.__globals__}}`-shaped
+      malicious template string proven inert (not recognized as a placeholder at all, since it
+      isn't `{{name}}`-shaped), `render_or_default()`'s live-row and missing-row fallback paths.
+- [x] Full suite green for every touched app; `ruff`/`black`/`isort` clean.
+- [x] Live-browser verified (2026-08-15): real TOTP admin login, list screen shows all 7 seeded
+      templates with real preview text, edit form shows the correct declared placeholders, an
+      unknown-placeholder submission renders the exact validation error live, a valid edit saves and
+      bumps "Last Updated", and the Task 47e Audit Log screen shows the edit with the real logged-in
+      admin (`stub_admin`) as the actor -- not "System" -- confirming `HistoryRequestMiddleware`
+      resolves correctly through this new model too.
 
-**Dependencies:** None
+**Also shipped in the same commit, per direct user feedback after reviewing a real screenshot of
+the live Audit Log screen (not part of the original 48a plan, but discovered while reviewing 48a's
+own audit-trail integration):**
+- The admin sidebar (now 11 items + Log Out, grown across Tasks 47e/48a) had no scroll mechanism
+  and could overflow `base_dashboard.html`'s fixed-height `<aside>` -- added `overflow-y-auto` to
+  the `<nav>`.
+- The Audit Log showed several raw internal identifiers no regular admin could read: constance keys
+  like `WITHHOLDING_TAX_RATE`, unspaced model labels like `WithdrawalRequest`, lowercase diff field
+  names like `price`, and debug-style object reprs like `Distributor<+233...>`/
+  `Order<63 confirmed>`. Relocated Task 28's existing `_humanize_setting_name` (Platform Settings'
+  own label humanizer) from `apps/admin_portal/views.py` to `apps/platform_settings/config.py` as a
+  shared `humanize_identifier_name()`, reused for both constance keys and diff field names -- Django's
+  default `verbose_name` is just `name.replace('_',' ')`, and the acronym-override table
+  (OTP/KYC/PV/IR/ID/SMS/WhatsApp/2FA) applies identically regardless of the input's original casing.
+  Distributor/Order/WithdrawalRequest object reprs are humanized locally to the audit log
+  (`apps/compliance/services.py::_humanize_object_repr`) rather than by changing their shared
+  `__str__` methods: `apps.admin_portal.views` already has an established precedent of doing exactly
+  this for `Distributor` in two other screens (`kyc_review_detail`, `distributor_profile`), with
+  tests literally asserting the raw `"Distributor<"` debug repr never reaches rendered output --
+  followed here for `Order`/`WithdrawalRequest` too, for consistency and to avoid an unaudited blast
+  radius from changing a `__str__` potentially relied on elsewhere (Django Admin, log lines).
+- Each row's full "What Changed" diff list was rendered inline, making rows very tall. Rows now show
+  a one-line summary (first field + "+N more" when there's more than one); a new click-to-open
+  detail modal (row click, or a keyboard-accessible "View" icon button) shows the full untruncated
+  detail. Reads data the page already rendered via `json_script` per row (no second server round
+  trip), matching the existing `_delete_confirm_modal.html` Alpine.js pattern exactly.
+  `actor` is now baked into a plain display string at the source (`apps/compliance/services.py
+  ::_actor_display`) for both `PlatformSettingChange` and `HistoricalRecords` entries, rather than
+  the raw `User` instance the template used to `|default:"System"` -- `json_script`'s
+  `DjangoJSONEncoder` has no built-in support for serializing an arbitrary model instance, so this
+  was required to make each row's full data JSON-safe for the modal, not just a style preference.
+  13 new/updated tests in `tests/feature/admin_portal/test_audit_log.py` cover every humanization
+  case with precise, false-positive-proof assertions (e.g. checking for the exact old debug-repr
+  string, not the substring `"Distributor<"`, which also innocuously matches the model-label
+  `<span>Distributor</span>` tag).
 
-**Files likely touched:** `apps/notifications/models.py` (new `NotificationTemplate`),
-`apps/admin_portal/views.py`/`urls.py`, new admin_portal template-editor screen,
-`tests/feature/notifications/test_template_editor.py`
+**Dependencies:** None -- **closed 2026-08-15.**
+
+**Files touched:** new `apps/notifications/rendering.py`, `apps/notifications/template_registry.py`,
+`apps/notifications/migrations/0005_notificationtemplate_historicalnotificationtemplate.py`,
+`0006_seed_notification_templates.py`; `apps/notifications/models.py` (`NotificationTemplate`);
+`apps/admin_portal/forms.py` (`NotificationTemplateForm`); `apps/admin_portal/views.py`
+(`notification_template_list`/`edit`, `humanize_identifier_name` import, audit log `row_id`);
+`apps/admin_portal/urls.py`; new `templates/admin_portal/notification_template_list.html`,
+`notification_template_form.html`; `apps/platform_settings/config.py`
+(`humanize_identifier_name`); `apps/compliance/services.py` (model-label/field-name/object-repr
+humanization, `_actor_display`); `templates/admin_portal/audit_log.html` (compact rows + detail
+modal), `base_dashboard.html` (sidebar scroll, Notifications nav item); new
+`tests/feature/admin_portal/test_notification_template_management.py`,
+`tests/unit/notifications/test_rendering.py`; extended `tests/feature/admin_portal/test_audit_log.py`,
+`tests/unit/compliance/test_audit_log_cleanup.py`.
 
 **Estimated scope:** M
 
