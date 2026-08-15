@@ -192,7 +192,14 @@ def dashboard(request):
     total_withholding_tax_remitted = WithdrawalRequest.objects.filter(
         status=WithdrawalRequest.Status.PAID
     ).aggregate(total=Sum("tax_amount"))["total"] or Decimal("0")
-    escrow_balance = EscrowLedger.objects.get(pk=1).balance
+    # A read-only fallback, not get_or_create -- this is a GET view and
+    # must never write. Mirrors credit_escrow/reverse_escrow's own "the
+    # pk=1 row may legitimately be absent" reasoning without the side
+    # effect: a hard .get(pk=1) would 500 the whole dashboard the moment
+    # that row is missing, instead of just showing GHS 0.00.
+    escrow_balance = EscrowLedger.objects.filter(pk=1).values_list(
+        "balance", flat=True
+    ).first() or Decimal("0")
 
     context = {
         "pending_kyc_count": pending_kyc_count,

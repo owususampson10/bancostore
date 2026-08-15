@@ -481,3 +481,18 @@ def test_escrow_balance_reflects_the_live_ledger(staff_client):
 
     assert response.context["escrow_balance"] == Decimal("123.45")
     assert b"123.45" in response.content
+
+
+@pytest.mark.django_db
+def test_dashboard_survives_a_missing_escrow_ledger_row(staff_client):
+    """CodeRabbit-caught regression: the seeded pk=1 EscrowLedger row is
+    documented as legitimately-absent-capable (same reasoning as
+    credit_escrow/reverse_escrow's own defensive get_or_create) -- a hard
+    .get(pk=1) would 500 the whole dashboard instead of just showing
+    GHS 0.00 for this one card."""
+    EscrowLedger.objects.filter(pk=1).delete()
+
+    response = staff_client.get(_dashboard_url())
+
+    assert response.status_code == 200
+    assert response.context["escrow_balance"] == Decimal("0")

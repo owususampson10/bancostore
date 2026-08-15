@@ -12,11 +12,6 @@ def seed_escrow_ledger(apps, schema_editor):
     EscrowLedger.objects.get_or_create(pk=1)
 
 
-def remove_escrow_ledger(apps, schema_editor):
-    EscrowLedger = apps.get_model("compliance", "EscrowLedger")
-    EscrowLedger.objects.filter(pk=1).delete()
-
-
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -24,5 +19,12 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(seed_escrow_ledger, remove_escrow_ledger),
+        # No real reverse: EscrowTransaction.ledger is on_delete=PROTECT,
+        # so deleting the pk=1 row on reverse-migrate would raise
+        # ProtectedError the moment any real transaction exists -- a
+        # CodeRabbit-caught data-integrity bug in the original
+        # remove_escrow_ledger. seed_escrow_ledger's forward direction is
+        # already idempotent via get_or_create, so there's nothing that
+        # genuinely needs undoing.
+        migrations.RunPython(seed_escrow_ledger, migrations.RunPython.noop),
     ]
