@@ -7705,12 +7705,14 @@ actually wired in code. Also fixed, per direct user feedback after reviewing a l
 admin sidebar scrollbar, and a full humanization pass on the Task 47e Audit Log screen (raw
 constance keys, unspaced model labels, lowercase diff field names, and debug-style object reprs all
 replaced with real, readable text) plus a click-to-open detail modal for any audit log row. See each
-48a-48d sub-task below for full acceptance-criteria/verification detail. **Not yet done:** the
-complete whole-repo full suite (deferred across 48b-48d to avoid disrupting a live manual-testing
-`runserver` session — the targeted runs covering every touched app were all green throughout) and
-CI on real MySQL, both pending the batch push decision; Checkpoint O below is a separate, broader
-verification step (all ten `SPEC_PHASE2.md` success-criteria sections, not just this one task) not
-yet attempted.
+48a-48d sub-task below for full acceptance-criteria/verification detail. The complete whole-repo
+full suite (deferred across 48b-48d to avoid disrupting a live manual-testing `runserver` session)
+ran clean once that session ended: 1743 passed, 5 skipped; the sole failure is the same
+already-tracked, pre-existing `test_earnings_history.py` Known Issue seen throughout this entire
+project (a stale cache-busted asset filename, unrelated to anything in this task — confirmed by
+isolated reruns every time it's come up). **Not yet done:** CI on real MySQL, pending the batch push
+decision; Checkpoint O below is a separate, broader verification step (all ten `SPEC_PHASE2.md`
+success-criteria sections, not just this one task) not yet attempted.
 
 #### 48a: `NotificationTemplate` model + admin CRUD (security-and-hardening pass mandatory)
 
