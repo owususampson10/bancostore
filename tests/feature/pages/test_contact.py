@@ -248,6 +248,26 @@ def test_an_empty_honeypot_field_sends_normally(client):
 
 
 @pytest.mark.django_db
+def test_a_filled_honeypot_is_caught_even_with_an_invalid_required_field(client):
+    """CodeRabbit finding (PR #81): the honeypot check must not depend on
+    the rest of the form being valid -- a bot that fills the honeypot but
+    leaves a required field blank/malformed must still get the fake
+    success response, not real validation errors that could tip it off."""
+    config.CONTACT_EMAIL_ADDRESS = "hello@bancostore.test"
+
+    response = client.post(
+        reverse("pages:contact"),
+        _valid_payload(honeypot="I am a bot", message=""),
+        follow=True,
+    )
+
+    assert response.status_code == 200
+    assert len(mail.outbox) == 0
+    messages_text = [m.message for m in response.context["messages"]]
+    assert any("sent" in m.lower() or "thank" in m.lower() for m in messages_text)
+
+
+@pytest.mark.django_db
 def test_contact_page_renders_no_captcha_widget_when_unconfigured(client, settings):
     settings.HCAPTCHA_SITE_KEY = ""
     settings.HCAPTCHA_SECRET_KEY = ""

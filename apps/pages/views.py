@@ -107,10 +107,16 @@ def contact(request):
     if request.method == "POST":
         form = ContactForm(request.POST)
         form_is_valid = form.is_valid()
-        if form_is_valid and form.is_bot_trap_filled:
+        if form.is_bot_trap_filled:
             # Honeypot triggered -- respond exactly like a real success so
             # an automated submitter gets no signal it was caught, but
-            # never actually send anything.
+            # never actually send anything. Checked independent of
+            # form_is_valid (CodeRabbit finding, PR #81): honeypot is
+            # required=False, so it lands in cleaned_data via
+            # full_clean()'s per-field cleaning regardless of whether
+            # some other field also failed -- a bot that fills the
+            # honeypot but leaves a required field blank must still hit
+            # this path, not fall through to real validation errors.
             logger.info("contact: honeypot field was filled, discarding submission")
             messages.success(
                 request,

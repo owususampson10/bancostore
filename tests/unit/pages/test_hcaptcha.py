@@ -58,6 +58,23 @@ class TestVerifyHcaptcha:
         with patch("apps.pages.hcaptcha.requests.post", return_value=mock_response):
             assert verify_hcaptcha("a-fake-token") is False
 
+    def test_sends_the_configured_site_key_in_the_verify_payload(self, settings):
+        """CodeRabbit finding (PR #81): without this, a token issued for a
+        different hCaptcha site key under the same account would still
+        verify successfully against this secret -- sitekey binds the
+        verification to the specific site key configured here."""
+        settings.HCAPTCHA_SITE_KEY = "site-key"
+        settings.HCAPTCHA_SECRET_KEY = "secret-key"
+        mock_response = Mock()
+        mock_response.json.return_value = {"success": True}
+
+        with patch(
+            "apps.pages.hcaptcha.requests.post", return_value=mock_response
+        ) as mock_post:
+            verify_hcaptcha("a-real-token")
+
+        assert mock_post.call_args.kwargs["data"]["sitekey"] == "site-key"
+
     def test_fails_closed_on_a_network_error(self, settings):
         """Unlike Paystack's wrapper (which raises), a CAPTCHA check that
         can't be confirmed must reject, not silently let the submission

@@ -31,7 +31,15 @@ def verify_hcaptcha(token):
     try:
         response = requests.post(
             HCAPTCHA_VERIFY_URL,
-            data={"secret": settings.HCAPTCHA_SECRET_KEY, "response": token},
+            data={
+                "secret": settings.HCAPTCHA_SECRET_KEY,
+                "response": token,
+                # CodeRabbit finding: binds verification to the configured
+                # site key -- without it, a token issued for a different
+                # hCaptcha site key under the same account would still
+                # verify successfully against this secret.
+                "sitekey": settings.HCAPTCHA_SITE_KEY,
+            },
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
