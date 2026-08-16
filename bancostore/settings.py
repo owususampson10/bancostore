@@ -522,6 +522,13 @@ DIDIT_API_KEY = os.environ.get("DIDIT_API_KEY", "")
 DIDIT_WEBHOOK_SECRET = os.environ.get("DIDIT_WEBHOOK_SECRET", "")
 DIDIT_WORKFLOW_ID = os.environ.get("DIDIT_WORKFLOW_ID", "")
 
+# hCaptcha — bot/spam protection on the public contact form. Same
+# blank-means-disabled fallback as MNOTIFY_API_KEY above: with no keys set,
+# apps/pages/hcaptcha.py's widget doesn't render and verification is
+# skipped, so local dev/tests never need a real hCaptcha account.
+HCAPTCHA_SITE_KEY = os.environ.get("HCAPTCHA_SITE_KEY", "")
+HCAPTCHA_SECRET_KEY = os.environ.get("HCAPTCHA_SECRET_KEY", "")
+
 
 # Internationalization
 

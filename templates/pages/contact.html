@@ -42,7 +42,15 @@ pixel-fidelity-over-durability instruction as the About page.
 <style>
 .contact-card-hover { transition: all 0.3s ease; }
 .contact-card-hover:hover { border-color: var(--color-primary); background-color: var(--color-surface-container-lowest); }
+/* Honeypot bot trap: visually hidden but still a real, focusable-by-bots
+   input in the DOM (not display:none/type="hidden", which many bots
+   specifically know to skip). Real users never see or reach it --
+   tabindex="-1" in the widget attrs keeps keyboard focus off it too. */
+.hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
 </style>
+{% if hcaptcha_site_key %}
+<script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+{% endif %}
 
 <section class="px-margin-mobile md:px-margin-desktop py-10 md:py-20 flex flex-col items-center text-center max-w-container-max mx-auto">
 <h1 class="font-display-lg-mobile text-display-lg-mobile md:font-display-lg md:text-display-lg text-on-surface mb-3">Get in Touch</h1>
@@ -57,6 +65,10 @@ pixel-fidelity-over-durability instruction as the About page.
 <h2 class="font-headline-md text-headline-md text-on-surface mb-6">Send us a message</h2>
 <form method="post" novalidate class="space-y-6">
 {% csrf_token %}
+<div class="hp-field" aria-hidden="true">
+<label for="{{ form.honeypot.id_for_label }}">Leave this field blank</label>
+{{ form.honeypot }}
+</div>
 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 <div class="flex flex-col gap-2">
 <label for="{{ form.name.id_for_label }}" class="font-label-caps text-label-caps text-secondary uppercase">Name</label>
@@ -79,6 +91,9 @@ pixel-fidelity-over-durability instruction as the About page.
 {{ form.message }}
 <p id="id_message-error" class="text-error text-sm">{% if form.message.errors %}{{ form.message.errors.0 }}{% endif %}</p>
 </div>
+{% if hcaptcha_site_key %}
+<div class="h-captcha" data-sitekey="{{ hcaptcha_site_key }}"></div>
+{% endif %}
 <div class="pt-2">
 <button type="submit" class="w-full md:w-auto px-10 py-4 bg-primary text-on-primary font-button text-button rounded-lg hover:brightness-110 transition-all active:scale-95 uppercase tracking-widest">
 Send Message
