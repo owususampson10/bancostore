@@ -376,37 +376,49 @@ def withdrawal_review_queue(request):
     )
 
 
-@login_required(login_url="two_factor:login")
-def withdrawal_review_export(request):
-    """Task 45: bancostore.exports.export_as_csv's first real consumer --
-    exports exactly the same SUBMITTED-only queryset withdrawal_review_queue
-    itself shows (this codebase's established "export what the screen
-    shows" convention, matching distributor_directory_export), including
-    the tax figures Section 12.3's GRA withholding-tax review needs
-    (amount/tax/net). Name-fallback logic (full_name, else the KYC-approved
-    DiditVerification's extracted_full_name, else blank) mirrors the
-    template's own `{% firstof %}` exactly -- same duplicated pattern
-    already repeated 3x across this file's other withdrawal views, not a
-    new one introduced here."""
-    if not is_admin_portal_staff(request.user):
-        raise PermissionDenied
-
-    withdrawal_requests = (
+def _submitted_withdrawal_requests_for_export():
+    """Shared by both withdrawal_review_export (CSV) and
+    withdrawal_review_export_pdf (Task 47g/Checkpoint O) -- exports exactly
+    the same SUBMITTED-only queryset withdrawal_review_queue itself shows
+    (this codebase's established "export what the screen shows" convention,
+    matching distributor_directory_export), including the tax figures
+    Section 12.3's GRA withholding-tax review needs (amount/tax/net).
+    Extracted so the CSV export's own scope test
+    (test_export_csv_only_includes_submitted_requests) is the one place
+    that proves this filtering, rather than duplicating it per format."""
+    return (
         WithdrawalRequest.objects.filter(status=WithdrawalRequest.Status.SUBMITTED)
         .select_related("distributor", "distributor__didit_verification")
         .order_by("created_at")
     )
 
+
+def _withdrawal_export_display_name(withdrawal_request):
+    """Name-fallback logic (full_name, else the KYC-approved
+    DiditVerification's extracted_full_name, else blank) mirrors the
+    template's own `{% firstof %}` exactly -- same duplicated pattern
+    already repeated 3x across this file's other withdrawal views, not a
+    new one introduced here."""
+    distributor = withdrawal_request.distributor
+    verification = getattr(distributor, "didit_verification", None)
+    return distributor.full_name or (
+        verification.extracted_full_name if verification else ""
+    )
+
+
+@login_required(login_url="two_factor:login")
+def withdrawal_review_export(request):
+    """Task 45: bancostore.exports.export_as_csv's first real consumer."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    withdrawal_requests = _submitted_withdrawal_requests_for_export()
+
     def _rows():
         for withdrawal_request in withdrawal_requests:
-            distributor = withdrawal_request.distributor
-            verification = getattr(distributor, "didit_verification", None)
-            display_name = distributor.full_name or (
-                verification.extracted_full_name if verification else ""
-            )
             yield [
-                display_name,
-                distributor.ir_id or "",
+                _withdrawal_export_display_name(withdrawal_request),
+                withdrawal_request.distributor.ir_id or "",
                 withdrawal_request.amount,
                 withdrawal_request.tax_amount,
                 withdrawal_request.net_amount,
@@ -424,6 +436,37 @@ def withdrawal_review_export(request):
             "Date Submitted",
         ],
         _rows(),
+    )
+
+
+@login_required(login_url="two_factor:login")
+def withdrawal_review_export_pdf(request):
+    """Checkpoint O finding: SPEC_PHASE2.md Feature 7's success criteria
+    require the GRA withholding-tax export be downloadable as both CSV and
+    PDF, matching every Feature 5 report -- this screen shipped CSV-only in
+    Task 45. Mirrors sales_revenue_report_export_pdf's exact same
+    export_as_pdf/WeasyPrint shape, reusing the same queryset/display-name
+    helpers the CSV export uses so the two formats can never drift apart on
+    what counts as "submitted" or how a distributor's name is resolved."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    withdrawal_requests = _submitted_withdrawal_requests_for_export()
+    rows = [
+        {
+            "display_name": _withdrawal_export_display_name(withdrawal_request),
+            "ir_id": withdrawal_request.distributor.ir_id or "",
+            "amount": withdrawal_request.amount,
+            "tax_amount": withdrawal_request.tax_amount,
+            "net_amount": withdrawal_request.net_amount,
+            "created_at": withdrawal_request.created_at,
+        }
+        for withdrawal_request in withdrawal_requests
+    ]
+    return export_as_pdf(
+        "withdrawal-requests.pdf",
+        "admin_portal/withdrawal_review_export_pdf.html",
+        {"withdrawal_requests": rows},
     )
 
 

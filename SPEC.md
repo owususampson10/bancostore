@@ -51,8 +51,8 @@ defaults and revisited in `SPEC_PHASE2.md`.
 - Section 12.1–12.3 — Admin: user/distributor management, commission oversight, withdrawal management (reporting/compliance dashboards deferred)
 - Section 13 (subset above) — Admin Settings Panel for MVP-relevant values
 
-### Out of scope (deferred to Phase 2 — see `SPEC_PHASE2.md`, written 2026-08-12; build in progress,
-Tasks 39-41 shipped)
+### Out of scope (deferred to Phase 2 — see `SPEC_PHASE2.md`, written 2026-08-12; **complete as of
+2026-08-16, all ten features shipped across Tasks 39-48, Checkpoint O signed off**)
 - Sales/revenue/compliance reporting (12.4–12.6)
 - Discount codes & promotional banners (Section 11)
 - Product reviews (10.3)

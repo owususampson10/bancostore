@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Withdrawal Requests -- GRA Withholding Tax Export</title>
+<style>
+body { font-family: sans-serif; font-size: 11pt; color: #1a1a1a; }
+h1 { font-size: 16pt; }
+table { width: 100%; border-collapse: collapse; margin-top: 0.5em; }
+th, td { border-bottom: 1px solid #ccc; padding: 0.35em; text-align: left; }
+td.amount, th.amount { text-align: right; }
+</style>
+</head>
+<body>
+{# Checkpoint O finding: mirrors sales_revenue_report_pdf.html's own
+   plain, self-contained style -- no Tailwind, matching every other
+   WeasyPrint-rendered output in this codebase. #}
+<h1>Withdrawal Requests</h1>
+<p>Pending review, with GRA withholding tax figures.</p>
+
+<table>
+<thead>
+<tr>
+<th>Distributor</th>
+<th>IR ID</th>
+<th class="amount">Amount (GHS)</th>
+<th class="amount">Tax (GHS)</th>
+<th class="amount">Net Payout (GHS)</th>
+<th>Date Submitted</th>
+</tr>
+</thead>
+<tbody>
+{% for row in withdrawal_requests %}
+<tr>
+<td>{{ row.display_name }}</td>
+<td>{{ row.ir_id }}</td>
+<td class="amount">{{ row.amount }}</td>
+<td class="amount">{{ row.tax_amount }}</td>
+<td class="amount">{{ row.net_amount }}</td>
+<td>{{ row.created_at|date:"Y-m-d" }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</body>
+</html>

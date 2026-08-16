@@ -11,6 +11,7 @@ from apps.wallet.models import WalletTransaction
 from apps.wallet.services import credit
 from apps.withdrawal.models import WithdrawalRequest
 from apps.withdrawal.services import submit_withdrawal_request
+from tests.conftest import WEASYPRINT_AVAILABLE
 
 User = get_user_model()
 _phone_seq = count(1)
@@ -400,6 +401,57 @@ def test_an_anonymous_user_is_redirected_to_login_for_export(client, db):
     response = client.get(_export_url())
 
     assert response.status_code == 302
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint O finding: SPEC_PHASE2.md Feature 7's success criteria require
+# the GRA withholding-tax export be downloadable as both CSV and PDF, same
+# as every Feature 5 report -- this screen shipped CSV-only in Task 45.
+# Mirrors sales_revenue_report_export_pdf's exact same
+# export_as_pdf/WeasyPrint/pytest.mark.skipif(not WEASYPRINT_AVAILABLE)
+# shape (tests/feature/reporting/test_sales_revenue_report.py).
+# ---------------------------------------------------------------------------
+
+
+def _pdf_export_url():
+    return reverse("admin_portal:withdrawal_review_export_pdf")
+
+
+@pytest.mark.django_db
+@pytest.mark.skipif(
+    not WEASYPRINT_AVAILABLE,
+    reason="WeasyPrint needs the system Pango library, not installable locally.",
+)
+def test_export_pdf_generates_a_real_pdf(staff_client):
+    distributor = _make_eligible_distributor(full_name="Ama Mensah")
+    _make_submitted_request(distributor, amount=Decimal("500.00"))
+
+    response = staff_client.get(_pdf_export_url())
+
+    assert response.status_code == 200
+    assert response["Content-Type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+
+
+@pytest.mark.django_db
+def test_export_pdf_requires_staff(client, db):
+    phone = f"+233247{next(_phone_seq):06d}"
+    user = User.objects.create_user(
+        username=phone, password="Passw0rd!", is_staff=False
+    )
+    client.force_login(user)
+
+    response = client.get(_pdf_export_url())
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_an_anonymous_user_is_redirected_to_login_for_pdf_export(client, db):
+    response = client.get(_pdf_export_url())
+
+    assert response.status_code == 302
+    assert reverse("two_factor:login") in response.url
     assert reverse("two_factor:login") in response.url
 
 

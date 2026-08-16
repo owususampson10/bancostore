@@ -259,15 +259,14 @@ suite on this Mac, but never a false CI failure blocking a real merge. No furthe
 
 ## Known issues — surfaced by Task 44a's full-suite verification (2026-08-13)
 
-- [ ] `tests/feature/distributors/test_earnings_history.py::
-  test_page_loads_the_shared_js_bundle_so_the_sidebar_can_actually_collapse` fails on `main`
-  independent of any Task 44 change (confirmed via `git stash`): it asserts the page contains
-  `src="{% static 'assets/main.js' %}"` literally, but Task 36's real content-hashed Vite output
-  (e.g. `assets/main-C9T1orRo.js`) means that exact stable path no longer exists — the test's own
-  assumption went stale when cache-busting shipped. Needs the test updated to resolve the real
-  hashed filename (e.g. via Django's `ManifestStaticFilesStorage`/`{% static %}` resolution at test
-  time) rather than a hardcoded string. Not fixed here — unrelated to backorders, flagged as a new
-  Known Issue instead of silently patched in passing.
+- [x] **Fixed 2026-08-16 (Checkpoint O).** `tests/feature/distributors/test_earnings_history.py::
+  test_page_loads_the_shared_js_bundle_so_the_sidebar_can_actually_collapse` asserted the page
+  contains `src="{% static 'assets/main.js' %}"` literally, but Task 36's real content-hashed Vite
+  output means that exact stable path no longer exists — the test's own assumption went stale when
+  cache-busting shipped. Repeatedly re-confirmed as "pre-existing/unrelated" across Tasks 44a
+  through 48 without ever being fixed. Fixed by calling the real
+  `apps.pages.templatetags.vite_tags.vite_asset("main.js")` resolver directly instead of a
+  hardcoded path, so the assertion tracks whatever hash the next `npm run build` produces.
 
 ---
 
@@ -8023,7 +8022,22 @@ new `apps/notifications/email.py` (`get_sender_email`), `apps/notifications/sms.
 ---
 
 ### Checkpoint O — Phase 2 complete
-- [ ] Every one of `SPEC_PHASE2.md`'s ten Success Criteria sections met
-- [ ] Full suite green, CI green on real MySQL, every feature live-browser-verified
-- [ ] `CLAUDE.md` Project State updated to record Phase 2's completion
-- [ ] Review with the user — Phase 2 sign-off
+- [x] Every one of `SPEC_PHASE2.md`'s ten Success Criteria sections re-audited directly against the
+      real shipped code and tests (not just each task's own todo-list checkmarks) — 2026-08-16. 8/10
+      fully pass outright. Two real findings, both resolved: Discount Codes' concurrency criterion
+      was stale prose contradicting 43b's own already-shipped, user-confirmed design (spec wording
+      corrected, no code change); the GRA withholding-tax export had no PDF option despite Task
+      45/47's own success criteria requiring one (fixed — `withdrawal_review_export_pdf`, reusing
+      the Sales & Revenue report's exact `export_as_pdf` pattern). Live-browser verification for
+      each feature was not re-run this round — relied on each task's own prior live-browser
+      verification, already recorded in this file and `CLAUDE.md`, since no code changed for 8 of
+      the 10 features during this audit.
+- [x] Full suite green (1748 passed locally after this checkpoint's two fixes; the only other
+      failure seen during this round was the documented SQLite-only threaded-concurrency-test
+      flakiness class, confirmed unrelated by re-running in isolation 3/3), CI green on real MySQL
+      for this checkpoint's own commit (`54bf6fb`, PR #80) — confirmed after push, not just for the
+      pre-fix `main` state this checkpoint started from
+- [x] `CLAUDE.md` Project State updated to record Phase 2's completion (Tasks 42-48 + this
+      checkpoint)
+- [ ] Review with the user — Phase 2 sign-off (pending: report this checkpoint's findings and the
+      two fixes to the user for final confirmation)
