@@ -16,7 +16,8 @@ from apps.distributors.paystack import (
     initiate_transfer,
     verify_transfer,
 )
-from apps.notifications.models import Notification
+from apps.notifications.models import Notification, NotificationTemplate
+from apps.notifications.rendering import render_or_default
 from apps.notifications.services import send_notification
 from apps.notifications.sms import send_sms
 from apps.wallet.models import WalletTransaction
@@ -426,9 +427,18 @@ def approve_withdrawal_request(withdrawal_request, *, reviewed_by) -> Withdrawal
     # apply_verified_transfer_outcome below.
     _notify(
         approved.distributor.phone_number,
-        f"Your Bancostore withdrawal of GHS {approved.net_amount} has been "
-        f"approved. Payout processes on {config.WITHDRAWAL_DAY.title()} -- "
-        f"we'll notify you once it's paid.",
+        render_or_default(
+            NotificationTemplate.Key.WITHDRAWAL_APPROVED,
+            {
+                "net_amount": approved.net_amount,
+                "withdrawal_day": config.WITHDRAWAL_DAY.title(),
+            },
+            default_body=(
+                "Your Bancostore withdrawal of GHS {{net_amount}} has been "
+                "approved. Payout processes on {{withdrawal_day}} -- we'll "
+                "notify you once it's paid."
+            ),
+        ),
         context="approve_withdrawal_request",
     )
     # Task 21d-ii: Section 6.6's "their withdrawal was approved and sent".
@@ -493,8 +503,14 @@ def reject_withdrawal_request(
     # one-time transition" reasoning as approve_withdrawal_request above.
     _notify(
         rejected.distributor.phone_number,
-        f"Your Bancostore withdrawal request of GHS {rejected.amount} was "
-        f"not approved. Reason: {rejected.rejection_reason}",
+        render_or_default(
+            NotificationTemplate.Key.WITHDRAWAL_REJECTED,
+            {"amount": rejected.amount, "reason": rejected.rejection_reason},
+            default_body=(
+                "Your Bancostore withdrawal request of GHS {{amount}} was "
+                "not approved. Reason: {{reason}}"
+            ),
+        ),
         context="reject_withdrawal_request",
     )
     return rejected
@@ -696,17 +712,29 @@ def apply_verified_transfer_outcome(
     if transition == "paid":
         _notify(
             updated_request.distributor.phone_number,
-            f"Good news! Your Bancostore withdrawal of GHS "
-            f"{updated_request.net_amount} has been paid to your mobile "
-            f"money account.",
+            render_or_default(
+                NotificationTemplate.Key.WITHDRAWAL_PAID,
+                {"net_amount": updated_request.net_amount},
+                default_body=(
+                    "Good news! Your Bancostore withdrawal of GHS "
+                    "{{net_amount}} has been paid to your mobile money "
+                    "account."
+                ),
+            ),
             context="apply_verified_transfer_outcome:paid",
         )
     elif transition == "reversed":
         _notify(
             updated_request.distributor.phone_number,
-            f"Your Bancostore withdrawal of GHS {updated_request.net_amount} "
-            f"could not be completed and has been returned to your wallet. "
-            f"You can request a new withdrawal anytime.",
+            render_or_default(
+                NotificationTemplate.Key.WITHDRAWAL_REVERSED,
+                {"net_amount": updated_request.net_amount},
+                default_body=(
+                    "Your Bancostore withdrawal of GHS {{net_amount}} could "
+                    "not be completed and has been returned to your wallet. "
+                    "You can request a new withdrawal anytime."
+                ),
+            ),
             context="apply_verified_transfer_outcome:reversed",
         )
 

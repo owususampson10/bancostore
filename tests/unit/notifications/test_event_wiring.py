@@ -20,7 +20,8 @@ from apps.distributors.services import (
     approve_kyc,
     reject_kyc,
 )
-from apps.notifications.models import Notification
+from apps.notifications.models import Notification, NotificationTemplate
+from apps.notifications.sms import fake_outbox
 from apps.pv_ledger.models import MonthlyPersonalPv, PvDailyBucket
 from apps.wallet.models import Wallet, WalletTransaction
 
@@ -59,6 +60,18 @@ def _bucket(distributor, leg, d, pv):
     return PvDailyBucket.objects.create(distributor=distributor, leg=leg, date=d, pv=pv)
 
 
+def _set_template_body(key, body):
+    """get_or_create, not a bare filter().update() -- a transaction=True
+    test's flush doesn't re-run data migrations, so a prior
+    transaction=True test in the same session can flush a migration-
+    seeded NotificationTemplate row away entirely (see this file's own
+    _ensure_ir_id_sequence_row fixture for the identical class of issue
+    with IrIdSequence)."""
+    template, _ = NotificationTemplate.objects.get_or_create(key=key)
+    template.body = body
+    template.save()
+
+
 @pytest.mark.django_db(transaction=True)
 def test_a_successful_placement_notifies_the_sponsor():
     sponsor = _make_distributor()
@@ -69,6 +82,22 @@ def test_a_successful_placement_notifies_the_sponsor():
     assert Notification.objects.filter(
         distributor=sponsor, event_type=Notification.EventType.DOWNLINE_JOINED
     ).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_successful_placement_uses_the_live_admin_edited_template_wording():
+    _set_template_body(
+        NotificationTemplate.Key.DOWNLINE_JOINED, "Custom: {{name}} joined!"
+    )
+    sponsor = _make_distributor()
+    new_distributor = _make_distributor(full_name="Kwame Asante")
+
+    BinaryTree.place_distributor(sponsor, new_distributor)
+
+    notification = Notification.objects.get(
+        distributor=sponsor, event_type=Notification.EventType.DOWNLINE_JOINED
+    )
+    assert notification.message == "Custom: Kwame Asante joined!"
 
 
 @pytest.mark.django_db(transaction=True)
@@ -97,6 +126,25 @@ def test_a_credited_binary_bonus_notifies_the_distributor():
 
 
 @pytest.mark.django_db(transaction=True)
+def test_a_credited_binary_bonus_uses_the_live_admin_edited_template_wording():
+    _set_template_body(
+        NotificationTemplate.Key.BINARY_BONUS_CREDITED, "Custom: GHS {{amount}}!"
+    )
+    distributor = _make_distributor()
+    _make_eligible(distributor)
+    _bucket(distributor, BinaryTreeEdge.Leg.LEFT, RUN_AT.date(), 1500)
+    _bucket(distributor, BinaryTreeEdge.Leg.RIGHT, RUN_AT.date(), 600)
+
+    process_binary_bonus_for_distributor(distributor, RUN_AT)
+
+    notification = Notification.objects.get(
+        distributor=distributor,
+        event_type=Notification.EventType.BINARY_BONUS_CREDITED,
+    )
+    assert notification.message == "Custom: GHS 45.00!"
+
+
+@pytest.mark.django_db(transaction=True)
 def test_a_zero_binary_bonus_cycle_creates_no_notification():
     distributor = _make_distributor()
     _make_eligible(distributor)
@@ -118,6 +166,41 @@ def test_a_credited_referral_bonus_notifies_the_sponsor():
     assert Notification.objects.filter(
         distributor=sponsor, event_type=Notification.EventType.REFERRAL_BONUS_PAID
     ).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_credited_referral_bonus_uses_the_live_admin_edited_inapp_wording():
+    _set_template_body(
+        NotificationTemplate.Key.DIRECT_REFERRAL_BONUS_CREDITED_INAPP,
+        "Custom in-app: GHS {{amount}} from {{referred_name}}!",
+    )
+    sponsor = _make_distributor()
+    distributor = _make_distributor(
+        sponsor=sponsor, starter_pack_pv=1000, full_name="Kwame Asante"
+    )
+
+    _credit_direct_referral_bonus(distributor, reference="test-referral-ref-2")
+
+    notification = Notification.objects.get(
+        distributor=sponsor, event_type=Notification.EventType.REFERRAL_BONUS_PAID
+    )
+    assert notification.message == "Custom in-app: GHS 100.00 from Kwame Asante!"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_credited_referral_bonus_uses_the_live_admin_edited_sms_wording():
+    _set_template_body(
+        NotificationTemplate.Key.DIRECT_REFERRAL_BONUS_CREDITED_SMS,
+        "Custom SMS: GHS {{amount}} from {{referred_name}}!",
+    )
+    sponsor = _make_distributor()
+    distributor = _make_distributor(
+        sponsor=sponsor, starter_pack_pv=1000, full_name="Kwame Asante"
+    )
+
+    _credit_direct_referral_bonus(distributor, reference="test-referral-ref-3")
+
+    assert fake_outbox[-1]["message"] == "Custom SMS: GHS 100.00 from Kwame Asante!"
 
 
 @pytest.mark.django_db(transaction=True)
@@ -184,6 +267,47 @@ def test_a_rejected_kyc_notifies_the_distributor():
         distributor=distributor, event_type=Notification.EventType.KYC_DECIDED
     )
     assert "Blurry ID photo" in notification.message
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_approved_kyc_uses_the_live_admin_edited_template_wording():
+    """Task 48b acceptance criteria: editing a template's wording from
+    admin_portal changes the next real send -- not just that the edit
+    saves. get_or_create rather than a plain filter().update(), matching
+    this file's own _ensure_ir_id_sequence_row fixture's precedent just
+    above: a transaction=True test can flush a migration-seeded row
+    away entirely (flush doesn't re-run data migrations), so a filter()
+    with zero matching rows would silently update nothing."""
+    template, _ = NotificationTemplate.objects.get_or_create(
+        key=NotificationTemplate.Key.KYC_APPROVED
+    )
+    template.body = "Custom wording: you're verified!"
+    template.save()
+    distributor = _make_distributor(kyc_status=Distributor.KycStatus.PENDING)
+
+    approve_kyc(distributor)
+
+    notification = Notification.objects.get(
+        distributor=distributor, event_type=Notification.EventType.KYC_DECIDED
+    )
+    assert notification.message == "Custom wording: you're verified!"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_rejected_kyc_uses_the_live_admin_edited_template_wording():
+    template, _ = NotificationTemplate.objects.get_or_create(
+        key=NotificationTemplate.Key.KYC_REJECTED
+    )
+    template.body = "Custom wording: not approved -- {{reason}}"
+    template.save()
+    distributor = _make_distributor(kyc_status=Distributor.KycStatus.PENDING)
+
+    reject_kyc(distributor, reason="Blurry ID photo")
+
+    notification = Notification.objects.get(
+        distributor=distributor, event_type=Notification.EventType.KYC_DECIDED
+    )
+    assert notification.message == "Custom wording: not approved -- Blurry ID photo"
 
 
 @pytest.mark.django_db(transaction=True)

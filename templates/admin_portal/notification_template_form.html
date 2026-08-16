@@ -1,0 +1,50 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Edit {{ template.get_key_display }} — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
+<div class="bg-white w-full max-w-lg rounded-xl shadow-2xl border border-outline-variant flex flex-col overflow-hidden max-h-[90vh]">
+<div class="px-6 py-6 border-b border-outline-variant flex justify-between items-start">
+<div>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Edit {{ template.get_key_display }}</h3>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Changes take effect on the next real send.</p>
+</div>
+<a href="{% url 'admin_portal:notification_template_list' %}" class="p-2 hover:bg-surface-container rounded-full transition-colors text-on-surface-variant" aria-label="Close">
+<span class="material-symbols-outlined" aria-hidden="true">close</span>
+</a>
+</div>
+<form method="post" class="flex-1 overflow-y-auto">
+{% csrf_token %}
+<div class="p-6 space-y-6">
+{% if form.non_field_errors %}
+<div class="bg-error-container text-on-error-container rounded-lg px-4 py-3 font-body-md text-body-md">
+{{ form.non_field_errors }}
+</div>
+{% endif %}
+
+{% if placeholders %}
+<div class="bg-surface-container-low rounded-lg px-4 py-3">
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">Available placeholders</p>
+<p class="font-mono-sm text-mono-sm text-on-surface">{% for p in placeholders %}{% if not forloop.first %} · {% endif %}{% templatetag openvariable %}{{ p }}{% templatetag closevariable %}{% endfor %}</p>
+</div>
+{% endif %}
+
+<div>
+<label for="{{ form.subject.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">Subject <span class="text-on-surface-variant/60">(email only — leave blank for SMS/in-app)</span></label>
+{{ form.subject }}
+{% if form.subject.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.subject.errors|striptags }}</p>{% endif %}
+</div>
+
+<div>
+<label for="{{ form.body.id_for_label }}" class="block font-label-md text-label-md text-on-surface-variant mb-2">Message</label>
+{{ form.body }}
+{% if form.body.errors %}<p class="text-admin-error font-label-md text-label-md mt-1">{{ form.body.errors|striptags }}</p>{% endif %}
+</div>
+</div>
+<div class="px-6 py-6 bg-surface-container-low border-t border-outline-variant flex justify-end gap-3">
+<a href="{% url 'admin_portal:notification_template_list' %}" class="px-6 py-2.5 rounded-lg font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors">Cancel</a>
+<button type="submit" class="px-8 py-2.5 rounded-lg font-bold bg-primary text-on-primary shadow-lg hover:opacity-90 active:scale-95 transition-all">Save Changes</button>
+</div>
+</form>
+</div>
+</div>
+{% endblock %}

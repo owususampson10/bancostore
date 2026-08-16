@@ -1,9 +1,17 @@
 {% extends "admin_portal/base_dashboard.html" %}
 {% block title %}Audit Log — Bancostore Admin Portal{% endblock %}
 {% block content %}
+<div x-data="{
+       detailOpen: false,
+       detail: null,
+       openDetail(rowId) {
+         this.detail = JSON.parse(document.getElementById(rowId).textContent);
+         this.detailOpen = true;
+       },
+     }">
 <div class="mb-8">
 <h2 class="font-headline-md text-headline-md text-on-surface">Audit Log</h2>
-<p class="font-body-md text-body-md text-on-surface-variant mt-1">Every tracked change to Products, Categories, Distributors, Orders, Withdrawal Requests, and Platform Settings — who changed what, and when.</p>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Every tracked change to Products, Categories, Distributors, Orders, Withdrawal Requests, Notification Templates, and Platform Settings — who changed what, and when.</p>
 </div>
 
 {% comment %}
@@ -39,23 +47,37 @@ changed"), not a full real-time filter system beyond what was asked.
 <th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">What Changed</th>
 <th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">Actor</th>
 <th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant">When</th>
+<th class="px-6 py-4 font-label-md text-label-md text-secondary uppercase tracking-wider border-b border-outline-variant text-right">Details</th>
 </tr>
 </thead>
 <tbody class="divide-y divide-outline-variant">
 {% for entry in page_obj.object_list %}
-<tr class="hover:bg-surface-container transition-colors">
+{{ entry|json_script:entry.row_id }}
+<tr class="hover:bg-surface-container transition-colors cursor-pointer" @click="openDetail('{{ entry.row_id }}')">
 <td class="px-6 py-4">
 <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-surface-container-high text-on-surface-variant">{{ entry.model }}</span>
 </td>
 <td class="px-6 py-4 font-body-md text-body-md text-on-surface">{{ entry.object_repr }}</td>
 <td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ entry.action }}</td>
-<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">
-{% for field in entry.changed_fields %}
-<div>{{ field }}</div>
-{% endfor %}
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant max-w-xs">
+{% if entry.changed_fields %}
+<div class="truncate">{{ entry.changed_fields.0 }}</div>
+{% if entry.changed_fields|length > 1 %}
+<span class="text-xs text-on-surface-variant/70">+{{ entry.changed_fields|length|add:"-1" }} more</span>
+{% endif %}
+{% endif %}
 </td>
-<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ entry.actor|default:"System" }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant">{{ entry.actor }}</td>
 <td class="px-6 py-4 font-body-md text-body-md text-on-surface-variant whitespace-nowrap">{{ entry.timestamp|date:"M j, Y \a\t g:i A" }}</td>
+<td class="px-6 py-4 text-right">
+<button type="button"
+        class="p-2 hover:bg-surface-container-high rounded-lg transition-colors text-on-surface-variant"
+        title="View details"
+        aria-label="View details for {{ entry.object_repr }}"
+        @click.stop="openDetail('{{ entry.row_id }}')">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">visibility</span>
+</button>
+</td>
 </tr>
 {% endfor %}
 </tbody>
@@ -87,4 +109,60 @@ changed"), not a full real-time filter system beyond what was asked.
 <p class="font-body-md text-body-md text-on-surface-variant mt-1">Try a wider date range, or check back once a tracked change happens.</p>
 </div>
 {% endif %}
+
+{% comment %}
+Task 48. Client-side only -- every row's full data was already rendered
+via json_script above (no second server round-trip), matching this
+codebase's established Alpine-modal convention (_delete_confirm_modal.html)
+of reading data the page already has rather than fetching it again.
+{% endcomment %}
+<div x-show="detailOpen"
+     x-cloak
+     x-effect="if (detailOpen) { $nextTick(() => $refs.closeButton.focus()) }"
+     class="fixed inset-0 z-[70] flex items-center justify-center p-4"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="audit-detail-title"
+     @keydown.escape.window="detailOpen = false">
+<div class="fixed inset-0 bg-black/40" @click="detailOpen = false"></div>
+<template x-if="detail">
+<div class="relative bg-white rounded-2xl border border-outline-variant shadow-2xl max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden">
+<div class="px-6 py-6 border-b border-outline-variant flex justify-between items-start">
+<div>
+<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-surface-container-high text-on-surface-variant" x-text="detail.model"></span>
+<h3 id="audit-detail-title" class="font-headline-sm text-headline-sm text-on-surface mt-2" x-text="detail.object_repr"></h3>
+</div>
+<button type="button" x-ref="closeButton" class="p-2 hover:bg-surface-container rounded-full transition-colors text-on-surface-variant" @click="detailOpen = false" aria-label="Close">
+<span class="material-symbols-outlined" aria-hidden="true">close</span>
+</button>
+</div>
+<div class="p-6 space-y-6 overflow-y-auto">
+<div class="grid grid-cols-2 gap-4">
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">Action</p>
+<p class="font-body-md text-body-md text-on-surface" x-text="detail.action"></p>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">Changed By</p>
+<p class="font-body-md text-body-md text-on-surface" x-text="detail.actor"></p>
+</div>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-1">When</p>
+<p class="font-body-md text-body-md text-on-surface" x-text="new Date(detail.timestamp).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })"></p>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface-variant mb-2">What Changed</p>
+<div class="bg-surface-container-low rounded-lg divide-y divide-outline-variant">
+<template x-for="(field, index) in detail.changed_fields" :key="index">
+<p class="px-4 py-3 font-body-md text-body-md text-on-surface" x-text="field"></p>
+</template>
+<p x-show="!detail.changed_fields || detail.changed_fields.length === 0" class="px-4 py-3 font-body-md text-body-md text-on-surface-variant">No field-level details recorded.</p>
+</div>
+</div>
+</div>
+</div>
+</template>
+</div>
+</div>
 {% endblock %}

@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from constance import config
 
+from apps.notifications.email import get_sender_email
 from bancostore.concurrency import (
     retry_on_lock_contention,
     select_for_update_nowait_if_supported,
@@ -98,6 +99,6 @@ def _send_lockout_alert(user):
             f"The admin account {user.email} was locked after too many "
             "failed login attempts."
         ),
-        from_email=None,
+        from_email=get_sender_email(),
         recipient_list=[config.LOCKOUT_ALERT_EMAIL],
     )

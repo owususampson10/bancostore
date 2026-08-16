@@ -4,7 +4,8 @@ from typing import NamedTuple
 from django.db import transaction
 
 from apps.distributors.models import Distributor
-from apps.notifications.models import Notification
+from apps.notifications.models import Notification, NotificationTemplate
+from apps.notifications.rendering import render_or_default
 from apps.notifications.services import send_notification
 from apps.pv_ledger.models import PvLedger
 from bancostore.concurrency import (
@@ -101,7 +102,11 @@ class BinaryTree:
                 send_notification(
                     sponsor,
                     Notification.EventType.DOWNLINE_JOINED,
-                    f"{new_distributor_name} just joined your team!",
+                    render_or_default(
+                        NotificationTemplate.Key.DOWNLINE_JOINED,
+                        {"name": new_distributor_name},
+                        default_body="{{name}} just joined your team!",
+                    ),
                 )
 
         retry_on_lock_contention(_attempt)

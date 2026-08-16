@@ -13,7 +13,13 @@ from apps.pv_ledger.services import (
     get_carry_forward_summary,
 )
 
-from .models import Notification, NotificationCycleFailure, NotificationCycleRun
+from .models import (
+    Notification,
+    NotificationCycleFailure,
+    NotificationCycleRun,
+    NotificationTemplate,
+)
+from .rendering import render_or_default
 from .services import send_notification
 
 logger = logging.getLogger(__name__)
@@ -63,8 +69,14 @@ def _notify_if_pv_nearing_expiry(distributor_id, run_at) -> bool:
     send_notification(
         distributor,
         Notification.EventType.PV_EXPIRING,
-        f"You have {summary.pv} PV expiring around "
-        f"{summary.nearest_expiry_date} -- use it before it's lost!",
+        render_or_default(
+            NotificationTemplate.Key.PV_EXPIRING,
+            {"pv": summary.pv, "expiry_date": summary.nearest_expiry_date},
+            default_body=(
+                "You have {{pv}} PV expiring around {{expiry_date}} -- use "
+                "it before it's lost!"
+            ),
+        ),
     )
     return True
 

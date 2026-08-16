@@ -5,6 +5,12 @@ from django.forms import inlineformset_factory
 from constance import config
 
 from apps.catalog.models import Category, Product, ProductImage, ProductVariant
+from apps.notifications.models import NotificationTemplate
+from apps.notifications.rendering import _PLACEHOLDER_RE
+from apps.notifications.template_registry import (
+    PLACEHOLDERS_BY_KEY,
+    REQUIRED_PLACEHOLDERS_BY_KEY,
+)
 from apps.pages.models import SocialMediaLink
 from apps.promotions.models import Banner, DiscountCode
 
@@ -320,4 +326,99 @@ class SocialMediaLinkForm(forms.ModelForm):
                     f"You can add up to {max_links} social media links. "
                     "Delete one before adding another."
                 )
+        return cleaned_data
+
+
+class NotificationTemplateForm(forms.ModelForm):
+    """Task 48a. `key` is deliberately excluded from `fields` -- every
+    row is pre-seeded by migration for a fixed Key enum member (see the
+    model's own docstring), so editing wording is the only real
+    operation; there's no freeform "new key" for an admin to invent.
+
+    clean() enforces two things no field-level validator can, both
+    findings from this sub-task's own mandatory security-and-hardening
+    pass:
+    (1) a body/subject referencing a {{placeholder}} not declared for
+        this template's key in PLACEHOLDERS_BY_KEY is rejected outright
+        -- catches a typo or a copy-pasted wrong variable name at save
+        time, before it can reach a real send as a literal, unreplaced
+        '{{typo}}' in a customer-facing message. This is a UX/
+        correctness safeguard, not a security boundary by itself: the
+        renderer (apps.notifications.rendering.render_template) can
+        never expose more than what the caller's own context dict
+        explicitly contains, regardless of what an admin writes here.
+    (2) `subject` rejects an embedded \\r/\\n -- Django's send_mail()
+        already raises BadHeaderError on a multi-line header, but every
+        real send site wraps that call in its own best-effort
+        try/except and would silently swallow it, quietly breaking that
+        notification type at every future send instead of surfacing the
+        mistake to the admin who made it right now."""
+
+    class Meta:
+        model = NotificationTemplate
+        fields = ["subject", "body"]
+        widgets = {
+            "subject": forms.TextInput(attrs={"class": _INPUT_CLASS}),
+            "body": forms.Textarea(attrs={"class": _INPUT_CLASS, "rows": 6}),
+        }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        allowed = set(PLACEHOLDERS_BY_KEY.get(self.instance.key, []))
+
+        for field_name in ("subject", "body"):
+            value = cleaned_data.get(field_name) or ""
+            used = set(_PLACEHOLDER_RE.findall(value))
+            unknown = used - allowed
+            if unknown:
+                unknown_display = ", ".join(
+                    f"{{{{{name}}}}}" for name in sorted(unknown)
+                )
+                allowed_display = (
+                    ", ".join(f"{{{{{name}}}}}" for name in sorted(allowed))
+                    if allowed
+                    else "none"
+                )
+                self.add_error(
+                    field_name,
+                    f"Unknown placeholder(s): {unknown_display}. "
+                    f"Available for this template: {allowed_display}.",
+                )
+
+        # CodeRabbit finding (PR #79): PLACEHOLDERS_BY_KEY above only
+        # rejects an unknown placeholder -- nothing stopped an admin from
+        # deleting {{code}} from an OTP_CODE body entirely, which would
+        # silently break every registration/password-reset OTP send
+        # afterward (the SMS would go out with no code in it).
+        required = set(REQUIRED_PLACEHOLDERS_BY_KEY.get(self.instance.key, []))
+        if required:
+            body = cleaned_data.get("body") or ""
+            used_in_body = set(_PLACEHOLDER_RE.findall(body))
+            missing = required - used_in_body
+            if missing:
+                missing_display = ", ".join(
+                    f"{{{{{name}}}}}" for name in sorted(missing)
+                )
+                self.add_error(
+                    "body",
+                    f"This template must include: {missing_display}.",
+                )
+
+        subject = cleaned_data.get("subject") or ""
+        # CodeRabbit finding (PR #79): only ORDER_STATUS_UPDATE_EMAIL's
+        # send site ever reads `subject` -- every SMS/in-app key ignores
+        # it entirely, so a non-empty subject saved against one of those
+        # keys looks like a successful, effective edit but silently does
+        # nothing on the next real send.
+        if (
+            self.instance.key != NotificationTemplate.Key.ORDER_STATUS_UPDATE_EMAIL
+            and subject
+        ):
+            self.add_error(
+                "subject",
+                "Subject is only available for email notification templates.",
+            )
+        if "\n" in subject or "\r" in subject:
+            self.add_error("subject", "Subject cannot contain line breaks.")
+
         return cleaned_data

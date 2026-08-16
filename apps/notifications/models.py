@@ -1,5 +1,7 @@
 from django.db import models
 
+from simple_history.models import HistoricalRecords
+
 
 class OTPCode(models.Model):
     class Purpose(models.TextChoices):
@@ -125,6 +127,109 @@ class NotificationCycleRun(models.Model):
 
     def __str__(self):
         return f"pv-expiry cycle {self.run_at.isoformat()}"
+
+
+class NotificationTemplate(models.Model):
+    """Task 48a (source doc Section 13.8). Lets an admin edit the wording
+    of an outbound notification without a code change/deploy. One row
+    per specific outbound message -- e.g. withdrawal_approved and
+    kyc_approved are separate rows even though both fire from a
+    "decision" action, because their channels and content genuinely
+    differ (see each Key member's own label for its channel).
+
+    `key` is a closed enum, not a freeform field: a call site looks a
+    template up by a fixed Key member, so editing wording is possible
+    but inventing a new notification type that no code path reads is
+    not. Pre-seeded via migration for every currently-wired send site
+    this sub-task covers (0005_seed_notification_templates) -- this
+    project's own established "pre-seed a fixed row set, don't
+    get_or_create at first-use" convention (IrIdSequence, EscrowLedger).
+    A send site that finds no row for its key falls back to a safe
+    hardcoded default (see apps.notifications.rendering.render_or_default)
+    rather than failing the underlying business operation -- a
+    notification wording lookup must never be the reason a real payment/
+    KYC/OTP flow breaks.
+
+    Security note (Task 48a's own mandatory review, see tasks/todo.md):
+    `body`/`subject` are admin-entered text rendered via
+    apps.notifications.rendering.render_template, a bespoke regex
+    substitution that can only ever emit values explicitly passed in by
+    the CALLER's own context dict -- never attribute/method access,
+    never code execution, regardless of what an admin writes in these
+    fields. The two invariants that keep this safe going forward: (1)
+    call sites must never put a secret/PII value into that context dict
+    that shouldn't be admin-visible through some future new placeholder
+    key, and (2) `body`/`subject` must never be rendered with Django's
+    `|safe` filter anywhere (every current consumer -- SMS, plain-text
+    email, the in-app notification bell -- is a context where Django's
+    own auto-escaping or plain-text transport already makes injected
+    HTML/script content inert). `subject` additionally rejects embedded
+    `\\r`/`\\n` at save time (NotificationTemplateForm.clean()) -- Django's
+    send_mail() already blocks multi-line headers at send time
+    (BadHeaderError), but that exception would otherwise be silently
+    swallowed by every call site's own best-effort try/except, quietly
+    breaking that notification type at every future send rather than
+    surfacing the mistake to the admin who made it."""
+
+    class Key(models.TextChoices):
+        OTP_CODE = "otp_code", "OTP Verification Code (SMS)"
+        WITHDRAWAL_APPROVED = "withdrawal_approved", "Withdrawal Approved (SMS)"
+        WITHDRAWAL_REJECTED = "withdrawal_rejected", "Withdrawal Rejected (SMS)"
+        WITHDRAWAL_PAID = "withdrawal_paid", "Withdrawal Paid (SMS)"
+        WITHDRAWAL_REVERSED = "withdrawal_reversed", "Withdrawal Reversed (SMS)"
+        KYC_APPROVED = "kyc_approved", "KYC Approved (In-App Notification)"
+        KYC_REJECTED = "kyc_rejected", "KYC Rejected (In-App Notification)"
+        # Task 48c. Matching Bonus deliberately has no member here -- Task
+        # 21d already excluded it from every notification channel (Section
+        # 6.6 never names it), and this task doesn't invent a new send site
+        # for it. _send_confirmation_notifications/_send_auto_cancel_
+        # notification/_send_stock_unavailable_notification (Task 17/18's
+        # own distinct checkout-flow messages) are also deliberately out of
+        # scope -- 48c's acceptance criteria names "order status update",
+        # which is specifically apps.orders.services._send_order_status_
+        # notification (used by advance_order_status and
+        # cancel_or_refund_order), not every order-related message.
+        BINARY_BONUS_CREDITED = (
+            "binary_bonus_credited",
+            "Binary Bonus Credited (In-App Notification)",
+        )
+        DOWNLINE_JOINED = "downline_joined", "New Downline Member (In-App Notification)"
+        DIRECT_REFERRAL_BONUS_CREDITED_SMS = (
+            "direct_referral_bonus_credited_sms",
+            "Direct Referral Bonus Credited (SMS)",
+        )
+        DIRECT_REFERRAL_BONUS_CREDITED_INAPP = (
+            "direct_referral_bonus_credited_inapp",
+            "Direct Referral Bonus Credited (In-App Notification)",
+        )
+        PV_EXPIRING = "pv_expiring", "PV Approaching Expiry (In-App Notification)"
+        ORDER_STATUS_UPDATE_SMS = "order_status_update_sms", "Order Status Update (SMS)"
+        ORDER_STATUS_UPDATE_EMAIL = (
+            "order_status_update_email",
+            "Order Status Update (Email)",
+        )
+
+    key = models.CharField(max_length=40, choices=Key.choices, unique=True)
+    # Email-only -- blank for the SMS/in-app keys above. Whether `subject`
+    # applies depends on which channel `key` implies, which isn't its own
+    # model field (see the class docstring); enforced as blank-for-non-
+    # email in NotificationTemplateForm.clean(), matching DiscountCode/
+    # Banner's own "form is the real cross-field enforcement" convention.
+    subject = models.CharField(max_length=200, blank=True, default="")
+    body = models.TextField()
+    updated_at = models.DateTimeField(auto_now=True)
+    # A security-review finding (Task 48a): this governs real customer-
+    # facing financial/KYC wording, the same class of admin-editable
+    # content Task 47d/47e already built a real audit trail for
+    # (Category/Product/PlatformSettingChange) -- an edit here belongs in
+    # that same unified audit log, not left untracked.
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["key"]
+
+    def __str__(self):
+        return self.get_key_display()
 
 
 class NotificationCycleFailure(models.Model):

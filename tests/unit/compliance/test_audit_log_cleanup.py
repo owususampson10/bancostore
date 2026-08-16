@@ -86,6 +86,10 @@ def test_cleanup_deletes_history_older_than_the_retention_window_across_every_so
         "Distributor": 1,
         "Order": 1,
         "WithdrawalRequest": 1,
+        # Task 48a added NotificationTemplate to the tracked-models dict
+        # this task reuses -- 0 here since this test creates none, not a
+        # sign the new model is untracked.
+        "NotificationTemplate": 0,
         "PlatformSettingChange": 1,
     }
     assert not distributor.history.exists()

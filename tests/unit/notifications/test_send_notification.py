@@ -90,6 +90,27 @@ def test_a_live_push_failure_never_propagates_and_the_row_still_persists(monkeyp
 
 
 @pytest.mark.django_db(transaction=True)
+def test_an_over_length_message_is_truncated_instead_of_failing_to_persist():
+    """CodeRabbit finding (PR #79): Notification.message is
+    max_length=500, but a rendered NotificationTemplate body has no
+    length bound of its own -- an admin-edited template, or a long
+    substituted value, could exceed it. This runs after the caller's own
+    transaction has already committed and is wrapped in try/except, so
+    an over-length value could never roll back the business event that
+    triggered it -- but without truncation it would silently drop the
+    notification entirely once the DB write failed."""
+    distributor = _make_distributor()
+    max_length = Notification._meta.get_field("message").max_length
+    too_long = "x" * (max_length + 100)
+
+    send_notification(distributor, Notification.EventType.KYC_DECIDED, too_long)
+
+    notification = Notification.objects.get(distributor=distributor)
+    assert len(notification.message) == max_length
+    assert notification.message == too_long[:max_length]
+
+
+@pytest.mark.django_db(transaction=True)
 def test_a_distributor_never_sees_another_distributors_notification_row():
     distributor_a = _make_distributor()
     distributor_b = _make_distributor()

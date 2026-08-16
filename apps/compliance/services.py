@@ -11,7 +11,10 @@ from constance import config
 
 from apps.catalog.models import Category, Product
 from apps.distributors.models import Distributor
+from apps.notifications.email import get_sender_email
+from apps.notifications.models import NotificationTemplate
 from apps.orders.models import Order
+from apps.platform_settings.config import humanize_identifier_name
 from apps.platform_settings.models import PlatformSettingChange
 from apps.withdrawal.models import WithdrawalRequest
 from bancostore.concurrency import select_for_update_nowait_if_supported
@@ -269,7 +272,7 @@ def check_retail_ratio_and_alert() -> None:
                         f"{threshold}%. Please review distributor purchase "
                         f"activity."
                     ),
-                    from_email=None,
+                    from_email=get_sender_email(),
                     recipient_list=[recipient],
                 )
                 # Only set on a genuine successful send -- the state
@@ -306,16 +309,33 @@ def check_retail_ratio_and_alert() -> None:
 # Task 47e: unified audit log
 # ---------------------------------------------------------------------------
 
-# Every HistoricalRecords()-tracked model in this codebase (apps.compliance
-# .tasks.cleanup_expired_audit_records deletes from these same 5 tables plus
-# PlatformSettingChange -- keep both lists in sync if a 6th model is ever
-# tracked).
+# Every HistoricalRecords()-tracked model in this codebase.
+# apps.compliance.tasks.cleanup_expired_audit_records imports this exact
+# dict rather than a second hardcoded list (a CodeRabbit-caught drift
+# risk on PR #78, fixed before it could recur) -- adding a model here
+# wires it into both the unified audit log AND the retention cleanup
+# job in one edit. NotificationTemplate added by Task 48a: it governs
+# real customer-facing financial/KYC wording, the same class of
+# admin-editable content this audit trail already covers.
 _HISTORY_TRACKED_MODELS = {
     "Category": Category,
     "Product": Product,
     "Distributor": Distributor,
     "Order": Order,
     "WithdrawalRequest": WithdrawalRequest,
+    "NotificationTemplate": NotificationTemplate,
+}
+
+# Display-only humanization of the internal keys above, applied where a
+# real admin reads this screen -- deliberately NOT applied to
+# _HISTORY_TRACKED_MODELS's own keys, which apps.compliance.tasks
+# .cleanup_expired_audit_records also uses as its returned deleted_counts
+# dict's keys (asserted verbatim by its own tests). Category/Product/
+# Distributor/Order already read fine as one word; only the two
+# multi-word model names need a space inserted.
+_MODEL_DISPLAY_LABELS = {
+    "WithdrawalRequest": "Withdrawal Request",
+    "NotificationTemplate": "Notification Template",
 }
 
 
@@ -339,9 +359,9 @@ def _normalize_historical_row(model_label, history_row):
     admin-only screen, not something this task engineers a prefetch
     solution for."""
     if history_row.history_type == "+":
-        changed_fields = ["created"]
+        changed_fields = ["Created"]
     elif history_row.history_type == "-":
-        changed_fields = ["deleted"]
+        changed_fields = ["Deleted"]
     else:
         # A property, not a method -- simple_history exposes these as
         # `prev_record`/`next_record` (django-simple-history's own
@@ -349,41 +369,89 @@ def _normalize_historical_row(model_label, history_row):
         # despite the underlying function being named get_prev_record.
         prev = history_row.prev_record
         if prev:
-            # "field: old → new" per changed field, matching
+            # "Field Label: old → new" per changed field, matching
             # PlatformSettingChange's own "old → new" display shape
             # below -- .changes (not just .changed_fields) carries the
             # actual old/new values, not just which fields moved.
+            # humanize_identifier_name turns the raw field name (e.g.
+            # "kyc_status") into something a non-technical admin can
+            # read ("KYC Status") -- a real usability gap the user
+            # caught live on the screen before this fix.
             changed_fields = [
-                f"{change.field}: {change.old} → {change.new}"
+                f"{humanize_identifier_name(change.field)}: {change.old} → {change.new}"
                 for change in history_row.diff_against(prev).changes
             ]
         else:
             changed_fields = []
     return {
-        "model": model_label,
+        "model": _MODEL_DISPLAY_LABELS.get(model_label, model_label),
         "object_repr": _safe_object_repr(model_label, history_row),
         "action": history_row.get_history_type_display(),
-        "actor": history_row.history_user,
+        "actor": _actor_display(history_row.history_user),
         "timestamp": history_row.history_date,
         "changed_fields": changed_fields,
     }
+
+
+def _humanize_object_repr(model_label, obj):
+    """A friendlier display than a model's own debug-style __str__ for
+    the models where one exists (Distributor.__str__ -- "Distributor<+
+    233...>", Order.__str__ -- "Order<63 confirmed>") -- caught live by
+    the user reviewing a real screenshot of this screen. Deliberately
+    local to the audit log rather than changing those __str__ methods:
+    apps.admin_portal.views already has an established precedent of
+    computing a proper display name locally instead of fixing
+    Distributor.__str__ at the source (kyc_review_detail,
+    distributor_profile -- both have tests asserting the raw
+    "Distributor<" repr never reaches rendered output), to avoid an
+    unaudited blast radius from changing a __str__ potentially relied on
+    elsewhere (Django Admin, log lines). This follows that same
+    precedent for Order/WithdrawalRequest too, for consistency. Every
+    other tracked model's own __str__ is already a plain, readable name
+    (Category/Product/NotificationTemplate) and needs no override."""
+    if model_label == "Distributor":
+        name = getattr(obj, "full_name", "") or str(
+            getattr(obj, "phone_number", "") or ""
+        )
+        return name or f"Distributor #{obj.pk}"
+    if model_label == "Order":
+        return f"Order #{obj.pk} ({obj.get_status_display()})"
+    if model_label == "WithdrawalRequest":
+        return f"Withdrawal #{obj.pk} ({obj.get_status_display()})"
+    return str(obj)
+
+
+def _actor_display(user):
+    """A plain string, not the raw User instance -- Task 48's click-to-
+    open detail modal passes each entry through Django's json_script
+    filter (DjangoJSONEncoder), which has no built-in support for
+    serializing an arbitrary model instance. Baking the "System" default
+    in here (rather than a template-side `|default:"System"`) means
+    every consumer -- the table cell and the modal alike -- always sees
+    the same already-resolved string, with one source of truth for it."""
+    return str(user) if user else "System"
 
 
 def _safe_object_repr(model_label, history_row):
     """A real bug caught live (not in a test) while first exercising this
     function: history_object reconstructs a plain instance from THIS
     row's own field values, but calling str() on it can still trigger a
-    FRESH, LIVE FK lookup (e.g. Distributor.__str__ reads self.user,
-    Django's related-object descriptor re-queries User by the stored
-    user_id rather than using any cached value) -- and raises
-    User.DoesNotExist if that related row was deleted since this
+    FRESH, LIVE FK lookup (e.g. the old, unhumanized Distributor.__str__
+    read self.user, Django's related-object descriptor re-querying User
+    by the stored user_id rather than using any cached value) -- and
+    raises User.DoesNotExist if that related row was deleted since this
     historical snapshot was taken. An audit-log row surviving the
     deletion of what it references is the whole point of this table
     (same reasoning as OrderCycleFailure/CommissionCycleFailure's
     plain-int FKs) -- it must never crash the WHOLE screen because of
-    one now-dangling reference on one row."""
+    one now-dangling reference on one row. _humanize_object_repr's
+    Distributor branch reads full_name/phone_number (plain fields
+    already in the historical snapshot, no live query) instead of
+    Distributor.__str__, which incidentally also closes off the
+    original failure mode for that model specifically -- this try/except
+    remains the general-purpose safety net for every other model."""
     try:
-        return str(history_row.history_object)
+        return _humanize_object_repr(model_label, history_row.history_object)
     except Exception:
         pk = getattr(history_row.history_object, "pk", "?")
         return f"{model_label} #{pk} (related record deleted)"
@@ -420,9 +488,9 @@ def get_unified_audit_log(*, date_from=None, date_to=None):
         entries.append(
             {
                 "model": "Platform Setting",
-                "object_repr": change.key,
+                "object_repr": humanize_identifier_name(change.key),
                 "action": "Changed",
-                "actor": change.changed_by,
+                "actor": _actor_display(change.changed_by),
                 "timestamp": change.changed_at,
                 "changed_fields": [f"{change.old_value} → {change.new_value}"],
             }

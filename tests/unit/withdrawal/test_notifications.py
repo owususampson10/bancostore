@@ -5,8 +5,10 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 
 import pytest
+from constance import config
 
 from apps.distributors.models import Distributor
+from apps.notifications.models import NotificationTemplate
 from apps.notifications.sms import fake_outbox
 from apps.wallet.models import Wallet, WalletTransaction
 from apps.wallet.services import credit
@@ -175,3 +177,65 @@ def test_a_failed_sms_send_does_not_undo_a_paid_transition(mock_send_sms):
     updated = apply_verified_transfer_outcome(request, "success")  # must not raise
 
     assert updated.status == WithdrawalRequest.Status.PAID
+
+
+# ---------------------------------------------------------------------------
+# Task 48b acceptance criteria: editing a template's wording from admin_portal
+# changes the next real send -- not just that the edit saves. Each key is
+# pre-seeded by migration 0006_seed_notification_templates, so these update
+# the already-existing row rather than creating a second one.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_approval_uses_the_live_admin_edited_template_wording():
+    NotificationTemplate.objects.filter(
+        key=NotificationTemplate.Key.WITHDRAWAL_APPROVED
+    ).update(body="Custom: GHS {{net_amount}} approved, pays {{withdrawal_day}}.")
+    request, _ = _make_submitted_request(amount=Decimal("500.00"))
+
+    approve_withdrawal_request(request, reviewed_by=_make_admin())
+
+    assert fake_outbox[-1]["message"] == (
+        f"Custom: GHS 495.00 approved, pays {config.WITHDRAWAL_DAY.title()}."
+    )
+
+
+@pytest.mark.django_db
+def test_rejection_uses_the_live_admin_edited_template_wording():
+    NotificationTemplate.objects.filter(
+        key=NotificationTemplate.Key.WITHDRAWAL_REJECTED
+    ).update(body="Custom: GHS {{amount}} rejected -- {{reason}}.")
+    request, _ = _make_submitted_request(amount=Decimal("500.00"))
+
+    reject_withdrawal_request(
+        request, reviewed_by=_make_admin(), reason="KYC re-verification required"
+    )
+
+    assert fake_outbox[-1]["message"] == (
+        "Custom: GHS 500.00 rejected -- KYC re-verification required."
+    )
+
+
+@pytest.mark.django_db
+def test_a_paid_outcome_uses_the_live_admin_edited_template_wording():
+    NotificationTemplate.objects.filter(
+        key=NotificationTemplate.Key.WITHDRAWAL_PAID
+    ).update(body="Custom: GHS {{net_amount}} paid out.")
+    request, _ = _make_queued_for_payout_request(amount=Decimal("500.00"))
+
+    apply_verified_transfer_outcome(request, "success")
+
+    assert fake_outbox[-1]["message"] == "Custom: GHS 495.00 paid out."
+
+
+@pytest.mark.django_db
+def test_a_reversed_outcome_uses_the_live_admin_edited_template_wording():
+    NotificationTemplate.objects.filter(
+        key=NotificationTemplate.Key.WITHDRAWAL_REVERSED
+    ).update(body="Custom: GHS {{net_amount}} returned to wallet.")
+    request, _ = _make_queued_for_payout_request(amount=Decimal("500.00"))
+
+    apply_verified_transfer_outcome(request, "failed")
+
+    assert fake_outbox[-1]["message"] == "Custom: GHS 495.00 returned to wallet."

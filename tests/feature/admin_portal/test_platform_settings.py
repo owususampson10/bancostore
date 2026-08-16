@@ -122,6 +122,24 @@ def test_setting_names_are_shown_as_human_readable_labels(staff_client):
 
 
 @pytest.mark.django_db
+def test_sms_and_email_provider_pickers_are_locked_to_the_one_real_option(
+    staff_client,
+):
+    """Task 48d. Matches the Currency-lock precedent (Task 36h): a real
+    <select>, honestly restricted to the one provider actually wired in
+    code -- never a functional-looking dropdown offering options
+    (Arkesel/Hubtel/Mailgun) that would silently do nothing."""
+    response = staff_client.get(_platform_settings_url())
+
+    body = response.content.decode()
+    assert "mNotify" in body
+    assert "Gmail SMTP" in body
+    assert "Arkesel" not in body
+    assert "Hubtel" not in body
+    assert "Mailgun" not in body
+
+
+@pytest.mark.django_db
 def test_saving_updates_a_boolean_constance_setting(staff_client):
     assert config.MAINTENANCE_MODE_ENABLED is False
 

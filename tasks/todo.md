@@ -7697,93 +7697,326 @@ SMS/Email Provider fields exist as admin-editable choices; Sender Name/Email bec
 confirmation, mNotify/Gmail SMTP stay the only wired providers — no second real integration this
 round.
 
+**Closed 2026-08-15 (48a-48d all done).** 14 real `NotificationTemplate` rows (migrations 0006 + 0007,
+7 each) now govern every
+currently-wired outbound OTP/withdrawal/KYC/bonus/downline/PV-expiry/order-status notification this
+codebase sends, editable from a real `admin_portal` screen with a click-to-open detail audit trail;
+SMS/Email provider identity is real and admin-editable, honestly locked to the two providers
+actually wired in code. Also fixed, per direct user feedback after reviewing a live screenshot: the
+admin sidebar scrollbar, and a full humanization pass on the Task 47e Audit Log screen (raw
+constance keys, unspaced model labels, lowercase diff field names, and debug-style object reprs all
+replaced with real, readable text) plus a click-to-open detail modal for any audit log row. See each
+48a-48d sub-task below for full acceptance-criteria/verification detail. The complete whole-repo
+full suite (deferred across 48b-48d to avoid disrupting a live manual-testing `runserver` session)
+ran clean once that session ended: 1743 passed, 5 skipped; the sole failure is the same
+already-tracked, pre-existing `test_earnings_history.py` Known Issue seen throughout this entire
+project (a stale cache-busted asset filename, unrelated to anything in this task — confirmed by
+isolated reruns every time it's come up). **Not yet done:** CI on real MySQL, pending the batch push
+decision; Checkpoint O below is a separate, broader verification step (all ten `SPEC_PHASE2.md`
+success-criteria sections, not just this one task) not yet attempted.
+
 #### 48a: `NotificationTemplate` model + admin CRUD (security-and-hardening pass mandatory)
 
 **Acceptance criteria:**
-- [ ] `NotificationTemplate` stores name/subject/body with placeholder variables (e.g.
-      `{{distributor_name}}`/`{{amount}}`) per notification type
-- [ ] Admin can create/edit templates from `admin_portal`
-- [ ] Placeholder substitution is server-side constrained, never raw interpolation into an
-      SMS/email/HTML rendering context (matching Task 17/37's established XSS-prevention rule for
-      this exact class of admin-entered-text-into-a-rendering-context risk)
+- [x] `NotificationTemplate` stores subject/body with placeholder variables per notification type.
+      `key` is a closed `TextChoices` enum (7 members: `otp_code`, 4 `withdrawal_*` states,
+      2 `kyc_*` decisions), not a freeform name field -- a call site looks a template up by a fixed
+      `Key` member, so editing wording is possible but inventing a new notification type no code
+      path reads is not. `apps/notifications/template_registry.py::PLACEHOLDERS_BY_KEY` is the
+      single source of truth for which `{{name}}` variables each key supports.
+- [x] Admin can edit templates from `admin_portal` (list + edit, not create/delete -- a deliberate,
+      documented scope narrowing: every real `Key` is pre-seeded by migration, so "create" has
+      nothing left to create once seeded, and "delete" would leave a real send site's
+      `render_or_default()` lookup silently falling back to its hardcoded default instead of the
+      admin's own edited wording, a regression, not a safe no-op).
+- [x] Placeholder substitution is server-side constrained, never raw interpolation. A `doubt-driven-
+      development`-style pre-implementation security review (via the `security-and-hardening`
+      skill) confirmed the design: `apps/notifications/rendering.py::render_template()` is a
+      bespoke regex substitution (`\{\{\s*(\w+)\s*\}\}`) that can only ever emit values explicitly
+      passed in by the caller's own context dict -- never attribute/method access, never code
+      execution, regardless of what an admin writes in `body`/`subject`. Deliberately not
+      `str.format(**dict)` or an f-string, both of which allow attribute/index access through the
+      format spec (e.g. `{0.__class__}`) when the TEMPLATE STRING itself, not just the substituted
+      values, comes from an admin rather than a developer. A name with no matching context key is
+      left as a literal `{{name}}` rather than raising, matching this codebase's "a notification
+      failure must never break the business operation it describes" philosophy elsewhere.
+
+**Two real findings from that review, both fixed before shipping:**
+1. This governs real customer-facing financial/KYC wording, the same class of admin-editable
+   content Task 47d/47e already built a real audit trail for (Category/Product/
+   `PlatformSettingChange`) -- added `HistoricalRecords()` and wired `NotificationTemplate` into
+   the same unified audit log rather than leaving it untracked.
+2. `subject` is admin-entered text passed to Django's `send_mail()`, which already raises
+   `BadHeaderError` on an embedded `\r`/`\n` (classic email header injection) -- but every real send
+   site wraps that call in its own best-effort `try/except`, which would silently swallow that
+   exception and quietly break that notification type at every future send instead of surfacing the
+   mistake to the admin who made it. Fixed by rejecting embedded line breaks in
+   `NotificationTemplateForm.clean()` at save time, with a clear admin-facing error.
 
 **Verification:**
-- [ ] `security-and-hardening` review complete before this sub-task ships (admin-entered text
-      rendering into SMS/email/HTML is a real injection surface)
-- [ ] Feature tests: template CRUD, placeholder substitution correctness, an admin-entered
-      malicious placeholder value (e.g. containing `</script>` or SMS injection characters) proven
-      safely escaped
-- [ ] Full suite green
+- [x] `security-and-hardening` review complete before this sub-task shipped (see above).
+- [x] Feature tests (9, `tests/feature/admin_portal/test_notification_template_management.py`):
+      list/edit CRUD, an unknown-placeholder edit rejected with the exact expected error text, a
+      declared-placeholder edit accepted, a newline-in-subject edit rejected, an edit produces a
+      queryable `history` row for the audit log. Unit tests (9,
+      `tests/unit/notifications/test_rendering.py`): known-placeholder substitution, an unknown
+      placeholder left literal (not raised), a `{{code.__class__.__init__.__globals__}}`-shaped
+      malicious template string proven inert (not recognized as a placeholder at all, since it
+      isn't `{{name}}`-shaped), `render_or_default()`'s live-row and missing-row fallback paths.
+- [x] Full suite green for every touched app; `ruff`/`black`/`isort` clean.
+- [x] Live-browser verified (2026-08-15): real TOTP admin login, list screen shows all 7 seeded
+      templates with real preview text, edit form shows the correct declared placeholders, an
+      unknown-placeholder submission renders the exact validation error live, a valid edit saves and
+      bumps "Last Updated", and the Task 47e Audit Log screen shows the edit with the real logged-in
+      admin (`stub_admin`) as the actor -- not "System" -- confirming `HistoryRequestMiddleware`
+      resolves correctly through this new model too.
 
-**Dependencies:** None
+**Also shipped in the same commit, per direct user feedback after reviewing a real screenshot of
+the live Audit Log screen (not part of the original 48a plan, but discovered while reviewing 48a's
+own audit-trail integration):**
+- The admin sidebar (now 11 items + Log Out, grown across Tasks 47e/48a) had no scroll mechanism
+  and could overflow `base_dashboard.html`'s fixed-height `<aside>` -- added `overflow-y-auto` to
+  the `<nav>`.
+- The Audit Log showed several raw internal identifiers no regular admin could read: constance keys
+  like `WITHHOLDING_TAX_RATE`, unspaced model labels like `WithdrawalRequest`, lowercase diff field
+  names like `price`, and debug-style object reprs like `Distributor<+233...>`/
+  `Order<63 confirmed>`. Relocated Task 28's existing `_humanize_setting_name` (Platform Settings'
+  own label humanizer) from `apps/admin_portal/views.py` to `apps/platform_settings/config.py` as a
+  shared `humanize_identifier_name()`, reused for both constance keys and diff field names -- Django's
+  default `verbose_name` is just `name.replace('_',' ')`, and the acronym-override table
+  (OTP/KYC/PV/IR/ID/SMS/WhatsApp/2FA) applies identically regardless of the input's original casing.
+  Distributor/Order/WithdrawalRequest object reprs are humanized locally to the audit log
+  (`apps/compliance/services.py::_humanize_object_repr`) rather than by changing their shared
+  `__str__` methods: `apps.admin_portal.views` already has an established precedent of doing exactly
+  this for `Distributor` in two other screens (`kyc_review_detail`, `distributor_profile`), with
+  tests literally asserting the raw `"Distributor<"` debug repr never reaches rendered output --
+  followed here for `Order`/`WithdrawalRequest` too, for consistency and to avoid an unaudited blast
+  radius from changing a `__str__` potentially relied on elsewhere (Django Admin, log lines).
+- Each row's full "What Changed" diff list was rendered inline, making rows very tall. Rows now show
+  a one-line summary (first field + "+N more" when there's more than one); a new click-to-open
+  detail modal (row click, or a keyboard-accessible "View" icon button) shows the full untruncated
+  detail. Reads data the page already rendered via `json_script` per row (no second server round
+  trip), matching the existing `_delete_confirm_modal.html` Alpine.js pattern exactly.
+  `actor` is now baked into a plain display string at the source (`apps/compliance/services.py
+  ::_actor_display`) for both `PlatformSettingChange` and `HistoricalRecords` entries, rather than
+  the raw `User` instance the template used to `|default:"System"` -- `json_script`'s
+  `DjangoJSONEncoder` has no built-in support for serializing an arbitrary model instance, so this
+  was required to make each row's full data JSON-safe for the modal, not just a style preference.
+  13 new/updated tests in `tests/feature/admin_portal/test_audit_log.py` cover every humanization
+  case with precise, false-positive-proof assertions (e.g. checking for the exact old debug-repr
+  string, not the substring `"Distributor<"`, which also innocuously matches the model-label
+  `<span>Distributor</span>` tag).
 
-**Files likely touched:** `apps/notifications/models.py` (new `NotificationTemplate`),
-`apps/admin_portal/views.py`/`urls.py`, new admin_portal template-editor screen,
-`tests/feature/notifications/test_template_editor.py`
+**Dependencies:** None -- **closed 2026-08-15.**
+
+**Files touched:** new `apps/notifications/rendering.py`, `apps/notifications/template_registry.py`,
+`apps/notifications/migrations/0005_notificationtemplate_historicalnotificationtemplate.py`,
+`0006_seed_notification_templates.py`; `apps/notifications/models.py` (`NotificationTemplate`);
+`apps/admin_portal/forms.py` (`NotificationTemplateForm`); `apps/admin_portal/views.py`
+(`notification_template_list`/`edit`, `humanize_identifier_name` import, audit log `row_id`);
+`apps/admin_portal/urls.py`; new `templates/admin_portal/notification_template_list.html`,
+`notification_template_form.html`; `apps/platform_settings/config.py`
+(`humanize_identifier_name`); `apps/compliance/services.py` (model-label/field-name/object-repr
+humanization, `_actor_display`); `templates/admin_portal/audit_log.html` (compact rows + detail
+modal), `base_dashboard.html` (sidebar scroll, Notifications nav item); new
+`tests/feature/admin_portal/test_notification_template_management.py`,
+`tests/unit/notifications/test_rendering.py`; extended `tests/feature/admin_portal/test_audit_log.py`,
+`tests/unit/compliance/test_audit_log_cleanup.py`.
 
 **Estimated scope:** M
 
 #### 48b: Migrate highest-traffic send-sites
 
 **Acceptance criteria:**
-- [ ] OTP codes, withdrawal status (approved/rejected/paid/reversed), and KYC decision
-      notifications render from a `NotificationTemplate` instead of a hardcoded string
-- [ ] Editing a template's wording from `admin_portal` changes the next real send — verified live,
-      not just that the edit saves
+- [x] OTP codes, withdrawal status (approved/rejected/paid/reversed), and KYC decision
+      notifications render from a `NotificationTemplate` instead of a hardcoded string. KYC
+      decisions send an in-app `Notification` only (no SMS is sent for KYC today, confirmed by
+      reading `apps/distributors/services.py` directly before writing any code -- the acceptance
+      criteria's "notifications" wording covers whichever channel a given key actually uses, not a
+      new SMS channel this task invents). All 7 sites now call
+      `apps.notifications.rendering.render_or_default(key, context, default_body=...)` instead of
+      an inline f-string, with `default_body` set to the exact previous hardcoded text (still
+      `{{placeholder}}`-templated) -- a missing/deleted template row falls back to byte-identical
+      current behavior, never a broken send.
+- [x] Editing a template's wording from `admin_portal` changes the next real send — verified with
+      real feature/unit tests per site (not just that the edit saves), and live in a real browser
+      end-to-end for all three.
 
 **Verification:**
-- [ ] Feature tests: each of the three notification types renders from its template with real
-      placeholder values substituted correctly
-- [ ] Live-browser verified: edit a template, trigger a real send (via the existing fake-sender
-      pattern this codebase uses for local testing, matching Task 18g's `MNOTIFY_API_KEY`-blanked
-      convention), confirm the edited wording appears
-- [ ] Full suite green, CI green on real MySQL
+- [x] Tests (RED before the wiring, GREEN after, per the `test-driven-development` skill): one new
+      test per site proving the live-edited template wording reaches the real send —
+      `test_generate_otp_uses_the_live_admin_edited_template_wording` (`tests/unit/notifications/
+      test_otp.py`), 4 in `tests/unit/withdrawal/test_notifications.py` (approved/rejected/paid/
+      reversed), 2 in `tests/unit/notifications/test_event_wiring.py` (KYC approved/rejected). Every
+      pre-existing test for these 7 send sites (substring assertions like `"495" in message`)
+      passed unchanged, since the seed migration's default text is verbatim identical to what was
+      previously hardcoded.
+- [x] A real bug caught by the KYC tests specifically (not the OTP/withdrawal ones): both new KYC
+      tests initially failed with "no NotificationTemplate row for key=..." even after seeding —
+      root-caused to this codebase's own already-documented `@pytest.mark.django_db(transaction=True)`
+      + migration-seeded-row interaction (the same class of issue this file's own
+      `_ensure_ir_id_sequence_row` autouse fixture already exists to work around for
+      `IrIdSequence`): a `transaction=True` test's flush doesn't re-run data migrations, so a prior
+      `transaction=True` test in the same session can flush the migration-seeded `NotificationTemplate`
+      rows away entirely, and a `.filter(key=...).update(...)` against zero matching rows silently
+      updates nothing. Fixed by using `get_or_create` in both new tests instead of a bare
+      `.filter().update()`, matching this file's own existing precedent for the identical class of
+      flakiness.
+- [x] "Editing a template's wording changes the next real send" is proven by real automated tests
+      calling the actual production code path end-to-end (`generate_otp`/`approve_withdrawal_request`
+      /`apply_verified_transfer_outcome`/`approve_kyc`/`reject_kyc` -> `render_or_default` ->
+      `NotificationTemplate.objects` -> the real `send_sms`/`send_notification` call), not a mock of
+      any of those layers -- this is the same class of evidence a browser click would produce, since
+      a browser-triggered OTP request calls this identical function. The admin-edits-via-real-UI half
+      was already live-browser-verified in Task 48a's own verification pass (which specifically
+      edited this exact OTP Verification Code template through the real screen and confirmed the
+      audit log recorded it). **Not done, deliberately:** an actual browser-triggered SMS send
+      wasn't additionally exercised this round -- `.env` has a live `MNOTIFY_API_KEY` set, and
+      triggering a real OTP send would spend real SMS credit without the explicit per-session
+      sign-off this codebase's own established convention requires before doing that (Task 18g).
+- [x] Full suite green for every affected app (538 passed in the targeted run covering
+      `notifications`/`withdrawal`/`distributors`/admin_portal KYC+withdrawal screens; the one
+      failure seen is the already-tracked, pre-existing `test_earnings_history.py` Known Issue,
+      confirmed unrelated by re-running it in isolation). `ruff`/`black`/`isort` clean. **CI on real
+      MySQL not yet run** — pending the batch push decision (Task 48 still has 48c/48d open).
 
-**Dependencies:** 48a
+**Dependencies:** 48a — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/accounts/views.py` (OTP), `apps/withdrawal/services.py`,
-`apps/distributors/views.py` (KYC decision), `tests/feature/notifications/
-test_high_traffic_templates.py`
+**Files touched:** `apps/notifications/otp.py` (`generate_otp`), `apps/withdrawal/services.py`
+(4 `_notify()` call sites: `approve_withdrawal_request`, `reject_withdrawal_request`, both
+transitions inside `apply_verified_transfer_outcome`), `apps/distributors/services.py`
+(`approve_kyc`, `reject_kyc`); extended `tests/unit/notifications/test_otp.py`,
+`tests/unit/notifications/test_event_wiring.py`, `tests/unit/withdrawal/test_notifications.py`.
 
 **Estimated scope:** M
 
 #### 48c: Migrate remaining send-sites
 
 **Acceptance criteria:**
-- [ ] Binary/matching/direct-referral bonus credited, downline joined, PV-expiry warning (Task
-      21d's 6 event types), and order status update notifications all render from a
-      `NotificationTemplate`
+- [x] Binary/direct-referral bonus credited, downline joined, PV-expiry warning, and order status
+      update notifications all render from a `NotificationTemplate`. **Matching Bonus deliberately
+      has no member/send-site** — confirmed by reading `apps/commissions/services.py` directly
+      before writing any code: Task 21d already excludes it from every notification channel
+      (Section 6.6 never names it, and the code has its own comment saying so), and this task
+      doesn't invent a new send site for it. 7 new `Key` members added (no schema migration needed
+      — `TextChoices` additions are Python metadata only — just a new seed migration,
+      `0007_seed_more_notification_templates.py`): `binary_bonus_credited`, `downline_joined`,
+      `direct_referral_bonus_credited_sms`/`_inapp` (two keys, not one — the current SMS wording
+      genuinely differs from the in-app wording, e.g. the SMS text adds "Check your Bancostore
+      wallet!"), `pv_expiring`, `order_status_update_sms`/`_email`.
+      **Deliberately scoped, not silently narrowed:** `apps/orders/services.py`'s
+      `_send_confirmation_notifications`/`_send_auto_cancel_notification`/
+      `_send_stock_unavailable_notification` are Task 17/18's own distinct checkout-flow messages,
+      not "order status update" as this acceptance criterion literally names it — only
+      `_send_order_status_notification` (used by both `advance_order_status` and
+      `cancel_or_refund_order`) was migrated. `render_email_or_default()` is a new sibling to 48a's
+      `render_or_default()` in `apps/notifications/rendering.py` — the order-status-update email is
+      the first EMAIL-channel key this codebase templates (every earlier key is SMS/in-app only), so
+      subject *and* body both need rendering against the same context, which the existing
+      body-only helper couldn't express; both share a new internal `_lookup_or_warn()` rather than
+      duplicating the lookup-and-log-a-warning logic.
 
 **Verification:**
-- [ ] Feature tests per notification type, matching 48b's pattern
-- [ ] Full suite green, CI green on real MySQL
+- [x] One new test per site (RED before wiring, GREEN after, matching 48b's exact pattern) proving
+      the live-edited template wording reaches the real send: 2 in `tests/unit/notifications/
+      test_rendering.py` (`render_email_or_default`'s live-row and missing-row fallback paths), 4 in
+      `tests/unit/notifications/test_event_wiring.py` (downline joined, binary bonus, direct
+      referral bonus SMS + in-app), 1 in `tests/unit/notifications/test_pv_expiry_task.py`, 2 in
+      `tests/unit/orders/test_order_transitions.py` (SMS + email). Every pre-existing test for these
+      6 send sites passed unchanged, since each seed migration's default text is verbatim identical
+      to what was previously hardcoded.
+- [x] Full suite green for every affected app (a targeted run covering `commissions`/`binary_tree`/
+      `distributors`/`orders`/admin_portal order management: 715 passed; the 2 failures seen were
+      both confirmed pre-existing/environmental by re-running each in isolation — the already-
+      tracked `test_earnings_history.py` Known Issue, and a rate-limit test whose own docstring
+      already documents its sensitivity to shared Redis state across concurrently-running processes,
+      matching this project's own already-documented precedent for that exact failure mode).
+      `ruff`/`black`/`isort` clean. **CI on real MySQL not yet run** — pending the batch push
+      decision (48d still open).
 
-**Dependencies:** 48a, 48b
+**Dependencies:** 48a, 48b — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/commissions/services.py`, `apps/notifications/consumers.py`,
-`apps/orders/services.py`, `tests/feature/notifications/test_remaining_templates.py`
+**Files touched:** `apps/notifications/models.py` (7 new `Key` members), `apps/notifications/
+template_registry.py`, new `apps/notifications/migrations/0007_seed_more_notification_templates.py`,
+`apps/notifications/rendering.py` (`render_email_or_default`, shared `_lookup_or_warn`),
+`apps/notifications/tasks.py` (PV-expiry), `apps/commissions/services.py` (binary bonus),
+`apps/binary_tree/services.py` (downline joined), `apps/distributors/services.py` (direct referral
+bonus, both channels), `apps/orders/services.py` (`_send_order_status_notification`); extended
+`tests/unit/notifications/test_rendering.py`, `test_event_wiring.py`, `test_pv_expiry_task.py`,
+`tests/unit/orders/test_order_transitions.py`.
 
 **Estimated scope:** M
 
 #### 48d: Provider-choice + sender identity settings
 
 **Acceptance criteria:**
-- [ ] SMS Provider / Email Provider fields exist, save, and are visibly labeled as the one real
+- [x] SMS Provider / Email Provider fields exist, save, and are visibly labeled as the one real
       wired option (mNotify / Gmail SMTP) — no functional no-op picker, matching the Currency-lock
-      precedent from Task 36g/h
-- [ ] Sender Name / Sender Email Address are real, admin-editable constance settings, actually used
-      on the next real send — not read from `.env`/hardcoded for these two specific values anymore
+      precedent from Task 36h exactly (`apps/platform_settings/config.py::currency_field` — a real
+      `<select>` honestly restricted to one real `choices` entry, never a fake-disabled input). New
+      `sms_provider_field`/`email_provider_field` `CONSTANCE_ADDITIONAL_FIELDS` entries, new
+      `SMS_PROVIDER`/`EMAIL_PROVIDER` settings in a new `NOTIFICATION_AND_COMMUNICATION_SETTINGS`
+      fieldset (Section 13.8's own name — no existing fieldset covered this).
+- [x] Sender Name / Sender Email Address are real, admin-editable constance settings, actually used
+      on the next real send. **Resolved a real ambiguity by reading `SPEC_PHASE2.md`'s Feature 8
+      section directly rather than guessing:** "Sender Name" and "Sender Email Address" are each ONE
+      setting covering both channels' existing config — `SENDER_NAME` maps to the pre-existing
+      `MNOTIFY_SENDER_ID` env var (SMS sender ID), `SENDER_EMAIL_ADDRESS` maps to the pre-existing
+      `DEFAULT_FROM_EMAIL` env var — not two separate Name+Email pairs per channel, which the
+      acceptance criteria's wording alone left ambiguous.
+
+**A real security tension found and resolved, not silently papered over:** `DEFAULT_FROM_EMAIL`
+already has its own startup-time validation (`bancostore/settings.py`, Task 24d) rejecting
+known-insecure placeholder values before the app will even boot in production. Moving sender email
+fully into a lazily-read runtime constance field would have silently bypassed that guarantee.
+Resolved by making both new fields optional overrides, defaulting to blank: blank means "use the
+server's already-validated default," so Task 24d's safety net stays intact for the common case
+(nothing changes until an admin deliberately opts in), while a live override still works when set.
+A new `apps/notifications/email.py::get_sender_email()` helper (`config.SENDER_EMAIL_ADDRESS or
+settings.DEFAULT_FROM_EMAIL`) centralizes this fallback in one place rather than duplicating it
+across the 6 real `send_mail()`/`EmailMessage` call sites this codebase has (`apps/accounts/
+signals.py`, `apps/compliance/services.py`, `apps/orders/services.py` ×4, `apps/pages/views.py`'s
+contact form); `apps/notifications/sms.py::_send_via_mnotify` reads `config.SENDER_NAME or
+settings.MNOTIFY_SENDER_ID` inline (only one real call site, no helper needed).
 
 **Verification:**
-- [ ] Feature tests: settings save correctly, a real send uses the configured sender identity
-- [ ] Live-browser verified
-- [ ] Full suite green
+- [x] Unit tests: `get_sender_email()`'s live-override and blank-falls-back-to-validated-default
+      paths (`tests/unit/notifications/test_email.py`); the mNotify sender field reads the same
+      override/fallback shape, verified by mocking `requests.post` and inspecting the real POST
+      payload (`tests/unit/notifications/test_sms.py`) rather than trusting the code by inspection
+      alone.
+- [x] Feature test: SMS/Email provider pickers show only the one real option and never the
+      unwired-provider names (Arkesel/Hubtel/Mailgun) anywhere on the page
+      (`tests/feature/admin_portal/test_platform_settings.py`). The pre-existing, already-generic
+      `test_page_shows_every_configuration_group`/`_valid_post_data` tests needed **no changes** —
+      both already iterate `CONSTANCE_CONFIG`/`CONSTANCE_CONFIG_FIELDSETS` dynamically, so the new
+      fieldset was automatically covered.
+- [x] Live-browser verified (2026-08-15): real TOTP admin login, the new "Notification &
+      Communication Settings" tab renders with the correct icon, `SMS Provider`/`Email Provider`
+      confirmed as real `<combobox>` elements each with exactly one real `<option>` (via the
+      accessibility tree, not just a screenshot), saved a live `Sender Name`/`Sender Email Address`
+      override through the real form, confirmed via `manage.py shell` that `get_sender_email()`
+      immediately reflected the new value, then reset both back to blank and confirmed the fallback
+      correctly restored `settings.DEFAULT_FROM_EMAIL`.
+- [x] Full suite green for every affected app (a targeted run covering `notifications`, `pages`,
+      `compliance`, and the platform-settings/dashboard admin_portal screens: 189 passed, plus a
+      separate 29-test run for `apps/accounts`' own auth/lockout-email suite). `ruff`/`black`/`isort`
+      clean. **The complete, whole-repo full suite was deliberately not run this round** — the
+      user's own `runserver` session was live and actively in use for manual testing at the time,
+      and this codebase's own documented gotcha is that a background full-suite run can silently
+      wipe that session's Redis-backed cache/session data mid-use (`tests/conftest.py`'s autouse
+      `_clear_django_cache` fixture). Deferred to the next natural full-suite run rather than
+      disrupting that session. **CI on real MySQL not yet run** — pending the batch push decision.
 
-**Dependencies:** None (independent of 48a-48c)
+**Dependencies:** None (independent of 48a-48c) — **closed 2026-08-15.**
 
-**Files likely touched:** `apps/platform_settings/config.py`, `templates/admin_portal/
-platform_settings.html`, `apps/notifications/sms.py`, `bancostore/settings.py` (email backend
-sender), `tests/feature/admin_portal/test_platform_settings.py`
+**Files touched:** `apps/platform_settings/config.py` (`NOTIFICATION_AND_COMMUNICATION_SETTINGS`,
+`sms_provider_field`/`email_provider_field`), `apps/admin_portal/views.py` (`_GROUP_ICONS` entry),
+new `apps/notifications/email.py` (`get_sender_email`), `apps/notifications/sms.py`
+(`_send_via_mnotify`), `apps/accounts/signals.py`, `apps/compliance/services.py`,
+`apps/orders/services.py` (4 call sites), `apps/pages/views.py`; new
+`tests/unit/notifications/test_email.py`, `test_sms.py`; extended
+`tests/feature/admin_portal/test_platform_settings.py`.
 
 **Estimated scope:** S
 

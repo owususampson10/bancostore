@@ -16,6 +16,7 @@ from apps.notifications.models import (
     Notification,
     NotificationCycleFailure,
     NotificationCycleRun,
+    NotificationTemplate,
 )
 from apps.notifications.tasks import (
     PV_EXPIRY_LOCK_KEY,
@@ -64,6 +65,38 @@ def test_notifies_a_distributor_whose_pv_is_nearing_expiry():
     assert Notification.objects.filter(
         distributor=distributor, event_type=Notification.EventType.PV_EXPIRING
     ).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_pv_expiry_warning_uses_the_live_admin_edited_template_wording():
+    """Task 48c acceptance criteria: editing a template's wording from
+    admin_portal changes the next real send. get_or_create, not a bare
+    filter().update() -- a transaction=True test's flush doesn't re-run
+    data migrations, so a prior transaction=True test in the same
+    session can flush the migration-seeded row away entirely."""
+    template, _ = NotificationTemplate.objects.get_or_create(
+        key=NotificationTemplate.Key.PV_EXPIRING
+    )
+    template.body = "Custom warning: {{pv}} PV expires {{expiry_date}}!"
+    template.save()
+    distributor = _make_distributor()
+    bucket_date = TODAY - timedelta(days=EXPIRY_DAYS - (WARNING_DAYS - 1))
+    _bucket(distributor, BinaryTreeEdge.Leg.LEFT, bucket_date, 200)
+
+    with patch("apps.notifications.tasks.timezone.now", return_value=RUN_AT):
+        send_pv_expiry_notifications()
+
+    notification = Notification.objects.get(
+        distributor=distributor, event_type=Notification.EventType.PV_EXPIRING
+    )
+    # CodeRabbit nitpick (PR #79): assert the actual rendered placeholder
+    # values, not just that the custom prefix survived -- a test that
+    # only checks "PV expires" in the message would still pass even if
+    # {{pv}}/{{expiry_date}} were swapped for the wrong values.
+    expected_expiry_date = bucket_date + timedelta(days=EXPIRY_DAYS)
+    assert notification.message == (
+        f"Custom warning: 200 PV expires {expected_expiry_date}!"
+    )
 
 
 @pytest.mark.django_db(transaction=True)
