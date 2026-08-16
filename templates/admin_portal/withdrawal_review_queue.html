@@ -44,11 +44,18 @@
 {# Task 45: mirrors distributor_directory's own Export CSV link exactly
    (templates/admin_portal/partials/directory_results.html) -- no
    filter/search exists on this queue to preserve via querystring, so
-   this link needs no htmx-swapped-fragment placement of its own. #}
-<div class="flex justify-end mb-4">
+   this link needs no htmx-swapped-fragment placement of its own.
+   Checkpoint O finding: Export PDF added alongside it, matching the
+   Sales & Revenue report's two-button pattern
+   (templates/admin_portal/partials/sales_revenue_report_results.html). #}
+<div class="flex justify-end gap-3 mb-4">
 <a href="{% url 'admin_portal:withdrawal_review_export' %}" class="px-6 py-2.5 bg-white border border-outline-variant rounded-xl text-secondary font-label-md text-label-md hover:bg-surface-container transition-all flex items-center gap-2">
 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>
 Export CSV
+</a>
+<a href="{% url 'admin_portal:withdrawal_review_export_pdf' %}" class="px-6 py-2.5 bg-white border border-outline-variant rounded-xl text-secondary font-label-md text-label-md hover:bg-surface-container transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">picture_as_pdf</span>
+Export PDF
 </a>
 </div>
 

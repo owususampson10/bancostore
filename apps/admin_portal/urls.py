@@ -15,6 +15,11 @@ urlpatterns = [
         name="withdrawal_review_export",
     ),
     path(
+        "withdrawals/export/pdf/",
+        views.withdrawal_review_export_pdf,
+        name="withdrawal_review_export_pdf",
+    ),
+    path(
         "withdrawals/<int:pk>/",
         views.withdrawal_review_detail,
         name="withdrawal_review_detail",

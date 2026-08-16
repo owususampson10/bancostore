@@ -39,10 +39,123 @@ production risk) both closed 2026-08-11, requested directly by the user the day 
 small follow-ups closed 2026-08-12: a real hand-vectorized brand logo replacing the placeholder
 wordmark, and a Google Search Console site-verification route (needed to submit Task 37b's sitemap
 to Search Console). **Phase 2 work started 2026-08-12** — `SPEC_PHASE2.md` (see `SPEC.md`'s "Out
-of scope" list for the ten deferred features it covers) is the current draft spec; Tasks 39
-(Wishlist), 40 (Saved/Multiple Delivery Addresses), and 41 (Product Reviews) are closed, shipped
-via PR #73. The remaining seven Phase 2 features (reporting/compliance, discount codes,
-promotional banners, backorders, PDF/CSV export, notification templates) have not been started.
+of scope" list for the ten deferred features it covers) is now **complete as of 2026-08-16**, all
+ten features shipped across Tasks 39-48, Checkpoint O signed off. Tasks 39 (Wishlist), 40
+(Saved/Multiple Delivery Addresses), and 41 (Product Reviews) closed first, shipped via PR #73.
+- **Task 42 (Promotional Banners)**, closed 2026-08-13 via PR #74: admin uploads a banner (image,
+  link target, start/end date) from a new `apps/promotions` app; the home page shows only
+  currently-active banners (`start_date <= now <= end_date`) with no admin action needed on the end
+  date itself, reusing Task 31's Editorial Variant home-page sections and the Task 7/26 image/WebP
+  pipeline. A follow-up round added a search filter, themed date picker, and auto-rotating carousel
+  per direct user feedback, plus 4 CodeRabbit fixes (keyboard-accessible combobox, carousel
+  pause-state race, timezone-consistent tests, accessible names on linked slides).
+- **Task 43 (Discount Codes)**, closed 2026-08-13: admin creates fixed-amount/percentage-off codes
+  (`apps/promotions.DiscountCode`) with expiry, an audience restriction (retail/distributor/
+  everyone, enforced via the same real `is_distributor` role check every other gate in this
+  codebase uses — never `Order.pv_earned`), a global `max_uses` cap, and an independent
+  `limit_one_per_customer` toggle. **A `doubt-driven-development` pass before 43b (fresh-context
+  `security-auditor`) found 2 Critical + 3 High gaps before any code was written**, two of which
+  were real product decisions put to the user with Shopify/Stripe/Amazon's own real-world
+  precedent researched first: once a payment is captured, the order is never cancelled or rolled
+  back over a redemption race (`times_used` can rarely end up over `max_uses` right at the
+  boundary — an accepted, deliberate design, not an unmitigated bug, proven by
+  `test_consume_discount_code_can_exceed_max_uses`); and disabling/expiring a code mid-checkout
+  doesn't retroactively revalidate an order already past creation. The discount amount snapshots
+  onto `Order.discount_amount` at creation time exactly like price/delivery fee already do. Audience
+  restriction (43c) reuses the same generic rejection message as every other rejection reason
+  ("This discount code is invalid or expired") to avoid an existence oracle, matching 43b's own
+  security reasoning.
+- **Task 44 (Backorders)**, closed 2026-08-13: three new global constance settings
+  (`BACKORDERS_ENABLED`, `BACKORDER_MESSAGE`, `OUT_OF_STOCK_BEHAVIOUR`) — store-wide only, not
+  per-product, per a direct `source-driven-development` correction against the source doc (the
+  original planning-time paraphrase had wrongly assumed a per-product flag). A backorder-eligible
+  out-of-stock product shows Add to Cart with the configured message instead of "Out of Stock." **A
+  `doubt-driven-development` pass before 44b** found live-re-checking the backorder settings at
+  `confirm_order_payment` time would be asymmetrically risky (an admin disabling backorders between
+  Paystack capture and a delayed webhook could wrongly cancel an already-paid order) — resolved by
+  snapshotting `Order.backorders_allowed_at_checkout` once at creation, matching this codebase's
+  existing price/PV/delivery-fee snapshot convention. A new `OrderItem.stock_decremented` field
+  (with a `stock_decremented <= quantity` `CheckConstraint`) records the real decremented amount so
+  `cancel_or_refund_order`'s restock logic never over-credits stock that was never actually removed
+  for a backordered line — backfilled for every pre-existing confirmed order via a data migration,
+  verified 0 mismatches against real local dev data.
+- **Task 45 (Shared CSV/PDF Export Utility)**, closed 2026-08-14: `bancostore/exports.py`
+  (`export_as_csv`/`export_as_pdf`), with `csv_safe_cell` (OWASP formula-injection guard) applied
+  unconditionally to every cell — extracted from `distributor_directory_export`'s own original
+  per-view helper, which now reuses the shared one too. Wired the pre-existing GRA withholding-tax
+  screen (`withdrawal_review_export`) to it as the first real consumer. A genuine local-only
+  WeasyPrint/cffi segfault (a second independent `try: import weasyprint` site corrupting internal
+  C state after a first failed dlopen on this Pango-less Mac) was fixed by computing
+  `WEASYPRINT_AVAILABLE` exactly once in `tests/conftest.py`, imported everywhere else.
+- **Task 46 (Sales & Revenue Reporting)**, closed 2026-08-14, three sub-tasks. 46a is a real
+  architecture decision (`docs/decisions/0010-reporting-architecture.md`, confirmed with the user
+  before implementation): revenue/orders-per-status/delivery-fee-by-zone/best-selling-products are
+  computed daily into small rollup tables by a Celery Beat job (`DailyOrderRollup`/
+  `DailyProductSales`, mirroring Binary/Matching Bonus's own scheduled-job shape) rather than a live
+  aggregate query per page load, since this codebase's stated hundreds-of-thousands-of-users scale
+  target means a naive live scan wouldn't hold up the way Task 27's handful of dashboard cards do;
+  new-vs-returning-customers and commissions-vs-revenue stay live, indexed, date-bounded queries.
+  46b/46c built the `sales_revenue_report` screen (all six report types, a Day/Week/Month toggle
+  re-bucketing one already-fetched series in Python, a themed date-range filter, CSV+PDF export via
+  Task 45 sharing the exact same filtered params as the on-screen report). A genuine SQLite
+  quirk (`Sum()` over a `DecimalField` losing its 2dp scale) was fixed at the root in
+  `get_order_summary_report` via explicit `Decimal.quantize`, not patched per-template.
+  `COMMISSION_TRANSACTION_TYPES` (Task 27) was relocated from `admin_portal/views.py` to
+  `apps/commissions/services.py` to avoid a circular import, verified behavior-preserving against
+  103 pre-existing tests.
+- **Task 47 (Compliance Dashboard + Financial Overview)**, closed 2026-08-15 via PR #78, five
+  sub-tasks. 47a (elevated rigor, `doubt-driven-development` first): an escrow reserve ledger
+  (`EscrowLedger`/`EscrowTransaction`) crediting the admin-configured percentage (default 5%) of
+  each confirmed order's NET revenue (`subtotal - discount_amount`, never `delivery_fee` — a
+  discount reduces what was actually collected) at order confirmation, atomically via the same
+  `F()`-based convention as `Wallet.balance`. 47b: a live retail-vs-distributor PV ratio with an
+  email alert firing only on the transition from above/at-threshold to below `RETAIL_PV_MINIMUM_PERCENT`
+  (never on every order while still below, avoiding an alert-storm). 47d/47e: a unified admin-facing
+  audit log merging every `HistoricalRecords()`-tracked model (`Category`, `Product`, `Distributor`,
+  `Order`, `WithdrawalRequest`, later `NotificationTemplate`) with `PlatformSettingChange`'s own
+  bespoke settings-change log, plus an admin-editable retention period with a real scheduled cleanup
+  job — closing a real gap where several sensitive admin actions (Category/Product CRUD, Platform
+  Settings changes, KYC decisions) had no history tracking at all before this task. Financial
+  Overview reuses Task 27's exact "real query per number" dashboard-card pattern for total revenue,
+  commissions paid, withholding tax remitted, and the new escrow balance.
+- **Task 48 (Notification Template Editor + Provider-Choice Settings)**, closed 2026-08-16 via PR
+  #79, four sub-tasks. `NotificationTemplate` (14 seeded rows across all real notification types —
+  OTP, withdrawal x4, KYC x2, binary/referral bonus, downline joined, PV expiry, order status x2)
+  with admin-editable subject/body via `admin_portal`, rendered through a bespoke regex placeholder
+  substitution (`apps/notifications/rendering.py`, deliberately not `str.format`/f-strings, which
+  allow attribute/code access through the format spec when the template string itself comes from an
+  admin) — every real send site (OTP, withdrawal status, KYC decision, bonuses, PV expiry, order
+  status) migrated onto it with a dedicated test per site proving a live admin edit reaches the next
+  real send. `SMS_PROVIDER`/`EMAIL_PROVIDER` are honestly locked single-choice fields (mNotify/Gmail
+  SMTP stay the only wired providers), matching Task 36h's Currency-lock precedent rather than a
+  fake-functional picker. `SENDER_NAME`/`SENDER_EMAIL_ADDRESS` default to blank, meaning "use the
+  server's already-validated `.env` default," preserving Task 24d's startup-time email-validation
+  safety net while still allowing a deliberate live admin override. Also fixed per direct user
+  feedback while reviewing a live screenshot: the admin sidebar gained a scrollbar
+  (`overflow-y-auto`), the Task 47e Audit Log screen's raw constance keys/model labels/field
+  names/debug-style object reprs were humanized (`apps.platform_settings.config.humanize_identifier_name`,
+  reused for both constance labels and diff field names), and clicking any audit log row now opens
+  an Alpine.js detail modal via `json_script`-rendered per-row data, no second server round-trip.
+- **Checkpoint O — Phase 2 complete**, signed off 2026-08-16: a full re-audit of all ten
+  `SPEC_PHASE2.md` features' own written success criteria against the actual shipped code and tests
+  (not just that each task's todo-list box was checked) found 8 of 10 fully passing outright and
+  surfaced two real, worth-recording findings. First, Discount Codes' concurrency criterion
+  ("exactly one succeeds") was stale prose left over from before 43b's own `doubt-driven-development`
+  review reversed that exact design — corrected in `SPEC_PHASE2.md` to describe the real,
+  already-user-confirmed no-rollback-on-race behavior instead of code being changed to match
+  outdated wording. Second, the GRA withholding-tax export (Task 45) had never actually gained a
+  PDF option despite Task 45/47's own written success criteria requiring both CSV and PDF for every
+  report — a genuine gap, fixed by adding `withdrawal_review_export_pdf`, reusing the exact same
+  `export_as_pdf`/queryset-sharing pattern the Sales & Revenue report already established. Also
+  root-caused and fixed a real, non-flaky test bug found while re-running the full suite: `tests/
+  feature/distributors/test_earnings_history.py`'s sidebar-JS regression guard had been silently
+  broken since Task 36a's real Vite cache-busting migration (asserting a hardcoded pre-hash
+  filename), repeatedly misdiagnosed as "known pre-existing flakiness" across Tasks 44 through 48
+  without ever actually being fixed — corrected to call the real `vite_asset()` resolver directly.
+  Full suite green (1748 tests passing locally as of this fix, plus the pre-existing documented
+  SQLite-only threaded-concurrency-test flakiness class, confirmed unrelated by re-running in
+  isolation), CI green on real MySQL.
+
 Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found
 no task anywhere had ever scoped a self-service order-history page for a customer or distributor,

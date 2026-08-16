@@ -119,21 +119,32 @@ re-derived from a live, possibly-since-expired code after the fact.
   and "Discount Applicable To" (a platform-wide default, distinct from the per-code audience
   restriction above — the source doc lists both, so both are real, not redundant).
 
-**Concurrency/money-safety note, flagged now because it's the same class of bug this codebase has
-hit before (Task 18b's stock-decrement race, the wallet's `retry_on_lock_contention` pattern):** a
-usage-limited code redeemed by many customers near-simultaneously needs the same atomic-counter
-discipline as `Product` stock decrement, not a naive read-then-write. This needs a
-`doubt-driven-development` pass before implementation, same as every other money-adjacent feature
-in this codebase.
+**Concurrency/money-safety note, resolved during Task 43b's build (updated 2026-08-16, Checkpoint
+O):** this looked at first like the same class of bug as Task 18b's stock-decrement race, needing
+the wallet's `retry_on_lock_contention`/atomic-counter discipline. Confirmed directly with the user
+against real-world platform behavior instead (Shopify/Stripe/Amazon): once a payment is captured,
+the resulting order is never cancelled or rolled back over a redemption race. `times_used` is
+incremented via a plain, unconditional `F()` update with no `WHERE times_used < max_uses` guard —
+`apps/promotions/services.py::consume_discount_code` — so two customers racing for the last slot
+can both succeed, pushing `times_used` past `max_uses` in the rare concurrent case. This is a
+deliberate, accepted design choice, not an unmitigated race: `max_uses` is a soft cap an admin sets
+to bound overall redemption volume, not a hard inventory limit like `Product` stock, where two
+customers keeping the same physical unit would be a real, visible defect.
 
 **Success criteria:**
 - Admin creates a code (amount/percentage, expiry, audience, usage cap) from `admin_portal`.
 - At checkout, a valid code reduces the order total by the correct amount, snapshotted onto the
   `Order` the same way price/delivery fee already are.
 - An expired, exhausted, or audience-mismatched code is rejected with a clear message, not silently
-  ignored or a 500.
-- Two customers redeeming the last unit of a usage-limited code concurrently: exactly one succeeds
-  (a real concurrency test, matching this codebase's elevated rigor standard for money code).
+  ignored or a 500, when checked at checkout time (creation-time validation only — see below).
+- Two customers redeeming the last unit of a usage-limited code concurrently: once either customer's
+  payment is captured, that order is honored unconditionally, even if this pushes `times_used` past
+  `max_uses` — the cap is enforced at redemption-time validation, not as a hard, race-free inventory
+  limit (a deliberate, user-confirmed design decision; see the concurrency/money-safety note above).
+  A test proves over-redemption is allowed by design
+  (`test_consume_discount_code_can_exceed_max_uses`), matching this codebase's elevated rigor
+  standard of testing every money-adjacent code path, including the ones that intentionally don't
+  fail closed.
 
 ### 3. Promotional Banners (source doc Section 11.2)
 

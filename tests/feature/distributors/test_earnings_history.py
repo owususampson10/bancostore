@@ -5,12 +5,12 @@ from itertools import count
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.templatetags.static import static
 from django.urls import reverse
 
 import pytest
 
 from apps.distributors.models import Distributor
+from apps.pages.templatetags.vite_tags import vite_asset
 from apps.wallet.models import WalletTransaction
 from apps.wallet.services import credit, debit
 
@@ -69,13 +69,27 @@ def test_page_loads_the_shared_js_bundle_so_the_sidebar_can_actually_collapse(cl
     HTML can't catch this, since the markup itself is valid; only the
     client-side behavior was broken). pytest can't drive a real browser
     either, but it can assert the one thing that made the bug possible:
-    the script tag must be present."""
+    the script tag must be present.
+
+    Checkpoint O finding: this assertion went stale after Task 36a's real
+    Vite cache-busting migration replaced the template's fixed
+    `{% static "assets/main.js" %}` reference with `{% vite_asset "main.js" %}`
+    (apps/pages/templatetags/vite_tags.py), which resolves to a
+    content-hashed filename (e.g. assets/main-BskopyOv.js) read from
+    static/dist/.vite/manifest.json -- so the old hardcoded path this test
+    checked for stopped appearing in the rendered page entirely. The test
+    had been silently red ever since and was repeatedly waved off as
+    pre-existing/environmental flakiness in later tasks' verification
+    notes; re-running it in isolation here proved it fails deterministically,
+    not from test-order pollution. Calling the real `vite_asset` tag
+    function directly keeps this test correct even if the build hash
+    changes on the next `npm run build`."""
     distributor = _make_distributor()
     _login(client, distributor)
 
     response = client.get(reverse("distributors:earnings_history"))
 
-    assert f'src="{static("assets/main.js")}"' in response.content.decode()
+    assert f'src="{vite_asset("main.js")}"' in response.content.decode()
 
 
 @pytest.mark.django_db
