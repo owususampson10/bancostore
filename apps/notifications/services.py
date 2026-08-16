@@ -40,6 +40,20 @@ def send_notification(distributor, event_type, message):
 
 
 def _create_and_push(distributor, event_type, message):
+    # CodeRabbit finding (PR #79): Notification.message is max_length=500,
+    # but a rendered NotificationTemplate body (Task 48c) has no length
+    # bound of its own -- an admin-edited template, or a long substituted
+    # value (e.g. a distributor's full_name), could exceed it. This
+    # already runs after the caller's own transaction has committed (see
+    # send_notification's on_commit deferral above) and the whole call is
+    # already wrapped in try/except below, so an over-length value could
+    # never roll back the placement/bonus/etc. event that triggered it --
+    # but it would silently drop the notification entirely once caught.
+    # Truncating up front means the distributor still gets a (slightly
+    # shortened) notification instead of losing it.
+    max_length = Notification._meta.get_field("message").max_length
+    if len(message) > max_length:
+        message = message[:max_length]
     try:
         notification = Notification.objects.create(
             distributor=distributor, event_type=event_type, message=message

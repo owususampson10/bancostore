@@ -26,3 +26,17 @@ PLACEHOLDERS_BY_KEY: dict[str, list[str]] = {
     Key.ORDER_STATUS_UPDATE_SMS: ["reference", "status"],
     Key.ORDER_STATUS_UPDATE_EMAIL: ["reference", "status"],
 }
+
+# CodeRabbit finding (PR #79): PLACEHOLDERS_BY_KEY above only says which
+# placeholders are ALLOWED -- nothing stopped an admin from saving an
+# OTP_CODE template with no {{code}} in it at all, which would silently
+# break every registration/password-reset OTP send afterward (the SMS
+# would go out with no code in it, and nothing anywhere would error).
+# Every other key's placeholders are informational, not load-bearing --
+# e.g. a withdrawal-rejected template missing {{reason}} is a less
+# helpful message, not a broken one -- so this is deliberately scoped to
+# just the one case where omitting a placeholder makes the notification
+# functionally useless, not a general "required placeholders" system.
+REQUIRED_PLACEHOLDERS_BY_KEY: dict[str, list[str]] = {
+    Key.OTP_CODE: ["code"],
+}

@@ -7,7 +7,10 @@ from constance import config
 from apps.catalog.models import Category, Product, ProductImage, ProductVariant
 from apps.notifications.models import NotificationTemplate
 from apps.notifications.rendering import _PLACEHOLDER_RE
-from apps.notifications.template_registry import PLACEHOLDERS_BY_KEY
+from apps.notifications.template_registry import (
+    PLACEHOLDERS_BY_KEY,
+    REQUIRED_PLACEHOLDERS_BY_KEY,
+)
 from apps.pages.models import SocialMediaLink
 from apps.promotions.models import Banner, DiscountCode
 
@@ -382,7 +385,39 @@ class NotificationTemplateForm(forms.ModelForm):
                     f"Available for this template: {allowed_display}.",
                 )
 
+        # CodeRabbit finding (PR #79): PLACEHOLDERS_BY_KEY above only
+        # rejects an unknown placeholder -- nothing stopped an admin from
+        # deleting {{code}} from an OTP_CODE body entirely, which would
+        # silently break every registration/password-reset OTP send
+        # afterward (the SMS would go out with no code in it).
+        required = set(REQUIRED_PLACEHOLDERS_BY_KEY.get(self.instance.key, []))
+        if required:
+            body = cleaned_data.get("body") or ""
+            used_in_body = set(_PLACEHOLDER_RE.findall(body))
+            missing = required - used_in_body
+            if missing:
+                missing_display = ", ".join(
+                    f"{{{{{name}}}}}" for name in sorted(missing)
+                )
+                self.add_error(
+                    "body",
+                    f"This template must include: {missing_display}.",
+                )
+
         subject = cleaned_data.get("subject") or ""
+        # CodeRabbit finding (PR #79): only ORDER_STATUS_UPDATE_EMAIL's
+        # send site ever reads `subject` -- every SMS/in-app key ignores
+        # it entirely, so a non-empty subject saved against one of those
+        # keys looks like a successful, effective edit but silently does
+        # nothing on the next real send.
+        if (
+            self.instance.key != NotificationTemplate.Key.ORDER_STATUS_UPDATE_EMAIL
+            and subject
+        ):
+            self.add_error(
+                "subject",
+                "Subject is only available for email notification templates.",
+            )
         if "\n" in subject or "\r" in subject:
             self.add_error("subject", "Subject cannot contain line breaks.")
 

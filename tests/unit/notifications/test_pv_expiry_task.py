@@ -89,8 +89,14 @@ def test_a_pv_expiry_warning_uses_the_live_admin_edited_template_wording():
     notification = Notification.objects.get(
         distributor=distributor, event_type=Notification.EventType.PV_EXPIRING
     )
-    assert notification.message.startswith("Custom warning: ")
-    assert "PV expires" in notification.message
+    # CodeRabbit nitpick (PR #79): assert the actual rendered placeholder
+    # values, not just that the custom prefix survived -- a test that
+    # only checks "PV expires" in the message would still pass even if
+    # {{pv}}/{{expiry_date}} were swapped for the wrong values.
+    expected_expiry_date = bucket_date + timedelta(days=EXPIRY_DAYS)
+    assert notification.message == (
+        f"Custom warning: 200 PV expires {expected_expiry_date}!"
+    )
 
 
 @pytest.mark.django_db(transaction=True)

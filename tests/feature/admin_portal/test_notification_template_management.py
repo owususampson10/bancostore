@@ -114,6 +114,65 @@ def test_a_subject_containing_a_newline_is_rejected(staff_client):
 
 
 @pytest.mark.django_db
+def test_removing_code_from_an_otp_template_is_rejected(staff_client):
+    """CodeRabbit finding (PR #79): PLACEHOLDERS_BY_KEY only says which
+    placeholders are ALLOWED -- nothing stopped an admin from deleting
+    {{code}} from an OTP body entirely, silently breaking every real OTP
+    send afterward (the SMS would go out with no code in it at all)."""
+    template = _make_template()
+
+    response = staff_client.post(
+        _edit_url(template),
+        {"subject": "", "body": "Your verification message has arrived."},
+    )
+
+    assert response.status_code == 200
+    template.refresh_from_db()
+    assert "{{code}}" in template.body  # rejected -- the seeded body is untouched
+    assert b"must include" in response.content
+
+
+@pytest.mark.django_db
+def test_a_subject_on_a_non_email_template_is_rejected(staff_client):
+    """CodeRabbit finding (PR #79): only ORDER_STATUS_UPDATE_EMAIL's send
+    site ever reads `subject` -- a non-empty subject saved against an
+    SMS/in-app key looks like a successful edit but silently does
+    nothing on the next real send."""
+    template = _make_template()
+
+    response = staff_client.post(
+        _edit_url(template),
+        {"subject": "This subject is never read", "body": "{{code}}"},
+    )
+
+    assert response.status_code == 200
+    template.refresh_from_db()
+    assert template.subject == ""
+    assert b"only available for email" in response.content
+
+
+@pytest.mark.django_db
+def test_a_subject_on_the_order_status_email_template_is_accepted(staff_client):
+    template = _make_template(
+        key=NotificationTemplate.Key.ORDER_STATUS_UPDATE_EMAIL,
+        subject="Old subject",
+        body="Old body {{status}}",
+    )
+
+    response = staff_client.post(
+        _edit_url(template),
+        {
+            "subject": "Your order is {{status}}",
+            "body": "Order {{reference}}: {{status}}",
+        },
+    )
+
+    assert response.status_code == 302
+    template.refresh_from_db()
+    assert template.subject == "Your order is {{status}}"
+
+
+@pytest.mark.django_db
 def test_editing_records_history_for_the_audit_log(staff_client):
     """Task 48a's own security-review finding: this feeds the same
     Task 47e unified audit log as Category/Product/PlatformSettingChange."""

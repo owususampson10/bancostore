@@ -7697,7 +7697,8 @@ SMS/Email Provider fields exist as admin-editable choices; Sender Name/Email bec
 confirmation, mNotify/Gmail SMTP stay the only wired providers — no second real integration this
 round.
 
-**Closed 2026-08-15 (48a-48d all done).** 20 real `NotificationTemplate` rows now govern every
+**Closed 2026-08-15 (48a-48d all done).** 14 real `NotificationTemplate` rows (migrations 0006 + 0007,
+7 each) now govern every
 currently-wired outbound OTP/withdrawal/KYC/bonus/downline/PV-expiry/order-status notification this
 codebase sends, editable from a real `admin_portal` screen with a click-to-open detail audit trail;
 SMS/Email provider identity is real and admin-editable, honestly locked to the two providers
