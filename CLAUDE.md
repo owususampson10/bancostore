@@ -154,7 +154,7 @@ ten features shipped across Tasks 39-48, Checkpoint O signed off. Tasks 39 (Wish
   without ever actually being fixed — corrected to call the real `vite_asset()` resolver directly.
   Full suite green (1748 tests passing locally as of this fix, plus the pre-existing documented
   SQLite-only threaded-concurrency-test flakiness class, confirmed unrelated by re-running in
-  isolation), CI green on real MySQL.
+  isolation), CI green on real MySQL for the checkpoint's own commit (PR #80).
 
 Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found

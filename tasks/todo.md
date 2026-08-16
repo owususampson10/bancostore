@@ -8035,7 +8035,8 @@ new `apps/notifications/email.py` (`get_sender_email`), `apps/notifications/sms.
 - [x] Full suite green (1748 passed locally after this checkpoint's two fixes; the only other
       failure seen during this round was the documented SQLite-only threaded-concurrency-test
       flakiness class, confirmed unrelated by re-running in isolation 3/3), CI green on real MySQL
-      (confirmed on `main` @ `e386fbc` before this checkpoint's own fixes were pushed)
+      for this checkpoint's own commit (`54bf6fb`, PR #80) — confirmed after push, not just for the
+      pre-fix `main` state this checkpoint started from
 - [x] `CLAUDE.md` Project State updated to record Phase 2's completion (Tasks 42-48 + this
       checkpoint)
 - [ ] Review with the user — Phase 2 sign-off (pending: report this checkpoint's findings and the
