@@ -90,7 +90,12 @@ pytest>=8,<9
 pytest-django==4.12.0
 
 # Formatting / linting
-black>=24,<25
+# black pinned >=26.1,<27 (was <25): PYSEC-2026-2121/PYSEC-2026-2120 have no
+# fix inside the 24.x line -- the 2025 and 2026 stable-style updates (25.1.0,
+# 26.1.0) are both required to reach a patched release. Verified the actual
+# reformat impact is tiny: 1 file (manage.py, a single blank line from the
+# new always_one_newline_after_import rule), not a repo-wide rewrite.
+black>=26.1,<27
 isort>=5,<6
 ruff>=0.6,<1
 
