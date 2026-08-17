@@ -155,6 +155,24 @@ ten features shipped across Tasks 39-48, Checkpoint O signed off. Tasks 39 (Wish
   Full suite green (1748 tests passing locally as of this fix, plus the pre-existing documented
   SQLite-only threaded-concurrency-test flakiness class, confirmed unrelated by re-running in
   isolation), CI green on real MySQL for the checkpoint's own commit (PR #80).
+- **Task 49 (Post-Phase 2 ad hoc hardening)**, outside `SPEC_PHASE2.md`'s scope: **49a**, closed
+  2026-08-16, three direct-to-main dependency security upgrades matching Task 30f's own
+  non-blocking `pip-audit` precedent — Pillow 10.4.0 -> 12.3.0 (fixing ~20 `pip-audit` advisories),
+  pytest 8.4.2 -> 9.1.1 (fixing PYSEC-2026-1845), black 24.10.0 -> 26.5.1 (fixing
+  PYSEC-2026-2121/PYSEC-2026-2120). **49b (PR #81)**, closed 2026-08-17: contact-form spam
+  protection — a hidden honeypot field on `ContactForm` (a bot that fills it gets a fake success
+  response, no email sent) plus optional hCaptcha server-side verification
+  (`apps/pages/hcaptcha.py`), disabled by default via blank `HCAPTCHA_SITE_KEY`/`HCAPTCHA_SECRET_KEY`
+  env vars, the same blank-means-disabled convention as `MNOTIFY_API_KEY`. CodeRabbit's first review
+  found 2 real issues (a missing `sitekey` in the verification payload, and the honeypot check being
+  gated on full form validity), both fixed; the re-review of that fix commit itself hit the
+  account's CodeRabbit rate limit and never ran, so PR #81 merged without a second pass. 12 new
+  tests, full suite green (1767 passed, 6 skipped), CI green on real MySQL. **The laptop froze right
+  after this merge** — recovered 2026-08-17: git state was already clean (nothing lost), but the
+  local `venv` had drifted off `requirements.txt`'s pins (Django 5.2.17 instead of the required
+  `<5.1`, plus stale `ruff`/`django-allauth`/`django-silk`/`flower`/`daphne`), almost certainly from
+  a `pip install` killed mid-write by the freeze — fixed by reinstalling from `requirements.txt`;
+  `manage.py check` and the full suite both confirmed clean afterward.
 
 Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found

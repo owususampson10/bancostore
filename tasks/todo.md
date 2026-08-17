@@ -8041,3 +8041,55 @@ new `apps/notifications/email.py` (`get_sender_email`), `apps/notifications/sms.
       checkpoint)
 - [ ] Review with the user — Phase 2 sign-off (pending: report this checkpoint's findings and the
       two fixes to the user for final confirmation)
+
+## Post-Phase 2: Ad Hoc Hardening
+
+### Task 49: Dependency security upgrades + contact-form spam protection
+
+**Description:** Not in `SPEC_PHASE2.md`'s scope — two independent pieces of hardening pushed
+directly after Checkpoint O, closed 2026-08-16/17.
+
+- **49a — Dependency security upgrades** (three direct-to-main commits, no PR — matching this
+  project's own established non-blocking `pip-audit` precedent from Task 30f): Pillow 10.4.0 ->
+  12.3.0 (fixing ~20 `pip-audit` advisories), pytest 8.4.2 -> 9.1.1 (fixing PYSEC-2026-1845), black
+  24.10.0 -> 26.5.1 (fixing PYSEC-2026-2121/PYSEC-2026-2120).
+- **49b — Contact-form spam protection** (PR #81): a hidden honeypot field on `ContactForm` — a bot
+  that fills it gets a fake success response and no email is sent — plus optional hCaptcha
+  server-side verification (`apps/pages/hcaptcha.py`), disabled by default via blank
+  `HCAPTCHA_SITE_KEY`/`HCAPTCHA_SECRET_KEY` env vars so local dev/CI never need real credentials,
+  the same convention as `MNOTIFY_API_KEY`. No new pip dependency — verification uses `requests`,
+  already in `requirements.txt`. Confirmed the per-IP rate limit (`RATELIMIT_IP_META_KEY`) is
+  already correctly proxy-aware from Task 24's deploy work, so no change was needed there.
+
+**Acceptance criteria:**
+- [x] 49a: `requirements.txt` pins updated to the new versions; full suite still green after each
+      upgrade
+- [x] 49b: a honeypot-filled submission gets a fake success response and sends no email; hCaptcha
+      verification blocks submission on failure, fails closed on a network error to the hCaptcha
+      API, and stays fully inert (no widget rendered, no verification call made) when
+      `HCAPTCHA_SITE_KEY`/`HCAPTCHA_SECRET_KEY` are blank
+
+**Verification:**
+- [x] 49b: 12 new tests (`tests/unit/pages/test_hcaptcha.py`, `tests/feature/pages/test_contact.py`)
+      covering honeypot trigger/no-trigger, CAPTCHA pass/fail/unconfigured, network-error
+      fail-closed behavior. `black`/`isort`/`ruff` clean.
+- [x] Full suite green: 1767 passed, 6 skipped (3 pre-existing, unrelated flaky timing tests
+      confirmed independent by isolated re-run). CI green on real MySQL for both the dependency
+      commits and PR #81.
+- [x] CodeRabbit's first review found 2 real issues, both fixed with a RED-first regression test:
+      `verify_hcaptcha()`'s payload was missing `sitekey` (a token issued for a different hCaptcha
+      site under the same account would still verify against this secret), and the honeypot check
+      in `contact()` was gated on the whole form being valid, so a bot filling the honeypot but
+      leaving a required field blank fell through to real validation errors instead of the fake
+      success path.
+- [ ] **The re-review of the fix commit itself never ran** — hit the account's CodeRabbit
+      review-rate-limit and PR #81 was merged before a second pass could confirm the fix.
+
+**Dependencies:** None. **Closed 2026-08-16 (49a) / 2026-08-17 (49b).**
+
+**Files touched:** `requirements.txt` (49a); `apps/pages/forms.py`, `apps/pages/views.py`, new
+`apps/pages/hcaptcha.py`, `templates/pages/contact.html`, `bancostore/settings.py`
+(`HCAPTCHA_SITE_KEY`/`HCAPTCHA_SECRET_KEY`), `.env.example`; new
+`tests/unit/pages/test_hcaptcha.py`, extended `tests/feature/pages/test_contact.py` (49b).
+
+**Estimated scope:** S
