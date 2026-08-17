@@ -2,7 +2,14 @@
 # Install: pip install -r requirements.txt
 
 # Core framework
-Django>=5,<5.1
+# Django pinned >=5.2,<5.3 (was <5.1): pip-audit surfaced 9 advisories in the 5.0.x line
+# (PYSEC-2025-47/105/107/108, CVE-2026-48587/6873/8404/48588/53877/53878), none fixed before
+# 5.1.10/5.2.2 at the earliest -- 5.2.x clears all of them. No documented reason was ever found
+# for the original <5.1 ceiling (checked SPEC.md/CLAUDE.md/docs/decisions -- it looks like it
+# was simply never bumped past the version installed at Task 1 scaffolding), so this stays a
+# same-major-version upgrade, not a decision to reconsider a deliberate constraint. Verified:
+# `manage.py check` clean and full test suite green after the bump.
+Django>=5.2,<5.3
 
 # Frontend integration (Django Templates + HTMX)
 django-htmx>=1.19,<2
@@ -22,10 +29,14 @@ daphne>=4,<5
 # tests bypass the real asyncio Redis client entirely). Pin below the
 # version channels-redis 4.3.0 was actually built against.
 redis<5
-# daphne -> autobahn requires cbor2, whose current release needs a Rust compiler to build
-# (not available on this Mac, same class of issue as the PHP/MySQL native-build failures
-# documented in SPEC.md). Pin to the last pure-Python cbor2 wheel to avoid that entirely.
-cbor2==5.5.0
+# daphne -> autobahn requires cbor2. Pinned to 5.5.0 for a while because a later release
+# needed a Rust compiler to build (not available on this Mac, same class of issue as the
+# PHP/MySQL native-build failures documented in SPEC.md) -- re-checked before this bump
+# (pip-audit found 4 advisories in 5.5.0, PYSEC-2025-90/PYSEC-2024-155/PYSEC-2025-238/
+# PYSEC-2026-2123, all fixed by 5.9.0) and confirmed 5.9.0 ships a pure-Python
+# `cbor2-5.9.0-py3-none-any.whl` wheel, so the original Rust-compiler blocker no longer
+# applies at this version.
+cbor2==5.9.0
 
 # Database
 dj-database-url>=2,<3
@@ -46,7 +57,19 @@ phonenumbers>=8,<9
 PyJWT>=2,<3
 
 # Admin-editable settings
-django-constance[database]>=3,<4
+# django-constance pinned >=4.3,<5 (was >=3,<4): the Django 5.2 bump above broke
+# `manage.py check` outright -- 3.1.0's admin.py registration path hits Django 5.2's new
+# composite-primary-key check (`model._meta.is_composite_pk`) against constance's own
+# non-standard Config model, raising AttributeError before the app even starts. Confirmed via
+# django-constance's own GitHub releases: 4.3.0 "Fix Admin on Django 5.2", 4.3.2 "Fix
+# override_config test decorator on Django 5.2", 4.3.3 "Add support for Django 5.1 and Django
+# 5.2" -- >=4.3.3 is the real minimum, pinned to >=4.3 for margin. Verified: `manage.py check`
+# clean and full test suite green on 4.3.5 after this bump. Also dropped the `[database]`
+# extra here: it was never a real extra django-constance declares (checked 3.1.0's own
+# METADATA -- only a `redis` extra exists, for the optional Redis backend this project
+# doesn't use, CONSTANCE_BACKEND is DatabaseBackend which needs no extra deps), silently
+# ignored by pip until this exact upgrade made it start warning.
+django-constance>=4.3,<5
 
 # Files
 # Pillow pinned >=12,<13 (was <11): ~20 advisories (decompression-bomb,

@@ -19,7 +19,7 @@ pytestmark = pytest.mark.django_db
 
 
 def _request_with_session(method, path):
-    # 404/403 (and the CSRF failure view) pass the real request into their
+    # 400/404/403 (and the CSRF failure view) pass the real request into their
     # template context, so every context processor in settings.py runs --
     # including apps.orders.context_processors.cart_count (needs
     # request.session) and apps.notifications.context_processors
@@ -69,7 +69,7 @@ def test_403_page_shows_access_denied_and_contact_support():
 
 
 def test_400_page_shows_bad_request_and_a_way_back():
-    request = RequestFactory().get("/bad/")
+    request = _request_with_session("get", "/bad/")
 
     response = bad_request(request, exception=Exception())
 

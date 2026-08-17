@@ -40,7 +40,9 @@ task partway through the migration, and the *old* worker code picks it up and ru
 now-partially-changed schema. This means a short real downtime window during every deploy that
 touches migrations (typically well under a minute) — an accepted tradeoff, not an oversight, since
 the alternative (a zero-downtime blue/green setup) is real infrastructure this project doesn't have
-yet:
+yet. See `docs/decisions/0011-deploy-downtime-mitigation.md` for the full mitigation plan
+(expand/contract migrations adopted now; a dual-Daphne-behind-Nginx setup deferred until real
+traffic justifies it) and `tasks/todo.md`'s Known Issues for the tracked, deferred half:
 
 ```bash
 cd /home/bancostore/bancostore
