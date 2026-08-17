@@ -12,6 +12,7 @@ from django_ratelimit.decorators import ratelimit
 from apps.notifications.email import get_sender_email
 
 from .forms import ContactForm
+from .hcaptcha import hcaptcha_enabled, verify_hcaptcha
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,38 @@ def _whatsapp_link(number):
 def contact(request):
     if request.method == "POST":
         form = ContactForm(request.POST)
-        if form.is_valid():
+        form_is_valid = form.is_valid()
+        if form.is_bot_trap_filled:
+            # Honeypot triggered -- respond exactly like a real success so
+            # an automated submitter gets no signal it was caught, but
+            # never actually send anything. Checked independent of
+            # form_is_valid (CodeRabbit finding, PR #81): honeypot is
+            # required=False, so it lands in cleaned_data via
+            # full_clean()'s per-field cleaning regardless of whether
+            # some other field also failed -- a bot that fills the
+            # honeypot but leaves a required field blank must still hit
+            # this path, not fall through to real validation errors.
+            logger.info("contact: honeypot field was filled, discarding submission")
+            messages.success(
+                request,
+                "Thank you — your message has been sent. We'll get back "
+                "to you soon.",
+            )
+            return redirect("pages:contact")
+
+        captcha_failed = (
+            form_is_valid
+            and hcaptcha_enabled()
+            and not verify_hcaptcha(request.POST.get("h-captcha-response", ""))
+        )
+        if captcha_failed:
+            # No field on the form maps to the CAPTCHA widget (it's not a
+            # Django form field -- see templates/pages/contact.html), so
+            # this surfaces the same way every other non-field failure on
+            # this view does: a flash message on re-render, matching the
+            # send-failure path below.
+            messages.error(request, "CAPTCHA verification failed. Please try again.")
+        elif form_is_valid:
             configured_recipient = _stripped_or_none(config.CONTACT_EMAIL_ADDRESS)
             if configured_recipient:
                 recipient = configured_recipient
@@ -164,5 +196,8 @@ def contact(request):
             "whatsapp_support_number": whatsapp_support_number,
             "whatsapp_link": _whatsapp_link(whatsapp_support_number),
             "physical_address": _stripped_or_none(config.PHYSICAL_ADDRESS),
+            "hcaptcha_site_key": (
+                settings.HCAPTCHA_SITE_KEY if hcaptcha_enabled() else None
+            ),
         },
     )

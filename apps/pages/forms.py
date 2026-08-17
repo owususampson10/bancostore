@@ -61,6 +61,32 @@ class ContactForm(forms.Form):
         ),
     )
 
+    # Honeypot bot trap: a field real users never see (hidden off-screen via
+    # CSS in the template, not type="hidden" -- a well-known bot heuristic
+    # skips hidden inputs specifically, so this must render as a normal
+    # visible-to-the-DOM text input). tabindex="-1" and aria-hidden keep it
+    # out of a real keyboard/screen-reader user's path. Left required=False
+    # so an empty submission (the only kind a human ever sends) validates
+    # normally -- apps/pages/views.py::contact checks is_bot_trap_filled
+    # after is_valid() and silently discards a filled submission instead of
+    # ever indicating anything went wrong.
+    honeypot = forms.CharField(
+        required=False,
+        label="",
+        widget=forms.TextInput(
+            attrs={
+                "class": "hp-field",
+                "tabindex": "-1",
+                "autocomplete": "off",
+                "aria-hidden": "true",
+            }
+        ),
+    )
+
+    @property
+    def is_bot_trap_filled(self):
+        return bool(self.cleaned_data.get("honeypot"))
+
     def clean(self):
         # Runs after every field's own clean_<field>(), so self.errors
         # already reflects field-level validation failures at this point --
