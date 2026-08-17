@@ -67,6 +67,27 @@ sudo supervisorctl status              # all three RUNNING with fresh pids
 curl -I https://bancostore.com/        # 200, not 500
 ```
 
+## Updating the Nginx config
+
+`deploy/nginx/bancostore.conf` in this repo is **not** synced to the live server automatically by
+the deploy steps above — a real `git pull` on the server never touches `/etc/nginx/`. It's also not
+a byte-for-byte copy of the live file: certbot's `--nginx` run (Task 24g) rewrote the deployed
+version to add the real `server { listen 443 ssl; ... }` block and the HTTP->HTTPS redirect, which
+this repo's copy — the pre-certbot HTTP-only starting point — doesn't have. Overwriting the live
+file with this repo's copy would silently drop HTTPS.
+
+To ship an Nginx config change: SSH in, edit `/etc/nginx/sites-available/bancostore` directly
+(apply just the diff, not a wholesale file replace), then:
+
+```bash
+sudo nginx -t                    # syntax-check before reloading -- a bad config here takes the
+                                  # whole site down, not just the one change
+sudo systemctl reload nginx      # zero-downtime -- reload, not restart
+```
+
+Update this repo's `deploy/nginx/bancostore.conf` with the same change afterward, so the tracked
+copy and the live file don't drift apart.
+
 ## Environment variables (`.env`)
 
 Lives only on the server at `/home/bancostore/bancostore/.env` (`chmod 600`, never committed).

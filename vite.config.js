@@ -3,6 +3,17 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [tailwindcss()],
+  // Static files are served under /static/ (bancostore/settings.py's
+  // STATIC_URL), not site root. vite_tags.py's vite_asset/vite_css tags
+  // already account for this themselves (they resolve the manifest's
+  // relative path through Django's own static() helper), but this `base`
+  // is still required for URLs Vite rewrites directly inside emitted CSS
+  // (e.g. @font-face src: url(...) referencing another built asset) --
+  // those never go through vite_tags.py, so without this they resolve to
+  // site root and 404. Found via the Task 38 icon-webfont self-hosting
+  // fix (2026-08-17): the subsetted font's url() came out as
+  // "/assets/...woff2" instead of "/static/assets/...woff2".
+  base: "/static/",
   build: {
     outDir: "static/dist",
     emptyOutDir: true,

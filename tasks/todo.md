@@ -8039,8 +8039,10 @@ new `apps/notifications/email.py` (`get_sender_email`), `apps/notifications/sms.
       pre-fix `main` state this checkpoint started from
 - [x] `CLAUDE.md` Project State updated to record Phase 2's completion (Tasks 42-48 + this
       checkpoint)
-- [ ] Review with the user — Phase 2 sign-off (pending: report this checkpoint's findings and the
-      two fixes to the user for final confirmation)
+- [x] Review with the user — Phase 2 sign-off. **Confirmed by the user 2026-08-17**: 8/10
+      `SPEC_PHASE2.md` features passed outright, the two real gaps found (stale Discount Codes
+      concurrency wording, missing GRA withholding-tax PDF export) were fixed, and the user accepted
+      that as final sign-off. **Phase 2 is officially complete.**
 
 ## Post-Phase 2: Ad Hoc Hardening
 
@@ -8082,8 +8084,17 @@ directly after Checkpoint O, closed 2026-08-16/17.
       in `contact()` was gated on the whole form being valid, so a bot filling the honeypot but
       leaving a required field blank fell through to real validation errors instead of the fake
       success path.
-- [ ] **The re-review of the fix commit itself never ran** — hit the account's CodeRabbit
-      review-rate-limit and PR #81 was merged before a second pass could confirm the fix.
+- [x] **The re-review of the fix commit itself never ran automatically** — hit the account's
+      CodeRabbit review-rate-limit and PR #81 was merged before a second pass could confirm the
+      fix. A manual `@coderabbitai review` retrigger 2026-08-17 declined ("does not re-review
+      already-reviewed commits ... applicable only when automatic reviews are paused") — the PR's
+      branch is already deleted post-merge, so a real second CodeRabbit pass is no longer possible.
+      Substituted a manual read of the fix diff instead: the `sitekey` field added to
+      `verify_hcaptcha()`'s payload is hCaptcha's own documented parameter for binding a
+      verification to the configured site key, and the honeypot check correctly reads
+      `form.is_bot_trap_filled` from `cleaned_data` (populated by `is_valid()`'s `full_clean()`
+      regardless of the form's overall validity) independent of `form_is_valid`. No new issues
+      found.
 
 **Dependencies:** None. **Closed 2026-08-16 (49a) / 2026-08-17 (49b).**
 
@@ -8091,5 +8102,61 @@ directly after Checkpoint O, closed 2026-08-16/17.
 `apps/pages/hcaptcha.py`, `templates/pages/contact.html`, `bancostore/settings.py`
 (`HCAPTCHA_SITE_KEY`/`HCAPTCHA_SECRET_KEY`), `.env.example`; new
 `tests/unit/pages/test_hcaptcha.py`, extended `tests/feature/pages/test_contact.py` (49b).
+
+**Estimated scope:** S
+
+### Task 50: Self-host the Material Symbols icon webfont (Task 38 follow-up)
+
+**Description:** Task 38's audit flagged the site-wide Material Symbols icon webfont as un-subsetted
+(the CDN link pulled the full ~2,500-icon family, ~1.1MB) and deferred it, needing either a new
+build-time subsetting tool or a larger icon-migration effort — user approved fixing it 2026-08-17.
+
+Enumerated every icon this codebase actually renders — every static `material-symbols-outlined`
+ligature across all of `templates/`, both Python icon-name dicts
+(`apps/notifications/models.py::_ICON_BY_EVENT_TYPE`, `apps/admin_portal/views.py::_GROUP_ICONS`),
+and every sidebar `icon="..."` include param — 125 distinct icon names, cross-checked against a
+second independent grep pass to catch anything the first pass missed (`apps/pages/social_icons.py`
+confirmed unrelated — a separate, already-self-hosted SVG brand-icon system). Used Google's own
+Material Symbols `icon_names=` CSS2 subsetting API (not a new pip/npm dependency — a one-off fetch,
+same "no new dependency" precedent as Task 38's own image self-hosting script) to generate a
+subsetted `.woff2`: **40KB vs. the original 1.1MB (96% smaller)**, self-hosted at
+`static/src/fonts/material-symbols-outlined-subset.woff2`, wired through the existing Vite
+build/manifest pipeline (Task 36a) via a new `@font-face` rule in `static/src/main.css`. Removed the
+`fonts.googleapis.com` Material Symbols `<link>` tag from all 6 templates that had it
+(`base_admin_auth.html`, `base_store.html`, `two_factor/core/login_token.html`,
+`distributors/base_dashboard.html`, `admin_portal/base_dashboard.html`, `errors/base_error.html`) —
+zero third-party request for icons at runtime now, same risk class Task 38 already fixed for images.
+
+**A real bug found and fixed during this task, not just the subsetting itself:** the first build
+produced icons that silently failed to render at all (raw ligature text like "search"/"shopping_cart"
+showing instead of glyphs) — live-browser-caught, not assumed fixed from a green build. Root cause:
+`vite.config.js` had no `base` set, so Vite's default (site root) rewrote the new `@font-face`'s
+internal `url()` to `/assets/...woff2` instead of `/static/assets/...woff2` (this project serves
+static files under `/static/`). The existing `vite_asset`/`vite_css` template tags never hit this
+because they resolve the manifest's relative path through Django's own `static()` helper — only
+`url()` references Vite rewrites *directly inside* built CSS (which never pass through those tags)
+were affected. Fixed with `base: "/static/"` in `vite.config.js`, documented inline for the next
+person who adds a CSS-referenced asset.
+
+**Acceptance criteria:**
+- [x] Every one of the 125 identified icon names renders as its real glyph, not fallback/tofu text
+- [x] Zero `fonts.googleapis.com` Material Symbols requests; `Hanken Grotesk`/`Inter` CDN links
+      (out of scope for this task) left untouched
+- [x] Self-hosted font is content-hashed and cache-busted through the existing Vite/manifest
+      pipeline, same as every other built asset
+
+**Verification:**
+- [x] Live-browser verified (2026-08-17) against a real `runserver`: home page (header search/cart
+      icons), `/shop/` (search icon), `/account/login/` admin auth screen (mail, lock, login,
+      shield, help icons) — confirmed via screenshot, not just absence of console errors. The
+      broken first build was caught this same way, not missed.
+- [x] Full suite run to confirm no regression (no existing test referenced the CDN link or icon
+      font directly, grep-confirmed first).
+
+**Dependencies:** None. **Closed 2026-08-17.**
+
+**Files touched:** `vite.config.js` (`base`), `static/src/main.css` (`@font-face` +
+`.material-symbols-outlined`), new `static/src/fonts/material-symbols-outlined-subset.woff2`,
+6 base templates (removed CDN `<link>`).
 
 **Estimated scope:** S

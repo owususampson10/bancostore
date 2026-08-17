@@ -154,7 +154,8 @@ ten features shipped across Tasks 39-48, Checkpoint O signed off. Tasks 39 (Wish
   without ever actually being fixed — corrected to call the real `vite_asset()` resolver directly.
   Full suite green (1748 tests passing locally as of this fix, plus the pre-existing documented
   SQLite-only threaded-concurrency-test flakiness class, confirmed unrelated by re-running in
-  isolation), CI green on real MySQL for the checkpoint's own commit (PR #80).
+  isolation), CI green on real MySQL for the checkpoint's own commit (PR #80). **User-confirmed
+  sign-off 2026-08-17 — Phase 2 is officially complete.**
 - **Task 49 (Post-Phase 2 ad hoc hardening)**, outside `SPEC_PHASE2.md`'s scope: **49a**, closed
   2026-08-16, three direct-to-main dependency security upgrades matching Task 30f's own
   non-blocking `pip-audit` precedent — Pillow 10.4.0 -> 12.3.0 (fixing ~20 `pip-audit` advisories),
@@ -173,6 +174,15 @@ ten features shipped across Tasks 39-48, Checkpoint O signed off. Tasks 39 (Wish
   `<5.1`, plus stale `ruff`/`django-allauth`/`django-silk`/`flower`/`daphne`), almost certainly from
   a `pip install` killed mid-write by the freeze — fixed by reinstalling from `requirements.txt`;
   `manage.py check` and the full suite both confirmed clean afterward.
+- **Task 50 (self-host the Material Symbols icon webfont)**, closed 2026-08-17 — the Task 38
+  finding deferred at the time (un-subsetted, ~1.1MB, full CDN family). Enumerated all 125 icon
+  names this codebase actually uses and subsetted via Google's own `icon_names=` API: **40KB self-
+  hosted, 96% smaller**, wired through the existing Vite/manifest pipeline, zero third-party request
+  left at runtime. **Found and fixed a real bug along the way**: the first build silently broke
+  every icon (raw ligature text rendering instead of glyphs) because `vite.config.js` had no `base`
+  set, so the new `@font-face`'s `url()` resolved to `/assets/...` instead of `/static/assets/...`
+  — caught by live-browser screenshot, not assumed fixed from a green build. Fixed with
+  `base: "/static/"`.
 
 Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found

@@ -144,8 +144,36 @@
   display: none !important;
 }
 
-/* Material Symbols icon font (used throughout the Stitch screens) */
+/* Material Symbols icon font (used throughout the Stitch screens).
+   Self-hosted, subsetted to only the ~125 icon names this codebase
+   actually uses (grep-verified across every template and the two Python
+   icon-name dicts, apps/notifications/models.py::_ICON_BY_EVENT_TYPE and
+   apps/admin_portal/views.py::_GROUP_ICONS) via Google's own Material
+   Symbols icon_names= subsetting API -- 40KB vs. the full family's 1.1MB,
+   and no third-party request at runtime (Task 38's flagged risk/finding,
+   fixed 2026-08-17). Regenerate by re-running the same icon_names= fetch
+   with an updated icon list if a new icon name is ever added. */
+@font-face {
+  font-family: "Material Symbols Outlined";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("./fonts/material-symbols-outlined-subset.woff2") format("woff2");
+}
+
 .material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
   font-variation-settings:
     "FILL" 0,
     "wght" 400,
