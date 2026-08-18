@@ -63,12 +63,21 @@ today's deploys":
 ### The concrete practice, starting with the next migration that touches an existing column/table
 
 - **Expand deploy:** add the new column/table (nullable, or with a server default so existing rows
-  are valid immediately); if data is moving, write to both the old and new locations from this
-  point on; old code paths keep working completely unmodified.
-- **Cut-over deploy** (can be the same deploy as expand, for a small change; a separate one for a
-  larger data migration): switch application code to read from the new column/table.
+  are valid immediately). Old application code keeps running completely unmodified against it.
+- **Compatibility deploy** (only needed if existing data has to move, not for a plain new
+  column/table with no backfill): deploy application code that dual-writes to both the old and new
+  locations, but still *reads* from the old location (or falls back to it) — this is the version
+  that has to run correctly against a schema where most rows don't have the new data populated yet.
+- **Backfill:** copy existing rows into the new location in batches, then validate old/new parity
+  before treating the new location as trustworthy.
+- **Cut-over deploy:** only once the backfill and parity check are done, switch application code to
+  *read* from the new column/table.
 - **Contract deploy:** once confident nothing depends on the old shape anymore, drop the old
   column/table in its own migration.
+- **Never combine expand and cut-over in one deploy when existing rows need to move** — reads would
+  hit a new location that's still empty or partial for anything written before the expand deploy.
+  Combining them is only safe for a genuinely new column/table with no pre-existing data to
+  reconcile (e.g. a nullable field added for future writes only).
 - Never combine "add the destructive change" and "code that only works with the new shape" in one
   migration when the change touches a column/table live code already reads or writes.
 - This is a **practice for future migrations**, not a retrofit of existing ones — no migration in
@@ -79,12 +88,23 @@ today's deploys":
 This codebase's Paystack integration is already built idempotent end-to-end — `confirm_order_
 payment`, `consume_paid_starter_pack`, and the shared `paystack_webhook` dispatcher all
 re-verify server-side and are safe to run twice, specifically because Paystack itself retries
-webhook delivery on failure. A webhook or callback landing during a deploy's brief downtime window
-gets a connection failure, Paystack retries per its own delivery schedule, and the retry succeeds
-once the app is back — the same protection that already covers an ordinary transient network blip
-today. This doesn't eliminate the concern (a customer's browser request during the window still
-sees a failure, not a silent retry), but it means the failure mode is "briefly unavailable," not
-"lost or double-processed payment."
+webhook delivery on failure. A **webhook** landing during a deploy's brief downtime window gets a
+connection failure, and Paystack retries per its own delivery schedule (up to 72 hours) until the
+app is back — the same protection that already covers an ordinary transient network blip today.
+
+The **browser callback** (`order_payment_callback`, `starter_pack_payment_callback`,
+`registration_payment_callback`) is a different mechanism and doesn't get this retry for free —
+Paystack doesn't re-send a browser redirect the way it retries a webhook. But the callback was
+deliberately built as only a *fast-path* alongside the webhook, never the sole trigger: it calls
+the exact same idempotent consume function the webhook calls, and the webhook fires independently
+of whether the callback request itself ever reached the app. So a callback that fails during the
+downtime window doesn't lose the payment — the webhook (Paystack's own server-to-server delivery,
+unaffected by whether the customer's browser request succeeded) still arrives and confirms it once
+the app is back up, typically within seconds to a couple of minutes of Paystack's own retry
+schedule. The one real user-facing effect is the customer's own browser sees a failed page load
+during that window rather than an immediate confirmation — annoying, but not a lost or
+double-processed payment, and revisiting the order page once the site is back shows it confirmed
+once the webhook has landed.
 
 ## Deferred: dual-Daphne behind Nginx
 

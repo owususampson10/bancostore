@@ -2,14 +2,17 @@
 # Install: pip install -r requirements.txt
 
 # Core framework
-# Django pinned >=5.2,<5.3 (was <5.1): pip-audit surfaced 9 advisories in the 5.0.x line
+# Django pinned >=5.2.17,<5.3 (was <5.1): pip-audit surfaced 9 advisories in the 5.0.x line
 # (PYSEC-2025-47/105/107/108, CVE-2026-48587/6873/8404/48588/53877/53878), none fixed before
-# 5.1.10/5.2.2 at the earliest -- 5.2.x clears all of them. No documented reason was ever found
-# for the original <5.1 ceiling (checked SPEC.md/CLAUDE.md/docs/decisions -- it looks like it
-# was simply never bumped past the version installed at Task 1 scaffolding), so this stays a
-# same-major-version upgrade, not a decision to reconsider a deliberate constraint. Verified:
-# `manage.py check` clean and full test suite green after the bump.
-Django>=5.2,<5.3
+# 5.1.10/5.2.2 at the earliest -- 5.2.x clears all of them. The lower bound is pinned to
+# 5.2.17 specifically (not just >=5.2), Django's latest 5.2-line security release as of
+# 2026-08-04 -- a bare >=5.2 would still permit installing an earlier, vulnerable 5.2.x
+# release like 5.2.9. No documented reason was ever found for the original <5.1 ceiling
+# (checked SPEC.md/CLAUDE.md/docs/decisions -- it looks like it was simply never bumped past
+# the version installed at Task 1 scaffolding), so this stays a same-major-version upgrade,
+# not a decision to reconsider a deliberate constraint. Verified: `manage.py check` clean
+# locally, and the full suite green in CI against real MySQL (PR #82).
+Django>=5.2.17,<5.3
 
 # Frontend integration (Django Templates + HTMX)
 django-htmx>=1.19,<2
