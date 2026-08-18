@@ -268,6 +268,18 @@ suite on this Mac, but never a false CI failure blocking a real merge. No furthe
   `apps.pages.templatetags.vite_tags.vite_asset("main.js")` resolver directly instead of a
   hardcoded path, so the assertion tracks whatever hash the next `npm run build` produces.
 
+## Known issues — deploy downtime mitigation, raised directly by the user (2026-08-17)
+
+- [ ] **Dual-Daphne behind Nginx (poor-man's blue/green on one VPS), deferred.** Every production
+  deploy that touches migrations briefly stops all three Supervisor programs (`deploy/README.md`
+  runbook) — real, if brief, downtime. True blue/green needs two servers, which this project
+  doesn't have (single Hostinger VPS). See `docs/decisions/0011-deploy-downtime-mitigation.md` for
+  the full design sketch and reasoning. **Trigger condition to pick this up:** once real
+  production traffic makes a short restart window actually matter — not the current state
+  (2026-08-17 production check: 1 total user, 0 orders, ever). Expand/contract migrations
+  (same ADR) were adopted immediately as a standing practice for future migrations, at zero
+  infra cost — only the dual-Daphne half is deferred.
+
 ---
 
 ## Phase 0: Foundation

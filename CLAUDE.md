@@ -1022,11 +1022,14 @@ concurrency helper: `bancostore/concurrency.py` (`retry_on_lock_contention`,
 reinventing locking. See `tasks/plan.md` and `tasks/todo.md` for the full task breakdown and
 what's next.
 
-**Environment note:** `cbor2` (a transitive dep of `daphne`/`autobahn`) is pinned to `5.5.0` in
-`requirements.txt` — later versions need a Rust compiler to build, which isn't available on this
-Mac (same class of native-build issue as the PHP/MySQL problems below). 5.5.0 ships a pure-Python
-wheel. `phonenumbers` and `PyJWT` are also pinned in requirements.txt as required-but-undeclared
-transitive deps of `django-two-factor-auth`'s phone plugin and allauth's Google provider.
+**Environment note:** `cbor2` (a transitive dep of `daphne`/`autobahn`) is pinned to `5.9.0` in
+`requirements.txt` — was `5.5.0` for a while because a later release needed a Rust compiler to
+build, which isn't available on this Mac (same class of native-build issue as the PHP/MySQL
+problems below), but that blocker no longer applies: 5.9.0 was bumped to clear 4 pip-audit
+advisories (PYSEC-2025-90/PYSEC-2024-155/PYSEC-2025-238/PYSEC-2026-2123) and, re-checked before
+the bump, still ships a pure-Python `cbor2-5.9.0-py3-none-any.whl` wheel. `phonenumbers` and
+`PyJWT` are also pinned in requirements.txt as required-but-undeclared transitive deps of
+`django-two-factor-auth`'s phone plugin and allauth's Google provider.
 
 Read `SPEC.md` in full before starting work — it contains the MVP scope, the full tech stack,
 project structure, code style, testing strategy, and the Boundaries (Always/Ask first/Never)

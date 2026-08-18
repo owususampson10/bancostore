@@ -351,6 +351,19 @@ DATABASES = {
     )
 }
 
+# SQLite's default lock-wait timeout (5s, Python's sqlite3 module default) is too short
+# for this project's real multi-threaded concurrency tests (apps/commissions,
+# apps/wallet, apps/pv_ledger, apps/distributors) -- they intentionally contend on the
+# same rows from multiple threads, and SQLite (unlike the MySQL this runs against in
+# CI/production) has no real row-level locking, just one coarse database-wide write
+# lock. Raising the wait window converts a full-suite-only flake ("database table is
+# locked") into a slightly slower pass instead of a hard failure, without masking a real
+# bug -- CI/production never hit this path at all, they're on MySQL. See tasks/todo.md's
+# Known Issues (2026-07-26 / 2026-08-05 investigation) for the flake history this
+# addresses.
+if DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3":
+    DATABASES["default"].setdefault("OPTIONS", {})["timeout"] = 30
+
 
 # Cache / sessions — Redis-backed so app servers stay stateless (see SPEC.md Scale
 # Architecture)
