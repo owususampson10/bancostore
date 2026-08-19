@@ -62,11 +62,28 @@ If a release has no new migrations, stopping/starting is optional — `sudo supe
 bancostore-daphne bancostore-celery-worker bancostore-celery-beat` after `collectstatic` is enough,
 since there's no schema change for old code to race against.
 
+**If `requirements.txt` changed, the restart above is never optional — do it in this same deploy
+session, not "next time services happen to restart."** A running process keeps whatever version of
+a package it already imported into memory for its entire life; `pip install` upgrading the
+on-disk package does nothing to it until it restarts. A dependency bump that also changes how
+already-*stored* data is read/written (not just code behavior) can then sit invisibly broken —
+the old process keeps working fine on old data with the old in-memory code, and the incompatibility
+only surfaces whenever some *unrelated* future deploy finally triggers a restart, at which point it
+looks like that unrelated deploy caused it. This exact failure mode took the storefront down for a
+few minutes during an unrelated deploy on 2026-08-19 — see
+`docs/decisions/0013-constance-pickle-to-json-incident.md` for the full incident writeup. After any
+`requirements.txt` change specifically, treat the restart-and-verify step below as mandatory, and
+verify a page that actually exercises the changed dependency, not just any 200 response.
+
 **Verify after restart:**
 
 ```bash
-sudo supervisorctl status              # all three RUNNING with fresh pids
-curl -I https://bancostore.com/        # 200, not 500
+sudo supervisorctl status                     # all three RUNNING with fresh pids
+curl -I https://bancostore.com/               # 200, not 500 -- catalog/storefront pages read
+                                               # constance on every request, so this alone would
+                                               # have caught ADR-0013's incident
+curl -I https://bancostore.com/account/login/ # a second, independent page family
+tail -50 /home/bancostore/bancostore/logs/daphne_error.log   # confirm no fresh tracebacks
 ```
 
 ## Updating the Nginx config
