@@ -1,16 +1,25 @@
+from urllib.parse import quote
+
 from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
+from django.urls import reverse
 from django.utils import timezone
 
+from allauth.account import app_settings
+from allauth.account.adapter import get_adapter
+from allauth.account.app_settings import AuthenticationMethod
 from allauth.account.forms import (
     LoginForm,
     ResetPasswordForm,
     ResetPasswordKeyForm,
     SignupForm,
+    default_token_generator,
 )
+from allauth.account.utils import user_pk_to_url_str, user_username
+from allauth.utils import build_absolute_uri
 from phonenumber_field.formfields import PhoneNumberField
 
 from .models import Address, AdminProfile, CustomerProfile
@@ -145,6 +154,74 @@ class AdminAuthenticationForm(AuthenticationForm):
                 if self.locked:
                     raise ValidationError("Account temporarily locked.")
         return super().clean()
+
+
+class AdminResetPasswordForm(ResetPasswordForm):
+    """The admin login page's own "Forgot password?" link (previously dead)
+    points here rather than at allauth's customer-facing account_reset_password
+    -- same underlying email lookup/token/rate-limit machinery (ResetPasswordForm
+    is untouched), styled to match the admin/2FA screens and, critically,
+    emailing a link back to this app's own admin-branded confirm screen
+    (admin_password_reset_from_key) instead of allauth's customer one."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["email"].widget.attrs["class"] = ADMIN_INPUT_CLASSES
+
+    def clean_email(self):
+        # code-review-and-quality finding: ResetPasswordForm.clean_email()
+        # alone doesn't check is_staff, so a customer/distributor typing
+        # their own email here would still get a fully working reset link
+        # -- just one that opens on admin-branded chrome/copy ("protect
+        # this admin account") for an account that isn't one. Filtering
+        # self.users down to staff-only after the base lookup keeps the
+        # exact same non-enumeration response either way (this project's
+        # ACCOUNT_PREVENT_ENUMERATION default is True): a non-staff email
+        # still lands on the generic "check your email" page, it just
+        # never actually receives a real reset link through this
+        # admin-branded front door.
+        email = super().clean_email()
+        self.users = [user for user in self.users if user.is_staff]
+        return email
+
+    def _send_password_reset_mail(self, request, email, users, **kwargs):
+        # Mirrors ResetPasswordForm._send_password_reset_mail (same token
+        # generation, same email template, same username-context branch for
+        # non-email-based auth) -- the only real change is the target URL
+        # name for the link embedded in the email. allauth's own version
+        # hardcodes "account_reset_password_from_key" with no hook to
+        # override just the URL name, so this duplicates the ~25 lines
+        # rather than the whole form/view (security-auditor finding: an
+        # earlier version of this method silently dropped the username
+        # branch below, which would only ever have mattered if
+        # ACCOUNT_AUTHENTICATION_METHOD stopped being "email").
+        token_generator = kwargs.get("token_generator", default_token_generator)
+        for user in users:
+            temp_key = token_generator.make_token(user)
+            uid = user_pk_to_url_str(user)
+            key = f"{uid}-{temp_key}"
+            path = reverse(
+                "admin_password_reset_from_key",
+                kwargs={"uidb36": "UID", "key": "KEY"},
+            ).replace("UID-KEY", quote(key))
+            url = build_absolute_uri(request, path)
+            context = {
+                "user": user,
+                "password_reset_url": url,
+                "uid": uid,
+                "key": temp_key,
+                "request": request,
+            }
+            if app_settings.AUTHENTICATION_METHOD != AuthenticationMethod.EMAIL:
+                context["username"] = user_username(user)
+            get_adapter().send_mail("account/email/password_reset_key", email, context)
+
+
+class AdminResetPasswordKeyForm(ResetPasswordKeyForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["password1"].widget.attrs["class"] = ADMIN_INPUT_CLASSES
+        self.fields["password2"].widget.attrs["class"] = ADMIN_INPUT_CLASSES
 
 
 class AddressForm(forms.ModelForm):
