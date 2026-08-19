@@ -295,10 +295,19 @@ def test_two_simultaneous_bootstraps_never_both_succeed():
     approve_kyc take on other rows are untouched): the first thread to
     reach it is forced to pause -- genuine DB lock still held, its
     transaction still open -- until the second thread has actually
-    reached the same point, guaranteeing real overlap instead of hoping
-    for it."""
+    reached the same point.
+
+    A further CodeRabbit finding caught that this first fix was still
+    incomplete: the test body released the first thread as soon as ITS
+    OWN lock was acquired, with no confirmation the second thread had
+    even started its own .get() call yet -- so the first thread could
+    still finish and commit before the second ever attempted real
+    contention. Fixed with a second signal (second_reached_lock),
+    fired the instant the second thread's own contended query begins,
+    that the test body also waits for before releasing the first."""
     results = {}
     first_reached_lock = threading.Event()
+    second_reached_lock = threading.Event()
     release_first = threading.Event()
     claim_lock = threading.Lock()
     call_order = {"n": 0}
@@ -310,15 +319,22 @@ def test_two_simultaneous_bootstraps_never_both_succeed():
             call_order["n"] += 1
             is_first_caller = call_order["n"] == 1
         locked_queryset = real_lock_helper(queryset)
+        real_get = locked_queryset.get
         if is_first_caller:
-            real_get = locked_queryset.get
 
             def paused_get(*args, **kwargs):
                 # The real query runs here -- the DB lock is genuinely
                 # acquired, and this thread's transaction stays open
                 # (nothing has returned control back to the `with
                 # transaction.atomic():` block yet) for as long as this
-                # stays paused below.
+                # stays paused below. Waits for second_reached_lock too,
+                # not just its own timeout -- a CodeRabbit finding on the
+                # first version of this synchronization caught that
+                # releasing the first thread as soon as ITS OWN lock was
+                # acquired, with no confirmation the second thread had
+                # even started its own .get() yet, could still let the
+                # first thread finish and commit before the second ever
+                # attempted real contention.
                 row = real_get(*args, **kwargs)
                 first_reached_lock.set()
                 release_first.wait(timeout=5)
@@ -330,6 +346,16 @@ def test_two_simultaneous_bootstraps_never_both_succeed():
             # its lock and is holding it open -- this is what guarantees
             # real overlap instead of a scheduling accident.
             first_reached_lock.wait(timeout=5)
+
+            def signaling_get(*args, **kwargs):
+                # Signals the instant this thread actually starts its
+                # own contended query -- not merely that it reached this
+                # wrapper -- so the test body knows real overlap has
+                # begun before it lets the first thread go.
+                second_reached_lock.set()
+                return real_get(*args, **kwargs)
+
+            locked_queryset.get = signaling_get
         return locked_queryset
 
     def attempt(key, phone):
@@ -365,10 +391,12 @@ def test_two_simultaneous_bootstraps_never_both_succeed():
         ]
         for t in threads:
             t.start()
-        # Once the first thread is confirmed paused while holding its
-        # lock open, both are guaranteed to have overlapped -- release it
-        # so the run can finish.
+        # Wait for BOTH signals, not just the first thread's own lock
+        # acquisition: the second thread must have genuinely started its
+        # own contended query too, or the first thread could be released
+        # and finish before the second ever attempts real overlap.
         first_reached_lock.wait(timeout=5)
+        second_reached_lock.wait(timeout=5)
         release_first.set()
         for t in threads:
             t.join()
