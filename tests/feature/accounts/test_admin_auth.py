@@ -680,6 +680,34 @@ def test_brand_new_admin_with_no_devices_is_redirected_to_2fa_setup(client):
 
 
 @pytest.mark.django_db
+def test_brand_new_admin_hitting_the_raw_django_admin_gets_its_own_login_redirect(
+    client,
+):
+    """A CodeRabbit review suggested testing that handler403's "admin"
+    app_name branch (covering the raw, un-branded Django Admin, not just
+    admin_portal) also redirects a brand-new admin to two_factor:setup --
+    on the assumption that the raw admin raises PermissionDenied the same
+    way admin_portal's views do. Checked directly against
+    two_factor.admin.AdminSiteOTPRequiredMixin's real source: it does NOT
+    -- has_permission() simply returns False for an unverified user, and
+    Django's own AdminSite.admin_view() responds to that by calling this
+    mixin's own login(), which redirects straight to the admin's own
+    login page (redirect_to_login()) -- PermissionDenied is never raised,
+    so handler403 is never even invoked for this exact path. This test
+    documents the real, verified behavior instead of the incorrect
+    assumption -- the "admin" app_name stays in handler403's set as
+    defense-in-depth for any OTHER PermissionDenied a custom admin view
+    might raise, but the raw admin's own index page isn't one of them."""
+    user = _create_admin()
+    client.force_login(user)
+
+    response = client.get(ADMIN_URL)
+
+    assert response.status_code == 302
+    assert response.url.startswith("/admin/login/")
+
+
+@pytest.mark.django_db
 def test_admin_with_an_unconfirmed_device_is_still_redirected_to_setup(client):
     """Someone who started 2FA setup but never scanned/confirmed the code
     has, from this handler's point of view, zero USABLE devices -- they

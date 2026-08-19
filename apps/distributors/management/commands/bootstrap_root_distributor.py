@@ -3,9 +3,11 @@ import getpass
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.sites.models import Site
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import IntegrityError, transaction
+from django.urls import reverse
 from django.utils import timezone
 
 from phonenumber_field.formfields import PhoneNumberField as PhoneNumberFormField
@@ -196,9 +198,17 @@ class Command(BaseCommand):
                 # is a locked row rather than a partial unique constraint
                 # (MySQL, this project's production database, has no
                 # partial-index support).
-                root_marker = select_for_update_nowait_if_supported(
-                    RootDistributor.objects.filter(pk=1)
-                ).get()
+                try:
+                    root_marker = select_for_update_nowait_if_supported(
+                        RootDistributor.objects.filter(pk=1)
+                    ).get()
+                except RootDistributor.DoesNotExist as exc:
+                    raise CommandError(
+                        "The RootDistributor marker row (pk=1) does not "
+                        "exist -- migration "
+                        "0017_seed_root_distributor_singleton should have "
+                        "created it. Apply migrations and re-run."
+                    ) from exc
                 if root_marker.distributor_id is not None and not force:
                     raise CommandError(
                         f"A root distributor already exists (id="
@@ -331,6 +341,11 @@ class Command(BaseCommand):
         ) as exc:
             raise CommandError(f"Could not create the account: {exc}") from exc
 
+        login_url = (
+            "https://"
+            + Site.objects.get_current().domain
+            + reverse("distributors:login")
+        )
         self.stdout.write(
             self.style.SUCCESS(
                 "\nRoot distributor created successfully.\n"
@@ -339,9 +354,8 @@ class Command(BaseCommand):
                 f"  IR ID:               {distributor.ir_id}\n"
                 f"  Rank:                {distributor.rank}\n"
                 f"  KYC status:          {distributor.kyc_status}\n\n"
-                "This account can log in immediately at "
-                "https://bancostore.com/distributors/login/ using the phone "
-                "number and password just set (no OTP/KYC wait, since both "
+                f"This account can log in immediately at {login_url} using "
+                "the phone number and password just set (no OTP/KYC wait, since both "
                 "were bypassed administratively for this one bootstrap "
                 "account). Its IR ID above is the Sponsor's IR ID that the "
                 "very first real recruit should enter on the public "

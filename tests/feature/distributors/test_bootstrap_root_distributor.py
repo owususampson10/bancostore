@@ -271,22 +271,28 @@ def test_two_simultaneous_bootstraps_never_both_succeed():
     threading tests) -- @pytest.mark.django_db(transaction=True) is
     required for this, since the default transactional-test-wrapper
     fixture would otherwise hide every thread's writes from every other
-    thread."""
+    thread. The getpass patch is applied ONCE, wrapping both threads,
+    rather than inside each thread's own attempt() -- unittest.mock.patch
+    is not thread-safe for concurrent enter/exit on the same target (a
+    CodeRabbit finding on the original version of this test): two threads
+    each entering/exiting their own `with patch(...)` block on the same
+    global attribute can save and restore each other's mock instead of
+    the real function, either leaking a mock into later tests or leaving
+    getpass permanently patched."""
     results = {}
 
     def attempt(key, phone):
         try:
-            with patch("getpass.getpass", return_value=STRONG_PASSWORD):
-                call_command(
-                    "bootstrap_root_distributor",
-                    "--phone",
-                    phone,
-                    "--full-name",
-                    "Founder",
-                    "--starter-pack",
-                    "A",
-                    "--yes",
-                )
+            call_command(
+                "bootstrap_root_distributor",
+                "--phone",
+                phone,
+                "--full-name",
+                "Founder",
+                "--starter-pack",
+                "A",
+                "--yes",
+            )
             results[key] = "success"
         except CommandError as exc:
             results[key] = f"error: {exc}"
@@ -294,18 +300,25 @@ def test_two_simultaneous_bootstraps_never_both_succeed():
             connection.close()  # each thread must not share the main
             # thread's connection/transaction state
 
-    threads = [
-        threading.Thread(target=attempt, args=("first", "+233241000001")),
-        threading.Thread(target=attempt, args=("second", "+233241000002")),
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    with patch("getpass.getpass", return_value=STRONG_PASSWORD):
+        threads = [
+            threading.Thread(target=attempt, args=("first", "+233241000001")),
+            threading.Thread(target=attempt, args=("second", "+233241000002")),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
     outcomes = list(results.values())
     assert outcomes.count("success") == 1, results
-    assert sum(1 for o in outcomes if o.startswith("error")) == 1, results
+    errors = [o for o in outcomes if o.startswith("error")]
+    assert len(errors) == 1, results
+    # Proves the loser failed on the singleton lock specifically, not on
+    # some unrelated guard (e.g. a duplicate-phone or missing-migration
+    # error) that would happen to also satisfy a bare "was there an error"
+    # check.
+    assert "already exists" in errors[0], results
     assert Distributor.objects.filter(sponsor__isnull=True).count() == 1
     marker = RootDistributor.objects.get(pk=1)
     assert marker.distributor_id is not None
