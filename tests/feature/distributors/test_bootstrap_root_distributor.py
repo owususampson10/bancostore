@@ -304,7 +304,29 @@ def test_two_simultaneous_bootstraps_never_both_succeed():
     still finish and commit before the second ever attempted real
     contention. Fixed with a second signal (second_reached_lock),
     fired the instant the second thread's own contended query begins,
-    that the test body also waits for before releasing the first."""
+    that the test body also waits for before releasing the first.
+
+    A third round of the same finding (the signal fires just BEFORE
+    real_get() runs, not after) was reviewed and deliberately left
+    as-is, user-confirmed -- not silently dropped. Closing that last
+    sliver would need different handling per database backend (a lock
+    conflict raises on MySQL but simply succeeds on SQLite, which has
+    no real per-row locking at all), for a window so narrow it would
+    need the scheduler to interleave inside a handful of CPU
+    instructions AND for the first thread's several remaining writes
+    (creating the account, tree placement, PV credit, KYC approval) to
+    all finish before the second thread's already-in-flight query
+    resolves. This test's real value was already proven the honest way,
+    twice: temporarily disabling the actual safety check in the command
+    and confirming this test correctly failed both times, before
+    restoring it. Matches this codebase's own established, already-
+    documented position on every other threaded test like it (see
+    tests/unit/distributors/test_consume_paid_starter_pack.py's own
+    docstring) -- a local SQLite run can't be perfect proof of real
+    concurrent safety on its own; the full guarantee comes from this
+    same test also running against real MySQL in CI. bootstrap_root_
+    distributor is also, in practice, run once by one person -- not
+    under sustained concurrent load."""
     results = {}
     first_reached_lock = threading.Event()
     second_reached_lock = threading.Event()
