@@ -18,8 +18,18 @@ from apps.accounts.views import (
     AdminPasswordResetFromKeyDoneView,
     AdminPasswordResetFromKeyView,
     AdminPasswordResetView,
+    admin_portal_permission_denied,
 )
 from apps.pages.sitemaps import sitemaps
+
+# Redirects a brand-new admin (zero confirmed 2FA devices yet) straight to
+# 2FA setup instead of a bare 403 the first time they hit any admin_portal
+# page -- see admin_portal_permission_denied's own docstring. Site-wide by
+# necessity (Django's handler403 has no URL-prefix scoping), but the
+# handler's own condition (is_staff + zero confirmed devices) means it can
+# only ever fire for a genuine admin account, never a customer/distributor
+# hitting an unrelated 403.
+handler403 = admin_portal_permission_denied
 
 # Mandatory 2FA for admin (Task 6, SPEC.md Section 2.3) — this must never be
 # made conditional on a settings toggle (e.g. ADMIN_2FA_ENABLED), per

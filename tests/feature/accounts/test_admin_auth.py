@@ -661,6 +661,147 @@ def test_2fa_setup_complete_continue_button_links_to_the_real_admin_portal():
     assert reverse("admin:index") not in html
 
 
+# --- admin_portal_permission_denied (handler403): a brand-new admin with
+# zero confirmed OTP devices gets redirected to 2FA setup instead of a
+# bare 403, without weakening the mandatory-2FA guarantee for anyone else.
+
+
+@pytest.mark.django_db
+def test_brand_new_admin_with_no_devices_is_redirected_to_2fa_setup(client):
+    from django.urls import reverse
+
+    user = _create_admin()
+    client.force_login(user)
+
+    response = client.get(reverse("admin_portal:dashboard"))
+
+    assert response.status_code == 302
+    assert response.url == reverse("two_factor:setup")
+
+
+@pytest.mark.django_db
+def test_brand_new_admin_hitting_the_raw_django_admin_gets_its_own_login_redirect(
+    client,
+):
+    """A CodeRabbit review suggested testing that handler403's "admin"
+    app_name branch (covering the raw, un-branded Django Admin, not just
+    admin_portal) also redirects a brand-new admin to two_factor:setup --
+    on the assumption that the raw admin raises PermissionDenied the same
+    way admin_portal's views do. Checked directly against
+    two_factor.admin.AdminSiteOTPRequiredMixin's real source: it does NOT
+    -- has_permission() simply returns False for an unverified user, and
+    Django's own AdminSite.admin_view() responds to that by calling this
+    mixin's own login(), which redirects straight to the admin's own
+    login page (redirect_to_login()) -- PermissionDenied is never raised,
+    so handler403 is never even invoked for this exact path. This test
+    documents the real, verified behavior instead of the incorrect
+    assumption -- the "admin" app_name stays in handler403's set as
+    defense-in-depth for any OTHER PermissionDenied a custom admin view
+    might raise, but the raw admin's own index page isn't one of them."""
+    user = _create_admin()
+    client.force_login(user)
+
+    response = client.get(ADMIN_URL)
+
+    assert response.status_code == 302
+    assert response.url.startswith("/admin/login/")
+
+
+@pytest.mark.django_db
+def test_admin_with_an_unconfirmed_device_is_still_redirected_to_setup(client):
+    """Someone who started 2FA setup but never scanned/confirmed the code
+    has, from this handler's point of view, zero USABLE devices -- they
+    should be sent back to finish setup, not blocked."""
+    from django.urls import reverse
+
+    user = _create_admin()
+    TOTPDevice.objects.create(user=user, name="default", confirmed=False)
+    client.force_login(user)
+
+    response = client.get(reverse("admin_portal:dashboard"))
+
+    assert response.status_code == 302
+    assert response.url == reverse("two_factor:setup")
+
+
+@pytest.mark.django_db
+def test_staff_with_a_confirmed_device_but_unverified_session_still_gets_a_real_403(
+    client,
+):
+    """The security-critical negative case: an admin who already has a
+    real, confirmed authenticator device must NOT be redirected around
+    2FA just because this particular session hasn't completed a real
+    challenge yet (e.g. force_login in a test, or a stale/tampered
+    session in production) -- that would be an actual 2FA bypass. They
+    must still see a real 403, exactly as before this fix."""
+    from django.urls import reverse
+
+    user = _create_admin()
+    TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+    client.force_login(user)  # deliberately NOT _verify_otp_in_session
+
+    response = client.get(reverse("admin_portal:dashboard"))
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_non_staff_user_hitting_admin_portal_gets_a_normal_403_not_redirected(client):
+    """The handler's is_staff condition must never fire for a completely
+    unrelated account (e.g. a distributor or customer somehow hitting an
+    admin_portal URL) -- they should see a normal 403, never be sent to
+    the admin's own 2FA setup page."""
+    from django.urls import reverse
+
+    user = User.objects.create_user(
+        username="+233241000099", password="Passw0rd!", is_staff=False
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("admin_portal:dashboard"))
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_unrelated_permission_denied_elsewhere_is_never_redirected_to_2fa_setup(
+    client,
+):
+    """Regression test for a real bug a fresh-context adversarial review
+    caught: a first version of this handler checked only user state
+    (is_staff/is_verified/no devices), with no check on which page raised
+    PermissionDenied. apps/distributors/views.py::dashboard raises the
+    exact same PermissionDenied for a completely unrelated reason (not
+    being a distributor) -- an admin with incomplete 2FA setup hitting
+    THAT page must see a normal 403, not get told to go set up an
+    authenticator app, which has nothing to do with why they were
+    actually denied."""
+    from django.urls import reverse
+
+    user = _create_admin()  # is_staff=True, zero OTP devices, not a distributor
+    client.force_login(user)
+
+    response = client.get(reverse("distributors:dashboard"))
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_admin_with_verified_2fa_is_never_affected_by_this_handler(client):
+    """Sanity check that the happy path (already covered by
+    test_staff_user_with_verified_2fa_can_reach_admin_panel for the raw
+    Django Admin) also still works for the branded admin_portal."""
+    from django.urls import reverse
+
+    user = _create_admin()
+    client.force_login(user)
+    _verify_otp_in_session(client, user)
+
+    response = client.get(reverse("admin_portal:dashboard"))
+
+    assert response.status_code == 200
+
+
 def test_admin_login_forgot_password_link_is_wired():
     """Regression test, found via user report: the admin login page's
     "Forgot password?" link was a dead href="#" -- no admin password-reset
