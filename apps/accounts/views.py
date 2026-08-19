@@ -4,16 +4,27 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
+from django.urls import reverse, reverse_lazy
 from django.views.decorators.http import require_POST
 from django.views.defaults import permission_denied as default_permission_denied
 
+from allauth.account.views import (
+    PasswordResetDoneView,
+    PasswordResetFromKeyDoneView,
+    PasswordResetFromKeyView,
+    PasswordResetView,
+)
 from django_otp import devices_for_user
 from django_ratelimit.core import is_ratelimited
 from two_factor.forms import AuthenticationTokenForm, BackupTokenForm
 from two_factor.views import LoginView as BaseLoginView
 
-from .forms import AddressForm, AdminAuthenticationForm
+from .forms import (
+    AddressForm,
+    AdminAuthenticationForm,
+    AdminResetPasswordForm,
+    AdminResetPasswordKeyForm,
+)
 from .models import Address
 
 logger = logging.getLogger(__name__)
@@ -212,6 +223,50 @@ class AdminLoginView(BaseLoginView):
                 self.get_user().pk,
             )
         return super().done(form_list, **kwargs)
+
+
+class AdminPasswordResetView(PasswordResetView):
+    """Admin-branded counterpart of allauth's account_reset_password (the
+    admin login page's own "Forgot password?" link points here). Reuses
+    ResetPasswordView/ResetPasswordForm's email-lookup, token, and rate-
+    limiting logic untouched -- only the template and the emailed link's
+    target (via AdminResetPasswordForm) differ, per
+    docs/decisions/0012-admin-password-reset-design.md."""
+
+    template_name = "account/admin_password_reset.html"
+    form_class = AdminResetPasswordForm
+    success_url = reverse_lazy("admin_password_reset_done")
+
+    def get_form_class(self):
+        # PasswordResetView.get_form_class() normally does
+        # get_form_class(app_settings.FORMS, "reset_password", self.form_class)
+        # -- app_settings.FORMS is this project's own global ACCOUNT_FORMS
+        # setting (settings.py), which already has a "reset_password" key
+        # (CustomerResetPasswordForm) and so silently wins over whatever
+        # form_class this subclass sets, regardless of it. Bypassing that
+        # lookup entirely is the only way this view's own form_class
+        # actually gets used (found by a failing test, not assumed).
+        return self.form_class
+
+
+class AdminPasswordResetDoneView(PasswordResetDoneView):
+    template_name = "account/admin_password_reset_done.html"
+
+
+class AdminPasswordResetFromKeyView(PasswordResetFromKeyView):
+    template_name = "account/admin_password_reset_from_key.html"
+    form_class = AdminResetPasswordKeyForm
+    success_url = reverse_lazy("admin_password_reset_from_key_done")
+
+    def get_form_class(self):
+        # Same global-ACCOUNT_FORMS-wins-over-subclass issue as
+        # AdminPasswordResetView.get_form_class() above, for the
+        # "reset_password_from_key" form id.
+        return self.form_class
+
+
+class AdminPasswordResetFromKeyDoneView(PasswordResetFromKeyDoneView):
+    template_name = "account/admin_password_reset_from_key_done.html"
 
 
 @login_required(login_url="account_login")

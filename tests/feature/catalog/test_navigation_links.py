@@ -79,22 +79,30 @@ def test_logged_in_user_sees_my_orders_and_log_out_instead(client):
 def test_about_link_points_to_the_real_about_page(client):
     """Task 29: base_store.html's About link was a dead href="#" with
     title="Coming soon" in three places (desktop nav, mobile nav,
-    footer)."""
+    footer). A 4th link was added later: the home page's "Discover
+    Bancostore" bento's "Know everything about Bancostore" tile, itself a
+    dead href="#" until it was wired to the About page in the same dead-
+    link audit that fixed the admin login's Forgot password link."""
     response = client.get(reverse("catalog:home"))
 
     content = response.content.decode()
     about_url = reverse("pages:about")
-    # Desktop nav, mobile nav, and footer "About Us" all point here now.
-    assert content.count(f'href="{about_url}"') == 3
+    # Desktop nav, mobile nav, footer "About Us", and the bento tile.
+    assert content.count(f'href="{about_url}"') == 4
 
 
 @pytest.mark.django_db
 def test_contact_link_points_to_the_real_contact_page(client):
+    """A 4th link (beyond desktop nav, mobile nav, footer) was added
+    later: the home page's "Discover Bancostore" bento's "Contact Us"
+    tile, itself a dead href="#" until it was wired to the Contact page in
+    the same dead-link audit that fixed the admin login's Forgot password
+    link."""
     response = client.get(reverse("catalog:home"))
 
     content = response.content.decode()
     contact_url = reverse("pages:contact")
-    assert content.count(f'href="{contact_url}"') == 3
+    assert content.count(f'href="{contact_url}"') == 4
 
 
 @pytest.mark.django_db

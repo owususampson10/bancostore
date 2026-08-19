@@ -800,3 +800,230 @@ def test_admin_with_verified_2fa_is_never_affected_by_this_handler(client):
     response = client.get(reverse("admin_portal:dashboard"))
 
     assert response.status_code == 200
+
+
+def test_admin_login_forgot_password_link_is_wired():
+    """Regression test, found via user report: the admin login page's
+    "Forgot password?" link was a dead href="#" -- no admin password-reset
+    flow existed at all (ADR-0012). Fixed to admin_password_reset, the
+    admin-branded counterpart of allauth's account_reset_password."""
+    from django.template.loader import render_to_string
+    from django.urls import reverse
+
+    html = render_to_string("two_factor/core/login.html", {})
+
+    assert f'href="{reverse("admin_password_reset")}">Forgot password?</a>' in html
+    assert 'href="#">Forgot password?</a>' not in html
+
+
+@pytest.mark.django_db
+def test_admin_password_reset_completes_via_email_link(client):
+    """End-to-end: request a reset from the admin-branded page, follow the
+    emailed link, set a new password, and confirm it actually took effect
+    (ADR-0012)."""
+    import re
+
+    from django.urls import reverse
+
+    _create_admin()
+
+    client.post(reverse("admin_password_reset"), {"email": "admin@example.test"})
+
+    assert len(mail.outbox) == 1
+    match = re.search(r"http\S+password/reset/key/\S+", mail.outbox[0].body)
+    assert match, "admin password reset email did not contain a reset link"
+    reset_url = match.group(0)
+
+    set_password_response = client.get(reset_url, follow=True)
+    assert set_password_response.status_code == 200
+
+    final_url = set_password_response.redirect_chain[-1][0]
+    client.post(
+        final_url,
+        {"password1": "NewAdminPassw0rd!", "password2": "NewAdminPassw0rd!"},
+    )
+
+    from django.contrib.auth import authenticate
+
+    user = authenticate(username="admin@example.test", password="NewAdminPassw0rd!")
+    assert user is not None
+
+
+@pytest.mark.django_db
+def test_admin_password_reset_email_links_to_admin_branded_confirm_page(client):
+    """The emailed link must resolve to this app's own admin-branded
+    admin_password_reset_from_key view, not allauth's customer-facing
+    account_reset_password_from_key -- otherwise an admin following the
+    link from the admin login page would be dropped onto customer-styled
+    chrome mid-flow (ADR-0012)."""
+    import re
+    from urllib.parse import urlparse
+
+    from django.urls import resolve, reverse
+
+    _create_admin()
+
+    client.post(reverse("admin_password_reset"), {"email": "admin@example.test"})
+
+    match = re.search(r"http\S+password/reset/key/\S+", mail.outbox[0].body)
+    reset_path = urlparse(match.group(0)).path
+
+    assert resolve(reset_path).url_name == "admin_password_reset_from_key"
+
+
+@pytest.mark.django_db
+def test_admin_password_reset_pages_use_admin_branded_chrome(client):
+    """The reset-request page must extend base_admin_auth.html (the same
+    chrome as the admin login screen), not allauth's customer-facing
+    base_auth.html shell -- established convention that every admin-facing
+    screen looks like the rest of the admin app (ADR-0012)."""
+    from django.urls import reverse
+
+    response = client.get(reverse("admin_password_reset"))
+
+    assert response.status_code == 200
+    assert b"Bancostore Internal Systems" in response.content
+    assert b"Forgot Password?" in response.content
+
+
+@pytest.mark.django_db
+def test_admin_password_reset_invalidates_remembered_device_cookie(client):
+    """A password reset is a credible signal the account may have been
+    compromised -- confirms (rather than assumes) that django-two-factor-
+    auth's remember-device cookie, whose signature is hashed over
+    user.password, is automatically invalidated the moment the password
+    changes, so a stale remembered browser can never skip the TOTP prompt
+    after a reset (ADR-0012 finding, verified against the library's own
+    source rather than guessed)."""
+    import re
+
+    from django.core.signing import BadSignature
+    from django.urls import reverse
+
+    from two_factor.views.utils import (
+        get_remember_device_cookie,
+        validate_remember_device_cookie,
+    )
+
+    user = _create_admin()
+    device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+    old_cookie = get_remember_device_cookie(user, otp_device_id=device.persistent_id)
+
+    client.post(reverse("admin_password_reset"), {"email": "admin@example.test"})
+    match_url = re.search(r"http\S+password/reset/key/\S+", mail.outbox[0].body)
+    reset_response = client.get(match_url.group(0), follow=True)
+    final_url = reset_response.redirect_chain[-1][0]
+    client.post(
+        final_url,
+        {"password1": "NewAdminPassw0rd!", "password2": "NewAdminPassw0rd!"},
+    )
+
+    user.refresh_from_db()
+    with pytest.raises(BadSignature):
+        validate_remember_device_cookie(
+            old_cookie, user=user, otp_device_id=device.persistent_id
+        )
+
+
+@pytest.mark.django_db
+def test_admin_password_reset_logs_audit_entry_for_admin_but_not_customer(
+    client, caplog
+):
+    """Matches this codebase's existing convention of auditing security-
+    relevant admin events (AdminLoginView.done()'s remembered-device log,
+    KYC/IR ID history) -- a completed password reset for an admin account
+    is exactly this class of event, and had no audit trail at all before
+    this fix (ADR-0012)."""
+    import logging
+    import re
+
+    from django.urls import reverse
+
+    admin = _create_admin()
+    customer = User.objects.create_user(
+        username="kwame", email="kwame@example.test", password="OldPassw0rd!"
+    )
+
+    with caplog.at_level(logging.INFO, logger="apps.accounts.signals"):
+        client.post(reverse("admin_password_reset"), {"email": "admin@example.test"})
+        admin_reset_url = re.search(
+            r"http\S+password/reset/key/\S+", mail.outbox[0].body
+        ).group(0)
+        response = client.get(admin_reset_url, follow=True)
+        client.post(
+            response.redirect_chain[-1][0],
+            {"password1": "NewAdminPassw0rd!", "password2": "NewAdminPassw0rd!"},
+        )
+
+        mail.outbox.clear()
+        client.post(reverse("account_reset_password"), {"email": "kwame@example.test"})
+        customer_reset_url = re.search(
+            r"http\S+password/reset/key/\S+", mail.outbox[0].body
+        ).group(0)
+        response = client.get(customer_reset_url, follow=True)
+        client.post(
+            response.redirect_chain[-1][0],
+            {"password1": "NewCustomerPassw0rd!", "password2": "NewCustomerPassw0rd!"},
+        )
+
+    admin_log_messages = [
+        record.message
+        for record in caplog.records
+        if record.name == "apps.accounts.signals"
+    ]
+    assert any(f"user_id={admin.pk}" in message for message in admin_log_messages)
+    assert not any(
+        f"user_id={customer.pk}" in message for message in admin_log_messages
+    )
+
+
+@pytest.mark.django_db
+def test_admin_password_reset_does_not_leak_whether_email_exists(client):
+    """No account-existence oracle: requesting a reset for an email that
+    doesn't belong to any account must behave the same (redirect to the
+    generic "check your email" page, no visible form error) as a real one
+    (ADR-0012). If enumeration protection were broken, clean_email() would
+    raise a validation error instead -- the form would re-render with a 200
+    and an EMPTY redirect_chain, not redirect to the done page, so this
+    assertion alone is a sufficient regression guard. allauth's own
+    EMAIL_UNKNOWN_ACCOUNTS default (unmodified here) still emails the
+    entered address itself a "no account found" notice -- that's the
+    library's own existing anti-enumeration mechanism, not a leak to
+    whoever submitted the form."""
+    from django.urls import reverse
+
+    response = client.post(
+        reverse("admin_password_reset"),
+        {"email": "nobody@example.test"},
+        follow=True,
+    )
+
+    assert response.status_code == 200
+    assert response.redirect_chain[-1][0] == reverse("admin_password_reset_done")
+
+
+@pytest.mark.django_db
+def test_admin_password_reset_does_not_email_a_non_staff_user(client):
+    """code-review-and-quality finding: a customer/distributor typing their
+    own email on the admin-branded reset page must not receive a real
+    working reset link through it -- only the response, not the actual
+    ability to reset a password via this front door, is meant to look the
+    same regardless of whether the account is staff (ADR-0012)."""
+    from django.urls import reverse
+
+    User.objects.create_user(
+        username="kwame@example.test",
+        email="kwame@example.test",
+        password="OldPassw0rd!",
+    )
+
+    response = client.post(
+        reverse("admin_password_reset"),
+        {"email": "kwame@example.test"},
+        follow=True,
+    )
+
+    assert response.status_code == 200
+    assert response.redirect_chain[-1][0] == reverse("admin_password_reset_done")
+    assert len(mail.outbox) == 1
+    assert "reset" not in mail.outbox[0].subject.lower()

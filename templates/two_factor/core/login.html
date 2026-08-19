@@ -68,7 +68,7 @@ Account Access Restricted
 <div class="space-y-stack-xs">
 <div class="flex justify-between items-center">
 <label class="font-label-lg text-label-lg text-on-surface-variant" for="{{ wizard.form.password.id_for_label }}">Password</label>
-<a class="font-label-md text-label-md text-primary hover:underline" href="#">Forgot password?</a>
+<a class="font-label-md text-label-md text-primary hover:underline" href="{% url 'admin_password_reset' %}">Forgot password?</a>
 </div>
 <div class="relative">
 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60">lock</span>

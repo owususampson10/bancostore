@@ -310,42 +310,21 @@ the same way this codebase's existing `.float-item` animation does.
 <!-- Discover Bancostore (Bento) -->
 <section class="py-20 md:py-32 px-margin-mobile md:px-16 max-w-[1440px] mx-auto">
 <h2 class="text-3xl md:text-4xl font-bold mb-12 text-center">Discover Bancostore</h2>
-<div class="grid grid-cols-1 md:grid-cols-4 grid-rows-2 gap-4 h-auto md:h-[600px]">
-<div class="md:col-span-2 md:row-span-2 relative rounded-xl overflow-hidden bg-inverse-surface flex items-end group">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 h-auto md:h-[400px]">
+<a href="{% url 'pages:about' %}" class="relative rounded-xl overflow-hidden bg-inverse-surface flex items-end group min-h-[320px] md:min-h-0">
 <div class="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-1000 group-hover:scale-105" style="background-image: url('{% static 'pages/home/bento-discover.webp' %}')"></div>
 <div class="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
 <div class="relative z-10 p-10">
 <h3 class="text-white text-2xl md:text-3xl mb-4 uppercase font-bold">Know everything about Bancostore</h3>
-<a href="#" title="Coming soon" class="inline-block bg-primary text-on-primary px-6 py-2 rounded-full hover:brightness-110 transition-all">Explore</a>
+<span class="inline-block bg-primary text-on-primary px-6 py-2 rounded-full group-hover:brightness-110 transition-all">Explore</span>
 </div>
-</div>
-<a href="#" title="Coming soon" class="bg-surface-variant p-8 rounded-xl flex flex-col justify-between hover:bg-primary/5 transition-colors">
-<div class="flex justify-between items-start">
-<span class="text-xs font-bold uppercase tracking-widest text-primary">Business</span>
-<span class="material-symbols-outlined text-primary">add</span>
-</div>
-<h3 class="text-xl font-bold uppercase">The Opportunity</h3>
 </a>
-<a href="#" title="Coming soon" class="bg-surface-variant p-8 rounded-xl flex flex-col justify-between hover:bg-primary/5 transition-colors">
-<div class="flex justify-between items-start">
-<span class="text-xs font-bold uppercase tracking-widest text-primary">Rewards</span>
-<span class="material-symbols-outlined text-primary">add</span>
-</div>
-<h3 class="text-xl font-bold uppercase">Compensation Plan</h3>
-</a>
-<a href="#" title="Coming soon" class="bg-surface-variant p-8 rounded-xl flex flex-col justify-between hover:bg-primary/5 transition-colors">
-<div class="flex justify-between items-start">
-<span class="text-xs font-bold uppercase tracking-widest text-primary">Community</span>
-<span class="material-symbols-outlined text-primary">add</span>
-</div>
-<h3 class="text-xl font-bold uppercase">Success Stories</h3>
-</a>
-<a href="#" title="Coming soon" class="bg-surface-variant p-8 rounded-xl flex flex-col justify-between hover:bg-primary/5 transition-colors">
+<a href="{% url 'pages:contact' %}" class="bg-surface-variant p-10 rounded-xl flex flex-col justify-between hover:bg-primary/5 transition-colors min-h-[200px]">
 <div class="flex justify-between items-start">
 <span class="text-xs font-bold uppercase tracking-widest text-primary">Connect</span>
 <span class="material-symbols-outlined text-primary">add</span>
 </div>
-<h3 class="text-xl font-bold uppercase">Contact Us</h3>
+<h3 class="text-xl md:text-2xl font-bold uppercase">Contact Us</h3>
 </a>
 </div>
 </section>
