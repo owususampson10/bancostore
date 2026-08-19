@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -7,6 +8,7 @@ from django.db import transaction
 from django.dispatch import receiver
 from django.utils import timezone
 
+from allauth.account.signals import password_reset
 from constance import config
 
 from apps.notifications.email import get_sender_email
@@ -18,6 +20,7 @@ from bancostore.concurrency import (
 from .models import AdminProfile
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 @receiver(user_login_failed)
@@ -88,6 +91,21 @@ def reset_admin_failed_attempts(sender, user, request=None, **kwargs):
     AdminProfile.objects.filter(user=user).update(
         failed_login_attempts=0, locked_until=None
     )
+
+
+@receiver(password_reset)
+def log_admin_password_reset(sender, request, user, **kwargs):
+    """Audit trail for a completed password reset on an admin account
+    (ADR-0012) -- matches this codebase's existing convention of logging
+    security-relevant admin events (AdminLoginView.done()'s remembered-
+    device log, KYC/IR ID history). Fires on allauth's shared password_reset
+    signal regardless of which front door (admin_password_reset or the
+    customer-facing account_reset_password) completed it, since an admin
+    account's password can be reset via either -- the signal fires on the
+    account being changed, not on which page was used."""
+    if not user.is_staff:
+        return
+    logger.info("Password reset completed for admin user_id=%s", user.pk)
 
 
 def _send_lockout_alert(user):
