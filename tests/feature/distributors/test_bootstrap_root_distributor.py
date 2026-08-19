@@ -9,6 +9,9 @@ import pytest
 from constance import config
 
 from apps.commissions.services import calculate_direct_referral_bonus
+from apps.distributors.management.commands import (
+    bootstrap_root_distributor as cmd_module,
+)
 from apps.distributors.models import Distributor, IrIdSequence, RootDistributor
 from apps.distributors.services import consume_paid_starter_pack
 from apps.pv_ledger.models import MonthlyPersonalPv
@@ -278,8 +281,56 @@ def test_two_simultaneous_bootstraps_never_both_succeed():
     each entering/exiting their own `with patch(...)` block on the same
     global attribute can save and restore each other's mock instead of
     the real function, either leaking a mock into later tests or leaving
-    getpass permanently patched."""
+    getpass permanently patched.
+
+    A later CodeRabbit finding caught that simply starting two threads
+    does not guarantee they actually overlap at the lock -- the scheduler
+    could run them fully sequentially, in which case this test would pass
+    for a reason that proves nothing about real concurrent safety (the
+    second call would see the first's already-committed row via the
+    ordinary pre-flight check, never touching contention at all). Fixed
+    by intercepting bootstrap_root_distributor's own call to
+    select_for_update_nowait_if_supported (patched only in that module's
+    namespace, so the internal locks snapshot_starter_pack_choice/
+    approve_kyc take on other rows are untouched): the first thread to
+    reach it is forced to pause -- genuine DB lock still held, its
+    transaction still open -- until the second thread has actually
+    reached the same point, guaranteeing real overlap instead of hoping
+    for it."""
     results = {}
+    first_reached_lock = threading.Event()
+    release_first = threading.Event()
+    claim_lock = threading.Lock()
+    call_order = {"n": 0}
+
+    real_lock_helper = cmd_module.select_for_update_nowait_if_supported
+
+    def synchronizing_lock_helper(queryset):
+        with claim_lock:
+            call_order["n"] += 1
+            is_first_caller = call_order["n"] == 1
+        locked_queryset = real_lock_helper(queryset)
+        if is_first_caller:
+            real_get = locked_queryset.get
+
+            def paused_get(*args, **kwargs):
+                # The real query runs here -- the DB lock is genuinely
+                # acquired, and this thread's transaction stays open
+                # (nothing has returned control back to the `with
+                # transaction.atomic():` block yet) for as long as this
+                # stays paused below.
+                row = real_get(*args, **kwargs)
+                first_reached_lock.set()
+                release_first.wait(timeout=5)
+                return row
+
+            locked_queryset.get = paused_get
+        else:
+            # Only proceed once the first caller has genuinely acquired
+            # its lock and is holding it open -- this is what guarantees
+            # real overlap instead of a scheduling accident.
+            first_reached_lock.wait(timeout=5)
+        return locked_queryset
 
     def attempt(key, phone):
         try:
@@ -300,13 +351,25 @@ def test_two_simultaneous_bootstraps_never_both_succeed():
             connection.close()  # each thread must not share the main
             # thread's connection/transaction state
 
-    with patch("getpass.getpass", return_value=STRONG_PASSWORD):
+    with (
+        patch("getpass.getpass", return_value=STRONG_PASSWORD),
+        patch.object(
+            cmd_module,
+            "select_for_update_nowait_if_supported",
+            side_effect=synchronizing_lock_helper,
+        ),
+    ):
         threads = [
             threading.Thread(target=attempt, args=("first", "+233241000001")),
             threading.Thread(target=attempt, args=("second", "+233241000002")),
         ]
         for t in threads:
             t.start()
+        # Once the first thread is confirmed paused while holding its
+        # lock open, both are guaranteed to have overlapped -- release it
+        # so the run can finish.
+        first_reached_lock.wait(timeout=5)
+        release_first.set()
         for t in threads:
             t.join()
 
