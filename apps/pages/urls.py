@@ -22,4 +22,9 @@ urlpatterns = [
         views.returns_refunds_shipping,
         name="returns_refunds_shipping",
     ),
+    path(
+        "getting-started-guide/",
+        views.getting_started_guide,
+        name="getting_started_guide",
+    ),
 ]

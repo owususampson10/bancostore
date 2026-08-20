@@ -1,0 +1,68 @@
+{% extends "pages/legal/_base.html" %}
+{% load humanize %}
+
+{% block title %}Bancostore | Getting Started Guide{% endblock %}
+{% block meta_description %}How to shop on Bancostore, and how to become and succeed as a distributor.{% endblock %}
+
+{% block legal_title %}Getting Started Guide{% endblock %}
+{% block legal_updated %}August 20, 2026{% endblock %}
+
+{% block legal_content %}
+<p>This guide explains, in plain language, how to shop on Bancostore and how to become a distributor — from registering to earning your first commission. It isn't a policy document; for the legal terms governing your account, see our <a href="{% url 'pages:terms_of_use' %}">Terms of Use</a> and <a href="{% url 'pages:earnings_disclosure' %}">Earnings &amp; Income Disclosure</a>.</p>
+
+<h2>1. Shopping as a Customer</h2>
+<p>You don't need an account to shop. Browse products, add items to your cart, and check out as a guest — your cart is kept for you as you browse.</p>
+<ol>
+<li>Browse the <a href="{% url 'catalog:product_list' %}">Shop</a> page, or a product's category, and add items to your cart.</li>
+<li>Go to checkout, enter your delivery details (or choose free pickup), and pay securely with Paystack — by card or Mobile Money.</li>
+<li>Once payment is confirmed, your order is placed. You'll see live order status updates: Pending, Confirmed, Processing, Dispatched, and Delivered.</li>
+</ol>
+<p>Creating an account lets you save delivery addresses, keep a wishlist, view your full order history, and leave a review once an order has been delivered. See our <a href="{% url 'pages:returns_refunds_shipping' %}">Returns, Refunds &amp; Shipping Policy</a> for delivery fees and order details.</p>
+
+<h2>2. Becoming a Distributor</h2>
+<p>Becoming a distributor means joining Bancostore's referral network as an Independent Representative (IR), with your own permanent IR ID and the ability to earn commissions. It happens in a fixed order:</p>
+<ol>
+<li><strong>Register.</strong> Fill in your details on the <a href="{% url 'distributors:register' %}">Become a Distributor</a> page. You'll need a sponsoring distributor's IR ID to register — usually pre-filled automatically if you followed someone's referral link.</li>
+<li><strong>Pay the registration fee</strong> — a one-time fee of GHS {{ registration_fee|intcomma }}, paid securely through Paystack.</li>
+<li><strong>Choose and pay for a starter pack.</strong> This is what activates your account and places you in the binary tree:
+<ul>
+<li><strong>Starter Pack A</strong> — GHS {{ starter_pack_a_price|intcomma }}, {{ starter_pack_a_pv|intcomma }} PV, starting rank {{ starter_pack_a_rank|title }}.</li>
+<li><strong>Starter Pack B</strong> — GHS {{ starter_pack_b_price|intcomma }}, {{ starter_pack_b_pv|intcomma }} PV, starting rank {{ starter_pack_b_rank|title }}.</li>
+</ul>
+</li>
+<li><strong>Complete identity verification (KYC).</strong> You'll be guided through a quick, secure process: photos of the front and back of your ID, plus a live selfie, all handled on our verification partner's own page.</li>
+<li><strong>Wait for approval.</strong> Once our team reviews and approves your verification, you're issued a permanent IR ID — this is what makes you a fully active distributor able to refer others and earn commissions.</li>
+</ol>
+<p>Changed your mind shortly after joining? New distributors have a short window to cancel their membership for a partial refund — see our <a href="{% url 'pages:returns_refunds_shipping' %}">Returns, Refunds &amp; Shipping Policy</a> for the cooling-off cancellation window.</p>
+
+<h2>3. How Sponsoring Works</h2>
+<p>There's no separate "become a sponsor" step — it happens automatically. Once you have your IR ID, your distributor dashboard shows your own personal referral link. Share it with anyone (WhatsApp, social media, or in person):</p>
+<ul>
+<li>Anyone who registers through your link automatically has your IR ID filled in as their sponsor — and, once they arrive from a real referral link, that field is locked so it can't be accidentally cleared.</li>
+<li>You become their sponsor: you're credited as their recruiter, and you earn a Direct Referral Bonus when they purchase their starter pack.</li>
+<li>They're also placed into the binary tree on your side — though for tree-balancing reasons, they may land a level or two below you rather than directly underneath, if your own immediate positions are already filled.</li>
+</ul>
+
+<h2>4. How You Earn</h2>
+<p>Distributors can earn three types of commission. Rates are business settings that may be adjusted by Bancostore over time — the figures below are the current values:</p>
+<ul>
+<li><strong>Direct Referral Bonus</strong> ({{ direct_referral_bonus_rate }}%) — earned when someone you personally sponsored purchases their starter pack.</li>
+<li><strong>Binary Bonus</strong> ({{ binary_bonus_rate }}%) — earned on your weaker leg's PV (Personal Volume), calculated automatically on a regular schedule.</li>
+<li><strong>Matching Bonus</strong> ({{ matching_bonus_rate }}%) — earned on your downline's binary bonus earnings. Bronze-rank distributors earn this {{ matching_bonus_depth_bronze }} levels deep; Silver-rank distributors earn it {% if matching_bonus_depth_silver %}{{ matching_bonus_depth_silver }} levels deep{% else %}at unlimited depth{% endif %}.</li>
+</ul>
+<p>To stay eligible for bonuses, you need to generate at least {{ min_monthly_personal_pv|intcomma }} PV of personal volume each month. Unused PV on your stronger leg is carried forward, but expires after {{ pv_carry_forward_expiry_days }} days if it's never matched.</p>
+<p>All your earnings — wallet balance, this week's earnings, team size, PV, and rank — are visible on your distributor dashboard at a glance.</p>
+
+<h2>5. Requesting a Withdrawal</h2>
+<p>Once you've earned a balance in your wallet, you can request a withdrawal from your dashboard:</p>
+<ul>
+<li>Your KYC must be approved, and you must have set a payout destination (a Mobile Money number and network) in your payout settings.</li>
+<li>Withdrawal requests must be between GHS {{ min_withdrawal_amount|intcomma }} and GHS {{ max_withdrawal_amount|intcomma }}, and can be made once per week.</li>
+<li>Approved withdrawals are processed on {{ withdrawal_day|title }}s.</li>
+<li>A withholding tax of {{ withholding_tax_rate }}% is deducted from every withdrawal and remitted to the Ghana Revenue Authority (GRA) — the exact tax and net amount are always shown to you before you submit a request.</li>
+<li>Requests are reviewed and approved by our team before payout.</li>
+</ul>
+
+<h2>6. Need Help?</h2>
+<p>If you have questions about shopping, registering, or your distributor account, reach us through our <a href="{% url 'pages:contact' %}">Contact page</a>.</p>
+{% endblock %}
