@@ -139,12 +139,19 @@ def test_gallery_shows_all_images_with_primary_shown_first(client, category):
     response = client.get(reverse("catalog:product_detail", args=[product.slug]))
 
     content = response.content.decode()
-    # main image's Alpine init state + its own thumbnail's data-url and <img>
-    # src + Task 37a's og:image meta tag + Task 37c's Product JSON-LD "image"
-    # field
-    assert content.count(primary.image.url) == 5
+    # main image's native src fallback + its Alpine init state + its own
+    # thumbnail's data-url and <img> src + Task 37a's og:image meta tag +
+    # Task 37c's Product JSON-LD "image" field
+    assert content.count(primary.image.url) == 6
     assert secondary.image.url in content
-    assert content.index(primary.image.url) < content.index(secondary.image.url)
+    # Compare the thumbnails' own data-url attributes, not the raw url's
+    # first occurrence anywhere on the page -- the primary photo's url also
+    # appears earlier in og:image/JSON-LD/data-initial-image, so comparing
+    # raw occurrences would pass even if the thumbnails themselves were
+    # rendered in the wrong order.
+    primary_thumb_pos = content.index(f'data-url="{primary.image.url}"')
+    secondary_thumb_pos = content.index(f'data-url="{secondary.image.url}"')
+    assert primary_thumb_pos < secondary_thumb_pos
 
 
 @pytest.mark.django_db

@@ -29,7 +29,7 @@
 <div class="flex flex-col gap-4" data-initial-image="{{ product.primary_image.image.url }}" x-data="{ activeImage: '' }" x-init="activeImage = $el.dataset.initialImage">
 <div class="aspect-square bg-surface-variant rounded-lg overflow-hidden group">
 {% if product.primary_image %}
-<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" :src="activeImage" alt="{{ product.name }}">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src="{{ product.primary_image.image.url }}" :src="activeImage" alt="{{ product.name }}">
 {% endif %}
 </div>
 {% if product.images.all|length > 1 %}
