@@ -88,18 +88,36 @@ Pillow>=12,<13
 requests>=2,<3
 
 # PDF / audit trail
-WeasyPrint>=62,<63
-# WeasyPrint 62.x's own Stream class calls super().transform(...) -- pydyf
-# 0.12.0 (2025-12-02) removed that deprecated method entirely (confirmed
-# against pydyf's own release notes, source-driven-development 2026-07-27),
-# breaking every real PDF generation with AttributeError: 'super' object
-# has no attribute 'transform'. WeasyPrint's own pyproject.toml only
-# declares pydyf>=0.11.0 with no upper bound, so pip silently resolves the
-# incompatible 0.12.x -- caught only once this task's first real,
-# non-mocked WeasyPrint call actually ran (in CI; Pango itself blocked
-# this code path from ever running locally at all, see
-# project_weasyprint_pango_blocked_locally memory). Pinned to the last
-# compatible release.
+# WeasyPrint pinned >=69,<70 (was >=62,<63): pip-audit surfaced 2 advisories --
+# PYSEC-2026-2034 (fixed by 68.0) and PYSEC-2026-3412 / CVE-2026-49452, a CSS-injection-via-
+# presentational-hints issue (GHSA-jhhc-3hcp-qhm5) that pip-audit's local DB still listed as
+# unfixed at the time this bump was scoped; re-checked directly against GitHub's own security
+# advisory (`patched_versions: >= 69.0`) and confirmed it IS fixed, in 69.0 -- pip-audit's
+# vuln DB just hadn't caught up yet. 69.0 clears both. Read WeasyPrint's full changelog
+# across every release in this range (source-driven-development): no breaking change to the
+# `HTML(string=...).write_pdf()` API this project actually calls (bancostore/exports.py);
+# the only two Python API deprecations in range (`default_url_fetcher()` in 68.0,
+# `DocumentMetadata.generate_rdf_metadata` in 68.0) are both features this project doesn't
+# use (no custom URL fetcher, no e-invoice metadata). WeasyPrint can't be installed locally
+# on this Mac at all (Pango dlopen blocker, see project_weasyprint_pango_blocked_locally
+# memory) -- verified via CI (real MySQL, Pango installed via apt) instead, confirming both
+# `manage.py check` and the PDF export tests (GRA withholding-tax export, Task 45/47; sales &
+# revenue report export, Task 46) actually exercise real (non-mocked) PDF generation and pass.
+WeasyPrint>=69,<70
+# WeasyPrint 62.x's own Stream class called the deprecated super().transform(...) -- pydyf
+# 0.12.0 (2025-12-02) removed that method entirely, breaking every real PDF generation with
+# AttributeError: 'super' object has no attribute 'transform'. WeasyPrint's own pyproject.toml
+# only declares pydyf>=0.11.0 with no upper bound, so pip silently resolved the incompatible
+# 0.12.x -- caught only once WeasyPrint's first real, non-mocked call actually ran (in CI;
+# Pango itself blocked this code path from ever running locally at all, see
+# project_weasyprint_pango_blocked_locally memory). Pinned to the last compatible release.
+# Re-checked against WeasyPrint 69.0's own source (weasyprint/pdf/stream.py) as part of the
+# 69.0 upgrade above: its Stream.transform() now calls super().set_matrix(...) instead --
+# the root cause is fixed upstream, and set_matrix() already existed in pydyf 0.11.0 (it's
+# the non-deprecated method transform() wrapped), so this pin is no longer strictly required
+# for compatibility. Left as-is here (one dependency per change) rather than folded into this
+# security bump -- pydyf isn't itself pip-audit-flagged, so relaxing this pin is optional
+# cleanup for its own separate change, not part of this one.
 pydyf>=0.11,<0.12
 django-simple-history>=3,<4
 
