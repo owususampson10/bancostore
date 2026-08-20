@@ -100,9 +100,11 @@ requests>=2,<3
 # `DocumentMetadata.generate_rdf_metadata` in 68.0) are both features this project doesn't
 # use (no custom URL fetcher, no e-invoice metadata). WeasyPrint can't be installed locally
 # on this Mac at all (Pango dlopen blocker, see project_weasyprint_pango_blocked_locally
-# memory) -- verified via CI (real MySQL, Pango installed via apt) instead, confirming both
+# memory) -- to be verified via CI (real MySQL, Pango installed via apt) instead, where
 # `manage.py check` and the PDF export tests (GRA withholding-tax export, Task 45/47; sales &
-# revenue report export, Task 46) actually exercise real (non-mocked) PDF generation and pass.
+# revenue report export, Task 46) exercise real (non-mocked) PDF generation. Full local pytest
+# suite (1799 passed, 6 skipped, 0 failed) passed against this bump; CI verification of the
+# real WeasyPrint 69.0 PDF-generation path itself is still pending as of this commit.
 WeasyPrint>=69,<70
 # WeasyPrint 62.x's own Stream class called the deprecated super().transform(...) -- pydyf
 # 0.12.0 (2025-12-02) removed that method entirely, breaking every real PDF generation with
