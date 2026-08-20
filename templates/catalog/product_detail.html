@@ -26,18 +26,18 @@
 
 <div class="grid grid-cols-1 lg:grid-cols-[55fr_45fr] gap-8 lg:gap-16">
 <!-- Gallery -->
-<div class="flex flex-col gap-4">
+<div class="flex flex-col gap-4" data-initial-image="{{ product.primary_image.image.url }}" x-data="{ activeImage: '' }" x-init="activeImage = $el.dataset.initialImage">
 <div class="aspect-square bg-surface-variant rounded-lg overflow-hidden group">
 {% if product.primary_image %}
-<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src="{{ product.primary_image.image.url }}" alt="{{ product.name }}">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" :src="activeImage" alt="{{ product.name }}">
 {% endif %}
 </div>
 {% if product.images.all|length > 1 %}
 <div class="grid grid-cols-4 gap-4">
 {% for image in product.images.all %}
-<div class="aspect-square rounded-lg overflow-hidden bg-surface-variant{% if image == product.primary_image %} ring-2 ring-primary{% endif %} hover:opacity-80 transition-opacity">
+<button type="button" data-url="{{ image.image.url }}" @click="activeImage = $el.dataset.url" :class="activeImage === $el.dataset.url ? 'ring-2 ring-primary' : ''" class="aspect-square rounded-lg overflow-hidden bg-surface-variant hover:opacity-80 transition-opacity" aria-label="Show image {{ forloop.counter }} of {{ product.name }}">
 <img class="w-full h-full object-cover" src="{{ image.image.url }}" alt="{{ product.name }}">
-</div>
+</button>
 {% endfor %}
 </div>
 {% endif %}

@@ -139,8 +139,42 @@ def test_gallery_shows_all_images_with_primary_shown_first(client, category):
     response = client.get(reverse("catalog:product_detail", args=[product.slug]))
 
     content = response.content.decode()
-    # main image + its own thumbnail + Task 37a's og:image meta tag
-    # + Task 37c's Product JSON-LD "image" field
-    assert content.count(primary.image.url) == 4
+    # main image's Alpine init state + its own thumbnail's data-url and <img>
+    # src + Task 37a's og:image meta tag + Task 37c's Product JSON-LD "image"
+    # field
+    assert content.count(primary.image.url) == 5
     assert secondary.image.url in content
     assert content.index(primary.image.url) < content.index(secondary.image.url)
+
+
+@pytest.mark.django_db
+def test_gallery_thumbnails_are_wired_to_switch_the_main_image(client, category):
+    """Regression test for a bug where clicking any thumbnail other than the
+    primary image did nothing -- the thumbnails were plain <img> tags with no
+    click handler wiring them to the large image at all."""
+    product = Product.objects.create(
+        name="Multi-Photo Product", category=category, price=Decimal("100.00")
+    )
+    primary = ProductImage.objects.create(
+        product=product,
+        image=_make_uploaded_image("primary.jpg", "blue"),
+        is_primary=True,
+        order=0,
+    )
+    secondary = ProductImage.objects.create(
+        product=product, image=_make_uploaded_image("secondary.jpg", "red"), order=1
+    )
+
+    response = client.get(reverse("catalog:product_detail", args=[product.slug]))
+
+    content = response.content.decode()
+    # The large image's src is driven by Alpine state, initialized from a
+    # data attribute (never interpolated directly into the x-data JS string).
+    assert ':src="activeImage"' in content
+    assert 'data-initial-image="' + primary.image.url + '"' in content
+    assert 'x-init="activeImage = $el.dataset.initialImage"' in content
+    # Every thumbnail (including the primary's own) carries a click handler
+    # that updates that same state, and highlights whichever is active.
+    assert content.count('@click="activeImage = $el.dataset.url"') == 2
+    assert content.count('data-url="' + primary.image.url + '"') == 1
+    assert content.count('data-url="' + secondary.image.url + '"') == 1
