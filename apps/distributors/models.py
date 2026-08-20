@@ -286,3 +286,33 @@ class IrIdSequence(models.Model):
 
     def __str__(self):
         return f"IrIdSequence<next={self.next_number}>"
+
+
+class RootDistributor(models.Model):
+    """Singleton (pk=1, pre-seeded by a data migration -- same pattern as
+    IrIdSequence above) recording which Distributor, if any, is the
+    platform's one and only sponsor-less root. bootstrap_root_distributor
+    (apps/distributors/management/commands/) locks this row with
+    select_for_update() before creating a new sponsor-less Distributor,
+    giving that command's "exactly one root" rule a real, race-free
+    database-level guarantee.
+
+    Deliberately not a Django UniqueConstraint(condition=Q(sponsor=None))
+    on Distributor itself: this project's production database is MySQL 8
+    (see CLAUDE.md), which has no partial/filtered-index support at all --
+    Django's own connection.features.supports_partial_indexes is False for
+    MySQL, so that constraint would fail to migrate there. A locked
+    singleton row is the same technique this codebase already uses for
+    IrIdSequence, and works identically on SQLite (local dev) and MySQL
+    (CI/production)."""
+
+    distributor = models.OneToOneField(
+        Distributor,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+
+    def __str__(self):
+        return f"RootDistributor<{self.distributor}>"

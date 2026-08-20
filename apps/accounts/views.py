@@ -4,17 +4,95 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
+from django.urls import reverse, reverse_lazy
 from django.views.decorators.http import require_POST
+from django.views.defaults import permission_denied as default_permission_denied
 
+from allauth.account.views import (
+    PasswordResetDoneView,
+    PasswordResetFromKeyDoneView,
+    PasswordResetFromKeyView,
+    PasswordResetView,
+)
+from django_otp import devices_for_user
 from django_ratelimit.core import is_ratelimited
 from two_factor.forms import AuthenticationTokenForm, BackupTokenForm
 from two_factor.views import LoginView as BaseLoginView
 
-from .forms import AddressForm, AdminAuthenticationForm
+from .forms import (
+    AddressForm,
+    AdminAuthenticationForm,
+    AdminResetPasswordForm,
+    AdminResetPasswordKeyForm,
+)
 from .models import Address
 
 logger = logging.getLogger(__name__)
+
+
+def admin_portal_permission_denied(request, exception):
+    """Site-wide handler403 (wired in bancostore/urls.py), added to fix a
+    known rough edge: apps.admin_portal.permissions.is_admin_portal_staff
+    gates every admin_portal view on `user.is_staff and user.is_verified()`
+    -- correct for an established admin, but a brand-new admin has zero
+    OTP devices at all, so their very first login (nothing to challenge
+    against) succeeds while leaving is_verified() False for that session.
+    They'd previously land on this project's bare default 403 page with no
+    indication that visiting the 2FA setup page themselves is the fix.
+
+    Scoped tightly to avoid becoming an accidental 2FA bypass: only
+    redirects when the user is authenticated, is_staff, NOT already
+    verified, AND has zero CONFIRMED OTP devices (an unconfirmed
+    in-progress device -- someone who started setup but didn't finish --
+    still counts as "none", correctly sending them back to finish it). A
+    staff user who already has a confirmed device but isn't verified this
+    session (e.g. a genuinely stale/tampered session) does NOT match this
+    condition and falls through to the normal 403 below -- they need to
+    actually complete a real 2FA challenge, not be redirected around it.
+    This is a global handler403 rather than a per-view fix because
+    apps/admin_portal/views.py repeats `if not is_admin_portal_staff(...):
+    raise PermissionDenied` at ~47 separate call sites -- catching the one
+    exception centrally is far less risky than editing every call site.
+
+    IMPORTANT: handler403 fires for every PermissionDenied anywhere on the
+    site, not just admin_portal -- apps/distributors/views.py and
+    apps/catalog/views.py each raise it too, for entirely unrelated
+    reasons (not being a distributor, not being eligible to review a
+    product). A first version of this fix checked only user state
+    (is_staff/is_verified/devices) with no page-scoping at all -- a
+    fresh-context adversarial review caught that this would wrongly
+    redirect an admin who ALSO happens to hit one of those unrelated
+    denials (e.g. browsing a distributor-only page) straight to 2FA
+    setup, with a "set up your authenticator app" message that has
+    nothing to do with the real reason they were denied. The
+    request.resolver_match.app_name check below closes that -- this
+    handler only ever fires for the two real admin-access surfaces (the
+    branded admin_portal and the raw Django Admin, confirmed via
+    django.urls.resolve to have app_name "admin_portal" and "admin"
+    respectively), never for a denial on an unrelated page."""
+    admin_app_names = {"admin_portal", "admin"}
+    on_an_admin_surface = (
+        request.resolver_match is not None
+        and request.resolver_match.app_name in admin_app_names
+    )
+    if (
+        on_an_admin_surface
+        and request.user.is_authenticated
+        and request.user.is_staff
+        and not request.user.is_verified()
+        # devices_for_user is a generator function -- the object it
+        # returns is always truthy regardless of whether it yields
+        # anything, so `not devices_for_user(...)` would never be True.
+        # any(...) actually consumes it to check for a real device.
+        and not any(devices_for_user(request.user, confirmed=True))
+    ):
+        messages.info(
+            request,
+            "Welcome! Before you can use the admin portal, set up your "
+            "authenticator app for two-factor login.",
+        )
+        return redirect("two_factor:setup")
+    return default_permission_denied(request, exception)
 
 
 class AdminLoginView(BaseLoginView):
@@ -145,6 +223,50 @@ class AdminLoginView(BaseLoginView):
                 self.get_user().pk,
             )
         return super().done(form_list, **kwargs)
+
+
+class AdminPasswordResetView(PasswordResetView):
+    """Admin-branded counterpart of allauth's account_reset_password (the
+    admin login page's own "Forgot password?" link points here). Reuses
+    ResetPasswordView/ResetPasswordForm's email-lookup, token, and rate-
+    limiting logic untouched -- only the template and the emailed link's
+    target (via AdminResetPasswordForm) differ, per
+    docs/decisions/0012-admin-password-reset-design.md."""
+
+    template_name = "account/admin_password_reset.html"
+    form_class = AdminResetPasswordForm
+    success_url = reverse_lazy("admin_password_reset_done")
+
+    def get_form_class(self):
+        # PasswordResetView.get_form_class() normally does
+        # get_form_class(app_settings.FORMS, "reset_password", self.form_class)
+        # -- app_settings.FORMS is this project's own global ACCOUNT_FORMS
+        # setting (settings.py), which already has a "reset_password" key
+        # (CustomerResetPasswordForm) and so silently wins over whatever
+        # form_class this subclass sets, regardless of it. Bypassing that
+        # lookup entirely is the only way this view's own form_class
+        # actually gets used (found by a failing test, not assumed).
+        return self.form_class
+
+
+class AdminPasswordResetDoneView(PasswordResetDoneView):
+    template_name = "account/admin_password_reset_done.html"
+
+
+class AdminPasswordResetFromKeyView(PasswordResetFromKeyView):
+    template_name = "account/admin_password_reset_from_key.html"
+    form_class = AdminResetPasswordKeyForm
+    success_url = reverse_lazy("admin_password_reset_from_key_done")
+
+    def get_form_class(self):
+        # Same global-ACCOUNT_FORMS-wins-over-subclass issue as
+        # AdminPasswordResetView.get_form_class() above, for the
+        # "reset_password_from_key" form id.
+        return self.form_class
+
+
+class AdminPasswordResetFromKeyDoneView(PasswordResetFromKeyDoneView):
+    template_name = "account/admin_password_reset_from_key_done.html"
 
 
 @login_required(login_url="account_login")

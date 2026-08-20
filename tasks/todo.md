@@ -282,6 +282,26 @@ suite on this Mac, but never a false CI failure blocking a real merge. No furthe
 
 ---
 
+## Known issues — production incident during an unrelated deploy, found and fixed same-session (2026-08-19)
+
+- [x] **django-constance pickle→JSON serialization mismatch — RESOLVED.** Task 51's
+  django-constance `3.x -> 4.3` upgrade changed how stored settings are serialized (pickle -> JSON)
+  but shipped no data migration for the 81 already-stored production rows, still in the old
+  format. This stayed invisible because the already-running Supervisor processes kept the *old*
+  constance code in memory (a `pip install` upgrade doesn't affect a process until it restarts) —
+  until an unrelated deploy (PR #83, dead links + admin password reset) triggered a routine
+  restart, which loaded the new code and immediately hit every storefront/catalog page reading any
+  constance value (`json.decoder.JSONDecodeError` inside `Config.__init__()`'s `autofill()`).
+  Diagnosed and fixed same-session: a dry-run-verified one-time re-encoding of all 81 rows (zero
+  decode failures, values confirmed matching documented seeded defaults), then cache clear +
+  restart + full route verification. ~2-3 minutes of storefront-only impact, no data loss. Full
+  incident writeup: `docs/decisions/0013-constance-pickle-to-json-incident.md`. **Process fix
+  already applied** (not deferred): `deploy/README.md`'s runbook now makes the post-restart
+  verification step mandatory and explicit whenever `requirements.txt` changes, specifically
+  naming this failure mode so it can't recur silently the same way.
+
+---
+
 ## Phase 0: Foundation
 
 ### Task 1: Scaffold the Django 5 project and install the full stack

@@ -6,14 +6,30 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.contrib.sitemaps.views import sitemap
-from django.urls import include, path
+from django.urls import include, path, re_path
 from django.views.generic import TemplateView
 
 from two_factor.admin import AdminSiteOTPRequired
 from two_factor.urls import urlpatterns as two_factor_urls
 
-from apps.accounts.views import AdminLoginView
+from apps.accounts.views import (
+    AdminLoginView,
+    AdminPasswordResetDoneView,
+    AdminPasswordResetFromKeyDoneView,
+    AdminPasswordResetFromKeyView,
+    AdminPasswordResetView,
+    admin_portal_permission_denied,
+)
 from apps.pages.sitemaps import sitemaps
+
+# Redirects a brand-new admin (zero confirmed 2FA devices yet) straight to
+# 2FA setup instead of a bare 403 the first time they hit any admin_portal
+# page -- see admin_portal_permission_denied's own docstring. Site-wide by
+# necessity (Django's handler403 has no URL-prefix scoping), but the
+# handler's own condition (is_staff + zero confirmed devices) means it can
+# only ever fire for a genuine admin account, never a customer/distributor
+# hitting an unrelated 403.
+handler403 = admin_portal_permission_denied
 
 # Mandatory 2FA for admin (Task 6, SPEC.md Section 2.3) — this must never be
 # made conditional on a settings toggle (e.g. ADMIN_2FA_ENABLED), per
@@ -52,6 +68,35 @@ urlpatterns = [
     # correctly — it's generated from the untouched pattern below, which
     # has the identical path string.
     path("account/login/", AdminLoginView.as_view(), name="admin_login"),
+    # Admin-branded counterpart of allauth's account_reset_password/
+    # account_reset_password_from_key below (ADR-0012) -- same "account/"
+    # prefix as admin_login above, distinct from allauth's "accounts/"
+    # (plural) customer namespace.
+    path(
+        "account/password/reset/",
+        AdminPasswordResetView.as_view(),
+        name="admin_password_reset",
+    ),
+    path(
+        "account/password/reset/done/",
+        AdminPasswordResetDoneView.as_view(),
+        name="admin_password_reset_done",
+    ),
+    # Mirrors allauth's own account_reset_password_from_key pattern exactly
+    # (venv/.../allauth/account/urls.py) -- uidb36 restricted to alphanumeric
+    # so it can't ambiguously swallow part of `key` on the '-' split, the
+    # same reason allauth itself uses a regex here rather than a plain
+    # path() converter for this one route.
+    re_path(
+        r"^account/password/reset/key/(?P<uidb36>[0-9A-Za-z]+)-(?P<key>.+)/$",
+        AdminPasswordResetFromKeyView.as_view(),
+        name="admin_password_reset_from_key",
+    ),
+    path(
+        "account/password/reset/key/done/",
+        AdminPasswordResetFromKeyDoneView.as_view(),
+        name="admin_password_reset_from_key_done",
+    ),
     path("accounts/", include("allauth.urls")),
     # Task 40a: a deliberately distinct "addresses/" prefix, not "account/"
     # (already the two_factor/admin-2FA namespace, per this codebase's own
