@@ -127,14 +127,30 @@ def _redirect_if_cooling_off_cancelled(view_func):
 
 
 @ratelimit(key="ip", rate="5/h", method="POST")
+@ratelimit(key="ip", rate="20/h", method="GET")
 def register(request):
     """Task 10a: creates a PendingRegistration, not a live account -- the
     real User/Distributor is only created once the registration fee is
     confirmed paid (Task 10b, not built yet). See tests/feature/
     distributors/test_registration_pending.py and the doubt-driven-development
-    design note in apps/distributors/models.py::PendingRegistration."""
+    design note in apps/distributors/models.py::PendingRegistration.
+
+    The GET rate limit (added alongside the sponsor-lock feature below,
+    matching pay_registration_fee's own precedent) exists because
+    determining sponsor_locked now runs a Distributor.objects.filter(ir_id=
+    ref).exists() query directly off the unauthenticated, attacker-
+    controlled ?ref= value -- unlimited GET requests would otherwise let
+    someone enumerate real IR IDs (via whether the response renders locked)
+    or just hammer the DB, neither of which the pre-existing POST-only
+    limit covers."""
     if request.method == "POST":
-        form = DistributorRegistrationForm(request.POST)
+        # sponsor_locked travels as a hidden field, not re-derived from
+        # request.POST["sponsor_ir_id"] -- a locked field's value was never
+        # attacker-editable in the first place, so re-deriving lock state
+        # from it would only mean "trust whatever the client claims its own
+        # readonly field said," which is circular and adds nothing.
+        sponsor_locked = request.POST.get("sponsor_locked") == "1"
+        form = DistributorRegistrationForm(request.POST, lock_sponsor=sponsor_locked)
         if form.is_valid():
             pending = PendingRegistration.objects.create(
                 full_name=form.cleaned_data["full_name"],
@@ -149,10 +165,20 @@ def register(request):
             request.session["pending_registration_token"] = str(pending.token)
             return redirect("distributors:pay_registration_fee")
     else:
+        ref = request.GET.get("ref", "")
+        # Only lock the field for a referral link that actually resolves to
+        # a real distributor -- a broken/typo'd link must stay editable so
+        # the visitor can correct it themselves (matches the existing
+        # "invalid ref still prefills, doesn't 500" behavior below).
+        sponsor_locked = bool(ref) and Distributor.objects.filter(ir_id=ref).exists()
         form = DistributorRegistrationForm(
-            initial={"sponsor_ir_id": request.GET.get("ref", "")}
+            initial={"sponsor_ir_id": ref}, lock_sponsor=sponsor_locked
         )
-    return render(request, "distributors/register.html", {"form": form})
+    return render(
+        request,
+        "distributors/register.html",
+        {"form": form, "sponsor_locked": sponsor_locked},
+    )
 
 
 @ratelimit(key="ip", rate="20/h", method="GET")
