@@ -153,6 +153,22 @@ def test_registration_is_rate_limited_per_ip(client):
 
 
 @pytest.mark.django_db
+def test_registration_get_is_rate_limited_per_ip(client):
+    """The sponsor-lock feature's GET-time Distributor.objects.filter(ir_id=
+    ref).exists() lookup runs off attacker-controlled ?ref= on every GET --
+    without a limit here, someone could enumerate real IR IDs (via whether
+    the response renders locked) or hammer the DB, neither of which the
+    pre-existing POST-only limit covers."""
+    sponsor = _make_sponsor()
+    responses = [
+        client.get(reverse("distributors:register"), {"ref": sponsor.ir_id})
+        for _ in range(25)
+    ]
+
+    assert any(r.status_code == 429 for r in responses)
+
+
+@pytest.mark.django_db
 def test_an_unknown_ref_value_does_not_crash_the_registration_page(client):
     """An invalid/unknown ?ref= value must not 500 -- it prefills the text
     field with the literal (auto-escaped) value, exactly like a distributor
@@ -181,3 +197,83 @@ def test_no_ref_query_param_leaves_the_sponsor_field_blank(client):
     # value the same as no value at all -- no `value=` attribute renders,
     # distinguishing "no referral link used" from a broken/empty one.
     assert "value=" not in sponsor_field_tag
+    assert "readonly" not in sponsor_field_tag
+
+
+def _sponsor_field_tag(content):
+    match = re.search(r'<input[^>]*name="sponsor_ir_id"[^>]*>', content)
+    assert match is not None, "sponsor_ir_id field not found in response"
+    return match.group(0)
+
+
+@pytest.mark.django_db
+def test_referral_link_with_a_real_sponsor_locks_the_field(client):
+    """The bug report: a distributor's referral link pre-fills the sponsor
+    field, but it was a plain editable text input the visitor could clear or
+    overwrite before submitting. A real, existing sponsor's IR ID now
+    renders the field readonly with a lock icon and a hidden field carrying
+    the lock state through to the POST."""
+    sponsor = _make_sponsor()
+
+    response = client.get(reverse("distributors:register"), {"ref": sponsor.ir_id})
+
+    content = response.content.decode()
+    assert "readonly" in _sponsor_field_tag(content)
+    assert response.context["sponsor_locked"] is True
+    assert '<input type="hidden" name="sponsor_locked" value="1">' in content
+    assert "Set from your referral link and can't be changed." in content
+
+
+@pytest.mark.django_db
+def test_referral_link_with_an_unknown_sponsor_does_not_lock_the_field(client):
+    """A broken/typo'd referral link must stay editable so the visitor can
+    correct it themselves -- only a real, existing sponsor locks the field."""
+    response = client.get(reverse("distributors:register"), {"ref": "not-a-real-ir-id"})
+
+    content = response.content.decode()
+    assert "readonly" not in _sponsor_field_tag(content)
+    assert response.context["sponsor_locked"] is False
+    assert 'name="sponsor_locked"' not in content
+
+
+@pytest.mark.django_db
+def test_locked_sponsor_field_still_submits_and_registers(client):
+    """readonly (unlike disabled) still submits its value -- a real browser
+    posts the field's content even though the visitor couldn't edit it."""
+    sponsor = _make_sponsor()
+
+    response = client.post(
+        reverse("distributors:register"),
+        {
+            **VALID_REGISTRATION_DATA,
+            "sponsor_ir_id": sponsor.ir_id,
+            "sponsor_locked": "1",
+        },
+    )
+
+    assert response.status_code == 302
+    pending = PendingRegistration.objects.get(phone_number="+233241234567")
+    assert pending.sponsor_id == sponsor.id
+
+
+@pytest.mark.django_db
+def test_lock_state_survives_a_failed_post_rerender(client):
+    """If some other field fails validation, the redisplayed form must keep
+    the sponsor field locked -- otherwise the visitor could edit and clear
+    it on the retry even though it arrived via a real referral link."""
+    sponsor = _make_sponsor()
+
+    response = client.post(
+        reverse("distributors:register"),
+        {
+            **VALID_REGISTRATION_DATA,
+            "sponsor_ir_id": sponsor.ir_id,
+            "sponsor_locked": "1",
+            "terms_accepted": "",  # fails validation, form redisplays
+        },
+    )
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "readonly" in _sponsor_field_tag(content)
+    assert response.context["sponsor_locked"] is True

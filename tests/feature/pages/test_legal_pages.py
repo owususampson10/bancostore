@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+from django.contrib.humanize.templatetags.humanize import intcomma
 from django.urls import reverse
 
 import pytest
@@ -16,6 +19,7 @@ LEGAL_URL_NAMES = [
     "pages:earnings_disclosure",
     "pages:ai_disclaimer",
     "pages:returns_refunds_shipping",
+    "pages:getting_started_guide",
 ]
 
 
@@ -38,6 +42,88 @@ def test_footer_links_to_every_policy_page(client):
     assert "Policies" in content
     for url_name in LEGAL_URL_NAMES:
         assert f'href="{reverse(url_name)}"' in content
+
+
+@pytest.mark.django_db
+def test_getting_started_guide_shows_real_business_rule_values(client):
+    """Every number on this guide (registration fee, starter pack prices,
+    commission rates, withdrawal bounds) is admin-configurable via
+    constance -- never hardcoded -- matching returns_refunds_shipping's
+    own established pattern above. A stale hardcoded number here would
+    silently mislead a new distributor about what they'll actually pay
+    or earn."""
+    response = client.get(reverse("pages:getting_started_guide"))
+
+    content = response.content.decode()
+    # The template renders these through |intcomma (matching
+    # returns_refunds_shipping's own convention), so expected values must
+    # be comma-formatted too, not just str(int(...)).
+    assert intcomma(int(config.REGISTRATION_FEE)) in content
+    assert intcomma(int(config.STARTER_PACK_A_PRICE)) in content
+    assert intcomma(int(config.STARTER_PACK_B_PRICE)) in content
+    assert str(config.DIRECT_REFERRAL_BONUS_RATE) in content
+    assert str(config.BINARY_BONUS_RATE) in content
+    assert str(config.MATCHING_BONUS_RATE) in content
+    assert intcomma(int(config.MIN_WITHDRAWAL_AMOUNT)) in content
+    assert intcomma(int(config.MAX_WITHDRAWAL_AMOUNT)) in content
+    assert str(config.WITHHOLDING_TAX_RATE) in content
+
+
+@pytest.mark.django_db
+def test_getting_started_guide_reflects_a_live_admin_change(client):
+    """Regression guard against the exact bug class this project has hit
+    before (see the docstring on terms_of_use's cooling_off_period_days):
+    a figure hardcoded as plain text instead of reading the live setting.
+    Changing a rate must actually change what renders. Constance state is
+    process-wide, not per-test-transaction-isolated, so the original value
+    is restored afterward -- matching tests/unit/commissions/
+    test_direct_referral.py's own established pattern for this exact
+    setting."""
+    original_rate = config.DIRECT_REFERRAL_BONUS_RATE
+    config.DIRECT_REFERRAL_BONUS_RATE = Decimal("42")
+    try:
+        response = client.get(reverse("pages:getting_started_guide"))
+        assert "42" in response.content.decode()
+    finally:
+        config.DIRECT_REFERRAL_BONUS_RATE = original_rate
+
+
+@pytest.mark.django_db
+def test_getting_started_guide_matching_bonus_silver_depth_is_read_live(client):
+    """Regression test for a real bug caught in review: the template
+    originally hardcoded "unlimited depth" for Silver rank as static text
+    instead of reading MATCHING_BONUS_DEPTH_SILVER, even though the view
+    already passed it into context -- an admin setting a real positive
+    depth would have silently gone unreflected. 0 means unlimited, per
+    config.py's own documented convention."""
+    original_depth = config.MATCHING_BONUS_DEPTH_SILVER
+    try:
+        config.MATCHING_BONUS_DEPTH_SILVER = 0
+        response = client.get(reverse("pages:getting_started_guide"))
+        assert "unlimited depth" in response.content.decode()
+
+        config.MATCHING_BONUS_DEPTH_SILVER = 6
+        response = client.get(reverse("pages:getting_started_guide"))
+        content = response.content.decode()
+        assert "6 levels deep" in content
+        assert "unlimited depth" not in content
+    finally:
+        config.MATCHING_BONUS_DEPTH_SILVER = original_depth
+
+
+@pytest.mark.django_db
+def test_getting_started_guide_withdrawal_frequency_is_read_live(client):
+    """Regression test for a real CodeRabbit finding on this same PR: the
+    withdrawal section hardcoded "once per week" as static text instead of
+    reading WITHDRAWAL_FREQUENCY -- the same "decorative claim that can
+    silently go stale" bug class as the matching-bonus fix above."""
+    original_frequency = config.WITHDRAWAL_FREQUENCY
+    try:
+        config.WITHDRAWAL_FREQUENCY = "biweekly"
+        response = client.get(reverse("pages:getting_started_guide"))
+        assert "biweekly" in response.content.decode()
+    finally:
+        config.WITHDRAWAL_FREQUENCY = original_frequency
 
 
 @pytest.mark.django_db

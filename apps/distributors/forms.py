@@ -77,6 +77,28 @@ class DistributorRegistrationForm(forms.Form):
             attrs={"class": INPUT_CLASSES, "placeholder": "e.g. IR00245"}
         ),
     )
+
+    def __init__(self, *args, lock_sponsor=False, **kwargs):
+        """lock_sponsor renders sponsor_ir_id readonly (not disabled --
+        a disabled field's value is never submitted, which would break
+        clean_sponsor_ir_id below). This is a UI affordance only: it stops a
+        distributor's referred visitor from accidentally clearing the
+        pre-filled sponsor ID, it is not a security boundary -- the real
+        check is still clean_sponsor_ir_id's DB lookup, which runs
+        regardless of this flag."""
+        super().__init__(*args, **kwargs)
+        if lock_sponsor:
+            field = self.fields["sponsor_ir_id"]
+            field.widget.attrs["readonly"] = True
+            # Swap pr-4 for pr-12, not append alongside it -- the template
+            # renders a lock icon over the field's right edge (matching the
+            # left-edge "group" icon's own pl-12), and two conflicting pr-*
+            # utility classes on one element is undefined which one wins.
+            field.widget.attrs["class"] = (
+                INPUT_CLASSES.replace("pr-4", "pr-12")
+                + " bg-surface-container-low text-on-surface-variant"
+            )
+
     password1 = forms.CharField(
         widget=forms.PasswordInput(
             attrs={"class": INPUT_CLASSES, "placeholder": "Create a secure password"}

@@ -66,7 +66,14 @@
 <div class="relative">
 <span class="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary">group</span>
 {{ form.sponsor_ir_id }}
+{% if sponsor_locked %}
+<input type="hidden" name="sponsor_locked" value="1">
+<span class="absolute right-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary text-[18px]" aria-hidden="true" title="Locked from your referral link">lock</span>
+{% endif %}
 </div>
+{% if sponsor_locked %}
+<p class="font-body-sm text-body-sm text-gray-muted">Set from your referral link and can't be changed.</p>
+{% endif %}
 {% if form.sponsor_ir_id.errors %}<p class="text-error text-body-sm mt-1">{{ form.sponsor_ir_id.errors.0 }}</p>{% endif %}
 </div>
 <div class="space-y-stack-xs">

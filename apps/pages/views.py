@@ -82,6 +82,34 @@ def returns_refunds_shipping(request):
     )
 
 
+def getting_started_guide(request):
+    return render(
+        request,
+        "pages/legal/getting-started-guide.html",
+        {
+            "registration_fee": config.REGISTRATION_FEE,
+            "starter_pack_a_price": config.STARTER_PACK_A_PRICE,
+            "starter_pack_a_pv": config.STARTER_PACK_A_PV,
+            "starter_pack_a_rank": config.STARTER_PACK_A_RANK,
+            "starter_pack_b_price": config.STARTER_PACK_B_PRICE,
+            "starter_pack_b_pv": config.STARTER_PACK_B_PV,
+            "starter_pack_b_rank": config.STARTER_PACK_B_RANK,
+            "direct_referral_bonus_rate": config.DIRECT_REFERRAL_BONUS_RATE,
+            "binary_bonus_rate": config.BINARY_BONUS_RATE,
+            "matching_bonus_rate": config.MATCHING_BONUS_RATE,
+            "matching_bonus_depth_bronze": config.MATCHING_BONUS_DEPTH_BRONZE,
+            "matching_bonus_depth_silver": config.MATCHING_BONUS_DEPTH_SILVER,
+            "min_monthly_personal_pv": config.MIN_MONTHLY_PERSONAL_PV,
+            "pv_carry_forward_expiry_days": config.PV_CARRY_FORWARD_EXPIRY_DAYS,
+            "min_withdrawal_amount": config.MIN_WITHDRAWAL_AMOUNT,
+            "max_withdrawal_amount": config.MAX_WITHDRAWAL_AMOUNT,
+            "withdrawal_frequency": config.WITHDRAWAL_FREQUENCY,
+            "withdrawal_day": config.WITHDRAWAL_DAY,
+            "withholding_tax_rate": config.WITHHOLDING_TAX_RATE,
+        },
+    )
+
+
 def _stripped_or_none(value):
     """A constance value defaults to "" and is meant to stay unset until
     an admin fills it in via the Platform Settings screen -- a
