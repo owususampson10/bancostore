@@ -112,6 +112,21 @@ def test_getting_started_guide_matching_bonus_silver_depth_is_read_live(client):
 
 
 @pytest.mark.django_db
+def test_getting_started_guide_withdrawal_frequency_is_read_live(client):
+    """Regression test for a real CodeRabbit finding on this same PR: the
+    withdrawal section hardcoded "once per week" as static text instead of
+    reading WITHDRAWAL_FREQUENCY -- the same "decorative claim that can
+    silently go stale" bug class as the matching-bonus fix above."""
+    original_frequency = config.WITHDRAWAL_FREQUENCY
+    try:
+        config.WITHDRAWAL_FREQUENCY = "biweekly"
+        response = client.get(reverse("pages:getting_started_guide"))
+        assert "biweekly" in response.content.decode()
+    finally:
+        config.WITHDRAWAL_FREQUENCY = original_frequency
+
+
+@pytest.mark.django_db
 def test_returns_refunds_shipping_shows_real_delivery_fees(client):
     """Grounded in the real, live constance settings -- never a hardcoded
     guess, matching this project's own "business rules live in settings,

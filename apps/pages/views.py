@@ -103,6 +103,7 @@ def getting_started_guide(request):
             "pv_carry_forward_expiry_days": config.PV_CARRY_FORWARD_EXPIRY_DAYS,
             "min_withdrawal_amount": config.MIN_WITHDRAWAL_AMOUNT,
             "max_withdrawal_amount": config.MAX_WITHDRAWAL_AMOUNT,
+            "withdrawal_frequency": config.WITHDRAWAL_FREQUENCY,
             "withdrawal_day": config.WITHDRAWAL_DAY,
             "withholding_tax_rate": config.WITHHOLDING_TAX_RATE,
         },

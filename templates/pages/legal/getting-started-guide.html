@@ -57,7 +57,7 @@
 <p>Once you've earned a balance in your wallet, you can request a withdrawal from your dashboard:</p>
 <ul>
 <li>Your KYC must be approved, and you must have set a payout destination (a Mobile Money number and network) in your payout settings.</li>
-<li>Withdrawal requests must be between GHS {{ min_withdrawal_amount|intcomma }} and GHS {{ max_withdrawal_amount|intcomma }}, and can be made once per week.</li>
+<li>Withdrawal requests must be between GHS {{ min_withdrawal_amount|intcomma }} and GHS {{ max_withdrawal_amount|intcomma }}, and can be made {{ withdrawal_frequency }}.</li>
 <li>Approved withdrawals are processed on {{ withdrawal_day|title }}s.</li>
 <li>A withholding tax of {{ withholding_tax_rate }}% is deducted from every withdrawal and remitted to the Ghana Revenue Authority (GRA) — the exact tax and net amount are always shown to you before you submit a request.</li>
 <li>Requests are reviewed and approved by our team before payout.</li>
