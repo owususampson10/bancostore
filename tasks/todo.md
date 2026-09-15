@@ -8301,3 +8301,171 @@ high-confidence secret check as a local stopgap.
 `.gitignore` (coverage artifacts), `CLAUDE.md` (pointer line).
 
 **Estimated scope:** M
+
+---
+
+### Task 55: django-allauth 0.63.6 -> 65.x upgrade
+
+**Description:** The remaining half of the still-open Task 30f pip-audit backlog (the other half —
+Django, Pillow, cbor2, pytest, black, WeasyPrint — was cleared by Tasks 49a, 51 and 53). Requested
+directly by the user 2026-09-15 after a reachability triage reframed it.
+
+**Reachability triage done FIRST, before any code (this is what the Task 30f entry actually asked
+for and nobody had done):** all three open advisories were read at source, and **none appear
+reachable in this codebase**:
+- `PYSEC-2025-110` (CVE-2025-65430) — allauth's **IdP/OIDC provider** issuing tokens that stay
+  valid after an account is deactivated. This project uses allauth as a *consumer* of Google login,
+  never as an identity provider; `allauth.idp.*` is not in `INSTALLED_APPS`.
+- `PYSEC-2025-111` (CVE-2025-65431) — **Okta and NetIQ** providers keying accounts off the mutable
+  `preferred_username`. Only `allauth.socialaccount.providers.google` is installed.
+- `PYSEC-2026-56` — open redirect in **SAML IdP-initiated SSO**, which is disabled by default and
+  unused here.
+
+So this is **maintenance, not a security fix** — recorded plainly rather than letting a raw
+pip-audit count imply urgency it doesn't have. The real reasons to do it, and to do it *now*:
+1. `apps/accounts/forms.py::AdminResetPasswordForm._send_password_reset_mail` is a ~25-line
+   copy-paste of an allauth **private** method (no hook existed to override just the URL name),
+   touching 5 internal symbols including `app_settings.AUTHENTICATION_METHOD` — a setting
+   deprecated in 65.4. It is fragile *today* and drifts further from upstream every release.
+2. Production is at 1 user / 0 orders. Changing login, signup and password reset is cheaper now
+   than it will ever be again.
+3. ADR-0013 (the django-constance pickle->JSON production incident) is the precedent for what
+   deferred dependency upgrades cost here.
+
+**Blast radius (from a full dependency audit before planning):** allauth owns customer
+signup/login/password-reset, customer+admin logout (`account_logout`), the Google login button, and
+the admin password-reset flow. It does **not** own distributor phone+OTP login
+(`apps.distributors.backends.PhoneNumberBackend`) or admin TOTP 2FA (`two_factor`) — the two most
+security-sensitive flows are untouched by this upgrade.
+
+**Sub-tasks:**
+
+- [ ] **55a — Bump the pin, change nothing else.** `django-allauth>=0.63,<0.64` ->
+      `django-allauth[socialaccount]>=65.14.1,<66`. The `[socialaccount]` extra has been required
+      since 0.62 for social providers and this project never had it — the missing extra is
+      currently patched by hand (`requirements.txt:59` pins `PyJWT` with the comment "allauth's
+      Google OAuth2 provider needs PyJWT to verify ID tokens"). Deliberately keeps the deprecated
+      settings as-is (they remain backwards-compatible) so this slice answers exactly one question:
+      what breaks from the version change alone. Highest-information, lowest-code-change slice —
+      run it first to fail fast. Confirm the target version's own notes: 65.15's RFC 8628 dashed
+      user-code format applies to code-based flows; this project's password reset is link-based
+      (`user_pk_to_url_str` + token), so verify it is genuinely unaffected rather than assuming.
+
+      **55a findings (2026-09-15, installed django-allauth 65.19.3):**
+      - Venv matches every `requirements.txt` pin (0 drift, `pip check` clean). The
+        `[socialaccount]` extra declares `oauthlib`, `requests`, `pyjwt[crypto]` — all present.
+      - `manage.py check`: only the 3 expected allauth deprecations (55c's scope).
+      - RFC 8628 dashed codes: confirmed unaffected, not assumed. They live in
+        `allauth/idp/oidc/.../device_codes.py` + `core/internal/cryptokit.py`; all three
+        code-based flows (`LOGIN_`/`EMAIL_VERIFICATION_`/`PASSWORD_RESET_BY_CODE_ENABLED`)
+        default `False` in `account/app_settings.py` and this project sets none of them.
+      - `tests/feature/accounts/` + `tests/unit/accounts/`: **84 passed, 1 failed.** No
+        allauth warnings in the pytest output.
+      - **The one failure is the silent one this task predicted:**
+        `test_admin_password_reset_email_links_to_admin_branded_confirm_page` — the admin reset
+        email now links to customer-facing `account_reset_password_from_key`. Root cause read at
+        source: 65.x `ResetPasswordForm.save()` (`account/forms.py:630-643`) no longer calls
+        `self._send_password_reset_mail()`; it calls
+        `flows.password_reset.request_password_reset()` directly, so
+        `AdminResetPasswordForm._send_password_reset_mail` is now **dead code**. A supported hook
+        now exists — `DefaultAccountAdapter.get_reset_password_from_key_url(key)`
+        (`account/adapter.py:679`, "intended to be overridden in case the password reset email
+        needs to be adjusted"), which is what `request_password_reset` calls. That hook is
+        adapter-wide, so 55b must route admin vs customer by request, not globally. Also check
+        in 55b: `request_password_reset` sends `send_unknown_account_mail` when `users` is empty
+        — confirm what a non-staff email typed into the admin form now receives.
+      - Full suite not run locally: this laptop thermally shut down ("Dark Wake Thermal
+        Emergency" in `pmset -g log`) on previous 55a attempts, and the throttled run needed to
+        avoid that takes ~3s/test. Full-suite verification goes to CI (real MySQL).
+- [ ] **55b — Fix the copy-pasted private method.** Check whether 65.x now offers a supported hook
+      for the password-reset URL name; if it does, delete the copy-paste and use it. If it does
+      not, re-sync the copied body against the 65.x source (`source-driven-development`, read the
+      real installed source, not a memory of it) and re-verify every one of the 5 internal symbols
+      still exists with the same signature. Also confirm the hardcoded email template name
+      `"account/email/password_reset_key"` still resolves.
+
+      **55b outcome (2026-09-15):** a supported hook exists, so the copy-paste is **deleted**, not
+      re-synced. `apps/accounts/adapter.py::BancostoreAccountAdapter` (new `ACCOUNT_ADAPTER`)
+      overrides `get_reset_password_from_key_url` and returns `admin_password_reset_from_key` only
+      when `request.resolver_match.url_name == "admin_password_reset"`; anything else (including no
+      request) gets allauth's customer link. ADR-0012's old reason for rejecting the adapter
+      (`self.request` was `None` in 0.63) no longer holds — 65.x reads it from
+      `allauth.core.context`, set by `AccountMiddleware`. ADR-0012 has a dated update.
+      - Removed with it: 9 now-unused imports in `apps/accounts/forms.py`, and the
+        `app_settings.AUTHENTICATION_METHOD` read 55c would otherwise have had to migrate.
+      - Email template: no project override exists; 65.19.3's
+        `adapter.send_password_reset_mail` sends the same `account/email/password_reset_key`.
+      - Non-staff email on the admin form: still the same "no account" email as on 0.63 —
+        `test_admin_password_reset_does_not_email_a_non_staff_user` passes unchanged.
+      - New test `test_customer_password_reset_email_links_to_customer_confirm_page` guards the
+        customer side, because the hook is project-wide.
+      - Tests: all 9 password-reset tests (7 admin, 2 customer) pass, including the 55a failure.
+        Both routing tests confirmed falsifiable: the admin one failed in 55a without the hook;
+        the customer one failed against a deliberately broken adapter (always-admin), then passed
+        once reverted. `make check-fast` clean.
+      - Not yet run: the rest of the suite (CI, real MySQL) and the live-browser admin reset (55e).
+- [ ] **55c — Migrate the deprecated settings.** `ACCOUNT_AUTHENTICATION_METHOD` ->
+      `ACCOUNT_LOGIN_METHODS` (65.4), and `ACCOUNT_EMAIL_REQUIRED`/`ACCOUNT_USERNAME_REQUIRED` ->
+      `ACCOUNT_SIGNUP_FIELDS` (65.5). Sequenced after 55a because the replacement settings do not
+      exist in 0.63.6. Includes the `app_settings.AUTHENTICATION_METHOD` read inside 55b's method.
+
+      **55c outcome (2026-09-15):** `bancostore/settings.py` now sets
+      `ACCOUNT_LOGIN_METHODS = {"email"}` and
+      `ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]`; the three deprecated
+      settings are gone. The values were not copied from the warning text — they were read from
+      65.19.3's own `account/app_settings.py` resolution logic (`LOGIN_METHODS` maps
+      `AUTHENTICATION_METHOD="email"` to `{email}`; `SIGNUP_FIELDS` builds `email*` from
+      `EMAIL_REQUIRED`, omits username for `USERNAME_REQUIRED=False`, and adds `password2*` because
+      `SIGNUP_PASSWORD_ENTER_TWICE` defaults to `True` and this project never set it). The
+      `app_settings.AUTHENTICATION_METHOD` read was already deleted in 55b.
+      - New `tests/unit/accounts/test_allauth_settings.py` (no DB, <1s): calls allauth's own
+        `settings_check` and asserts it returns nothing (its deprecation warnings carry no check
+        id; an empty result also covers `account.W001`, login-method vs signup-field conflict) —
+        **failed with the 3 warnings before the change, passes after**. Two more tests pin the
+        effective `LOGIN_METHODS`/`SIGNUP_FIELDS`; both passed on the old settings *and* the new
+        ones, which is the proof the migration preserved behavior.
+      - `manage.py check`: **"System check identified no issues"** (was 3 warnings).
+      - Stale comments updated: `settings.py` backend-order comment, `apps/accounts/backends.py`
+        docstring, `CustomerSignupForm` docstring (username is dropped because `SIGNUP_FIELDS` has
+        no `username` entry — confirmed at `allauth/account/forms.py:294-304`).
+      - Tests: `test_customer_auth.py` + `test_google_login_gating.py` + `tests/unit/accounts/`
+        **35 passed**, zero allauth warnings. `make check-fast` clean. `test_admin_auth.py` not
+        re-run locally (~25 min throttled); its password-reset subset passed after 55b, and the
+        effective settings values are pinned identical — full suite goes to CI.
+- [ ] **55d — Production rate-limiting behaviour (`ALLAUTH_TRUSTED_PROXY_COUNT`).** 65.14.2 made
+      allauth distrust `X-Forwarded-For` by default. This project runs behind Nginx in production,
+      so without configuration every visitor's IP collapses to the proxy's and allauth's own
+      login-attempt rate limits become global instead of per-visitor. This is the *same* gap
+      already tracked as a Known Issue for `django-ratelimit` (Task 29's deferred Medium finding),
+      now extended to allauth's built-in limits. Must be resolved as part of this task, not
+      deferred again, and must be reflected in `deploy/README.md`'s runbook.
+- [ ] **55e — Live-browser verification + close.** Not pytest alone.
+
+**Acceptance criteria:**
+- [ ] `pip-audit -r requirements.txt` reports zero django-allauth findings (weasyprint's own
+      remaining advisory is out of scope — see the Task 30f entry)
+- [ ] No deprecation warnings from allauth in the test output
+- [ ] The copy-pasted private method is either deleted in favour of a supported hook, or
+      re-verified line by line against the installed 65.x source with that verification recorded
+- [ ] `CONSTRAINTS.md`'s recorded pip-audit baseline (7 findings / 2 packages) is updated to the
+      new real number — the ratchet is only honest if it tracks reality
+
+**Verification:**
+- [ ] `pytest tests/feature/accounts/` green — 19 directly relevant tests already exist
+      (`test_customer_auth.py` 6, `test_admin_auth.py`'s ~9 password-reset/login subset,
+      `test_google_login_gating.py` 4), so every risk point is covered before the change starts
+- [ ] Full suite green, CI green on real MySQL
+- [ ] **Live browser, not just pytest:** customer signup, customer login, customer password reset
+      end-to-end via the real email link, admin password reset via its own branded link, customer
+      logout, admin logout, and the Google button's gated show/hide. The admin password-reset path
+      is the one that fails *silently* if 55b is wrong — a green suite alone is not sufficient
+      evidence, matching this project's standing rule for auth work.
+- [ ] `MNOTIFY_API_KEY` check before any browser login testing (no real SMS spend)
+
+**Dependencies:** None. Sequencing within the task is 55a -> 55b -> 55c -> 55d -> 55e.
+
+**Files likely touched:** `requirements.txt`, `bancostore/settings.py`, `apps/accounts/forms.py`,
+`apps/accounts/views.py` (possibly), `CONSTRAINTS.md` (baseline), `deploy/README.md` (55d),
+`tests/feature/accounts/*`.
+
+**Estimated scope:** M

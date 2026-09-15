@@ -17,7 +17,7 @@ class EmailBackend(ModelBackend):
     against User.username.
 
     Matches is_staff users only. Note that allauth's own backend (configured
-    for email-based customer login, ACCOUNT_AUTHENTICATION_METHOD="email")
+    for email-based customer login, ACCOUNT_LOGIN_METHODS={"email"})
     will also happily match a staff user's email+password, since it has no
     concept of "staff-only" or lockout — so a locked-out admin must raise
     PermissionDenied here, not just return None. Django's authenticate()

@@ -237,7 +237,7 @@ if DEBUG:
 # test_lockout_holds_even_when_username_equals_email.
 #
 # apps.accounts.backends.EmailBackend must come before allauth's backend:
-# allauth also matches by email (ACCOUNT_AUTHENTICATION_METHOD="email") with
+# allauth also matches by email (ACCOUNT_LOGIN_METHODS={"email"}) with
 # no concept of "staff-only" or lockout, so if it ran first it would happily
 # authenticate a locked-out admin before our lockout check ever got a chance
 # to raise PermissionDenied and stop the backend chain.
@@ -257,11 +257,18 @@ PHONENUMBER_DEFAULT_REGION = "GH"
 # django-allauth — regular customer registration/login (see apps/accounts/forms.py for
 # the custom signup form collecting full_name/phone_number, per docs Section 4.1).
 # Distributor and admin login have their own rules, built in later tasks (5 and 6).
-ACCOUNT_AUTHENTICATION_METHOD = "email"
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_USERNAME_REQUIRED = False
+# Task 55c: django-allauth 65.x replacements for the deprecated
+# ACCOUNT_AUTHENTICATION_METHOD="email" (-> LOGIN_METHODS, 65.4) and
+# ACCOUNT_EMAIL_REQUIRED=True / ACCOUNT_USERNAME_REQUIRED=False (-> SIGNUP_FIELDS,
+# 65.5). Values are exactly what allauth itself derived from the old settings --
+# pinned by tests/unit/accounts/test_allauth_settings.py.
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_EMAIL_VERIFICATION = "optional"
+# Task 55b: routes the admin password-reset email to its admin-branded confirm
+# page via allauth's documented get_reset_password_from_key_url hook.
+ACCOUNT_ADAPTER = "apps.accounts.adapter.BancostoreAccountAdapter"
 ACCOUNT_FORMS = {
     "signup": "apps.accounts.forms.CustomerSignupForm",
     "login": "apps.accounts.forms.CustomerLoginForm",

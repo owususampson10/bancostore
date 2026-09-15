@@ -162,3 +162,26 @@ def test_customer_password_reset_completes_via_email_link(client):
 
     user.refresh_from_db()
     assert user.check_password("NewPassw0rd!")
+
+
+@pytest.mark.django_db
+def test_customer_password_reset_email_links_to_customer_confirm_page(client):
+    """Task 55b: the admin-branded reset link now comes from the project-wide
+    ACCOUNT_ADAPTER's get_reset_password_from_key_url hook, which every
+    allauth password reset goes through -- not just the admin one. A
+    customer requesting a reset from the storefront must still get allauth's
+    own customer-facing confirm page, never the admin-branded one."""
+    from urllib.parse import urlparse
+
+    from django.urls import resolve
+
+    User.objects.create_user(
+        username="kwame", email="kwame@example.test", password="OldPassw0rd!"
+    )
+
+    client.post(reverse("account_reset_password"), {"email": "kwame@example.test"})
+
+    match = RESET_LINK_PATTERN.search(mail.outbox[0].body)
+    reset_path = urlparse(match.group(0)).path
+
+    assert resolve(reset_path).url_name == "account_reset_password_from_key"

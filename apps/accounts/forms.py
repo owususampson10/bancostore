@@ -1,25 +1,16 @@
-from urllib.parse import quote
-
 from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
-from django.urls import reverse
 from django.utils import timezone
 
-from allauth.account import app_settings
-from allauth.account.adapter import get_adapter
-from allauth.account.app_settings import AuthenticationMethod
 from allauth.account.forms import (
     LoginForm,
     ResetPasswordForm,
     ResetPasswordKeyForm,
     SignupForm,
-    default_token_generator,
 )
-from allauth.account.utils import user_pk_to_url_str, user_username
-from allauth.utils import build_absolute_uri
 from phonenumber_field.formfields import PhoneNumberField
 
 from .models import Address, AdminProfile, CustomerProfile
@@ -39,8 +30,9 @@ CHECKBOX_CLASSES = (
 
 
 class CustomerSignupForm(SignupForm):
-    """ACCOUNT_USERNAME_REQUIRED=False already makes the base form drop the
-    username field itself, so there's no need to remove it here too."""
+    """ACCOUNT_SIGNUP_FIELDS has no "username" entry, which already makes the
+    base form drop the username field itself, so there's no need to remove it
+    here too."""
 
     full_name = forms.CharField(
         max_length=150,
@@ -162,7 +154,9 @@ class AdminResetPasswordForm(ResetPasswordForm):
     -- same underlying email lookup/token/rate-limit machinery (ResetPasswordForm
     is untouched), styled to match the admin/2FA screens and, critically,
     emailing a link back to this app's own admin-branded confirm screen
-    (admin_password_reset_from_key) instead of allauth's customer one."""
+    (admin_password_reset_from_key) instead of allauth's customer one. That
+    link now comes from apps.accounts.adapter.BancostoreAccountAdapter
+    (Task 55b), not from a copied allauth private method on this form."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -183,38 +177,6 @@ class AdminResetPasswordForm(ResetPasswordForm):
         email = super().clean_email()
         self.users = [user for user in self.users if user.is_staff]
         return email
-
-    def _send_password_reset_mail(self, request, email, users, **kwargs):
-        # Mirrors ResetPasswordForm._send_password_reset_mail (same token
-        # generation, same email template, same username-context branch for
-        # non-email-based auth) -- the only real change is the target URL
-        # name for the link embedded in the email. allauth's own version
-        # hardcodes "account_reset_password_from_key" with no hook to
-        # override just the URL name, so this duplicates the ~25 lines
-        # rather than the whole form/view (security-auditor finding: an
-        # earlier version of this method silently dropped the username
-        # branch below, which would only ever have mattered if
-        # ACCOUNT_AUTHENTICATION_METHOD stopped being "email").
-        token_generator = kwargs.get("token_generator", default_token_generator)
-        for user in users:
-            temp_key = token_generator.make_token(user)
-            uid = user_pk_to_url_str(user)
-            key = f"{uid}-{temp_key}"
-            path = reverse(
-                "admin_password_reset_from_key",
-                kwargs={"uidb36": "UID", "key": "KEY"},
-            ).replace("UID-KEY", quote(key))
-            url = build_absolute_uri(request, path)
-            context = {
-                "user": user,
-                "password_reset_url": url,
-                "uid": uid,
-                "key": temp_key,
-                "request": request,
-            }
-            if app_settings.AUTHENTICATION_METHOD != AuthenticationMethod.EMAIL:
-                context["username"] = user_username(user)
-            get_adapter().send_mail("account/email/password_reset_key", email, context)
 
 
 class AdminResetPasswordKeyForm(ResetPasswordKeyForm):

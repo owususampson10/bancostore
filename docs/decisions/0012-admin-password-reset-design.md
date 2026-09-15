@@ -184,3 +184,26 @@ actual committed diff (not just the design), independently surfaced the same two
   AuthenticationMethod.EMAIL: context["username"] = user_username(user)`) — inert today only because
   `ACCOUNT_AUTHENTICATION_METHOD = "email"`, but a real, untested divergence risk if that setting
   ever changed. Restored for true parity with the original.
+
+## Update (2026-09-15): Decision 3 moved to the adapter at Task 55b (django-allauth 0.63.6 -> 65.x)
+
+The reason Decision 3 rejected the adapter no longer holds. In 65.x, `BaseAdapter.__init__` sets
+`self.request = context.request` (`allauth/core/internal/adapter.py`), populated per request by the
+already-installed `allauth.account.middleware.AccountMiddleware` — so the adapter *can* now tell
+which front door started a reset. And the old form override stopped working outright: 65.x
+`ResetPasswordForm.save()` no longer calls `_send_password_reset_mail` at all, it calls
+`flows.password_reset.request_password_reset()`, which asks
+`adapter.get_reset_password_from_key_url(key)` for the link. The copied method became dead code and
+every admin reset email silently fell back to the customer confirm page — caught by
+`test_admin_password_reset_email_links_to_admin_branded_confirm_page` during Task 55a, exactly the
+silent failure the Consequences section above predicted.
+
+`apps/accounts/adapter.py::BancostoreAccountAdapter` (wired via `ACCOUNT_ADAPTER`) now overrides
+that documented hook and returns `admin_password_reset_from_key` only when the request's
+`resolver_match.url_name` is `admin_password_reset`; every other caller, including one with no
+request, gets allauth's own customer link. The duplicated method, its username-context branch, and
+its `app_settings.AUTHENTICATION_METHOD` read are deleted — token generation, email context, and the
+email template are allauth's own again. Consequences' "re-verify the duplicate on every allauth
+upgrade" obligation is retired; `test_customer_password_reset_email_links_to_customer_confirm_page`
+was added because the hook is project-wide, and both routing tests were confirmed to fail against a
+deliberately broken adapter before being trusted. Decisions 1, 2 and 4 are unchanged.
