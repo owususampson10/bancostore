@@ -8610,11 +8610,70 @@ input, empty when there is no `?next=`. An off-site `next` is still refused by a
       renders the hidden `next` input and login -> `GET /cart/my-orders/ 200`. No request to
       `/accounts/profile/`. Throwaway customer deleted afterwards.
 - [ ] Full suite green in CI on real MySQL (with Task 55's push)
-- [ ] Note for the PR: this branch is stacked on `task55-allauth-upgrade`; per this repo's past
-      experience CodeRabbit skips auto-review for PRs targeting a non-default branch until retargeted
-      to `main`.
+- [x] Shipped in one PR to `main` together with Tasks 55, 57 and 58 (branch
+      `task55-58-allauth-login-redirect-product-tabs`), so CodeRabbit reviews it once, with no
+      stacked-branch retargeting needed.
 
 **Files touched:** `apps/accounts/adapter.py`, `templates/account/login.html`,
 `templates/account/signup.html`, `tests/feature/accounts/test_customer_auth.py`.
+
+**Estimated scope:** S
+
+---
+
+### Task 57: Product page — Description and Reviews as horizontal tabs
+
+**Description:** Requested directly by the user 2026-09-15 with a reference screenshot (a tab strip
+reading "About the product / Specifications / Reviews", active tab underlined). On
+`templates/catalog/product_detail.html` the Description and Reviews sections were stacked one
+above the other; they are now one tab set.
+
+**Decisions (confirmed with the user via `AskUserQuestion`):**
+- **Two tabs, Description + Reviews — no Specifications tab.** The reference's Specifications table
+  (weight, store, tags) has no backing data: `Product` stores only name/description/category/price/
+  PV/stock/featured, plus `ProductVariant` name/value pairs that the page already shows beside the
+  price. Adding real specification fields would be its own task (migration + admin form).
+- **Active tab in Bancostore orange (`primary`)**, not the reference's green, which the storefront
+  uses nowhere else.
+
+**Built:**
+- WAI-ARIA tabs: `role="tablist"`/`tab`/`tabpanel`, `aria-selected`, `aria-controls` /
+  `aria-labelledby`, roving `tabindex`, Left/Right arrows (wrapping) and Home/End move selection and
+  focus. Visually hidden `<h2>` in each panel keeps the heading outline.
+- Reviews tab label shows the approved-review count, e.g. "Reviews (2)".
+- Initial tab comes from the server through `data-initial-tab` (not interpolated into `x-data`,
+  per this repo's Alpine XSS lesson): **Reviews when a submitted review failed validation** (the
+  view re-renders with errors, which would otherwise sit hidden behind Description), else
+  Description — or Reviews when the URL is `#reviews`.
+- `review_submit`'s success redirect now appends `#reviews`, so the customer returns to the tab
+  they were on.
+- The inactive panel is `x-cloak`ed so it doesn't flash before Alpine starts.
+
+- [x] Tests (`tests/feature/catalog/test_reviews.py`): tab/panel ARIA wiring and default tab,
+      approved-only count in the label, invalid review reopens on Reviews, successful review
+      redirects to `#reviews` — all four failed before the change. Catalog reviews + detail +
+      wishlist: 36 passed. `make check-fast` clean.
+- [x] Live browser (local runserver, temporary approved review, deleted afterwards), 1440px and
+      500px: tabs side by side; clicking switches panels; ArrowLeft/End move selection and focus;
+      tabindex roves 0/-1; fresh load of `#reviews` opens Reviews, a plain load opens Description,
+      nothing focused on load; no horizontal page overflow at 500px.
+- Bugs caught by that live check and fixed before finishing (pytest could not see either):
+  `overflow-x-auto` on the tab row plus the underline's `-mb-px` produced 1px of vertical overflow,
+  so the row showed a scrollbar and clipped the underline; and a static `border-transparent`
+  beside the dynamic `border-primary` always won the cascade, so no active underline rendered.
+  Also swapped a multi-line HTML comment for `{% comment %}` so the implementation note doesn't
+  ship in public page source.
+- Testing gotchas worth remembering: `runserver --noreload` keeps Django's cached template loader,
+  so template edits need a server restart to show; and navigating to the same URL plus a `#fragment`
+  is a same-document navigation, not a reload — test hash behaviour via a different page first.
+
+**Found, not fixed (pre-existing since Task 50, 2026-08-17):** `static/src/fonts/
+material-symbols-outlined-subset.woff2` is a **static** font (fontTools: no `fvar` axes), so every
+`font-variation-settings: 'FILL' 1` renders as an outline. Rating stars always look empty
+regardless of the score, and the filled wishlist heart on this page uses the same mechanism.
+Needs its own task — re-fetch the subset with a FILL-axis range, or a separate filled face.
+
+**Files touched:** `templates/catalog/product_detail.html`, `apps/catalog/views.py`,
+`tests/feature/catalog/test_reviews.py`.
 
 **Estimated scope:** S

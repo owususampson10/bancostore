@@ -286,3 +286,72 @@ def test_a_race_between_two_first_time_submissions_updates_instead_of_erroring(
     review = Review.objects.get(user=user, product=product)
     assert review.rating == 5
     assert review.body == "Second writer's real submission"
+
+
+@pytest.mark.django_db
+def test_product_detail_shows_description_and_reviews_as_tabs(client, product):
+    """Task 57: Description and Reviews were two stacked sections; they are
+    now one accessible tab set, each tab wired to its own panel, opening on
+    Description by default."""
+    response = client.get(reverse("catalog:product_detail", args=[product.slug]))
+
+    content = response.content.decode()
+    assert 'role="tablist"' in content
+    assert 'id="product-tab-description"' in content
+    assert 'aria-controls="product-panel-description"' in content
+    assert 'id="product-panel-description"' in content
+    assert 'aria-labelledby="product-tab-description"' in content
+    assert 'id="product-tab-reviews"' in content
+    assert 'aria-controls="product-panel-reviews"' in content
+    assert 'id="product-panel-reviews"' in content
+    assert 'aria-labelledby="product-tab-reviews"' in content
+    assert 'data-initial-tab="description"' in content
+
+
+@pytest.mark.django_db
+def test_reviews_tab_label_counts_approved_reviews_only(client, product):
+    for n, approved in enumerate([True, True, False]):
+        Review.objects.create(
+            user=User.objects.create_user(username=f"reviewer{n}@example.test"),
+            product=product,
+            rating=5,
+            body="Great",
+            is_approved=approved,
+        )
+
+    response = client.get(reverse("catalog:product_detail", args=[product.slug]))
+
+    assert "Reviews (2)" in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_invalid_review_reopens_the_page_on_the_reviews_tab(client, product):
+    """The page is re-rendered with the form errors; opening on Description
+    would hide those errors behind a tab the customer didn't choose."""
+    user = User.objects.create_user(username="ama@example.test", password="pw")
+    _make_delivered_order(user, product)
+    client.force_login(user)
+
+    response = client.post(
+        reverse("catalog:review_submit", args=[product.pk]), {"rating": "", "body": ""}
+    )
+
+    assert response.status_code == 200
+    assert 'data-initial-tab="reviews"' in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_successful_review_redirects_to_the_reviews_tab(client, product):
+    user = User.objects.create_user(username="ama@example.test", password="pw")
+    _make_delivered_order(user, product)
+    client.force_login(user)
+
+    response = client.post(
+        reverse("catalog:review_submit", args=[product.pk]),
+        {"rating": 4, "body": "Really liked this."},
+    )
+
+    assert response.status_code == 302
+    assert response.url == (
+        reverse("catalog:product_detail", args=[product.slug]) + "#reviews"
+    )
