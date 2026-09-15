@@ -107,6 +107,16 @@ if not DEBUG and not _RUNNING_UNDER_PYTEST:
     # collapsing every visitor into one shared rate-limit bucket instead of one
     # bucket per real client IP.
     RATELIMIT_IP_META_KEY = "HTTP_X_REAL_IP"
+    # Task 55d: django-allauth has its own login/signup/password-reset rate
+    # limits, and since 65.14.2 it trusts no proxy header by default -- behind
+    # Nginx every visitor would resolve to 127.0.0.1 and share one global
+    # bucket. Trust the same Nginx-overwritten X-Real-IP header as
+    # django-ratelimit above, not ALLAUTH_TRUSTED_PROXY_COUNT: one trust anchor
+    # for both limiters (already spoof-tested live in Task 24g), and the same
+    # fail-closed behaviour if Nginx ever stopped sending it -- allauth raises
+    # PermissionDenied, django-ratelimit raises ImproperlyConfigured, instead of
+    # allauth alone silently falling back to REMOTE_ADDR.
+    ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP"
 
 
 # Application definition

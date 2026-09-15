@@ -8439,6 +8439,37 @@ security-sensitive flows are untouched by this upgrade.
       already tracked as a Known Issue for `django-ratelimit` (Task 29's deferred Medium finding),
       now extended to allauth's built-in limits. Must be resolved as part of this task, not
       deferred again, and must be reflected in `deploy/README.md`'s runbook.
+
+      **55d outcome (2026-09-15):** the production block of `bancostore/settings.py` sets
+      **`ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP"`** — deliberately *not* the
+      `ALLAUTH_TRUSTED_PROXY_COUNT` this sub-task was named for. Both work behind this project's
+      single Nginx hop (DNS is a direct A record, no CDN); the header won on three counts, each read
+      at source in 65.19.3 rather than assumed:
+      - **One trust anchor.** django-ratelimit already trusts exactly `X-Real-IP` (Task 24d), which
+        Nginx *overwrites* with `$remote_addr` and which Task 24g spoof-tested live. A proxy count
+        would make allauth trust a second header (`X-Forwarded-For`, which Nginx *appends* to).
+      - **Same failure mode.** If Nginx ever stopped sending the header, allauth's
+        `adapter.get_client_ip` raises `PermissionDenied` and django-ratelimit's `_get_ip` raises
+        `ImproperlyConfigured` — both loud. A proxy count with no `X-Forwarded-For` silently falls
+        back to `REMOTE_ADDR` (Nginx's `127.0.0.1`), i.e. exactly the global bucket this task exists
+        to prevent. (`clean_client_ip` strips whitespace, so the count's `", "` parsing was fine —
+        checked, not the reason.)
+      - **Not exposed under pytest/CI anyway.** The production block is gated on
+        `not DEBUG and not _RUNNING_UNDER_PYTEST`, so neither choice changes local/CI behaviour.
+      - Tests, new `tests/unit/bancostore/test_production_proxy_settings.py` (no DB, ~2s):
+        (1) imports the real settings in a fresh interpreter with `DEBUG=False` and no
+        `PYTEST_VERSION` — the only way to load the production block — and asserts both limiters
+        trust the same header and the proxy count stays 0; **failed (`None`) before, passes after**.
+        (2) two visitors with different `X-Real-IP` and an identical forged `X-Forwarded-For`
+        resolve to their own IPs; confirmed falsifiable — with allauth's default both resolve to
+        `127.0.0.1`, the global-bucket bug itself.
+      - `deploy/README.md`: Server facts now name `X-Real-IP` as the sole client-IP source for both
+        limiters; "Updating the Nginx config" warns never to remove/append that header and what a
+        future CDN would require (`real_ip_header`/`set_real_ip_from`); a one-time post-deploy
+        check for Task 55's first deploy (a failed customer login must show allauth's normal
+        "not correct" error, not a 403). `deploy/nginx/bancostore.conf` header comment updated.
+        **Nothing changed on the live server** — this ships with the normal Task 55 deploy.
+      - `manage.py check` clean; `make check-fast` clean.
 - [ ] **55e — Live-browser verification + close.** Not pytest alone.
 
 **Acceptance criteria:**

@@ -22,7 +22,9 @@ following the steps below.
 - **Web server:** Nginx (config in this repo's `deploy/nginx/bancostore.conf`, deployed to
   `/etc/nginx/sites-available/bancostore`) — reverse-proxies to Daphne, serves `/static/`/`/media/`
   directly, sets `X-Real-IP`/`X-Forwarded-Proto` (which `bancostore/settings.py`'s production
-  security block trusts)
+  security block trusts). `X-Real-IP` is the **only** client-IP source for **both** rate limiters:
+  `django-ratelimit` (`RATELIMIT_IP_META_KEY`) and django-allauth's own login/signup/password-reset
+  limits (`ALLAUTH_TRUSTED_CLIENT_IP_HEADER`, Task 55d)
 - **Database:** MySQL 8, database `bancostore`, user `bancostore`@`localhost` (credentials only in
   the server's own `.env`, never committed)
 - **Logs:** `/home/bancostore/bancostore/logs/*.log` (Supervisor-managed, stdout/stderr per
@@ -86,6 +88,17 @@ curl -I https://bancostore.com/account/login/ # a second, independent page famil
 tail -50 /home/bancostore/bancostore/logs/daphne_error.log   # confirm no fresh tracebacks
 ```
 
+**First deploy of Task 55 (django-allauth 65.x) only — also check the client-IP header reaches
+allauth.** In a real browser, open `https://bancostore.com/accounts/login/` (customer login,
+plural `accounts/`) and submit a made-up email with a wrong password. Expected: the normal
+"email address and/or password you specified are not correct" form error. A **403** instead means
+allauth can't read `X-Real-IP` (`adapter.get_client_ip` raises `PermissionDenied`) — every customer
+login, signup and password reset is then refused; roll back or fix the Nginx header before
+anything else. Don't try to prove per-visitor limits by hammering the live login page (allauth's
+defaults are 30 logins / 20 signups / 20 password resets per IP per minute) — that is covered by
+`tests/unit/bancostore/test_production_proxy_settings.py`, and the same header's spoof resistance was
+verified live in Task 24g.
+
 ## Updating the Nginx config
 
 `deploy/nginx/bancostore.conf` in this repo is **not** synced to the live server automatically by
@@ -106,6 +119,15 @@ sudo systemctl reload nginx      # zero-downtime -- reload, not restart
 
 Update this repo's `deploy/nginx/bancostore.conf` with the same change afterward, so the tracked
 copy and the live file don't drift apart.
+
+**Never remove or change `proxy_set_header X-Real-IP $remote_addr;`** in any proxied `location`
+(both `/` and `/ws/`), and never switch it to `$proxy_add_x_forwarded_for`. It must *overwrite*
+whatever the visitor sent — that is what makes it unspoofable — and both rate limiters depend on it
+(Server facts above). Without it, django-ratelimit endpoints fail with `ImproperlyConfigured` and
+every allauth login/signup/password reset returns 403. **If a CDN or second proxy (e.g. Cloudflare)
+is ever put in front of Nginx**, `$remote_addr` becomes the CDN's IP and every visitor shares one
+rate-limit bucket: Nginx then needs `real_ip_header`/`set_real_ip_from` for that CDN's published
+ranges, re-verified before relying on it.
 
 ## Environment variables (`.env`)
 
