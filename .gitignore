@@ -32,6 +32,13 @@ build/
 out/
 coverage/
 
+# Coverage artifacts (CONSTRAINTS.md changed-line coverage rule). Generated
+# by every `make check-task` run and by CI; the recorded baseline lives in
+# CONSTRAINTS.md, not in a committed report.
+coverage.lcov
+.coverage
+.coverage.*
+
 # Python
 __pycache__/
 *.py[cod]

@@ -1,0 +1,11 @@
+# Paths exempt from the CONSTRAINTS.md floor guard.
+#
+# One glob per line. This is a TRACKED exemption file on purpose: exempting a
+# path shows up in review as a diff, where loosening the bar should be loud.
+# It is never a substitute for fixing the code -- see CONSTRAINTS.md's
+# Exceptions table for time-boxed, owned exemptions of the numbered rules.
+
+# The guard defines the suppression/stub patterns it searches for as string
+# literals, so scanning its own source always matches. Unavoidable and
+# self-referential, not a real finding.
+scripts/floor_guard.py

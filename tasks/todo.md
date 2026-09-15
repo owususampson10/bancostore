@@ -8192,3 +8192,112 @@ person who adds a CSS-referenced asset.
 6 base templates (removed CDN `<link>`).
 
 **Estimated scope:** S
+
+---
+
+> **Numbering note:** Tasks 51, 52 and 53 shipped without their own headings in this file —
+> 51 (dependency security upgrades: Django 5.2, cbor2, django-constance, plus the deploy-downtime
+> ADR, PR #82), 52 (local branch only), 53 (WeasyPrint security bump, PR #85). They are referenced
+> from the Known Issues sections above and from
+> `docs/decisions/0013-constance-pickle-to-json-incident.md`. The gap between Task 50 and Task 54
+> here is that, not a missing task. Task 54 took the next genuinely free integer, matching Task 25's
+> own precedent of never renumbering an already-shipped, already-referenced number.
+
+### Task 54: Written quality bar — CONSTRAINTS.md + diff-scoped floor guard
+
+**Description:** Not part of the original numbered plan — requested directly by the user after the
+`agent-skills` plugin was updated 0.6.6 -> 0.6.9 and shipped a new `constraint-driven-development`
+skill. Records what "good enough to ship" means for this codebase as numbers that can be checked
+mechanically, rather than prose in `CLAUDE.md`/`SPEC.md` that an agent may or may not follow. The
+motivating failure is already in this repo's own history: `test_earnings_history.py` asserted a
+hard-coded pre-hash asset filename, broke silently at Task 36a's Vite cache-busting migration, and
+was written off as "known pre-existing flakiness" across Tasks 44 through 48 before anyone actually
+fixed it (Checkpoint O). A diff-scoped guard would have flagged the weakening the day it happened.
+
+Four-question intake (the skill caps it at four deliberately): dimensions beyond the floor
+(**coverage + security**), block-or-warn (**block the floor, warn the rest for two weeks**), target
+numbers vs. measure-and-hold (**measure and hold**), and slowest tolerable check (**~90s**).
+
+**Measured baseline, 2026-09-15** — every rule is anchored to this, not to an invented target:
+94.9% project coverage (6,483/6,830 statements across 246 files), 1,810 tests passing locally
+(1,816 on CI — the 6-test gap is exactly the WeasyPrint/Pango skips, which run under CI's apt Pango
+and skip on this Mac), 7 pip-audit findings across 2 packages, ~38 min full suite with coverage
+instrumentation locally vs. 12m47s on CI.
+
+**Changed-line coverage set at 90%, not the conventional 80%** — a real decision, not a default
+accepted unexamined. At 94.9% project coverage an 80% rule would have permitted every new change to
+land *below* the standard already being met, a ratchet pointing the wrong way. Validated against
+real history before committing to it: the last 10, 25 and 60 commits score 95.7%, 94.9% and 95.0%,
+so 90% is reachable but not free.
+
+**`scripts/floor_guard.py` is a Python port of the skill's Node reference implementation**, not a
+hand-rolled checker. The fast loop is otherwise entirely Python (black/isort/ruff/pytest), so making
+the cheapest and most-often-run gate the only one requiring Node would have been the wrong
+dependency to add. The contract is deliberately unchanged from the reference: diff-scoped including
+untracked files, exit `0`/`1`/`2` where a "could not run" never reads as a pass, and secrets
+reported by rule and location only, never by value.
+
+**Two findings during the build, both caught before merge:**
+1. The guard flagged its own bootstrap — every row in a brand-new `CONSTRAINTS.md` Exceptions table
+   is necessarily "new". Resolved by narrowing the rule to fire only when the file already existed
+   at the merge base (`constraints_file_is_new`), since there is no prior bar to weaken on the
+   commit that creates it. Deliberately narrow: it never applies to a file that already existed,
+   which is the case the rule actually targets.
+2. A `# noqa: E402` was added to `floor_guard.py` to quiet a type-checker hint about the
+   `_gitdiff` import — i.e. adding a suppression comment to the very file whose job is to catch
+   suppression comments. Reverted rather than suppressed; the plain import resolves fine because
+   Python puts a script's own directory on `sys.path`.
+
+`scripts/_gitdiff.py` was extracted after the same `+++ /dev/null` header off-by-one (which parses
+to the garbage filename `ev/null`) had to be fixed in both scripts — a bug needing two fixes is
+duplication worth removing, and the reference implementation carries the same flaw.
+
+**Acceptance criteria:**
+- [x] `CONSTRAINTS.md` exists at the repo root, and every number in it has a stated reason
+- [x] The floor is enforced and passes on the current codebase with zero changes to existing code
+- [x] Every chosen dimension has a real tool and a command that runs today — coverage via
+      `pytest-cov` (the one new pip dependency, user-approved), dependency security via the
+      already-present `pip-audit`
+- [x] Each constraint records where it runs; the fast stage (`make check-fast`) measured at 4.4s
+- [x] At least one constraint is external rather than self-judged (`pip-audit` reads a real
+      vulnerability database; real-MySQL CI is a real environment, not a mock)
+- [x] Measured-only metrics record today's value and a direction
+- [x] Every exception has an owner and an expiry date
+- [x] `CLAUDE.md` points at the file — added as the second line of the doc, above Project State
+- [x] A trial run on the branch produces no failures the user disagrees with
+
+**Deliberately NOT done, recorded rather than faked:** gitleaks and osv-scanner install machine-wide
+via Homebrew, unreliable on this macOS 12 dev box, and Lighthouse needs a running URL. Rather than
+write a number into `CONSTRAINTS.md` with no tool behind it (an explicit red flag in the skill),
+these are tracked as exception **E4**, leaving only one genuinely external constraint wired — which
+`CONSTRAINTS.md` states plainly instead of glossing over. `floor_guard.py` carries a narrow,
+high-confidence secret check as a local stopgap.
+
+**Verification:**
+- [x] Both scripts exercised against all three exit codes, including the "could not run" path
+- [x] Planted violations each detected — a `# noqa`, a `NotImplementedError` stub, a live-shaped
+      `sk_live_` key, and a `@pytest.mark.skip` — with the secret printed as `<redacted>`. Probe
+      files removed afterwards. Re-run after the `_gitdiff` extraction to prove the refactor was
+      behaviour-preserving (identical results).
+- [x] Coverage script validated against real history (14/14, 224/234, 930/980 lines) and proven to
+      fail at a threshold it cannot meet, plus `--warn` proven to report and still exit 0
+- [x] CI green on real MySQL, including the floor guard's first run on real infrastructure — the
+      one thing unverifiable locally, since without `fetch-depth: 0` a shallow checkout gives no
+      merge base and the guard exits 2 rather than passing
+
+**Known follow-ups (dates recorded so they can't drift silently):**
+- **2026-09-29** — the warn window ends. Coverage at 90% and the pip-audit gate each get re-decided,
+  not silently extended.
+- **2026-10-15** — exceptions E3 (pip-audit backlog) and E4 (missing external scanners) expire.
+- `django-allauth` 0.63.6 carries 3 advisories and `weasyprint` 69.0 one more — the remaining half
+  of the still-open Task 30f pip-audit backlog above. Wants its own task, one package at a time,
+  per this project's dependency-upgrade discipline.
+
+**Dependencies:** None. **Closed 2026-09-15.**
+
+**Files touched:** new `CONSTRAINTS.md`, `.constraintsignore`, `Makefile`, `scripts/floor_guard.py`,
+`scripts/changed_line_coverage.py`, `scripts/_gitdiff.py`; modified `.github/workflows/ci.yml`
+(floor guard step, coverage step, `fetch-depth: 0` on both jobs), `requirements.txt` (`pytest-cov`),
+`.gitignore` (coverage artifacts), `CLAUDE.md` (pointer line).
+
+**Estimated scope:** M

@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Read `CONSTRAINTS.md` before writing code. Never weaken it to make a change pass** — no new
+suppression comment, no skipped or deleted test, no assertion quietly removed, no threshold edited
+down. Run `make check-fast` after an edit (about 4 seconds) and `make check-task` when a task is
+done. Tightening the bar is silent; loosening it should be loud.
+
 ## Project State
 
 **Tasks 1–25 are all done. Task 21 (dashboard extras: binary tree view, earnings history
