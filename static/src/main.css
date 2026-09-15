@@ -152,7 +152,17 @@
    Symbols icon_names= subsetting API -- 40KB vs. the full family's 1.1MB,
    and no third-party request at runtime (Task 38's flagged risk/finding,
    fixed 2026-08-17). Regenerate by re-running the same icon_names= fetch
-   with an updated icon list if a new icon name is ever added. */
+   with an updated icon list if a new icon name is ever added.
+
+   Task 58: the fetch MUST request the FILL axis --
+   css2?family=Material+Symbols+Outlined:FILL@0..1&icon_names=<comma list>
+   (Chrome User-Agent, then download the woff2 URL it returns). The first
+   subset omitted it and came back as a static font, so every
+   font-variation-settings 'FILL' 1 below (rating stars, the wishlist heart,
+   the 2FA shield/lock icons) silently drew as an outline for a month. wght
+   is deliberately not an axis: every icon is pinned to 400 here anyway.
+   tests/unit/test_icon_font.py checks the axis and that every icon name the
+   code renders is still in the file. */
 @font-face {
   font-family: "Material Symbols Outlined";
   font-style: normal;

@@ -8671,9 +8671,51 @@ above the other; they are now one tab set.
 material-symbols-outlined-subset.woff2` is a **static** font (fontTools: no `fvar` axes), so every
 `font-variation-settings: 'FILL' 1` renders as an outline. Rating stars always look empty
 regardless of the score, and the filled wishlist heart on this page uses the same mechanism.
-Needs its own task — re-fetch the subset with a FILL-axis range, or a separate filled face.
+Fixed the same day as **Task 58** (below).
 
 **Files touched:** `templates/catalog/product_detail.html`, `apps/catalog/views.py`,
 `tests/feature/catalog/test_reviews.py`.
+
+**Estimated scope:** S
+
+---
+
+### Task 58: Filled icons render as outlines — icon font subset lost its FILL axis
+
+**Description:** Found during Task 57's live check, fixed at the user's request 2026-09-15. Every
+icon styled `font-variation-settings: 'FILL' 1` has drawn as a plain outline since Task 50
+(2026-08-17): product rating stars (a 4.0 rating showed five empty stars), the saved-to-wishlist
+heart (`catalog/wishlist.html`, `catalog/product_detail.html`), and the 2FA screens' shield/lock
+icons (`two_factor/core/login.html`, `login_token.html`, `setup.html`, `setup_complete.html`).
+
+**Root cause:** the pre-Task-50 CDN link loaded `Material+Symbols+Outlined:wght,FILL@100..700,0..1`.
+Task 50's self-hosted `icon_names=` subset was fetched without any axis, so Google returned a
+**static** font (fontTools: no `fvar` table) — `'FILL' 1` had nothing to vary.
+
+**Fix:** re-fetched the same subset with the FILL axis —
+`css2?family=Material+Symbols+Outlined:FILL@0..1&icon_names=<125 names>` (Chrome User-Agent, woff2
+URL from `fonts.gstatic.com`) — replacing `static/src/fonts/material-symbols-outlined-subset.woff2`.
+Result: FILL axis 0..1 (default 0, so unfilled icons are unchanged), all 125 icons present,
+**17.6KB** (was 13.4KB). `wght` deliberately not requested: `main.css` pins every icon to 400.
+The icon list was rebuilt, not reused: a fresh scan of templates (incl. multi-line spans), both
+Python icon dicts and sidebar `icon="..."` params found exactly 125 names, none missing from the old
+font (its 190 ligatures include Google's automatic aliases, e.g. `access_time` for `schedule`).
+`main.css`'s `@font-face` comment now spells out the axis requirement for the next regeneration.
+
+- [x] `tests/unit/test_icon_font.py` (no DB, ~1s): the font has a FILL axis 0..1 — **failed** on
+      the old file ("icon font is static") and passes on the new one; and every icon name the code
+      renders is still a ligature in the font, guarding any future re-subset against icons silently
+      falling back to raw text. Uses fontTools/brotli, which a fresh `requirements.txt` resolve
+      already installs via WeasyPrint.
+- [x] Vite rebuild emits a new content-hashed font (`material-symbols-outlined-subset-*.woff2`), so
+      browsers can't keep serving the static one from cache.
+- [x] Live browser (temporary approved 4-star review, deleted afterwards): stars now show 4 filled
+      + 1 outlined in both the summary and the review row; header search/cart icons still outlined;
+      admin login page renders its icons with none falling back to wide raw ligature text; the
+      icon font face reports `loaded`.
+- [x] `make check-fast` clean.
+
+**Files touched:** `static/src/fonts/material-symbols-outlined-subset.woff2`,
+`static/src/main.css`, `tests/unit/test_icon_font.py`.
 
 **Estimated scope:** S
