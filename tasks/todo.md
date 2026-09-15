@@ -8472,26 +8472,90 @@ security-sensitive flows are untouched by this upgrade.
       - `manage.py check` clean; `make check-fast` clean.
 - [ ] **55e — Live-browser verification + close.** Not pytest alone.
 
+      **55e live-browser run (2026-09-15, real Chrome against local `runserver` on 65.19.3):**
+      run with `MNOTIFY_API_KEY`, `EMAIL_HOST_USER` and `EMAIL_HOST_PASSWORD` blanked **for the
+      server process only** (`.env` untouched) — fake SMS sender and console email backend, so no
+      real SMS or Gmail send; reset links were followed from the server log. Throwaway local accounts
+      `task55-customer@` / `task55-admin@example.test` (+ a TOTP device, + a fake-credential Google
+      `SocialApp`) were created for the run and **all deleted afterwards** (verified 0 left).
+      - [x] Customer signup — form shows email/password/password-again and no username (matches
+        55c's `SIGNUP_FIELDS`); user, `customer` group and profile created; confirmation email sent
+        to the console.
+      - [x] Customer logout — `POST /accounts/logout/` 302, "You have signed out."
+      - [x] Customer login — wrong password shows allauth's exact "The email address and/or
+        password you specified are not correct." (the runbook's 55d post-deploy check); correct
+        password logs in, "Successfully signed in", My Orders 200.
+      - [x] Customer password reset via the emailed link — link is `/accounts/password/reset/key/…`
+        (customer route, so 55b's adapter leaves customers alone); new password works, old doesn't.
+      - [x] **Admin password reset via its own link** — link is `/account/password/reset/key/…`
+        (admin route), lands on the admin-branded "protect this admin account" page; new password
+        works, old doesn't. This is the path that failed silently in 55a.
+      - [x] Admin login with the reset password + a real TOTP code — "Don't ask again" unchecked by
+        default; dashboard 200.
+      - [x] Admin logout — confirm modal, `POST /accounts/logout/` 302 to the branded
+        `/account/login/`; `/admin-portal/` then redirects to login.
+      - [x] Google button — hidden on login and signup with no `SocialApp`; shown on both
+        (`href="/accounts/google/login/"`, not clicked) once one exists; hidden again after
+        deleting it.
+      - Not reproducible locally: the X-Real-IP production path (production block is off under
+        `DEBUG`) — covered by 55d's tests and the runbook's post-deploy check.
+      - Setup note, not a bug: two_factor only prompts for a code when the confirmed device is named
+        exactly `default` (`two_factor/utils.py::default_device`). A first attempt with a
+        differently-named device skipped the token step and `/admin-portal/` returned 403 — the
+        2FA gate still held; matches the Task 24 "admin with no device gets a bare 403" note.
+      - **Pre-existing issues found, NOT caused by Task 55 and NOT fixed here** (both identical on
+        `main`): (1) `LOGIN_REDIRECT_URL` has never been set, so customer signup, and login without a
+        `next`, redirect to Django's default `/accounts/profile/`, which 404s — the test suite has
+        carried a comment about it since before Task 8; (2) `templates/account/login.html` has no
+        hidden `next` field, so a `?next=` target is dropped when the form posts. Together, a real
+        customer on production likely lands on a 404 right after signing up or logging in. Needs its
+        own task.
+      - Remaining before closing Task 55: full suite green in CI on real MySQL (needs a push).
+        (`CONSTRAINTS.md`'s pip-audit baseline was updated the same day — see Acceptance criteria.)
+
 **Acceptance criteria:**
-- [ ] `pip-audit -r requirements.txt` reports zero django-allauth findings (weasyprint's own
-      remaining advisory is out of scope — see the Task 30f entry)
-- [ ] No deprecation warnings from allauth in the test output
-- [ ] The copy-pasted private method is either deleted in favour of a supported hook, or
-      re-verified line by line against the installed 65.x source with that verification recorded
-- [ ] `CONSTRAINTS.md`'s recorded pip-audit baseline (7 findings / 2 packages) is updated to the
-      new real number — the ratchet is only honest if it tracks reality
+- [x] `pip-audit -r requirements.txt` reports zero django-allauth findings (weasyprint's own
+      remaining advisory is out of scope — see the Task 30f entry) — 2026-09-15: **1 finding in 1
+      package, `weasyprint` 69.0 (PYSEC-2026-3940)**, zero allauth. Measured on the set a fresh
+      `-r` resolve picks (`pip install --dry-run --ignore-installed --report`, 120 packages, then
+      `pip-audit --no-deps --disable-pip`) rather than a full throwaway reinstall, which this
+      laptop can't sustain thermally. CI's own `pip-audit -r` step is the independent confirmation.
+- [x] No deprecation warnings from allauth in the test output (55a–c runs: zero; `manage.py check`
+      clean)
+- [x] The copy-pasted private method is either deleted in favour of a supported hook, or
+      re-verified line by line against the installed 65.x source with that verification recorded —
+      deleted (55b)
+- [x] `CONSTRAINTS.md`'s recorded pip-audit baseline (7 findings / 2 packages) is updated to the
+      new real number — the ratchet is only honest if it tracks reality — now 1 in 1 package, with a
+      note that the figure must come from the resolved set, not a local venv. **Exception E3's
+      reason text deliberately left unchanged** even though its allauth half is now resolved:
+      `scripts/floor_guard.py` flags *any* added line in the Exceptions table as `new-exception`
+      (it can't tell narrowing from adding, and has no override), and the floor blocks in CI. E3
+      is for its owner to re-decide at its 2026-10-15 expiry, when a deliberate edit is expected.
+- **Found while measuring, not fixed (new follow-up):** this laptop's `venv` audits at 17 findings in
+  5 packages because `pip install -r requirements.txt` never upgrades an already-satisfied
+  *transitive* dependency — it still has `sqlparse` 0.5.5, `tornado` 6.5.7, `cryptography` 49.0.0
+  where a fresh resolve picks 0.6.0 / 6.5.10 / 50.0.1. **The production venv on the VPS was built
+  the same way (Task 24e) and very likely has the same stale transitive versions.** Worth checking
+  with `pip-audit` on the server and deciding whether to `pip install --upgrade` those packages
+  or pin transitives — a production-dependency decision, not taken here.
 
 **Verification:**
 - [ ] `pytest tests/feature/accounts/` green — 19 directly relevant tests already exist
       (`test_customer_auth.py` 6, `test_admin_auth.py`'s ~9 password-reset/login subset,
       `test_google_login_gating.py` 4), so every risk point is covered before the change starts
 - [ ] Full suite green, CI green on real MySQL
-- [ ] **Live browser, not just pytest:** customer signup, customer login, customer password reset
+- [x] **Live browser, not just pytest:** customer signup, customer login, customer password reset
       end-to-end via the real email link, admin password reset via its own branded link, customer
       logout, admin logout, and the Google button's gated show/hide. The admin password-reset path
       is the one that fails *silently* if 55b is wrong — a green suite alone is not sufficient
-      evidence, matching this project's standing rule for auth work.
-- [ ] `MNOTIFY_API_KEY` check before any browser login testing (no real SMS spend)
+      evidence, matching this project's standing rule for auth work. — **done 2026-09-15, all
+      eight flows; see 55e above**
+- [x] `MNOTIFY_API_KEY` check before any browser login testing (no real SMS spend) — blanked for
+      the dev-server process only during 55e
+- Still open: the accounts-folder box and full-suite box above — after 55a, only the
+  password-reset subset of `test_admin_auth.py` was re-run locally (throttled runs take ~3s/test);
+  both go to CI on real MySQL when the branch is pushed.
 
 **Dependencies:** None. Sequencing within the task is 55a -> 55b -> 55c -> 55d -> 55e.
 
