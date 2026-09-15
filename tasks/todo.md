@@ -8508,8 +8508,8 @@ security-sensitive flows are untouched by this upgrade.
         `next`, redirect to Django's default `/accounts/profile/`, which 404s — the test suite has
         carried a comment about it since before Task 8; (2) `templates/account/login.html` has no
         hidden `next` field, so a `?next=` target is dropped when the form posts. Together, a real
-        customer on production likely lands on a 404 right after signing up or logging in. Needs its
-        own task.
+        customer on production likely lands on a 404 right after signing up or logging in. Now
+        **Task 56** (below).
       - Remaining before closing Task 55: full suite green in CI on real MySQL (needs a push).
         (`CONSTRAINTS.md`'s pip-audit baseline was updated the same day — see Acceptance criteria.)
 
@@ -8564,3 +8564,57 @@ security-sensitive flows are untouched by this upgrade.
 `tests/feature/accounts/*`.
 
 **Estimated scope:** M
+
+---
+
+### Task 56: Customer signup/login redirect 404 (found during Task 55e)
+
+**Description:** Found live in Task 55e, not caused by Task 55, identical on `main`, requested by the
+user 2026-09-15. Two gaps together meant a real customer landed on a 404 right after signing up, or
+after logging in without a specific destination:
+1. `LOGIN_REDIRECT_URL` has never been set, so allauth's customer login and signup redirected to
+   Django's default `/accounts/profile/`, which does not exist. The test suite had carried a comment
+   about it since before Task 8.
+2. `templates/account/login.html` and `signup.html` never rendered allauth's redirect field. The
+   form posts to `{% url 'account_login' %}` with no query string, so a `?next=` target (e.g. from
+   the wishlist/review login-required redirects) was dropped on submit.
+
+**Destination:** the storefront home page (`catalog:home`), confirmed with the user via
+`AskUserQuestion` (options were home, My Orders, Shop).
+
+**Design:** `LOGIN_REDIRECT_URL` stays unset, keeping the Task 22 decision recorded in
+`AdminLoginView.get_success_url`: it is one setting shared by all three roles, and
+django-two-factor-auth's own setup/cancel views read it too. Instead
+`apps/accounts/adapter.py::BancostoreAccountAdapter` (Task 55b) overrides `get_login_redirect_url`
+and `get_signup_redirect_url`, which only allauth's flows reach (customer login/signup, Google
+login); admin login keeps its Task 22 override and distributor login its own explicit redirects.
+Both templates now render `{{ redirect_field }}` — allauth 65's own `format_html`-escaped hidden
+input, empty when there is no `?next=`. An off-site `next` is still refused by allauth's
+`adapter.is_safe_url()` before the adapter default is ever used. Branched on top of
+`task55-allauth-upgrade` because `redirect_field` is allauth-65 template context.
+
+- [x] Signup lands on home — `test_customer_can_register_logout_and_login` now asserts the URL (it
+      only asserted 302 before)
+- [x] Login without `next` lands on home — same test
+- [x] Login and signup forms carry `?next=`; login returns there —
+      `test_customer_login_form_keeps_the_next_page_and_returns_there`,
+      `test_customer_signup_form_keeps_the_next_page`
+- [x] No open redirect — `test_customer_login_ignores_an_offsite_next_and_lands_on_home`
+- [x] All four failed before the fix (redirect to `/accounts/profile/`, no hidden input) and pass
+      after; `test_customer_auth.py` + `test_google_login_gating.py` 14 passed; `make check-fast`
+      clean. (The first fake passwords, 16 chars in `create_user(password=...)`, tripped the floor
+      guard's secret-assignment pattern — changed to 13-char fakes matching the file's existing
+      convention, not by loosening the guard.)
+- [x] Live browser (local `runserver`, SMS/Gmail blanked for the process): signup ->
+      `POST /accounts/signup/ 302` -> `GET / 200`, signed in; `/accounts/login/?next=/cart/my-orders/`
+      renders the hidden `next` input and login -> `GET /cart/my-orders/ 200`. No request to
+      `/accounts/profile/`. Throwaway customer deleted afterwards.
+- [ ] Full suite green in CI on real MySQL (with Task 55's push)
+- [ ] Note for the PR: this branch is stacked on `task55-allauth-upgrade`; per this repo's past
+      experience CodeRabbit skips auto-review for PRs targeting a non-default branch until retargeted
+      to `main`.
+
+**Files touched:** `apps/accounts/adapter.py`, `templates/account/login.html`,
+`templates/account/signup.html`, `tests/feature/accounts/test_customer_auth.py`.
+
+**Estimated scope:** S
