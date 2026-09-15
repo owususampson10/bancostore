@@ -147,6 +147,11 @@ pytest>=9,<10
 # tests) with an AttributeError. 4.12.0 is the last version confirmed
 # working against this project's full suite.
 pytest-django==4.12.0
+# Added for CONSTRAINTS.md's changed-line coverage rule. Coverage is measured
+# from the lcov report the normal test run writes -- the suite is never run a
+# second time to produce a number. Pure-Python wheel, no native build (the
+# constraint that has bitten this project before, e.g. cbor2 above).
+pytest-cov>=7,<8
 
 # Formatting / linting
 # black pinned >=26.1,<27 (was <25): PYSEC-2026-2121/PYSEC-2026-2120 have no
