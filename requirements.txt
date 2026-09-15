@@ -52,11 +52,26 @@ django-celery-beat>=2,<3
 flower>=2,<3
 
 # Auth
-django-allauth>=0.63,<0.64
+# Task 55: bumped from >=0.63,<0.64. The three open advisories were triaged for
+# reachability first and NONE apply here (allauth-as-IdP, Okta/NetIQ, and SAML
+# IdP-initiated SSO respectively -- see tasks/todo.md Task 55) -- this is a
+# maintenance upgrade, not a security fix. Floor is 65.14.1 rather than plain
+# 65: that is the first release carrying all three fixes, so pip-audit stays
+# quiet even though none were reachable.
+#
+# The [socialaccount] extra is NOT cosmetic. Since 0.62 allauth moved social
+# provider dependencies behind it; this project never had the extra and was
+# compensating by hand with its own PyJWT pin below. The extra now pulls the
+# real dependency set (oauthlib, requests, PyJWT[crypto]) as allauth 65.19.3's
+# own package metadata declares it.
+django-allauth[socialaccount]>=65.14.1,<66
 django-two-factor-auth>=1.16,<2
 # django-two-factor-auth's phonenumber plugin needs this optional extra of django-phonenumber-field
 phonenumbers>=8,<9
-# allauth's Google OAuth2 provider needs PyJWT to verify ID tokens
+# Kept as an explicit floor even though django-allauth[socialaccount] now
+# declares PyJWT itself: this project pins every transitive dep it actually
+# relies on (same convention as phonenumbers above), and the Google provider's
+# ID-token verification depends on it directly.
 PyJWT>=2,<3
 
 # Admin-editable settings

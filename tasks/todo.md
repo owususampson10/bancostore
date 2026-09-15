@@ -8301,3 +8301,421 @@ high-confidence secret check as a local stopgap.
 `.gitignore` (coverage artifacts), `CLAUDE.md` (pointer line).
 
 **Estimated scope:** M
+
+---
+
+### Task 55: django-allauth 0.63.6 -> 65.x upgrade
+
+**Description:** The remaining half of the still-open Task 30f pip-audit backlog (the other half —
+Django, Pillow, cbor2, pytest, black, WeasyPrint — was cleared by Tasks 49a, 51 and 53). Requested
+directly by the user 2026-09-15 after a reachability triage reframed it.
+
+**Reachability triage done FIRST, before any code (this is what the Task 30f entry actually asked
+for and nobody had done):** all three open advisories were read at source, and **none appear
+reachable in this codebase**:
+- `PYSEC-2025-110` (CVE-2025-65430) — allauth's **IdP/OIDC provider** issuing tokens that stay
+  valid after an account is deactivated. This project uses allauth as a *consumer* of Google login,
+  never as an identity provider; `allauth.idp.*` is not in `INSTALLED_APPS`.
+- `PYSEC-2025-111` (CVE-2025-65431) — **Okta and NetIQ** providers keying accounts off the mutable
+  `preferred_username`. Only `allauth.socialaccount.providers.google` is installed.
+- `PYSEC-2026-56` — open redirect in **SAML IdP-initiated SSO**, which is disabled by default and
+  unused here.
+
+So this is **maintenance, not a security fix** — recorded plainly rather than letting a raw
+pip-audit count imply urgency it doesn't have. The real reasons to do it, and to do it *now*:
+1. `apps/accounts/forms.py::AdminResetPasswordForm._send_password_reset_mail` is a ~25-line
+   copy-paste of an allauth **private** method (no hook existed to override just the URL name),
+   touching 5 internal symbols including `app_settings.AUTHENTICATION_METHOD` — a setting
+   deprecated in 65.4. It is fragile *today* and drifts further from upstream every release.
+2. Production is at 1 user / 0 orders. Changing login, signup and password reset is cheaper now
+   than it will ever be again.
+3. ADR-0013 (the django-constance pickle->JSON production incident) is the precedent for what
+   deferred dependency upgrades cost here.
+
+**Blast radius (from a full dependency audit before planning):** allauth owns customer
+signup/login/password-reset, customer+admin logout (`account_logout`), the Google login button, and
+the admin password-reset flow. It does **not** own distributor phone+OTP login
+(`apps.distributors.backends.PhoneNumberBackend`) or admin TOTP 2FA (`two_factor`) — the two most
+security-sensitive flows are untouched by this upgrade.
+
+**Sub-tasks:**
+
+- [ ] **55a — Bump the pin, change nothing else.** `django-allauth>=0.63,<0.64` ->
+      `django-allauth[socialaccount]>=65.14.1,<66`. The `[socialaccount]` extra has been required
+      since 0.62 for social providers and this project never had it — the missing extra is
+      currently patched by hand (`requirements.txt:59` pins `PyJWT` with the comment "allauth's
+      Google OAuth2 provider needs PyJWT to verify ID tokens"). Deliberately keeps the deprecated
+      settings as-is (they remain backwards-compatible) so this slice answers exactly one question:
+      what breaks from the version change alone. Highest-information, lowest-code-change slice —
+      run it first to fail fast. Confirm the target version's own notes: 65.15's RFC 8628 dashed
+      user-code format applies to code-based flows; this project's password reset is link-based
+      (`user_pk_to_url_str` + token), so verify it is genuinely unaffected rather than assuming.
+
+      **55a findings (2026-09-15, installed django-allauth 65.19.3):**
+      - Venv matches every `requirements.txt` pin (0 drift, `pip check` clean). The
+        `[socialaccount]` extra declares `oauthlib`, `requests`, `pyjwt[crypto]` — all present.
+      - `manage.py check`: only the 3 expected allauth deprecations (55c's scope).
+      - RFC 8628 dashed codes: confirmed unaffected, not assumed. They live in
+        `allauth/idp/oidc/.../device_codes.py` + `core/internal/cryptokit.py`; all three
+        code-based flows (`LOGIN_`/`EMAIL_VERIFICATION_`/`PASSWORD_RESET_BY_CODE_ENABLED`)
+        default `False` in `account/app_settings.py` and this project sets none of them.
+      - `tests/feature/accounts/` + `tests/unit/accounts/`: **84 passed, 1 failed.** No
+        allauth warnings in the pytest output.
+      - **The one failure is the silent one this task predicted:**
+        `test_admin_password_reset_email_links_to_admin_branded_confirm_page` — the admin reset
+        email now links to customer-facing `account_reset_password_from_key`. Root cause read at
+        source: 65.x `ResetPasswordForm.save()` (`account/forms.py:630-643`) no longer calls
+        `self._send_password_reset_mail()`; it calls
+        `flows.password_reset.request_password_reset()` directly, so
+        `AdminResetPasswordForm._send_password_reset_mail` is now **dead code**. A supported hook
+        now exists — `DefaultAccountAdapter.get_reset_password_from_key_url(key)`
+        (`account/adapter.py:679`, "intended to be overridden in case the password reset email
+        needs to be adjusted"), which is what `request_password_reset` calls. That hook is
+        adapter-wide, so 55b must route admin vs customer by request, not globally. Also check
+        in 55b: `request_password_reset` sends `send_unknown_account_mail` when `users` is empty
+        — confirm what a non-staff email typed into the admin form now receives.
+      - Full suite not run locally: this laptop thermally shut down ("Dark Wake Thermal
+        Emergency" in `pmset -g log`) on previous 55a attempts, and the throttled run needed to
+        avoid that takes ~3s/test. Full-suite verification goes to CI (real MySQL).
+- [ ] **55b — Fix the copy-pasted private method.** Check whether 65.x now offers a supported hook
+      for the password-reset URL name; if it does, delete the copy-paste and use it. If it does
+      not, re-sync the copied body against the 65.x source (`source-driven-development`, read the
+      real installed source, not a memory of it) and re-verify every one of the 5 internal symbols
+      still exists with the same signature. Also confirm the hardcoded email template name
+      `"account/email/password_reset_key"` still resolves.
+
+      **55b outcome (2026-09-15):** a supported hook exists, so the copy-paste is **deleted**, not
+      re-synced. `apps/accounts/adapter.py::BancostoreAccountAdapter` (new `ACCOUNT_ADAPTER`)
+      overrides `get_reset_password_from_key_url` and returns `admin_password_reset_from_key` only
+      when `request.resolver_match.url_name == "admin_password_reset"`; anything else (including no
+      request) gets allauth's customer link. ADR-0012's old reason for rejecting the adapter
+      (`self.request` was `None` in 0.63) no longer holds — 65.x reads it from
+      `allauth.core.context`, set by `AccountMiddleware`. ADR-0012 has a dated update.
+      - Removed with it: 9 now-unused imports in `apps/accounts/forms.py`, and the
+        `app_settings.AUTHENTICATION_METHOD` read 55c would otherwise have had to migrate.
+      - Email template: no project override exists; 65.19.3's
+        `adapter.send_password_reset_mail` sends the same `account/email/password_reset_key`.
+      - Non-staff email on the admin form: still the same "no account" email as on 0.63 —
+        `test_admin_password_reset_does_not_email_a_non_staff_user` passes unchanged.
+      - New test `test_customer_password_reset_email_links_to_customer_confirm_page` guards the
+        customer side, because the hook is project-wide.
+      - Tests: all 9 password-reset tests (7 admin, 2 customer) pass, including the 55a failure.
+        Both routing tests confirmed falsifiable: the admin one failed in 55a without the hook;
+        the customer one failed against a deliberately broken adapter (always-admin), then passed
+        once reverted. `make check-fast` clean.
+      - Not yet run: the rest of the suite (CI, real MySQL) and the live-browser admin reset (55e).
+- [ ] **55c — Migrate the deprecated settings.** `ACCOUNT_AUTHENTICATION_METHOD` ->
+      `ACCOUNT_LOGIN_METHODS` (65.4), and `ACCOUNT_EMAIL_REQUIRED`/`ACCOUNT_USERNAME_REQUIRED` ->
+      `ACCOUNT_SIGNUP_FIELDS` (65.5). Sequenced after 55a because the replacement settings do not
+      exist in 0.63.6. Includes the `app_settings.AUTHENTICATION_METHOD` read inside 55b's method.
+
+      **55c outcome (2026-09-15):** `bancostore/settings.py` now sets
+      `ACCOUNT_LOGIN_METHODS = {"email"}` and
+      `ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]`; the three deprecated
+      settings are gone. The values were not copied from the warning text — they were read from
+      65.19.3's own `account/app_settings.py` resolution logic (`LOGIN_METHODS` maps
+      `AUTHENTICATION_METHOD="email"` to `{email}`; `SIGNUP_FIELDS` builds `email*` from
+      `EMAIL_REQUIRED`, omits username for `USERNAME_REQUIRED=False`, and adds `password2*` because
+      `SIGNUP_PASSWORD_ENTER_TWICE` defaults to `True` and this project never set it). The
+      `app_settings.AUTHENTICATION_METHOD` read was already deleted in 55b.
+      - New `tests/unit/accounts/test_allauth_settings.py` (no DB, <1s): calls allauth's own
+        `settings_check` and asserts it returns nothing (its deprecation warnings carry no check
+        id; an empty result also covers `account.W001`, login-method vs signup-field conflict) —
+        **failed with the 3 warnings before the change, passes after**. Two more tests pin the
+        effective `LOGIN_METHODS`/`SIGNUP_FIELDS`; both passed on the old settings *and* the new
+        ones, which is the proof the migration preserved behavior.
+      - `manage.py check`: **"System check identified no issues"** (was 3 warnings).
+      - Stale comments updated: `settings.py` backend-order comment, `apps/accounts/backends.py`
+        docstring, `CustomerSignupForm` docstring (username is dropped because `SIGNUP_FIELDS` has
+        no `username` entry — confirmed at `allauth/account/forms.py:294-304`).
+      - Tests: `test_customer_auth.py` + `test_google_login_gating.py` + `tests/unit/accounts/`
+        **35 passed**, zero allauth warnings. `make check-fast` clean. `test_admin_auth.py` not
+        re-run locally (~25 min throttled); its password-reset subset passed after 55b, and the
+        effective settings values are pinned identical — full suite goes to CI.
+- [ ] **55d — Production rate-limiting behaviour (`ALLAUTH_TRUSTED_PROXY_COUNT`).** 65.14.2 made
+      allauth distrust `X-Forwarded-For` by default. This project runs behind Nginx in production,
+      so without configuration every visitor's IP collapses to the proxy's and allauth's own
+      login-attempt rate limits become global instead of per-visitor. This is the *same* gap
+      already tracked as a Known Issue for `django-ratelimit` (Task 29's deferred Medium finding),
+      now extended to allauth's built-in limits. Must be resolved as part of this task, not
+      deferred again, and must be reflected in `deploy/README.md`'s runbook.
+
+      **55d outcome (2026-09-15):** the production block of `bancostore/settings.py` sets
+      **`ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP"`** — deliberately *not* the
+      `ALLAUTH_TRUSTED_PROXY_COUNT` this sub-task was named for. Both work behind this project's
+      single Nginx hop (DNS is a direct A record, no CDN); the header won on three counts, each read
+      at source in 65.19.3 rather than assumed:
+      - **One trust anchor.** django-ratelimit already trusts exactly `X-Real-IP` (Task 24d), which
+        Nginx *overwrites* with `$remote_addr` and which Task 24g spoof-tested live. A proxy count
+        would make allauth trust a second header (`X-Forwarded-For`, which Nginx *appends* to).
+      - **Same failure mode.** If Nginx ever stopped sending the header, allauth's
+        `adapter.get_client_ip` raises `PermissionDenied` and django-ratelimit's `_get_ip` raises
+        `ImproperlyConfigured` — both loud. A proxy count with no `X-Forwarded-For` silently falls
+        back to `REMOTE_ADDR` (Nginx's `127.0.0.1`), i.e. exactly the global bucket this task exists
+        to prevent. (`clean_client_ip` strips whitespace, so the count's `", "` parsing was fine —
+        checked, not the reason.)
+      - **Not exposed under pytest/CI anyway.** The production block is gated on
+        `not DEBUG and not _RUNNING_UNDER_PYTEST`, so neither choice changes local/CI behaviour.
+      - Tests, new `tests/unit/bancostore/test_production_proxy_settings.py` (no DB, ~2s):
+        (1) imports the real settings in a fresh interpreter with `DEBUG=False` and no
+        `PYTEST_VERSION` — the only way to load the production block — and asserts both limiters
+        trust the same header and the proxy count stays 0; **failed (`None`) before, passes after**.
+        (2) two visitors with different `X-Real-IP` and an identical forged `X-Forwarded-For`
+        resolve to their own IPs; confirmed falsifiable — with allauth's default both resolve to
+        `127.0.0.1`, the global-bucket bug itself.
+      - `deploy/README.md`: Server facts now name `X-Real-IP` as the sole client-IP source for both
+        limiters; "Updating the Nginx config" warns never to remove/append that header and what a
+        future CDN would require (`real_ip_header`/`set_real_ip_from`); a one-time post-deploy
+        check for Task 55's first deploy (a failed customer login must show allauth's normal
+        "not correct" error, not a 403). `deploy/nginx/bancostore.conf` header comment updated.
+        **Nothing changed on the live server** — this ships with the normal Task 55 deploy.
+      - `manage.py check` clean; `make check-fast` clean.
+- [ ] **55e — Live-browser verification + close.** Not pytest alone.
+
+      **55e live-browser run (2026-09-15, real Chrome against local `runserver` on 65.19.3):**
+      run with `MNOTIFY_API_KEY`, `EMAIL_HOST_USER` and `EMAIL_HOST_PASSWORD` blanked **for the
+      server process only** (`.env` untouched) — fake SMS sender and console email backend, so no
+      real SMS or Gmail send; reset links were followed from the server log. Throwaway local accounts
+      `task55-customer@` / `task55-admin@example.test` (+ a TOTP device, + a fake-credential Google
+      `SocialApp`) were created for the run and **all deleted afterwards** (verified 0 left).
+      - [x] Customer signup — form shows email/password/password-again and no username (matches
+        55c's `SIGNUP_FIELDS`); user, `customer` group and profile created; confirmation email sent
+        to the console.
+      - [x] Customer logout — `POST /accounts/logout/` 302, "You have signed out."
+      - [x] Customer login — wrong password shows allauth's exact "The email address and/or
+        password you specified are not correct." (the runbook's 55d post-deploy check); correct
+        password logs in, "Successfully signed in", My Orders 200.
+      - [x] Customer password reset via the emailed link — link is `/accounts/password/reset/key/…`
+        (customer route, so 55b's adapter leaves customers alone); new password works, old doesn't.
+      - [x] **Admin password reset via its own link** — link is `/account/password/reset/key/…`
+        (admin route), lands on the admin-branded "protect this admin account" page; new password
+        works, old doesn't. This is the path that failed silently in 55a.
+      - [x] Admin login with the reset password + a real TOTP code — "Don't ask again" unchecked by
+        default; dashboard 200.
+      - [x] Admin logout — confirm modal, `POST /accounts/logout/` 302 to the branded
+        `/account/login/`; `/admin-portal/` then redirects to login.
+      - [x] Google button — hidden on login and signup with no `SocialApp`; shown on both
+        (`href="/accounts/google/login/"`, not clicked) once one exists; hidden again after
+        deleting it.
+      - Not reproducible locally: the X-Real-IP production path (production block is off under
+        `DEBUG`) — covered by 55d's tests and the runbook's post-deploy check.
+      - Setup note, not a bug: two_factor only prompts for a code when the confirmed device is named
+        exactly `default` (`two_factor/utils.py::default_device`). A first attempt with a
+        differently-named device skipped the token step and `/admin-portal/` returned 403 — the
+        2FA gate still held; matches the Task 24 "admin with no device gets a bare 403" note.
+      - **Pre-existing issues found, NOT caused by Task 55 and NOT fixed here** (both identical on
+        `main`): (1) `LOGIN_REDIRECT_URL` has never been set, so customer signup, and login without a
+        `next`, redirect to Django's default `/accounts/profile/`, which 404s — the test suite has
+        carried a comment about it since before Task 8; (2) `templates/account/login.html` has no
+        hidden `next` field, so a `?next=` target is dropped when the form posts. Together, a real
+        customer on production likely lands on a 404 right after signing up or logging in. Now
+        **Task 56** (below).
+      - Remaining before closing Task 55: full suite green in CI on real MySQL (needs a push).
+        (`CONSTRAINTS.md`'s pip-audit baseline was updated the same day — see Acceptance criteria.)
+
+**Acceptance criteria:**
+- [x] `pip-audit -r requirements.txt` reports zero django-allauth findings (weasyprint's own
+      remaining advisory is out of scope — see the Task 30f entry) — 2026-09-15: **1 finding in 1
+      package, `weasyprint` 69.0 (PYSEC-2026-3940)**, zero allauth. Measured on the set a fresh
+      `-r` resolve picks (`pip install --dry-run --ignore-installed --report`, 120 packages, then
+      `pip-audit --no-deps --disable-pip`) rather than a full throwaway reinstall, which this
+      laptop can't sustain thermally. CI's own `pip-audit -r` step is the independent confirmation.
+- [x] No deprecation warnings from allauth in the test output (55a–c runs: zero; `manage.py check`
+      clean)
+- [x] The copy-pasted private method is either deleted in favour of a supported hook, or
+      re-verified line by line against the installed 65.x source with that verification recorded —
+      deleted (55b)
+- [x] `CONSTRAINTS.md`'s recorded pip-audit baseline (7 findings / 2 packages) is updated to the
+      new real number — the ratchet is only honest if it tracks reality — now 1 in 1 package, with a
+      note that the figure must come from the resolved set, not a local venv. **Exception E3's
+      reason text deliberately left unchanged** even though its allauth half is now resolved:
+      `scripts/floor_guard.py` flags *any* added line in the Exceptions table as `new-exception`
+      (it can't tell narrowing from adding, and has no override), and the floor blocks in CI. E3
+      is for its owner to re-decide at its 2026-10-15 expiry, when a deliberate edit is expected.
+- **Found while measuring, not fixed (new follow-up):** this laptop's `venv` audits at 17 findings in
+  5 packages because `pip install -r requirements.txt` never upgrades an already-satisfied
+  *transitive* dependency — it still has `sqlparse` 0.5.5, `tornado` 6.5.7, `cryptography` 49.0.0
+  where a fresh resolve picks 0.6.0 / 6.5.10 / 50.0.1. **The production venv on the VPS was built
+  the same way (Task 24e) and very likely has the same stale transitive versions.** Worth checking
+  with `pip-audit` on the server and deciding whether to `pip install --upgrade` those packages
+  or pin transitives — a production-dependency decision, not taken here.
+
+**Verification:**
+- [ ] `pytest tests/feature/accounts/` green — 19 directly relevant tests already exist
+      (`test_customer_auth.py` 6, `test_admin_auth.py`'s ~9 password-reset/login subset,
+      `test_google_login_gating.py` 4), so every risk point is covered before the change starts
+- [ ] Full suite green, CI green on real MySQL
+- [x] **Live browser, not just pytest:** customer signup, customer login, customer password reset
+      end-to-end via the real email link, admin password reset via its own branded link, customer
+      logout, admin logout, and the Google button's gated show/hide. The admin password-reset path
+      is the one that fails *silently* if 55b is wrong — a green suite alone is not sufficient
+      evidence, matching this project's standing rule for auth work. — **done 2026-09-15, all
+      eight flows; see 55e above**
+- [x] `MNOTIFY_API_KEY` check before any browser login testing (no real SMS spend) — blanked for
+      the dev-server process only during 55e
+- Still open: the accounts-folder box and full-suite box above — after 55a, only the
+  password-reset subset of `test_admin_auth.py` was re-run locally (throttled runs take ~3s/test);
+  both go to CI on real MySQL when the branch is pushed.
+
+**Dependencies:** None. Sequencing within the task is 55a -> 55b -> 55c -> 55d -> 55e.
+
+**Files likely touched:** `requirements.txt`, `bancostore/settings.py`, `apps/accounts/forms.py`,
+`apps/accounts/views.py` (possibly), `CONSTRAINTS.md` (baseline), `deploy/README.md` (55d),
+`tests/feature/accounts/*`.
+
+**Estimated scope:** M
+
+---
+
+### Task 56: Customer signup/login redirect 404 (found during Task 55e)
+
+**Description:** Found live in Task 55e, not caused by Task 55, identical on `main`, requested by the
+user 2026-09-15. Two gaps together meant a real customer landed on a 404 right after signing up, or
+after logging in without a specific destination:
+1. `LOGIN_REDIRECT_URL` has never been set, so allauth's customer login and signup redirected to
+   Django's default `/accounts/profile/`, which does not exist. The test suite had carried a comment
+   about it since before Task 8.
+2. `templates/account/login.html` and `signup.html` never rendered allauth's redirect field. The
+   form posts to `{% url 'account_login' %}` with no query string, so a `?next=` target (e.g. from
+   the wishlist/review login-required redirects) was dropped on submit.
+
+**Destination:** the storefront home page (`catalog:home`), confirmed with the user via
+`AskUserQuestion` (options were home, My Orders, Shop).
+
+**Design:** `LOGIN_REDIRECT_URL` stays unset, keeping the Task 22 decision recorded in
+`AdminLoginView.get_success_url`: it is one setting shared by all three roles, and
+django-two-factor-auth's own setup/cancel views read it too. Instead
+`apps/accounts/adapter.py::BancostoreAccountAdapter` (Task 55b) overrides `get_login_redirect_url`
+and `get_signup_redirect_url`, which only allauth's flows reach (customer login/signup, Google
+login); admin login keeps its Task 22 override and distributor login its own explicit redirects.
+Both templates now render `{{ redirect_field }}` — allauth 65's own `format_html`-escaped hidden
+input, empty when there is no `?next=`. An off-site `next` is still refused by allauth's
+`adapter.is_safe_url()` before the adapter default is ever used. Branched on top of
+`task55-allauth-upgrade` because `redirect_field` is allauth-65 template context.
+
+- [x] Signup lands on home — `test_customer_can_register_logout_and_login` now asserts the URL (it
+      only asserted 302 before)
+- [x] Login without `next` lands on home — same test
+- [x] Login and signup forms carry `?next=`; login returns there —
+      `test_customer_login_form_keeps_the_next_page_and_returns_there`,
+      `test_customer_signup_form_keeps_the_next_page`
+- [x] No open redirect — `test_customer_login_ignores_an_offsite_next_and_lands_on_home`
+- [x] All four failed before the fix (redirect to `/accounts/profile/`, no hidden input) and pass
+      after; `test_customer_auth.py` + `test_google_login_gating.py` 14 passed; `make check-fast`
+      clean. (The first fake passwords, 16 chars in `create_user(password=...)`, tripped the floor
+      guard's secret-assignment pattern — changed to 13-char fakes matching the file's existing
+      convention, not by loosening the guard.)
+- [x] Live browser (local `runserver`, SMS/Gmail blanked for the process): signup ->
+      `POST /accounts/signup/ 302` -> `GET / 200`, signed in; `/accounts/login/?next=/cart/my-orders/`
+      renders the hidden `next` input and login -> `GET /cart/my-orders/ 200`. No request to
+      `/accounts/profile/`. Throwaway customer deleted afterwards.
+- [ ] Full suite green in CI on real MySQL (with Task 55's push)
+- [x] Shipped in one PR to `main` together with Tasks 55, 57 and 58 (branch
+      `task55-58-allauth-login-redirect-product-tabs`), so CodeRabbit reviews it once, with no
+      stacked-branch retargeting needed.
+
+**Files touched:** `apps/accounts/adapter.py`, `templates/account/login.html`,
+`templates/account/signup.html`, `tests/feature/accounts/test_customer_auth.py`.
+
+**Estimated scope:** S
+
+---
+
+### Task 57: Product page — Description and Reviews as horizontal tabs
+
+**Description:** Requested directly by the user 2026-09-15 with a reference screenshot (a tab strip
+reading "About the product / Specifications / Reviews", active tab underlined). On
+`templates/catalog/product_detail.html` the Description and Reviews sections were stacked one
+above the other; they are now one tab set.
+
+**Decisions (confirmed with the user via `AskUserQuestion`):**
+- **Two tabs, Description + Reviews — no Specifications tab.** The reference's Specifications table
+  (weight, store, tags) has no backing data: `Product` stores only name/description/category/price/
+  PV/stock/featured, plus `ProductVariant` name/value pairs that the page already shows beside the
+  price. Adding real specification fields would be its own task (migration + admin form).
+- **Active tab in Bancostore orange (`primary`)**, not the reference's green, which the storefront
+  uses nowhere else.
+
+**Built:**
+- WAI-ARIA tabs: `role="tablist"`/`tab`/`tabpanel`, `aria-selected`, `aria-controls` /
+  `aria-labelledby`, roving `tabindex`, Left/Right arrows (wrapping) and Home/End move selection and
+  focus. Visually hidden `<h2>` in each panel keeps the heading outline.
+- Reviews tab label shows the approved-review count, e.g. "Reviews (2)".
+- Initial tab comes from the server through `data-initial-tab` (not interpolated into `x-data`,
+  per this repo's Alpine XSS lesson): **Reviews when a submitted review failed validation** (the
+  view re-renders with errors, which would otherwise sit hidden behind Description), else
+  Description — or Reviews when the URL is `#reviews`.
+- `review_submit`'s success redirect now appends `#reviews`, so the customer returns to the tab
+  they were on.
+- The inactive panel is `x-cloak`ed so it doesn't flash before Alpine starts.
+
+- [x] Tests (`tests/feature/catalog/test_reviews.py`): tab/panel ARIA wiring and default tab,
+      approved-only count in the label, invalid review reopens on Reviews, successful review
+      redirects to `#reviews` — all four failed before the change. Catalog reviews + detail +
+      wishlist: 36 passed. `make check-fast` clean.
+- [x] Live browser (local runserver, temporary approved review, deleted afterwards), 1440px and
+      500px: tabs side by side; clicking switches panels; ArrowLeft/End move selection and focus;
+      tabindex roves 0/-1; fresh load of `#reviews` opens Reviews, a plain load opens Description,
+      nothing focused on load; no horizontal page overflow at 500px.
+- Bugs caught by that live check and fixed before finishing (pytest could not see either):
+  `overflow-x-auto` on the tab row plus the underline's `-mb-px` produced 1px of vertical overflow,
+  so the row showed a scrollbar and clipped the underline; and a static `border-transparent`
+  beside the dynamic `border-primary` always won the cascade, so no active underline rendered.
+  Also swapped a multi-line HTML comment for `{% comment %}` so the implementation note doesn't
+  ship in public page source.
+- Testing gotchas worth remembering: `runserver --noreload` keeps Django's cached template loader,
+  so template edits need a server restart to show; and navigating to the same URL plus a `#fragment`
+  is a same-document navigation, not a reload — test hash behaviour via a different page first.
+
+**Found, not fixed (pre-existing since Task 50, 2026-08-17):** `static/src/fonts/
+material-symbols-outlined-subset.woff2` is a **static** font (fontTools: no `fvar` axes), so every
+`font-variation-settings: 'FILL' 1` renders as an outline. Rating stars always look empty
+regardless of the score, and the filled wishlist heart on this page uses the same mechanism.
+Fixed the same day as **Task 58** (below).
+
+**Files touched:** `templates/catalog/product_detail.html`, `apps/catalog/views.py`,
+`tests/feature/catalog/test_reviews.py`.
+
+**Estimated scope:** S
+
+---
+
+### Task 58: Filled icons render as outlines — icon font subset lost its FILL axis
+
+**Description:** Found during Task 57's live check, fixed at the user's request 2026-09-15. Every
+icon styled `font-variation-settings: 'FILL' 1` has drawn as a plain outline since Task 50
+(2026-08-17): product rating stars (a 4.0 rating showed five empty stars), the saved-to-wishlist
+heart (`catalog/wishlist.html`, `catalog/product_detail.html`), and the 2FA screens' shield/lock
+icons (`two_factor/core/login.html`, `login_token.html`, `setup.html`, `setup_complete.html`).
+
+**Root cause:** the pre-Task-50 CDN link loaded `Material+Symbols+Outlined:wght,FILL@100..700,0..1`.
+Task 50's self-hosted `icon_names=` subset was fetched without any axis, so Google returned a
+**static** font (fontTools: no `fvar` table) — `'FILL' 1` had nothing to vary.
+
+**Fix:** re-fetched the same subset with the FILL axis —
+`css2?family=Material+Symbols+Outlined:FILL@0..1&icon_names=<125 names>` (Chrome User-Agent, woff2
+URL from `fonts.gstatic.com`) — replacing `static/src/fonts/material-symbols-outlined-subset.woff2`.
+Result: FILL axis 0..1 (default 0, so unfilled icons are unchanged), all 125 icons present,
+**17.6KB** (was 13.4KB). `wght` deliberately not requested: `main.css` pins every icon to 400.
+The icon list was rebuilt, not reused: a fresh scan of templates (incl. multi-line spans), both
+Python icon dicts and sidebar `icon="..."` params found exactly 125 names, none missing from the old
+font (its 190 ligatures include Google's automatic aliases, e.g. `access_time` for `schedule`).
+`main.css`'s `@font-face` comment now spells out the axis requirement for the next regeneration.
+
+- [x] `tests/unit/test_icon_font.py` (no DB, ~1s): the font has a FILL axis 0..1 — **failed** on
+      the old file ("icon font is static") and passes on the new one; and every icon name the code
+      renders is still a ligature in the font, guarding any future re-subset against icons silently
+      falling back to raw text. Uses fontTools/brotli, which a fresh `requirements.txt` resolve
+      already installs via WeasyPrint.
+- [x] Vite rebuild emits a new content-hashed font (`material-symbols-outlined-subset-*.woff2`), so
+      browsers can't keep serving the static one from cache.
+- [x] Live browser (temporary approved 4-star review, deleted afterwards): stars now show 4 filled
+      + 1 outlined in both the summary and the review row; header search/cart icons still outlined;
+      admin login page renders its icons with none falling back to wide raw ligature text; the
+      icon font face reports `loaded`.
+- [x] `make check-fast` clean.
+
+**Files touched:** `static/src/fonts/material-symbols-outlined-subset.woff2`,
+`static/src/main.css`, `tests/unit/test_icon_font.py`.
+
+**Estimated scope:** S

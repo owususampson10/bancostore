@@ -28,9 +28,11 @@ def test_customer_can_register_logout_and_login(client):
         },
     )
 
-    # Signup redirects to LOGIN_REDIRECT_URL, which doesn't have a real page yet
-    # (no homepage until Task 8) — a 302 here confirms signup itself succeeded.
+    # Task 56: signup used to redirect to Django's default LOGIN_REDIRECT_URL
+    # (/accounts/profile/), which has never existed -- a real 404 for every new
+    # customer. It now lands on the storefront home page.
     assert response.status_code == 302
+    assert response.url == reverse("catalog:home")
     user = User.objects.get(email="ama@example.test")
     assert user.customer_profile.full_name == "Ama Mensah"
     assert str(user.customer_profile.phone_number) == "+233241234567"
@@ -45,7 +47,71 @@ def test_customer_can_register_logout_and_login(client):
     )
 
     assert login_response.status_code == 302
+    assert login_response.url == reverse("catalog:home")
     assert int(client.session["_auth_user_id"]) == user.id
+
+
+@pytest.mark.django_db
+def test_customer_login_form_keeps_the_next_page_and_returns_there(client):
+    """Task 56: templates/account/login.html never rendered allauth's
+    redirect field, so a ?next= target was silently dropped when the form
+    posted and the customer landed on the default page instead of where they
+    were going."""
+    User.objects.create_user(
+        username="esi", email="esi@example.test", password="Passw0rd-Esi!"
+    )
+    my_orders = reverse("orders:order_history")
+
+    page = client.get(f"{reverse('account_login')}?next={my_orders}")
+    assert (
+        f'<input type="hidden" name="next" value="{my_orders}">'
+        in page.content.decode()
+    )
+
+    response = client.post(
+        reverse("account_login"),
+        {
+            "login": "esi@example.test",
+            "password": "Passw0rd-Esi!",
+            "next": my_orders,
+        },
+    )
+
+    assert response.status_code == 302
+    assert response.url == my_orders
+
+
+@pytest.mark.django_db
+def test_customer_signup_form_keeps_the_next_page(client):
+    my_orders = reverse("orders:order_history")
+
+    page = client.get(f"{reverse('account_signup')}?next={my_orders}")
+
+    assert (
+        f'<input type="hidden" name="next" value="{my_orders}">'
+        in page.content.decode()
+    )
+
+
+@pytest.mark.django_db
+def test_customer_login_ignores_an_offsite_next_and_lands_on_home(client):
+    """Now that the form carries `next`, it must not become an open redirect:
+    allauth only follows it when adapter.is_safe_url() allows it."""
+    User.objects.create_user(
+        username="yaw", email="yaw@example.test", password="Passw0rd-Yaw!"
+    )
+
+    response = client.post(
+        reverse("account_login"),
+        {
+            "login": "yaw@example.test",
+            "password": "Passw0rd-Yaw!",
+            "next": "https://evil.example/phish",
+        },
+    )
+
+    assert response.status_code == 302
+    assert response.url == reverse("catalog:home")
 
 
 @pytest.mark.django_db
@@ -162,3 +228,26 @@ def test_customer_password_reset_completes_via_email_link(client):
 
     user.refresh_from_db()
     assert user.check_password("NewPassw0rd!")
+
+
+@pytest.mark.django_db
+def test_customer_password_reset_email_links_to_customer_confirm_page(client):
+    """Task 55b: the admin-branded reset link now comes from the project-wide
+    ACCOUNT_ADAPTER's get_reset_password_from_key_url hook, which every
+    allauth password reset goes through -- not just the admin one. A
+    customer requesting a reset from the storefront must still get allauth's
+    own customer-facing confirm page, never the admin-branded one."""
+    from urllib.parse import urlparse
+
+    from django.urls import resolve
+
+    User.objects.create_user(
+        username="kwame", email="kwame@example.test", password="OldPassw0rd!"
+    )
+
+    client.post(reverse("account_reset_password"), {"email": "kwame@example.test"})
+
+    match = RESET_LINK_PATTERN.search(mail.outbox[0].body)
+    reset_path = urlparse(match.group(0)).path
+
+    assert resolve(reset_path).url_name == "account_reset_password_from_key"

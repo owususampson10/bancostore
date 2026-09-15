@@ -118,9 +118,45 @@ Add to Cart
 </div>
 </div>
 
-<!-- Description -->
-<section class="mt-16 max-w-3xl">
-<h2 class="text-2xl font-bold mb-6">Description</h2>
+<!-- Description & Reviews -->
+{% comment %}Task 57: one tab set, not two stacked sections. The initial tab comes from the
+server via a data- attribute (never interpolated into x-data): Reviews when a submitted review
+failed validation, so its errors aren't hidden; otherwise Description, unless the URL is
+#reviews (the redirect after a successful review).{% endcomment %}
+<section class="mt-16"
+         data-initial-tab="{% if review_form.errors %}reviews{% else %}description{% endif %}"
+         x-data="{
+           tab: '',
+           tabs: ['description', 'reviews'],
+           select(name, moveFocus) {
+             this.tab = name;
+             if (moveFocus) { this.$nextTick(() => document.getElementById('product-tab-' + name).focus()); }
+           },
+           step(offset) {
+             const next = (this.tabs.indexOf(this.tab) + offset + this.tabs.length) % this.tabs.length;
+             this.select(this.tabs[next], true);
+           }
+         }"
+         x-init="tab = window.location.hash === '#reviews' ? 'reviews' : $el.dataset.initialTab">
+<div class="flex gap-8 border-b border-outline-variant" role="tablist" aria-label="Product information"
+     @keydown.arrow-right.prevent="step(1)" @keydown.arrow-left.prevent="step(-1)"
+     @keydown.home.prevent="select(tabs[0], true)" @keydown.end.prevent="select(tabs[tabs.length - 1], true)">
+<button type="button" role="tab" id="product-tab-description" aria-controls="product-panel-description"
+        :aria-selected="(tab === 'description').toString()" :tabindex="tab === 'description' ? 0 : -1"
+        @click="select('description')"
+        :class="tab === 'description' ? 'border-primary text-primary' : 'border-transparent text-on-surface hover:text-primary'"
+        class="-mb-px border-b-2 pb-3 text-lg font-bold whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-t">Description</button>
+<button type="button" role="tab" id="product-tab-reviews" aria-controls="product-panel-reviews"
+        :aria-selected="(tab === 'reviews').toString()" :tabindex="tab === 'reviews' ? 0 : -1"
+        @click="select('reviews')"
+        :class="tab === 'reviews' ? 'border-primary text-primary' : 'border-transparent text-on-surface hover:text-primary'"
+        class="-mb-px border-b-2 pb-3 text-lg font-bold whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-t">Reviews{% if reviews %} ({{ reviews|length }}){% endif %}</button>
+</div>
+
+<div role="tabpanel" id="product-panel-description" aria-labelledby="product-tab-description" tabindex="0"
+     x-show="tab === 'description'"{% if review_form.errors %} x-cloak{% endif %}
+     class="pt-8 max-w-3xl focus-visible:outline-none">
+<h2 class="sr-only">Description</h2>
 <div class="space-y-4 text-gray-700 text-lg">
 {% if product.description %}
 <p>{{ product.description|linebreaksbr }}</p>
@@ -128,21 +164,22 @@ Add to Cart
 <p class="text-gray-500">No description available yet.</p>
 {% endif %}
 </div>
-</section>
+</div>
 
-<!-- Reviews -->
-<section class="mt-16 max-w-3xl">
-<div class="flex items-center gap-3 mb-6">
-<h2 class="text-2xl font-bold">Reviews</h2>
+<div role="tabpanel" id="product-panel-reviews" aria-labelledby="product-tab-reviews" tabindex="0"
+     x-show="tab === 'reviews'"{% if not review_form.errors %} x-cloak{% endif %}
+     class="pt-8 max-w-3xl focus-visible:outline-none">
+<h2 class="sr-only">Reviews</h2>
 {% if average_rating %}
+<div class="flex items-center gap-3 mb-6">
 <div class="flex items-center gap-1">
 {% for n in "12345" %}
 <span class="material-symbols-outlined text-primary text-[18px]"{% if forloop.counter <= average_rating %} style="font-variation-settings: 'FILL' 1;"{% endif %} aria-hidden="true">star</span>
 {% endfor %}
 </div>
 <span class="text-sm text-gray-600">{{ average_rating }} out of 5 ({{ reviews|length }} review{{ reviews|length|pluralize }})</span>
-{% endif %}
 </div>
+{% endif %}
 {% if can_review %}
 <form method="post" action="{% url 'catalog:review_submit' product.pk %}" class="bg-surface-container-low rounded-xl border border-outline-variant p-6 space-y-4">
 {% csrf_token %}
@@ -180,6 +217,7 @@ Add to Cart
 {% else %}
 <p class="text-gray-600 mt-4">No reviews yet.</p>
 {% endif %}
+</div>
 </section>
 
 <!-- Related Products -->

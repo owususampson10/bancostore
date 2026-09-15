@@ -10,6 +10,8 @@
 </div>
 <form class="space-y-stack-md" method="post" action="{% url 'account_signup' %}">
 {% csrf_token %}
+{% comment %}Task 56: allauth's own hidden `next` input -- see account/login.html.{% endcomment %}
+{{ redirect_field }}
 {% if form.non_field_errors %}
 <div class="p-3 bg-error-container text-on-error-container rounded-lg font-body-sm text-body-sm">
 {{ form.non_field_errors.0 }}

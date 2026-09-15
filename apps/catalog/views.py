@@ -7,6 +7,7 @@ from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Avg, Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from constance import config
@@ -265,7 +266,11 @@ def review_submit(request, product_id):
             messages.success(
                 request, "Thanks for your review! It will appear once approved."
             )
-        return redirect("catalog:product_detail", slug=product.slug)
+        # Task 57: land back on the Reviews tab, not the default Description tab.
+        return redirect(
+            reverse("catalog:product_detail", kwargs={"slug": product.slug})
+            + "#reviews"
+        )
     return render(
         request,
         "catalog/product_detail.html",

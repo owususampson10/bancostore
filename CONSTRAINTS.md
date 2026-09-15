@@ -104,11 +104,20 @@ refuse to get worse.
 |--------|--------------------|-----------|
 | Project coverage (`apps/`, `bancostore/`) | **94.9%** (6,483 of 6,830 statements, 246 files) | must not fall (0.5% tolerance) |
 | Tests passing | **1,810** (6 skipped) | must not fall |
-| pip-audit findings | **7** across 2 packages | must not grow |
+| pip-audit findings | **1** in 1 package — `weasyprint` 69.0 (PYSEC-2026-3940). Was 7 across 2 before Task 55 cleared all 3 `django-allauth` advisories. | must not grow |
 | Full suite runtime, with coverage | ~38 min (this Mac, SQLite) | informational |
 
 Tolerance is 0.5% on coverage, to absorb drift when an unrelated file moves the
 number. Re-measure with `make ratchet`.
+
+The pip-audit figure must come from what `pip-audit -r requirements.txt`
+resolves, **not** from auditing a local `venv`: `requirements.txt` pins direct
+dependencies only, so an older venv keeps stale transitive versions a fresh
+resolve would not pick. On 2026-09-15 the local venv reported 17 findings in 5
+packages (old `sqlparse`, `tornado`, `cryptography`, plus `pip` itself) against
+the resolved set's 1. On a machine that can't take a full `-r` reinstall, the
+equivalent is `pip install --dry-run --ignore-installed --report` to resolve,
+then `pip-audit -r <resolved pins> --no-deps --disable-pip`.
 
 ---
 
