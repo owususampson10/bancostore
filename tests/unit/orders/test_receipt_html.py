@@ -84,6 +84,15 @@ def _send(order, settings):
     return mail.outbox[0]
 
 
+def _render(order):
+    """The receipt as rendered, for tests about what the customer SEES."""
+    from django.template.loader import render_to_string
+
+    context = build_receipt_html_context(order)
+    context.update(intro="", closing="")
+    return render_to_string("emails/order_receipt.html", context)
+
+
 def _html(message):
     html = [body for body, mime in message.alternatives if mime == "text/html"]
     assert html, "no text/html alternative was attached"
@@ -119,6 +128,15 @@ def test_the_html_receipt_lists_items_and_totals(settings):
     assert "240.00" in html  # 2 x 120.00, the LINE total
     assert "620.00" in html
     assert order.payment_reference in html
+    # Code review (PR #93): the two checks above can pass without the parts
+    # customers actually read. The reference also appears in <title>, and
+    # the total in the hidden inbox preheader -- so removing the visible
+    # ORDER NO. value, or rendering the wrong figure in the TOTAL row, still
+    # passed. These pin the visible cells themselves.
+    assert f">{order.payment_reference}</td>" in html
+    total_row = html[html.index(">TOTAL</td>") :]
+    total_row = total_row[: total_row.index("</tr>")]
+    assert "GHS 620.00" in total_row
 
 
 @pytest.mark.django_db
@@ -211,6 +229,10 @@ def test_a_zero_discount_is_hidden_rather_than_shown_as_zero():
     _add_item(order)
 
     assert build_receipt_html_context(order)["show_discount"] is False
+    # Code review (PR #93): the flag alone passed even with the template's
+    # {% if show_discount %} replaced by {% if True %}. The test name
+    # promises what the customer sees, so check the rendered receipt.
+    assert ">Discount</td>" not in _render(order)
 
 
 @pytest.mark.django_db
@@ -219,22 +241,39 @@ def test_free_delivery_reads_free_rather_than_ghs_zero():
     _add_item(order)
 
     assert build_receipt_html_context(order)["delivery_is_free"] is True
+    # Code review (PR #93): same gap -- the flag passed with the FREE branch
+    # removed from the template entirely.
+    assert ">FREE</td>" in _render(order)
 
 
 @pytest.mark.django_db
-def test_no_email_is_sent_for_a_legacy_order_with_no_address(settings):
+def test_no_email_is_sent_for_a_legacy_order_with_no_address(
+    settings, django_capture_on_commit_callbacks
+):
     """Order.email stays blank=True for orders placed before email became
-    required at checkout. Those must still be skipped cleanly."""
+    required at checkout. Those must still be skipped cleanly.
+
+    Code review (PR #93) proved the previous version could never fail. It
+    asserted mail.outbox == [], but after Task 62 moved the receipt into a
+    Celery task, _send_confirmation_notifications never writes to the
+    outbox for ANY order -- and without capturing on_commit callbacks the
+    enqueue would not even have run. It passed with the blank-email guard
+    replaced by `if True:`. It now asserts the enqueue, with callbacks
+    actually executed."""
     from apps.orders.services import _send_confirmation_notifications
 
     settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
     order = _make_order(email="")
     _add_item(order)
 
-    with patch("apps.orders.services.send_sms"):
+    with (
+        patch("apps.orders.services.send_sms"),
+        patch("apps.orders.services.send_order_receipt_email_task") as task,
+        django_capture_on_commit_callbacks(execute=True),
+    ):
         _send_confirmation_notifications(order)
 
-    assert mail.outbox == []
+    task.delay.assert_not_called()
 
 
 # --- Admin-editable wording (Task 62c) -------------------------------------
@@ -291,6 +330,25 @@ def test_markup_typed_by_an_admin_is_shown_as_text_never_run(settings):
     assert "<script>" not in html
     assert 'href="https://evil.test"' not in html
     assert "&lt;script&gt;" in html  # present, but escaped into plain text
+
+
+@pytest.mark.django_db
+def test_markup_typed_into_the_closing_is_shown_as_text_too(settings):
+    """Code review (PR #93): only the intro's escaping was tested. The
+    closing is a separate admin-editable block rendered by a separate
+    template line, so it gets its own proof."""
+    from apps.notifications.models import NotificationTemplate
+
+    NotificationTemplate.objects.filter(
+        key=NotificationTemplate.Key.ORDER_RECEIPT_CLOSING
+    ).update(body='<a href="https://evil.test">Claim your prize</a>')
+    order = _make_order()
+    _add_item(order)
+
+    html = _html(_send(order, settings))
+
+    assert 'href="https://evil.test"' not in html
+    assert "&lt;a href=" in html
 
 
 @pytest.mark.django_db

@@ -272,6 +272,10 @@ def test_the_sms_stays_short_enough_not_to_multiply_cost():
     assert len(body) <= 160
     assert order.payment_reference in body
     assert "400.00" in body
+    # Code review (PR #93): the length check alone could never catch an item
+    # list -- send_admin_order_alert truncates any body to one segment, so
+    # a list is cut short rather than rejected. Check for the item itself.
+    assert "A Very Long Product Name" not in body
 
 
 @pytest.mark.django_db

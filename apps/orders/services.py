@@ -600,10 +600,10 @@ def _send_confirmation_notifications(order: Order) -> None:
     # retry_on_lock_contention -- so a failure while building the receipt
     # escaped the helper entirely, skipping both notifications on an
     # already-confirmed order and, if it happened to resemble an
-    # OperationalError, re-running an already-committed transaction. The
-    # duplicated call costs one extra query on a path that is already
-    # sending an SMS and an email; the per-channel guarantee is the whole
-    # point of this function's shape.
+    # OperationalError, re-running an already-committed transaction. Since
+    # Task 62 only the SMS builds this context here -- the email's is built
+    # by the Celery worker -- but each channel keeps its own guard; the
+    # per-channel guarantee is the whole point of this function's shape.
     try:
         context = build_receipt_context(order)
         send_sms(

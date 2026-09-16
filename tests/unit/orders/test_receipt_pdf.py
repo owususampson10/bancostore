@@ -126,7 +126,10 @@ def test_a_pdf_failure_still_sends_the_receipt_email(locmem):
 
     (message,) = mail.outbox
     assert message.attachments == []
+    # Code review (PR #93): the bare reference also sits in the HTML's
+    # <title>, so that alone passed with the visible receipt body missing.
     assert order.payment_reference in message.alternatives[0][0]
+    assert f">{order.payment_reference}</td>" in message.alternatives[0][0]
 
 
 @pytest.mark.django_db
@@ -195,6 +198,51 @@ def test_the_task_quietly_ignores_a_deleted_order(locmem):
     assert mail.outbox == []
 
 
+@pytest.mark.django_db
+def test_the_task_skips_an_order_whose_email_was_cleared(locmem):
+    """The address can be blanked between enqueue and run. The task must
+    not try to send to an empty address."""
+    from apps.orders.tasks import send_order_receipt_email_task
+
+    order = _make_order()
+    _add_item(order)
+    Order.objects.filter(pk=order.pk).update(email="")
+
+    with patch("apps.orders.receipt_email.send_order_receipt_email") as send:
+        send_order_receipt_email_task(order.pk)
+
+    send.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_a_broker_outage_never_escapes_the_notification_boundary():
+    """Code review (PR #93): nothing exercised the guard around the enqueue.
+    Production calls this after confirm_order_payment's transaction has
+    committed, in autocommit mode, where on_commit runs its callback
+    immediately -- so a Redis outage raises right there. on_commit is
+    patched to run the callback immediately, exactly as production does;
+    the test's own wrapping transaction would otherwise defer it past the
+    guard. Escaping would land in retry_on_lock_contention after the money
+    has already moved."""
+    from apps.orders.services import _send_confirmation_notifications
+
+    order = _make_order()
+    _add_item(order)
+
+    with (
+        patch("apps.orders.services.send_sms"),
+        patch("apps.orders.services.send_order_receipt_email_task") as task,
+        patch(
+            "apps.orders.services.transaction.on_commit",
+            side_effect=lambda callback, *args, **kwargs: callback(),
+        ),
+    ):
+        task.delay.side_effect = ConnectionError("Redis is down")
+        _send_confirmation_notifications(order)  # must not raise
+
+    task.delay.assert_called_once_with(order.pk)
+
+
 # --- Hardening the PDF renderer --------------------------------------------
 
 
@@ -246,7 +294,13 @@ def test_write_pdf_is_never_given_the_advisory_affected_options():
     with patch.object(receipt_pdf, "_load_weasyprint", return_value=fake_weasyprint):
         assert receipt_pdf.render_receipt_pdf(order) == FAKE_PDF
 
-    write_pdf_kwargs = fake_weasyprint.HTML.return_value.write_pdf.call_args.kwargs
+    # Code review (PR #93): reading call_args directly failed with a
+    # confusing AttributeError on None if write_pdf was never called, and a
+    # positional argument would have slipped past a kwargs-only check.
+    write_pdf = fake_weasyprint.HTML.return_value.write_pdf
+    write_pdf.assert_called_once()
+    assert write_pdf.call_args.args == ()
+    write_pdf_kwargs = write_pdf.call_args.kwargs
     assert "stylesheets" not in write_pdf_kwargs
     assert "xmp_metadata" not in write_pdf_kwargs
     html_kwargs = fake_weasyprint.HTML.call_args.kwargs
