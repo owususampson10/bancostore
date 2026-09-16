@@ -140,6 +140,91 @@ who is not.
   </div>
 </div>
 </header>
+
+{% comment %}
+Task 61c. Live bell updates.
+
+Found by real-browser testing, not by any test: without this the
+consumer, the push inside send_admin_notification and
+broadcast_admin_unread_count were all dead code -- nothing in the page
+ever opened the socket. The bell only updated on a full reload, and the
+badge stayed stuck showing the old count after "Mark all read".
+
+Mirrors templates/distributors/base_dashboard.html's own client
+(reconnect with capped backoff, ignore malformed payloads rather than
+crash the page) instead of inventing a second approach for the same job.
+
+The badge is ALSO corrected straight from the htmx swap, not only from
+the socket: local dev runs on runserver as often as daphne, and runserver
+has no WebSocket routing at all (CLAUDE.md documents this), so a bell
+depending solely on the socket would look broken in exactly the
+environment it is developed in.
+{% endcomment %}
+<script>
+  (function () {
+    const panel = document.getElementById("admin-bell-panel");
+    if (!panel) return;
+    const wrapper = panel.closest("[x-data]");
+
+    function setUnread(count) {
+      if (typeof count !== "number" || !wrapper) return;
+      try {
+        window.Alpine.$data(wrapper).unread = count;
+      } catch (e) {
+        // Alpine not ready yet, or the wrapper was replaced. The badge
+        // is correct on the next page load either way -- never worth
+        // throwing inside an admin page over.
+      }
+    }
+
+    // Mark-all-read returns the re-rendered panel carrying the new count,
+    // so the badge clears even with no WebSocket connection at all.
+    panel.addEventListener("htmx:afterSwap", function () {
+      const el = panel.querySelector("[data-unread-count]");
+      if (el) setUnread(Number(el.dataset.unreadCount));
+    });
+
+    let reconnectDelay = 1000;
+    const maxReconnectDelay = 30000;
+
+    function connect() {
+      const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+      const socket = new WebSocket(
+        protocol + window.location.host + "/ws/admin/notifications/"
+      );
+
+      socket.onopen = function () {
+        reconnectDelay = 1000;
+      };
+
+      socket.onmessage = function (event) {
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch (e) {
+          return; // malformed payload -- ignore rather than crash the page
+        }
+        if (
+          !data ||
+          (data.type !== "notification_push" &&
+            data.type !== "unread_count_update")
+        ) {
+          return;
+        }
+        setUnread(data.unread_count);
+      };
+
+      socket.onclose = function () {
+        // Capped backoff: a server restart must not turn every open admin
+        // tab into a reconnect storm.
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
+      };
+    }
+
+    connect();
+  })();
+</script>
 <main class="flex-1 p-margin-mobile md:p-margin-desktop max-w-[1200px] w-full mx-auto">
 {% if messages %}
 {% comment %}
