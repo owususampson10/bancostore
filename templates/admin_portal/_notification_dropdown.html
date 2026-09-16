@@ -1,0 +1,56 @@
+{% comment %}
+Task 61c. The admin bell's panel, loaded on demand via htmx.
+
+Mirrors templates/distributors/_notification_dropdown.html rather than
+inventing a second layout for the same thing. Note Django's {# #} comment
+is single-line only -- this block uses {% comment %} deliberately, since
+a multi-line {# #} renders as literal visible page text (a footgun this
+codebase has hit on three separate templates: Tasks 18f, 21d, 25).
+{% endcomment %}
+<div class="flex items-center justify-between px-4 py-3 border-b border-outline-variant/50">
+  <p class="font-label-lg text-label-lg text-on-surface">Notifications</p>
+  {% if unread_count %}
+    <form hx-post="{% url 'admin_portal:admin_notification_mark_all_read' %}"
+          hx-target="#admin-bell-panel"
+          hx-swap="innerHTML">
+      {% csrf_token %}
+      <button type="submit"
+              class="font-label-sm text-label-sm text-primary hover:underline">
+        Mark all read
+      </button>
+    </form>
+  {% endif %}
+</div>
+
+<ul class="max-h-80 overflow-y-auto divide-y divide-outline-variant/40">
+  {% for notification in notifications %}
+    {% with icon=notification.icon %}
+      <li class="flex items-start gap-3 px-4 py-3 {% if not notification.is_read %}bg-primary/5{% endif %}">
+        <span class="shrink-0 w-8 h-8 rounded-full flex items-center justify-center {{ icon.1 }}">
+          <span class="material-symbols-outlined text-[18px]" aria-hidden="true">{{ icon.0 }}</span>
+        </span>
+        <div class="min-w-0">
+          <p class="font-body-sm text-body-sm text-on-surface break-words">
+            {% if notification.order_id %}
+              <a href="{% url 'admin_portal:order_detail' notification.order_id %}"
+                 class="hover:underline">{{ notification.message }}</a>
+            {% else %}
+              {{ notification.message }}
+            {% endif %}
+          </p>
+          <p class="font-body-xs text-body-xs text-gray-muted mt-0.5">
+            {{ notification.created_at|date:"j M Y, g:i a" }}
+          </p>
+        </div>
+      </li>
+    {% endwith %}
+  {% empty %}
+    <li class="px-4 py-8 text-center">
+      <span class="material-symbols-outlined text-gray-muted text-[32px]" aria-hidden="true">notifications_off</span>
+      <p class="font-body-sm text-body-sm text-gray-muted mt-2">No notifications yet.</p>
+      <p class="font-body-xs text-body-xs text-gray-muted mt-1">
+        You'll see new orders here as they come in.
+      </p>
+    </li>
+  {% endfor %}
+</ul>

@@ -331,6 +331,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "apps.orders.context_processors.cart_count",
                 "apps.notifications.context_processors.unread_notification_count",
+                "apps.admin_portal.context_processors.admin_notification_badge",
                 "apps.accounts.context_processors.google_login_flags",
                 "apps.pages.context_processors.social_media_links",
                 "apps.pages.context_processors.organization_json_ld",

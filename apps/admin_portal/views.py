@@ -27,7 +27,8 @@ from apps.compliance.models import EscrowLedger
 from apps.compliance.services import get_retail_distributor_ratio, get_unified_audit_log
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
-from apps.notifications.models import NotificationTemplate
+from apps.notifications.models import AdminNotification, NotificationTemplate
+from apps.notifications.services import broadcast_admin_unread_count
 from apps.notifications.template_registry import PLACEHOLDERS_BY_KEY
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import (
@@ -2408,3 +2409,48 @@ def social_link_detect_platform(request):
     candidate_url = request.GET.get("url", "")
     detected_platform = detect_platform_from_url(candidate_url)
     return JsonResponse({"platform": detected_platform})
+
+
+# --- Task 61c: the admin notification bell --------------------------------
+
+
+ADMIN_BELL_PAGE_SIZE = 10
+
+
+@login_required(login_url="two_factor:login")
+def admin_notification_dropdown(request):
+    """Task 61c. The bell's panel contents, loaded on demand via htmx
+    rather than rendered into every admin page -- the same shape the
+    distributor bell (Task 21d) uses.
+
+    Deliberately NOT decorated with anything that could swap a full page
+    into the panel: Task 21d hit exactly that, where a redirect decorator
+    on an htmx-loaded fragment put an entire page inside a small dropdown.
+    """
+    notifications = AdminNotification.objects.all()[:ADMIN_BELL_PAGE_SIZE]
+    return render(
+        request,
+        "admin_portal/_notification_dropdown.html",
+        {
+            "notifications": notifications,
+            "unread_count": AdminNotification.unread_count(),
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+@require_POST
+def admin_notification_mark_all_read(request):
+    """POST-only: marking read is a state change, so a GET (a prefetch, a
+    crawler, a browser preloading the link) must never silently clear an
+    admin's whole bell."""
+    AdminNotification.objects.filter(is_read=False).update(is_read=True)
+    broadcast_admin_unread_count()
+    return render(
+        request,
+        "admin_portal/_notification_dropdown.html",
+        {
+            "notifications": AdminNotification.objects.all()[:ADMIN_BELL_PAGE_SIZE],
+            "unread_count": 0,
+        },
+    )

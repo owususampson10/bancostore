@@ -102,6 +102,74 @@ class Notification(models.Model):
         return self._ICON_BY_EVENT_TYPE[self.event_type][1]
 
 
+class AdminNotification(models.Model):
+    """Task 61c. An admin-portal-facing notification, for the bell in the
+    admin shell.
+
+    SEPARATE from Notification above rather than a widened version of it.
+    That model is FK'd to Distributor and documented as having "exactly 6
+    event types because Section 6.6 names exactly 6" -- a real, narrow
+    contract. Making its distributor nullable and bolting on an audience
+    flag would blur that into "notifications, for someone" and leave every
+    reader checking which kind they have.
+
+    ONE SHARED STREAM, not one per staff account. "The admin" here is a
+    role, not a person: a new order is a fact about the shop, and every
+    admin should see the same list rather than each getting a private copy
+    of the same event. The accepted cost is that `is_read` is shared too --
+    when one admin reads a notification it is read for all of them. For a
+    shop with a handful of staff that is the behaviour you want; if this
+    ever grows per-user read state, that is a real schema change and a
+    real decision, not something to slide in later.
+    """
+
+    class EventType(models.TextChoices):
+        NEW_ORDER = "new_order", "New order paid"
+
+    _ICON_BY_EVENT_TYPE = {
+        EventType.NEW_ORDER: ("shopping_bag", "bg-primary/10 text-primary"),
+    }
+
+    event_type = models.CharField(max_length=32, choices=EventType.choices)
+    message = models.CharField(max_length=255)
+    # SET_NULL, not CASCADE: an admin reading their bell history should
+    # still see that an order arrived even if the row was later removed.
+    # Losing the audit line entirely would be worse than losing the link.
+    order = models.ForeignKey(
+        "orders.Order",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="admin_notifications",
+    )
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # "-pk" as the tie-breaker, not "-created_at" alone: Task 15d's
+        # pagination bug was exactly this -- two rows sharing a timestamp
+        # could be skipped or repeated across a page boundary.
+        ordering = ["-created_at", "-pk"]
+        indexes = [models.Index(fields=["is_read", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.get_event_type_display()}: {self.message}"
+
+    @property
+    def icon(self):
+        """One canonical icon/colour per event type, mirroring
+        Notification._ICON_BY_EVENT_TYPE. Falls back rather than raising
+        so a new event type renders a plain bell instead of 500-ing the
+        whole admin shell."""
+        return self._ICON_BY_EVENT_TYPE.get(
+            self.event_type, ("notifications", "bg-surface-container text-on-surface")
+        )
+
+    @classmethod
+    def unread_count(cls) -> int:
+        return cls.objects.filter(is_read=False).count()
+
+
 class NotificationCycleRun(models.Model):
     """Task 21d-iii. Mirrors apps.orders.models.OrderCycleRun's own
     audit-trail shape and rationale for

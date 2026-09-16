@@ -30,8 +30,9 @@ from django.core.mail import send_mail
 from constance import config
 
 from apps.notifications.email import get_sender_email
-from apps.notifications.models import NotificationTemplate
+from apps.notifications.models import AdminNotification, NotificationTemplate
 from apps.notifications.rendering import render_email_or_default, render_or_default
+from apps.notifications.services import send_admin_notification
 from apps.notifications.sms import send_sms
 from apps.orders.receipts import build_receipt_context
 
@@ -99,6 +100,7 @@ def send_admin_order_alert(order) -> None:
     """
     _send_admin_email_alert(order)
     _send_admin_sms_alert(order)
+    _send_admin_bell_notification(order)
 
 
 def _send_admin_email_alert(order) -> None:
@@ -157,5 +159,32 @@ def _send_admin_sms_alert(order) -> None:
         logger.exception(
             "send_admin_order_alert: failed to SMS the admin about "
             "reference=%s -- the order itself is unaffected.",
+            order.payment_reference,
+        )
+
+
+def _send_admin_bell_notification(order) -> None:
+    """Task 61c. The in-app bell.
+
+    Unlike the email and SMS above this has no recipient setting, because
+    there is nobody to address: it writes one row that every logged-in
+    admin sees. Nothing to configure means nothing to leave misconfigured.
+
+    send_admin_notification never raises (it owns its own guard), so this
+    wrapper exists only to keep the module's "every channel is
+    independently guarded" contract literally true rather than true by
+    the grace of a function defined elsewhere.
+    """
+    try:
+        send_admin_notification(
+            AdminNotification.EventType.NEW_ORDER,
+            f"New order {order.payment_reference} -- GHS {order.total} "
+            f"from {order.full_name}",
+            order=order,
+        )
+    except Exception:
+        logger.exception(
+            "send_admin_order_alert: failed to record the bell notification "
+            "for reference=%s -- the order itself is unaffected.",
             order.payment_reference,
         )

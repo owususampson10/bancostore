@@ -320,3 +320,58 @@ def test_an_email_failure_does_not_skip_the_sms(settings):
         send_admin_order_alert(order)
 
     mock_sms.assert_called_once()
+
+
+# --- Task 61c: the in-app bell -------------------------------------------
+
+
+@pytest.mark.django_db
+def test_a_confirmed_order_records_a_bell_notification():
+    from apps.notifications.models import AdminNotification
+
+    config.ADMIN_ORDER_ALERT_EMAIL = ""
+    config.ADMIN_ORDER_ALERT_SMS_NUMBER = ""
+    order = _make_order()
+    _add_item(order)
+
+    send_admin_order_alert(order)
+
+    notification = AdminNotification.objects.get()
+    assert notification.order_id == order.pk
+    assert order.payment_reference in notification.message
+    assert "Kofi Mensah" in notification.message
+
+
+@pytest.mark.django_db
+def test_the_bell_fires_even_with_both_other_channels_disabled():
+    """The bell has no recipient setting -- there is nobody to address,
+    so there is nothing to leave misconfigured. A store that has set
+    neither an email nor a number still gets the in-app record."""
+    from apps.notifications.models import AdminNotification
+
+    config.ADMIN_ORDER_ALERT_EMAIL = ""
+    config.ADMIN_ORDER_ALERT_SMS_NUMBER = ""
+    order = _make_order()
+    _add_item(order)
+
+    send_admin_order_alert(order)
+
+    assert AdminNotification.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_a_bell_failure_does_not_skip_the_email(settings):
+    """Third channel, same independence contract as the first two."""
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    config.ADMIN_ORDER_ALERT_EMAIL = "ops@bancostore.test"
+    config.ADMIN_ORDER_ALERT_SMS_NUMBER = ""
+    order = _make_order()
+    _add_item(order)
+
+    with patch(
+        "apps.orders.admin_alerts.send_admin_notification",
+        side_effect=RuntimeError("bell broke"),
+    ):
+        send_admin_order_alert(order)
+
+    assert len(mail.outbox) == 1
