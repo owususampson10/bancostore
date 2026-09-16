@@ -262,3 +262,31 @@ def test_no_confirmation_email_is_sent_for_a_legacy_order_with_no_email(settings
     _send_confirmation_notifications(order)
 
     assert mail.outbox == []
+
+
+@pytest.mark.django_db
+def test_a_broken_receipt_never_escapes_the_notification_boundary(settings):
+    """CodeRabbit (PR #91): _send_confirmation_notifications runs inside
+    confirm_order_payment's _attempt, AFTER the money/stock/PV
+    transaction commits, and _attempt is wrapped by
+    retry_on_lock_contention. Building the receipt context outside both
+    channels' try blocks meant a failure there escaped the helper
+    entirely -- skipping both notifications on an already-confirmed
+    order, and, if it resembled an OperationalError, re-running an
+    already-committed transaction.
+
+    That is exactly what this function's per-channel guards exist to
+    prevent, so the context must be built inside them."""
+    from unittest.mock import patch
+
+    from apps.orders.services import _send_confirmation_notifications
+
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    order = _make_order()
+    _add_item(order)
+
+    with patch(
+        "apps.orders.services.build_receipt_context",
+        side_effect=RuntimeError("receipt blew up"),
+    ):
+        _send_confirmation_notifications(order)  # must not raise

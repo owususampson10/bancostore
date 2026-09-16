@@ -40,7 +40,9 @@ def test_parses_a_rule_and_path_pair():
 def test_parses_several_allowances_across_several_commits():
     message = (
         "FLOOR-ALLOW: assertion-removed tests/a/test_one.py\n"
+        "Reason: the first one was wrong.\n"
         "FLOOR-ALLOW: test-file-deleted tests/b/test_two.py\n"
+        "Reason: the second one was wrong too.\n"
     )
 
     assert parse_floor_allowances(message) == {
@@ -50,7 +52,10 @@ def test_parses_several_allowances_across_several_commits():
 
 
 def test_is_case_insensitive_on_the_marker_but_not_the_path():
-    message = "floor-allow: assertion-removed tests/a/test_one.py\n"
+    message = (
+        "floor-allow: assertion-removed tests/a/test_one.py\n"
+        "reason: lowercase markers are still markers.\n"
+    )
 
     assert parse_floor_allowances(message) == {
         ("assertion-removed", "tests/a/test_one.py")
@@ -61,7 +66,7 @@ def test_ignores_a_marker_with_no_path():
     """A bare "FLOOR-ALLOW: assertion-removed" must not become a blanket
     pass for every file in the change -- that would be the
     .constraintsignore failure mode this exists to avoid."""
-    message = "FLOOR-ALLOW: assertion-removed\n"
+    message = "FLOOR-ALLOW: assertion-removed\nReason: no path was given.\n"
 
     assert parse_floor_allowances(message) == set()
 
@@ -70,7 +75,10 @@ def test_ignores_an_unknown_rule_name():
     """A typo must fail closed. Silently accepting "assertion-removeed"
     would mean the author believes they filed an allowance while the
     guard believes it blocked nothing."""
-    message = "FLOOR-ALLOW: assertion-removeed tests/a/test_one.py\n"
+    message = (
+        "FLOOR-ALLOW: assertion-removeed tests/a/test_one.py\n"
+        "Reason: a typo in the rule name must not pass.\n"
+    )
 
     assert parse_floor_allowances(message) == set()
 
@@ -85,7 +93,10 @@ def test_the_most_serious_rules_can_never_be_allowed_away(rule):
     should be able to wave through -- CONSTRAINTS.md's "reason in the
     commit message" clause is scoped to skipped/deleted/weakened tests,
     and nothing else."""
-    message = f"FLOOR-ALLOW: {rule} apps/anything.py\n"
+    message = (
+        f"FLOOR-ALLOW: {rule} apps/anything.py\n"
+        "Reason: a reason must never unlock a non-test rule.\n"
+    )
 
     assert parse_floor_allowances(message) == set()
 
@@ -115,3 +126,60 @@ def test_allowed_findings_is_unchanged_when_there_are_no_allowances():
     findings = [("assertion-removed", "tests/a/test_one.py", "assert x")]
 
     assert allowed_findings(findings, set()) == findings
+
+
+# CodeRabbit (PR #91): an allowance was accepted with no reason at all, so
+# "FLOOR-ALLOW: assertion-removed path/to/test.py" on its own could make
+# the guard report clean. CONSTRAINTS.md's rule is "without a reason in
+# the commit message" -- a reason-free allowance is exactly the thing the
+# rule refuses, and the guard's own help text tells authors to write one.
+
+
+def test_an_allowance_with_no_reason_is_rejected():
+    message = "FLOOR-ALLOW: assertion-removed tests/a/test_one.py\n"
+
+    assert parse_floor_allowances(message) == set()
+
+
+def test_an_allowance_with_an_empty_reason_is_rejected():
+    message = "FLOOR-ALLOW: assertion-removed tests/a/test_one.py\nReason:   \n"
+
+    assert parse_floor_allowances(message) == set()
+
+
+def test_an_allowance_with_a_reason_is_accepted():
+    message = (
+        "FLOOR-ALLOW: assertion-removed tests/a/test_one.py\n"
+        "Reason: the assertion pinned a value that was itself the bug.\n"
+    )
+
+    assert parse_floor_allowances(message) == {
+        ("assertion-removed", "tests/a/test_one.py")
+    }
+
+
+def test_a_reason_may_span_several_lines():
+    message = (
+        "FLOOR-ALLOW: assertion-removed tests/a/test_one.py\n"
+        "Reason: the first line of the explanation,\n"
+        "continuing onto a second line.\n"
+    )
+
+    assert parse_floor_allowances(message) == {
+        ("assertion-removed", "tests/a/test_one.py")
+    }
+
+
+def test_a_reason_does_not_carry_over_to_a_later_reasonless_allowance():
+    """Two allowances, one reason. Only the one that owns the reason is
+    accepted -- otherwise a single reason would launder any number of
+    unexplained allowances filed after it."""
+    message = (
+        "FLOOR-ALLOW: assertion-removed tests/a/test_one.py\n"
+        "Reason: a real explanation for this one.\n"
+        "FLOOR-ALLOW: test-file-deleted tests/b/test_two.py\n"
+    )
+
+    assert parse_floor_allowances(message) == {
+        ("assertion-removed", "tests/a/test_one.py")
+    }

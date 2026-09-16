@@ -226,29 +226,53 @@ ALLOWABLE_RULES = frozenset(
     {"assertion-removed", "test-file-deleted", "test-made-easier"}
 )
 
-_FLOOR_ALLOW_RE = re.compile(
-    r"^\s*FLOOR-ALLOW:\s*([a-z-]+)\s+(\S+)\s*$",
-    re.IGNORECASE | re.MULTILINE,
-)
+_FLOOR_ALLOW_RE = re.compile(r"^\s*FLOOR-ALLOW:\s*([a-z-]+)\s+(\S+)\s*$", re.IGNORECASE)
+# Any FLOOR-ALLOW line at all, well-formed or not -- used only to reset
+# the pending allowance, so a malformed marker can never leave an earlier
+# one hanging around to absorb the next Reason line.
+_FLOOR_ALLOW_MARKER_RE = re.compile(r"^\s*FLOOR-ALLOW:", re.IGNORECASE)
+# A reason with actual content. "Reason:" followed by whitespace only does
+# not count.
+_REASON_RE = re.compile(r"^\s*Reason:\s*\S", re.IGNORECASE)
 
 
 def parse_floor_allowances(message: str) -> set[tuple[str, str]]:
-    """Extract (rule, path) pairs from FLOOR-ALLOW lines in a commit
+    """Extract (rule, path) pairs from FLOOR-ALLOW blocks in a commit
     message.
 
-    Fails closed on anything it does not recognise: an unknown or
-    misspelled rule name yields nothing, so an author who believes they
-    filed an allowance and a guard that believes it blocked nothing can
-    never disagree silently. A marker with no path is likewise ignored --
-    a bare rule name must not become a blanket pass over every file in
-    the change, which is exactly the .constraintsignore failure mode this
-    exists to avoid.
+    A block is a FLOOR-ALLOW line followed by a non-empty `Reason:` line.
+    Both halves are required: CONSTRAINTS.md's rule is "without a REASON
+    in the commit message", so an allowance with no reason is precisely
+    what the rule refuses, and accepting one would have let the marker
+    alone clear a finding (CodeRabbit, PR #91).
+
+    Fails closed on everything else. An unknown or misspelled rule name
+    yields nothing, so an author who believes they filed an allowance and
+    a guard that believes it blocked nothing can never disagree silently.
+    A marker with no path is ignored -- a bare rule name must not become a
+    blanket pass over every file in the change, which is exactly the
+    .constraintsignore failure mode this exists to avoid. A reason belongs
+    to the one allowance it follows and is not carried over to a later
+    reasonless one, so a single explanation cannot launder any number of
+    unexplained allowances filed after it.
     """
-    return {
-        (rule.lower(), path)
-        for rule, path in _FLOOR_ALLOW_RE.findall(message or "")
-        if rule.lower() in ALLOWABLE_RULES
-    }
+    allowances: set[tuple[str, str]] = set()
+    pending: tuple[str, str] | None = None
+
+    for line in (message or "").split("\n"):
+        if _FLOOR_ALLOW_MARKER_RE.match(line):
+            match = _FLOOR_ALLOW_RE.match(line)
+            pending = None
+            if match:
+                rule, path = match.group(1).lower(), match.group(2)
+                if rule in ALLOWABLE_RULES:
+                    pending = (rule, path)
+            continue
+        if pending is not None and _REASON_RE.match(line):
+            allowances.add(pending)
+            pending = None
+
+    return allowances
 
 
 def allowed_findings(

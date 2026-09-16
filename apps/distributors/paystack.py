@@ -123,6 +123,14 @@ def _response_body_detail(response):
         return ""
     if len(body) > MAX_LOGGED_RESPONSE_BODY_CHARS:
         body = body[:MAX_LOGGED_RESPONSE_BODY_CHARS] + "... (truncated)"
+    # CodeRabbit (PR #91), CWE-117: this lands in a logger.exception()
+    # call on a production server. An embedded newline in an external
+    # response would let it forge extra log lines -- a fake timestamped
+    # entry spliced into the log reads exactly like a real one. Escaped
+    # rather than stripped so the content is still legible for the
+    # diagnosis this field exists to enable; truncation happens first so
+    # the escaping cannot push a long body back over the cap.
+    body = body.encode("unicode_escape").decode("ascii")
     return f" -- response body: {body}"
 
 

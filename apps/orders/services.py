@@ -568,12 +568,23 @@ def _send_confirmation_notifications(order: Order) -> None:
     # message an admin could not reword, while "your order is now
     # Dispatched" was editable.
     #
-    # The receipt context is built once and shared by both channels, but
-    # only the email body uses the itemised placeholders: SMS is billed
+    # Only the email body uses the itemised placeholders: SMS is billed
     # per 160 characters by mNotify, so an item list there would multiply
     # the messaging cost of every single order.
-    context = build_receipt_context(order)
+    #
+    # CodeRabbit (PR #91): the context is built INSIDE each channel's try
+    # block, not once above them. This helper runs inside
+    # confirm_order_payment's _attempt, after the money/stock/PV
+    # transaction has already committed, and _attempt is wrapped by
+    # retry_on_lock_contention -- so a failure while building the receipt
+    # escaped the helper entirely, skipping both notifications on an
+    # already-confirmed order and, if it happened to resemble an
+    # OperationalError, re-running an already-committed transaction. The
+    # duplicated call costs one extra query on a path that is already
+    # sending an SMS and an email; the per-channel guarantee is the whole
+    # point of this function's shape.
     try:
+        context = build_receipt_context(order)
         send_sms(
             str(order.phone_number),
             render_or_default(
@@ -596,7 +607,7 @@ def _send_confirmation_notifications(order: Order) -> None:
         try:
             subject, message = render_email_or_default(
                 NotificationTemplate.Key.ORDER_CONFIRMED_EMAIL,
-                context,
+                build_receipt_context(order),
                 default_subject="Your Bancostore order {{reference}} is confirmed",
                 default_body=(
                     "Your order (GHS {{total}}) is confirmed. "

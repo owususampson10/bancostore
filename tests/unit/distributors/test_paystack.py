@@ -551,3 +551,31 @@ def test_paystack_customer_email_fallback_survives_a_phone_with_no_digits():
     result = paystack_customer_email("", "")
 
     assert result == "guest@guests.bancostore.com"
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.post")
+def test_paystack_error_escapes_control_characters_in_the_response_body(mock_post):
+    """CodeRabbit (PR #91), CWE-117: the body goes straight into a
+    logger.exception() call on a production server. Embedded newlines
+    would let an external response forge extra log lines -- a fake
+    timestamped entry spliced into the log is the whole log-injection
+    class."""
+    mock_post.return_value = _fake_response(
+        {"status": False},
+        status_code=400,
+        text='{"message":"bad"}\n2026-01-01 00:00:00 ERROR forged log line',
+    )
+
+    with pytest.raises(PaystackError) as exc_info:
+        initialize_transaction(
+            email="kofi@example.test",
+            amount_pesewas=10000,
+            reference="ref123",
+            callback_url="https://bancostore.test/callback/",
+        )
+
+    message = str(exc_info.value)
+    assert "\n" not in message
+    assert "\r" not in message
+    assert "forged log line" in message  # escaped, not dropped
