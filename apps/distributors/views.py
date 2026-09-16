@@ -73,7 +73,12 @@ from .forms import (
     WithdrawalRequestForm,
 )
 from .models import DiditVerification, Distributor, PendingRegistration
-from .paystack import PaystackError, initialize_transaction, verify_webhook_signature
+from .paystack import (
+    PaystackError,
+    initialize_transaction,
+    paystack_customer_email,
+    verify_webhook_signature,
+)
 from .services import (
     MembershipCancelled,
     PendingRegistrationAlreadyConsumed,
@@ -204,9 +209,9 @@ def pay_registration_fee(request):
     )
     # Paystack requires an email on every transaction; the form's email
     # field is optional (SPEC.md Section 4 lists it as "for notifications
-    # only"), so fall back to a synthetic address that satisfies the API
-    # without claiming it's a real contact channel.
-    email = pending.email or f"{pending.phone_number}@bancostore.test"
+    # only"). Task 59: the fallback address comes from the shared helper,
+    # which produces one live Paystack actually accepts.
+    email = paystack_customer_email(pending.email, pending.phone_number)
 
     try:
         data = initialize_transaction(
@@ -299,8 +304,10 @@ def select_starter_pack(request):
         callback_url = request.build_absolute_uri(
             reverse("distributors:starter_pack_payment_callback")
         )
-        email = distributor.user.email or (
-            f"{distributor.phone_number}@bancostore.test"
+        # Task 59: see paystack_customer_email's docstring -- the
+        # hand-rolled fallback this replaced is rejected by live Paystack.
+        email = paystack_customer_email(
+            distributor.user.email, distributor.phone_number
         )
 
         try:

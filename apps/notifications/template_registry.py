@@ -25,6 +25,23 @@ PLACEHOLDERS_BY_KEY: dict[str, list[str]] = {
     Key.PV_EXPIRING: ["pv", "expiry_date"],
     Key.ORDER_STATUS_UPDATE_SMS: ["reference", "status"],
     Key.ORDER_STATUS_UPDATE_EMAIL: ["reference", "status"],
+    # Task 60. {{items}} is pre-rendered server-side into one string by
+    # apps.orders.receipts.render_items_block -- the renderer has no loop
+    # construct, deliberately (see apps.notifications.rendering's module
+    # docstring). An admin can move the block and reword around it, but
+    # not restructure the per-line format.
+    Key.ORDER_CONFIRMED_SMS: ["total", "reference"],
+    Key.ORDER_CONFIRMED_EMAIL: [
+        "customer_name",
+        "reference",
+        "order_date",
+        "items",
+        "subtotal",
+        "discount_amount",
+        "delivery_fee",
+        "total",
+        "delivery_details",
+    ],
 }
 
 # CodeRabbit finding (PR #79): PLACEHOLDERS_BY_KEY above only says which

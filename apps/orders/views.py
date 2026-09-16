@@ -13,7 +13,11 @@ from django_ratelimit.decorators import ratelimit
 from apps.accounts.models import Address
 from apps.catalog.models import Product
 from apps.catalog.services import storefront_visible_products
-from apps.distributors.paystack import PaystackError, initialize_transaction
+from apps.distributors.paystack import (
+    PaystackError,
+    initialize_transaction,
+    paystack_customer_email,
+)
 from apps.promotions.services import InvalidDiscountCodeError
 
 from .cart import Cart
@@ -135,12 +139,13 @@ def checkout_view(request):
                     reverse("orders:order_payment_callback")
                 )
                 # Paystack requires an email on every transaction;
-                # Order.email is optional (a guest may leave it blank) --
-                # fall back to a synthetic address that satisfies the API
-                # without claiming it's a real contact channel, mirroring
-                # pay_registration_fee's own established workaround. Never
-                # persisted onto Order.email itself.
-                email = order.email or f"{order.phone_number}@bancostore.test"
+                # Order.email is optional (a guest may leave it blank).
+                # Task 59: the fallback address is built by the shared
+                # helper, which all three payment entry points now use --
+                # the hand-rolled version here produced an address live
+                # Paystack rejects with 400. Never persisted onto
+                # Order.email itself.
+                email = paystack_customer_email(order.email, order.phone_number)
                 try:
                     data = initialize_transaction(
                         email=email,

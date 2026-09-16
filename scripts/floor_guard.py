@@ -202,6 +202,107 @@ def constraints_file_is_new(base: str) -> bool:
     return not (existing or "").strip()
 
 
+# Task 60. CONSTRAINTS.md's floor rule reads: "No skipped, deleted, or
+# weakened tests **without a reason in the commit message**". Only the
+# first half of that was ever implemented -- every assertion change was
+# flagged unconditionally, which made this guard STRICTER than the rule
+# it enforces and left no sanctioned way to correct a test that was
+# itself wrong. (The case that forced this: a test asserting the exact
+# broken email address live Paystack rejects. It passed, green, for the
+# whole period production could not take payment from any customer
+# without an email. Correcting it had to be possible.)
+#
+# Scoped deliberately to the three test-correction rules. A committed
+# secret, a silenced checker, an unfinished stub or a lowered threshold
+# is never something a commit message should wave through -- the written
+# clause covers skipped/deleted/weakened tests and nothing else.
+#
+# Deliberately NOT a config file: .constraintsignore is a path glob that,
+# once added, exempts that file forever and silently. An allowance here
+# names one rule and one path, has to be written by hand into a commit
+# message, and stays permanently readable in git history next to the
+# reason for it.
+ALLOWABLE_RULES = frozenset(
+    {"assertion-removed", "test-file-deleted", "test-made-easier"}
+)
+
+_FLOOR_ALLOW_RE = re.compile(r"^\s*FLOOR-ALLOW:\s*([a-z-]+)\s+(\S+)\s*$", re.IGNORECASE)
+# Any FLOOR-ALLOW line at all, well-formed or not -- used only to reset
+# the pending allowance, so a malformed marker can never leave an earlier
+# one hanging around to absorb the next Reason line.
+_FLOOR_ALLOW_MARKER_RE = re.compile(r"^\s*FLOOR-ALLOW:", re.IGNORECASE)
+# A reason with actual content. "Reason:" followed by whitespace only does
+# not count.
+_REASON_RE = re.compile(r"^\s*Reason:\s*\S", re.IGNORECASE)
+
+
+def parse_floor_allowances(message: str) -> set[tuple[str, str]]:
+    """Extract (rule, path) pairs from FLOOR-ALLOW blocks in a commit
+    message.
+
+    A block is a FLOOR-ALLOW line followed by a non-empty `Reason:` line.
+    Both halves are required: CONSTRAINTS.md's rule is "without a REASON
+    in the commit message", so an allowance with no reason is precisely
+    what the rule refuses, and accepting one would have let the marker
+    alone clear a finding (CodeRabbit, PR #91).
+
+    Fails closed on everything else. An unknown or misspelled rule name
+    yields nothing, so an author who believes they filed an allowance and
+    a guard that believes it blocked nothing can never disagree silently.
+    A marker with no path is ignored -- a bare rule name must not become a
+    blanket pass over every file in the change, which is exactly the
+    .constraintsignore failure mode this exists to avoid. A reason belongs
+    to the one allowance it follows and is not carried over to a later
+    reasonless one, so a single explanation cannot launder any number of
+    unexplained allowances filed after it.
+    """
+    allowances: set[tuple[str, str]] = set()
+    pending: tuple[str, str] | None = None
+
+    for line in (message or "").split("\n"):
+        if _FLOOR_ALLOW_MARKER_RE.match(line):
+            match = _FLOOR_ALLOW_RE.match(line)
+            pending = None
+            if match:
+                rule, path = match.group(1).lower(), match.group(2)
+                if rule in ALLOWABLE_RULES:
+                    pending = (rule, path)
+            continue
+        if pending is not None and _REASON_RE.match(line):
+            allowances.add(pending)
+            pending = None
+
+    return allowances
+
+
+def allowed_findings(
+    findings: list[tuple[str, str, str]], allowances: set[tuple[str, str]]
+) -> list[tuple[str, str, str]]:
+    """Drop findings covered by an allowance, keeping every other one.
+
+    Matching is on the (rule, path) pair, never the rule alone: an
+    allowance for a changed assertion in a file must not also excuse that
+    same file being deleted outright.
+    """
+    return [
+        (rule, filename, text)
+        for rule, filename, text in findings
+        if (rule, filename) not in allowances
+    ]
+
+
+def collect_commit_messages(base: str) -> str:
+    """Every commit message in the range under review, concatenated.
+
+    An allowance may be filed in any commit of the change, not only the
+    one that happens to carry the weakening -- a follow-up commit
+    correcting course is a normal way to work, and forcing an amend would
+    just push authors toward the blunter .constraintsignore instead.
+    """
+    merge_base = require_merge_base(base, "floor-guard")
+    return git(["log", "--format=%B", f"{merge_base}..HEAD"]) or ""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="origin/main")
@@ -282,18 +383,39 @@ def main() -> int:
         ):
             flag("threshold-lowered", filename, f"{old.strip()}  ->  {match.strip()}")
 
-    if not findings:
+    # Task 60. Applied last, so an allowance can only ever excuse a
+    # finding this run actually produced -- never pre-authorise one.
+    allowances = parse_floor_allowances(collect_commit_messages(args.base))
+    remaining = allowed_findings(findings, allowances)
+
+    # Printed on stdout even on a clean run: an allowance that passes
+    # silently is indistinguishable from a guard that found nothing, and
+    # the whole point is that using one is loud.
+    for rule, filename in sorted(allowances):
+        used = any(f[0] == rule and f[1] == filename for f in findings)
+        state = "applied" if used else "UNUSED -- no such finding"
+        print(f"floor-guard: FLOOR-ALLOW [{rule}] {filename} -- {state}")
+
+    if not remaining:
         print("floor-guard: clean")
         return 0
 
-    print(f"floor-guard: {len(findings)} floor violation(s):", file=sys.stderr)
-    for rule, filename, text in findings:
+    print(f"floor-guard: {len(remaining)} floor violation(s):", file=sys.stderr)
+    for rule, filename, text in remaining:
         print(f"  [{rule}] {filename}: {text}", file=sys.stderr)
     print(
         "\nEach is a move that lowers the bar. Fix the code, or route it "
         "through a tracked exception in CONSTRAINTS.md.",
         file=sys.stderr,
     )
+    if any(rule in ALLOWABLE_RULES for rule, _, _ in remaining):
+        print(
+            "\nA test correction that is genuinely right can be allowed with a "
+            "line in the commit message, per CONSTRAINTS.md:\n"
+            "  FLOOR-ALLOW: <rule> <path>\n"
+            "  Reason: <why the old assertion was wrong>",
+            file=sys.stderr,
+        )
     return 1
 
 

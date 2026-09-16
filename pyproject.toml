@@ -2,6 +2,14 @@
 DJANGO_SETTINGS_MODULE = "bancostore.settings"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
+# Task 60: scripts/floor_guard.py does `from _gitdiff import ...`, a
+# sibling top-level import that resolves because CI runs it as
+# `python scripts/floor_guard.py`. Putting scripts/ on the path here lets
+# its tests import it the same way it really runs, rather than
+# restructuring the script to suit its test or hacking sys.path inside
+# the test module -- which would need a lint-suppression comment, itself
+# a floor violation.
+pythonpath = ["scripts"]
 
 [tool.black]
 line-length = 88

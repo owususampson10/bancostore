@@ -36,7 +36,10 @@ def _valid_home_delivery_data(**overrides):
     data = {
         "full_name": "Guest Shopper",
         "phone_number": "+233241234567",
-        "email": "",
+        # Task 59: email is required at checkout as of this task -- every
+        # customer gets both an email receipt and an SMS one, which is
+        # not possible without a real address to send to.
+        "email": "guest.shopper@example.com",
         "delivery_method": Order.DeliveryMethod.HOME_DELIVERY,
         "delivery_zone": Order.DeliveryZone.ACCRA,
         "address": "12 High St",
@@ -237,25 +240,51 @@ def test_checkout_post_is_rate_limited(client):
 
 @pytest.mark.django_db
 @patch("apps.orders.views.initialize_transaction")
-def test_checkout_uses_a_synthetic_email_for_paystack_when_order_email_is_blank(
-    mock_initialize, client
-):
-    # Paystack requires an email on every transaction; Order.email is
-    # optional (a guest may leave it blank) -- the synthetic fallback
-    # mirrors pay_registration_fee's own established workaround and must
-    # never be persisted onto Order.email itself.
+def test_checkout_rejects_a_blank_email(mock_initialize, client):
+    """Task 59: email is required at checkout so every customer gets both
+    an email receipt and an SMS one -- an email receipt is impossible
+    without a real address to send it to.
+
+    This replaces a test that asserted the opposite (a blank email fell
+    back to a synthetic "{phone}@bancostore.test" address). That fallback
+    is what live Paystack rejects with 400 Bad Request, so the old test
+    was pinning the bug in place rather than catching it. The fallback
+    itself still exists for the two distributor payment flows, whose
+    email fields remain optional -- see
+    apps.distributors.paystack.paystack_customer_email and its own unit
+    tests.
+    """
     mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
     product = _make_product()
     _add_to_cart(client, product)
 
-    client.post(reverse("orders:checkout"), _valid_home_delivery_data(email=""))
+    response = client.post(
+        reverse("orders:checkout"), _valid_home_delivery_data(email="")
+    )
+
+    assert response.status_code == 200
+    assert not Order.objects.exists()
+    mock_initialize.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.views.initialize_transaction")
+def test_checkout_sends_the_customers_real_email_to_paystack(mock_initialize, client):
+    """The whole point of requiring the field: Paystack gets a real
+    address, so its own receipt reaches the customer alongside the SMS
+    and email this codebase sends itself."""
+    mock_initialize.return_value = {"authorization_url": _FAKE_AUTHORIZATION_URL}
+    product = _make_product()
+    _add_to_cart(client, product)
+
+    client.post(
+        reverse("orders:checkout"),
+        _valid_home_delivery_data(email="kofi@example.com"),
+    )
 
     order = Order.objects.get()
-    assert order.email == ""
-    assert (
-        mock_initialize.call_args.kwargs["email"]
-        == f"{order.phone_number}@bancostore.test"
-    )
+    assert order.email == "kofi@example.com"
+    assert mock_initialize.call_args.kwargs["email"] == "kofi@example.com"
 
 
 @pytest.mark.django_db
