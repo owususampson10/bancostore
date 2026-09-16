@@ -7,6 +7,7 @@ collapsed to a broken strip; and Gmail restyled the domain and phone number
 as blue underlined links.
 """
 
+import uuid
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -21,6 +22,13 @@ from apps.orders.receipts import build_receipt_html_context, receipt_logo_url
 
 def _make_order(**overrides):
     defaults = {
+        # A REAL reference, generated per call. Order.payment_reference has
+        # no default, so omitting it left every order with "" -- and
+        # `assert order.payment_reference in html` is then `assert "" in
+        # html`, which is true of ANY text. Those checks could never fail,
+        # whether or not the reference was rendered at all (CodeRabbit,
+        # PR #93). Unique per call because the field is unique=True.
+        "payment_reference": f"order-{uuid.uuid4().hex}",
         "full_name": "Kofi Mensah",
         "phone_number": "+233241234567",
         "email": "kofi@example.com",

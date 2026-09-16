@@ -5,6 +5,7 @@ the money/stock/PV side of confirmation, this one covers only what the
 customer is told about it.
 """
 
+import uuid
 from decimal import Decimal
 
 from django.utils import timezone
@@ -18,6 +19,13 @@ from apps.orders.receipts import build_receipt_context, render_items_block
 
 def _make_order(**overrides):
     defaults = {
+        # A REAL reference, generated per call. Order.payment_reference has
+        # no default, so omitting it left every order with "" -- and
+        # `assert order.payment_reference in html` is then `assert "" in
+        # html`, which is true of ANY text. Those checks could never fail,
+        # whether or not the reference was rendered at all (CodeRabbit,
+        # PR #93). Unique per call because the field is unique=True.
+        "payment_reference": f"order-{uuid.uuid4().hex}",
         "full_name": "Kofi Mensah",
         "phone_number": "+233241234567",
         "email": "kofi@example.com",

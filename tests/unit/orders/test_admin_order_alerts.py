@@ -5,6 +5,7 @@ the admin found out by logging in and looking at a dashboard card. If
 nobody logged in, paid orders sat unseen while the customer waited.
 """
 
+import uuid
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -20,6 +21,13 @@ from apps.orders.models import Order, OrderItem
 
 def _make_order(**overrides):
     defaults = {
+        # A REAL reference, generated per call. Order.payment_reference has
+        # no default, so omitting it left every order with "" -- and
+        # `assert order.payment_reference in html` is then `assert "" in
+        # html`, which is true of ANY text. Those checks could never fail,
+        # whether or not the reference was rendered at all (CodeRabbit,
+        # PR #93). Unique per call because the field is unique=True.
+        "payment_reference": f"order-{uuid.uuid4().hex}",
         "full_name": "Kofi Mensah",
         "phone_number": "+233241234567",
         "email": "kofi@example.com",
