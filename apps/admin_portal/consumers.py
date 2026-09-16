@@ -42,7 +42,31 @@ class AdminNotificationConsumer(AsyncWebsocketConsumer):
         if self.group_name is not None:
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
+    async def _still_authorised(self) -> bool:
+        """CodeRabbit (PR #92), CWE-863: re-check against the DATABASE
+        before every push, not against the cached scope["user"].
+
+        An admin who is deactivated or has is_staff revoked while this
+        socket is open would otherwise keep receiving customer names,
+        phone numbers and order totals until they happened to disconnect.
+        The two distributor consumers carry the same documented
+        limitation, but it matters more here: revoking an admin's access
+        is precisely the moment you need it to take effect, and this
+        channel carries other people's personal data rather than the
+        connected user's own.
+        """
+        user = self.scope.get("user")
+        user_id = getattr(user, "pk", None)
+        if user_id is None:
+            return False
+        if not await self._is_staff_by_id(user_id):
+            await self.close()
+            return False
+        return True
+
     async def notification_push(self, event):
+        if not await self._still_authorised():
+            return
         await self.send(
             text_data=json.dumps(
                 {
@@ -60,6 +84,8 @@ class AdminNotificationConsumer(AsyncWebsocketConsumer):
         """Cross-tab badge reconciliation, mirroring NotificationConsumer:
         one admin marking a notification read in one tab must not leave a
         stale badge in another."""
+        if not await self._still_authorised():
+            return
         await self.send(
             text_data=json.dumps(
                 {
@@ -67,6 +93,19 @@ class AdminNotificationConsumer(AsyncWebsocketConsumer):
                     "unread_count": event["unread_count"],
                 }
             )
+        )
+
+    @database_sync_to_async
+    def _is_staff_by_id(self, user_id) -> bool:
+        """Deliberately a fresh query by id, never a re-read of the
+        cached user object -- that object was serialised at connect time
+        and cannot know it has since been revoked."""
+        from django.contrib.auth import get_user_model
+
+        return (
+            get_user_model()
+            .objects.filter(pk=user_id, is_active=True, is_staff=True)
+            .exists()
         )
 
     @database_sync_to_async

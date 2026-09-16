@@ -59,6 +59,44 @@ DELIVERY
 """
 
 # Task 61b: one SMS segment is the budget -- see _send_admin_sms_alert.
+# mNotify bills per 160 characters and this fires on every confirmed
+# order, so the rendered body is capped, not merely written short.
+MAX_ADMIN_SMS_CHARS = 160
+# Code review (PR #92): a CHARACTER cap is not a SEGMENT cap. A message
+# containing any character outside GSM 03.38 is encoded UCS-2, where one
+# segment holds 70 characters, not 160 -- so a 160-character body with a
+# single accented name or emoji in it bills as THREE segments. The
+# customer's own full_name reaches this body and is never constrained to
+# GSM-7, and the template is admin-editable, so both are real inputs.
+MAX_ADMIN_SMS_CHARS_UCS2 = 70
+
+# GSM 03.38 basic alphabet plus its extension table. Anything outside
+# this forces UCS-2 for the WHOLE message.
+_GSM7_CHARS = set(
+    "@\u00a3$\u00a5\u00e8\u00e9\u00f9\u00ec\u00f2\u00c7\n\u00d8\u00f8\r\u00c5\u00e5"
+    "\u0394_\u03a6\u0393\u039b\u03a9\u03a0\u03a8\u03a3\u0398\u039e\u00c6\u00e6\u00df\u00c9"
+    " !\"#\u00a4%&'()*+,-./0123456789:;<=>?"
+    "\u00a1ABCDEFGHIJKLMNOPQRSTUVWXYZ\u00c4\u00d6\u00d1\u00dc\u00a7"
+    "\u00bfabcdefghijklmnopqrstuvwxyz\u00e4\u00f6\u00f1\u00fc\u00e0"
+    "\f^{}\\[~]|\u20ac"
+)
+
+
+def _sms_char_limit(body: str) -> int:
+    """160 when every character is GSM-7, otherwise 70.
+
+    Counting Python characters is still an approximation of billing
+    units for astral-plane characters (an emoji is one Python char but
+    two UTF-16 units), which is why the UCS-2 limit is the conservative
+    70 rather than a computed figure.
+    """
+    return (
+        MAX_ADMIN_SMS_CHARS
+        if all(ch in _GSM7_CHARS for ch in body)
+        else MAX_ADMIN_SMS_CHARS_UCS2
+    )
+
+
 _DEFAULT_SMS_BODY = (
     "New Bancostore order {{reference}} -- GHS {{total}} from {{customer_name}}."
 )
@@ -104,14 +142,18 @@ def send_admin_order_alert(order) -> None:
 
 
 def _send_admin_email_alert(order) -> None:
-    recipient = _stripped_or_none(config.ADMIN_ORDER_ALERT_EMAIL)
-    if recipient is None:
-        # Not an error, and deliberately not logged at warning level: a
-        # store that has not configured an address has chosen not to get
-        # these, and this runs on every single confirmed order.
-        return
-
+    # CodeRabbit (PR #92): the constance lookup is INSIDE the try, not
+    # above it. config reads through Redis, so an outage there would
+    # otherwise raise before the guard and skip every later channel --
+    # the same class of bug as the receipt context on PR #91.
     try:
+        recipient = _stripped_or_none(config.ADMIN_ORDER_ALERT_EMAIL)
+        if recipient is None:
+            # Not an error, and deliberately not logged at warning level:
+            # a store that has not configured an address has chosen not
+            # to get these, and this runs on every confirmed order.
+            return
+
         subject, message = render_email_or_default(
             NotificationTemplate.Key.ADMIN_NEW_ORDER_EMAIL,
             build_admin_alert_context(order),
@@ -142,19 +184,33 @@ def _send_admin_sms_alert(order) -> None:
     SMS costs real money per message and email does not, so wanting one
     without the other is a normal choice rather than an edge case.
     """
-    recipient = _stripped_or_none(config.ADMIN_ORDER_ALERT_SMS_NUMBER)
-    if recipient is None:
-        return
-
+    # Setting lookup inside the guard -- see _send_admin_email_alert.
     try:
-        send_sms(
-            recipient,
-            render_or_default(
-                NotificationTemplate.Key.ADMIN_NEW_ORDER_SMS,
-                build_admin_alert_context(order),
-                default_body=_DEFAULT_SMS_BODY,
-            ),
+        recipient = _stripped_or_none(config.ADMIN_ORDER_ALERT_SMS_NUMBER)
+        if recipient is None:
+            return
+
+        body = render_or_default(
+            NotificationTemplate.Key.ADMIN_NEW_ORDER_SMS,
+            build_admin_alert_context(order),
+            default_body=_DEFAULT_SMS_BODY,
         )
+        # CodeRabbit (PR #92): the cap was only ever asserted against the
+        # DEFAULT wording. An admin edit, or simply a long customer name,
+        # could push the rendered body past one segment and spend several
+        # credits per order -- defeating the whole reason it is short.
+        # Truncated rather than refused: a clipped alert still tells the
+        # admin an order arrived, which is the point, and refusing would
+        # mean an admin silently learns nothing because of their own edit.
+        #
+        # Code review (PR #92): the marker is three ASCII dots, NOT
+        # U+2026. The ellipsis character is outside GSM 03.38, so adding
+        # it forced the whole message to UCS-2 and billed THREE segments
+        # where two were billed before -- the fix cost more than the bug.
+        limit = _sms_char_limit(body)
+        if len(body) > limit:
+            body = body[: limit - 3].rstrip() + "..."
+        send_sms(recipient, body)
     except Exception:
         logger.exception(
             "send_admin_order_alert: failed to SMS the admin about "

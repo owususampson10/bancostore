@@ -375,3 +375,52 @@ def test_a_bell_failure_does_not_skip_the_email(settings):
         send_admin_order_alert(order)
 
     assert len(mail.outbox) == 1
+
+
+# --- CodeRabbit (PR #92) -------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_a_broken_settings_backend_does_not_skip_later_channels(settings):
+    """CodeRabbit (PR #92): the constance lookups sat ABOVE their try
+    blocks. constance reads through Redis, so an outage there raised
+    before the guard and skipped every later channel -- the same class of
+    bug as the receipt context on PR #91, which I should have generalised
+    at the time."""
+    from apps.notifications.models import AdminNotification
+
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    order = _make_order()
+    _add_item(order)
+
+    class _Boom:
+        def __getattr__(self, name):
+            raise RuntimeError("redis down")
+
+    with patch("apps.orders.admin_alerts.config", _Boom()):
+        send_admin_order_alert(order)  # must not raise
+
+    # The bell reads no setting at all, so it must still have fired.
+    assert AdminNotification.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_an_oversized_admin_edited_sms_is_truncated():
+    """CodeRabbit (PR #92): the 160-character cap was only ever asserted
+    against the DEFAULT wording. An admin edit -- or simply a long
+    customer name -- could blow past it and spend several SMS credits per
+    order, defeating the entire reason the body was kept short."""
+    from apps.notifications.models import NotificationTemplate
+
+    config.ADMIN_ORDER_ALERT_SMS_NUMBER = "+233201112222"
+    order = _make_order(full_name="A" * 300)
+    _add_item(order)
+    NotificationTemplate.objects.filter(
+        key=NotificationTemplate.Key.ADMIN_NEW_ORDER_SMS
+    ).update(body="{{customer_name}} " * 40)
+
+    with patch("apps.orders.admin_alerts.send_sms") as mock_sms:
+        send_admin_order_alert(order)
+
+    body = mock_sms.call_args.args[1]
+    assert len(body) <= 160

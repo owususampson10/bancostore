@@ -149,10 +149,39 @@ def send_admin_notification(event_type, message, order=None):
     """
     from .models import AdminNotification
 
+    # Code review (PR #92): the same guard _create_and_push already has
+    # for the distributor path (CodeRabbit, PR #79), missing here. The
+    # bell body is "New order {reference} -- GHS {total} from {full_name}"
+    # where reference is max_length=100 and full_name max_length=255 --
+    # about 380 characters against a 255-character column. SQLite ignores
+    # varchar limits so this never surfaces locally; MySQL 8 under
+    # STRICT_TRANS_TABLES raises DataError and the bell silently drops
+    # that order. This is also the most likely real trigger for the
+    # needs-rollback problem the savepoint below guards against.
+    max_length = AdminNotification._meta.get_field("message").max_length
+    if len(message) > max_length:
+        message = message[:max_length]
+
     try:
-        notification = AdminNotification.objects.create(
-            event_type=event_type, message=message, order=order
-        )
+        # CodeRabbit (PR #92): the write needs its own savepoint. Django's
+        # docs are explicit that catching a database error inside an open
+        # atomic block does NOT make that block usable again -- the BLOCK
+        # is marked for rollback (connection.needs_rollback) and the
+        # CALLER then fails on its next query. Without this inner
+        # atomic(), the "never breaks the caller" contract above was
+        # false for exactly the callers most likely to rely on it: ones
+        # inside a transaction.
+        #
+        # Note the trigger is whether a real statement ran, NOT the
+        # exception type: Model.save_base wraps the write in
+        # mark_for_rollback_on_error, which catches bare Exception. This
+        # savepoint covers the common cases (constraint violation, data
+        # error); a MySQL deadlock or a dropped connection rolls back the
+        # whole transaction server-side regardless.
+        with transaction.atomic():
+            notification = AdminNotification.objects.create(
+                event_type=event_type, message=message, order=order
+            )
     except Exception:
         logger.exception(
             "send_admin_notification: could not record %s -- the caller's "

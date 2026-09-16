@@ -79,3 +79,88 @@ def test_a_deactivated_staff_account_is_rejected():
     user.save(update_fields=["is_active"])
 
     assert _connect_as(user) is False
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_push_stops_once_staff_access_is_revoked_mid_session():
+    """CodeRabbit (PR #92), CWE-863: an admin deactivated while the socket
+    is open must stop receiving customer data immediately, not whenever
+    they happen to disconnect. The check must hit the database -- the
+    cached scope["user"] was serialised at connect time and cannot know
+    it has been revoked."""
+    from apps.notifications.realtime import admin_notification_group_name
+
+    user = User.objects.create_user(
+        username="revoked-admin", password="Passw0rd!", is_staff=True
+    )
+    received = {}
+
+    async def run():
+        from channels.layers import get_channel_layer
+
+        communicator = WebsocketCommunicator(
+            AdminNotificationConsumer.as_asgi(), "/ws/admin/notifications/"
+        )
+        communicator.scope["user"] = user
+        connected, _ = await communicator.connect()
+        assert connected is True
+
+        # Revoked AFTER the socket is already open.
+        await User.objects.filter(pk=user.pk).aupdate(is_staff=False)
+
+        await get_channel_layer().group_send(
+            admin_notification_group_name(),
+            {
+                "type": "notification_push",
+                "id": 1,
+                "event_type": "new_order",
+                "message": "customer name and total",
+                "created_at": "2026-09-16T00:00:00+00:00",
+                "unread_count": 1,
+            },
+        )
+        # The socket is closed on revocation, so SOMETHING arrives -- a
+        # close frame. What must never arrive is the payload itself.
+        output = await communicator.receive_output(timeout=2)
+        received["output"] = output
+        await communicator.disconnect()
+
+    async_to_sync(run)()
+    assert received["output"]["type"] == "websocket.close"
+    assert "customer name and total" not in str(received["output"])
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_badge_update_also_stops_once_staff_access_is_revoked():
+    """Code review (PR #92): the same guard on unread_count_update had
+    zero coverage -- reverting it alone left every consumer test passing.
+    Both handlers push to a revoked user's socket, so both need proving."""
+    from apps.notifications.realtime import admin_notification_group_name
+
+    user = User.objects.create_user(
+        username="revoked-admin-2", password="Passw0rd!", is_staff=True
+    )
+    received = {}
+
+    async def run():
+        from channels.layers import get_channel_layer
+
+        communicator = WebsocketCommunicator(
+            AdminNotificationConsumer.as_asgi(), "/ws/admin/notifications/"
+        )
+        communicator.scope["user"] = user
+        connected, _ = await communicator.connect()
+        assert connected is True
+
+        await User.objects.filter(pk=user.pk).aupdate(is_active=False)
+
+        await get_channel_layer().group_send(
+            admin_notification_group_name(),
+            {"type": "unread_count_update", "unread_count": 42},
+        )
+        received["output"] = await communicator.receive_output(timeout=2)
+        await communicator.disconnect()
+
+    async_to_sync(run)()
+    assert received["output"]["type"] == "websocket.close"
+    assert "42" not in str(received["output"])
