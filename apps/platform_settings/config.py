@@ -317,6 +317,14 @@ ORDER_SETTINGS = {
         "Emailed whenever a customer's payment is confirmed. Leave blank "
         "to disable.",
     ),
+    # Task 61b. Same blank-means-disabled convention as the email above.
+    # Independent of it on purpose: SMS costs real money per message and
+    # email does not, so a store may well want one and not the other.
+    "ADMIN_ORDER_ALERT_SMS_NUMBER": (
+        "",
+        "Texted whenever a customer's payment is confirmed. Costs one SMS "
+        "credit per order. Leave blank to disable.",
+    ),
     "PENDING_ORDER_AUTO_CANCEL_HOURS": (
         24,
         "How many hours an unpaid order can stay pending before it is "

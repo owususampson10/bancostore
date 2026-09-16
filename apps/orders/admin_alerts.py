@@ -31,7 +31,8 @@ from constance import config
 
 from apps.notifications.email import get_sender_email
 from apps.notifications.models import NotificationTemplate
-from apps.notifications.rendering import render_email_or_default
+from apps.notifications.rendering import render_email_or_default, render_or_default
+from apps.notifications.sms import send_sms
 from apps.orders.receipts import build_receipt_context
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,11 @@ ITEMS
 DELIVERY
 {{delivery_details}}
 """
+
+# Task 61b: one SMS segment is the budget -- see _send_admin_sms_alert.
+_DEFAULT_SMS_BODY = (
+    "New Bancostore order {{reference}} -- GHS {{total}} from {{customer_name}}."
+)
 
 
 def _stripped_or_none(value):
@@ -84,11 +90,18 @@ def build_admin_alert_context(order) -> dict:
 
 
 def send_admin_order_alert(order) -> None:
-    """Email the configured admin address about a newly paid order.
+    """Tell the admin about a newly paid order, by email and/or SMS.
 
-    Never raises: see the module docstring for why that matters at this
-    call site specifically.
+    Each channel has its own recipient setting and its own guard, and
+    builds its own context inside that guard. One channel failing must
+    never skip the other, and nothing here may raise -- see the module
+    docstring for why that matters at this call site specifically.
     """
+    _send_admin_email_alert(order)
+    _send_admin_sms_alert(order)
+
+
+def _send_admin_email_alert(order) -> None:
     recipient = _stripped_or_none(config.ADMIN_ORDER_ALERT_EMAIL)
     if recipient is None:
         # Not an error, and deliberately not logged at warning level: a
@@ -112,6 +125,37 @@ def send_admin_order_alert(order) -> None:
     except Exception:
         logger.exception(
             "send_admin_order_alert: failed to email the admin about "
+            "reference=%s -- the order itself is unaffected.",
+            order.payment_reference,
+        )
+
+
+def _send_admin_sms_alert(order) -> None:
+    """Task 61b. Deliberately short: mNotify bills per 160 characters and
+    this fires on every confirmed order, so an item list here would
+    multiply the store's whole messaging bill. Reference, total and
+    customer name are what identifies the order and what fits.
+
+    A separate setting from the email, not a single "alerts on/off":
+    SMS costs real money per message and email does not, so wanting one
+    without the other is a normal choice rather than an edge case.
+    """
+    recipient = _stripped_or_none(config.ADMIN_ORDER_ALERT_SMS_NUMBER)
+    if recipient is None:
+        return
+
+    try:
+        send_sms(
+            recipient,
+            render_or_default(
+                NotificationTemplate.Key.ADMIN_NEW_ORDER_SMS,
+                build_admin_alert_context(order),
+                default_body=_DEFAULT_SMS_BODY,
+            ),
+        )
+    except Exception:
+        logger.exception(
+            "send_admin_order_alert: failed to SMS the admin about "
             "reference=%s -- the order itself is unaffected.",
             order.payment_reference,
         )

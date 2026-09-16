@@ -230,3 +230,93 @@ def test_an_admin_alert_failure_never_breaks_a_confirmed_order():
 
     order.refresh_from_db()
     assert order.status == Order.Status.CONFIRMED
+
+
+# --- Task 61b: the SMS channel -------------------------------------------
+
+
+@pytest.mark.django_db
+def test_an_sms_goes_to_the_configured_admin_number():
+    config.ADMIN_ORDER_ALERT_SMS_NUMBER = "+233201112222"
+    order = _make_order()
+    _add_item(order)
+
+    with patch("apps.orders.admin_alerts.send_sms") as mock_sms:
+        send_admin_order_alert(order)
+
+    mock_sms.assert_called_once()
+    assert mock_sms.call_args.args[0] == "+233201112222"
+
+
+@pytest.mark.django_db
+def test_the_sms_stays_short_enough_not_to_multiply_cost():
+    """mNotify bills per 160 characters and this fires on every confirmed
+    order, so an item list here would multiply the store's whole
+    messaging bill. One segment is the budget."""
+    config.ADMIN_ORDER_ALERT_SMS_NUMBER = "+233201112222"
+    order = _make_order()
+    _add_item(order, name="A Very Long Product Name That Goes On And On", quantity=3)
+
+    with patch("apps.orders.admin_alerts.send_sms") as mock_sms:
+        send_admin_order_alert(order)
+
+    body = mock_sms.call_args.args[1]
+    assert len(body) <= 160
+    assert order.payment_reference in body
+    assert "400.00" in body
+
+
+@pytest.mark.django_db
+def test_a_blank_sms_number_disables_only_the_sms(settings):
+    """The two channels are independent settings. Configuring email but
+    not SMS must send the email and no SMS."""
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    config.ADMIN_ORDER_ALERT_EMAIL = "ops@bancostore.test"
+    config.ADMIN_ORDER_ALERT_SMS_NUMBER = ""
+    order = _make_order()
+    _add_item(order)
+
+    with patch("apps.orders.admin_alerts.send_sms") as mock_sms:
+        send_admin_order_alert(order)
+
+    mock_sms.assert_not_called()
+    assert len(mail.outbox) == 1
+
+
+@pytest.mark.django_db
+def test_an_sms_failure_does_not_skip_the_email(settings):
+    """Each channel independently guarded -- the convention every other
+    multi-channel send site in this codebase already follows."""
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    config.ADMIN_ORDER_ALERT_EMAIL = "ops@bancostore.test"
+    config.ADMIN_ORDER_ALERT_SMS_NUMBER = "+233201112222"
+    order = _make_order()
+    _add_item(order)
+
+    with patch(
+        "apps.orders.admin_alerts.send_sms", side_effect=RuntimeError("mnotify down")
+    ):
+        send_admin_order_alert(order)  # must not raise
+
+    assert len(mail.outbox) == 1
+
+
+@pytest.mark.django_db
+def test_an_email_failure_does_not_skip_the_sms(settings):
+    """The mirror of the test above -- proving the guards are genuinely
+    per-channel and not just one try block around both."""
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    config.ADMIN_ORDER_ALERT_EMAIL = "ops@bancostore.test"
+    config.ADMIN_ORDER_ALERT_SMS_NUMBER = "+233201112222"
+    order = _make_order()
+    _add_item(order)
+
+    with (
+        patch(
+            "apps.orders.admin_alerts.send_mail", side_effect=RuntimeError("smtp down")
+        ),
+        patch("apps.orders.admin_alerts.send_sms") as mock_sms,
+    ):
+        send_admin_order_alert(order)
+
+    mock_sms.assert_called_once()
