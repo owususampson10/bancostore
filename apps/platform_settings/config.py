@@ -306,6 +306,25 @@ ORDER_SETTINGS = {
     # per ADR-0005 decision 5) or payment retry logic. 24 hours, matching
     # standard e-commerce abandoned-checkout cleanup convention, confirmed
     # with the user 2026-07-26.
+    # Task 61a. Blank = disabled, the same convention as
+    # COMPLIANCE_ALERT_EMAIL/LOCKOUT_ALERT_EMAIL above and MNOTIFY_API_KEY
+    # -- a store that has not set an address simply gets no alert, rather
+    # than the send failing obscurely against an empty recipient. Before
+    # this existed a paid order notified the CUSTOMER and nobody else;
+    # the admin found out by logging in and looking at a dashboard card.
+    "ADMIN_ORDER_ALERT_EMAIL": (
+        "",
+        "Emailed whenever a customer's payment is confirmed. Leave blank "
+        "to disable.",
+    ),
+    # Task 61b. Same blank-means-disabled convention as the email above.
+    # Independent of it on purpose: SMS costs real money per message and
+    # email does not, so a store may well want one and not the other.
+    "ADMIN_ORDER_ALERT_SMS_NUMBER": (
+        "",
+        "Texted whenever a customer's payment is confirmed. Costs one SMS "
+        "credit per order. Leave blank to disable.",
+    ),
     "PENDING_ORDER_AUTO_CANCEL_HOURS": (
         24,
         "How many hours an unpaid order can stay pending before it is "

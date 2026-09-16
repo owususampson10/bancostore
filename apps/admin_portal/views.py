@@ -27,7 +27,8 @@ from apps.compliance.models import EscrowLedger
 from apps.compliance.services import get_retail_distributor_ratio, get_unified_audit_log
 from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
-from apps.notifications.models import NotificationTemplate
+from apps.notifications.models import AdminNotification, NotificationTemplate
+from apps.notifications.services import broadcast_admin_unread_count
 from apps.notifications.template_registry import PLACEHOLDERS_BY_KEY
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import (
@@ -2408,3 +2409,75 @@ def social_link_detect_platform(request):
     candidate_url = request.GET.get("url", "")
     detected_platform = detect_platform_from_url(candidate_url)
     return JsonResponse({"platform": detected_platform})
+
+
+# --- Task 61c: the admin notification bell --------------------------------
+
+
+ADMIN_BELL_PAGE_SIZE = 10
+
+
+@login_required(login_url="two_factor:login")
+def admin_notification_dropdown(request):
+    """Task 61c. The bell's panel contents, loaded on demand via htmx
+    rather than rendered into every admin page -- the same shape the
+    distributor bell (Task 21d) uses.
+
+    Deliberately NOT decorated with anything that could swap a full page
+    into the panel: Task 21d hit exactly that, where a redirect decorator
+    on an htmx-loaded fragment put an entire page inside a small dropdown.
+    """
+    # Code review (PR #92): this check was MISSING while every other
+    # admin_portal view has it. @login_required alone let any logged-in
+    # customer or distributor GET this endpoint and read the last 10
+    # admin notifications -- other customers' names, order references and
+    # GHS totals -- and it bypassed the mandatory-2FA gate entirely,
+    # since is_admin_portal_staff is is_staff AND is_verified(). Proven
+    # by a live exploit against a non-staff account, not theorised.
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    notifications = AdminNotification.objects.all()[:ADMIN_BELL_PAGE_SIZE]
+    return render(
+        request,
+        "admin_portal/_notification_dropdown.html",
+        {
+            "notifications": notifications,
+            "unread_count": AdminNotification.unread_count(),
+        },
+    )
+
+
+@login_required(login_url="two_factor:login")
+@require_POST
+def admin_notification_mark_all_read(request):
+    """POST-only: marking read is a state change, so a GET (a prefetch, a
+    crawler, a browser preloading the link) must never silently clear an
+    admin's whole bell."""
+    # Code review (PR #92): see admin_notification_dropdown. Without this,
+    # any logged-in non-staff user could POST here and silently zero the
+    # admin's unread badge -- a denial of awareness on a platform whose
+    # whole reason for this feature is "paid orders sat unseen".
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    AdminNotification.objects.filter(is_read=False).update(is_read=True)
+    # Computed once and shared, so the WebSocket broadcast and this
+    # response can never carry different numbers for the same request.
+    unread_count = AdminNotification.unread_count()
+    broadcast_admin_unread_count()
+    return render(
+        request,
+        "admin_portal/_notification_dropdown.html",
+        {
+            "notifications": AdminNotification.objects.all()[:ADMIN_BELL_PAGE_SIZE],
+            # CodeRabbit (PR #92): a real count, never a hardcoded 0. A
+            # notification arriving between the bulk update above and this
+            # render would otherwise be invisible -- the WebSocket sets
+            # the badge to 1 and this response stomps it back to zero.
+            # This narrows that race rather than closing it: one arriving
+            # after the read still races the push at the browser. For a
+            # badge that is an acceptable trade.
+            "unread_count": unread_count,
+        },
+    )

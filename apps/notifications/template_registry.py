@@ -30,6 +30,21 @@ PLACEHOLDERS_BY_KEY: dict[str, list[str]] = {
     # construct, deliberately (see apps.notifications.rendering's module
     # docstring). An admin can move the block and reword around it, but
     # not restructure the per-line format.
+    # Task 61a/61b: admin-facing. customer_phone/customer_email exist
+    # only here -- a customer's own receipt has no reason to repeat their
+    # contact details back at them, but an admin alert is useless without
+    # them, since acting on an order means reaching the buyer.
+    Key.ADMIN_NEW_ORDER_EMAIL: [
+        "reference",
+        "order_date",
+        "total",
+        "customer_name",
+        "customer_phone",
+        "customer_email",
+        "items",
+        "delivery_details",
+    ],
+    Key.ADMIN_NEW_ORDER_SMS: ["reference", "total", "customer_name"],
     Key.ORDER_CONFIRMED_SMS: ["total", "reference"],
     Key.ORDER_CONFIRMED_EMAIL: [
         "customer_name",

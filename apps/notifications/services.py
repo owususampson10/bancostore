@@ -8,6 +8,7 @@ from channels.layers import get_channel_layer
 from apps.distributors.realtime import notification_group_name
 
 from .models import Notification
+from .realtime import admin_notification_group_name
 
 logger = logging.getLogger(__name__)
 
@@ -127,4 +128,119 @@ def push_unread_count_update(distributor):
         logger.exception(
             "push_unread_count_update: failed to push for distributor=%s",
             distributor.pk,
+        )
+
+
+def send_admin_notification(event_type, message, order=None):
+    """Task 61c. Records an admin-portal bell notification and pushes it
+    live to every connected admin.
+
+    Never raises. This is called from the order-confirmation path after
+    money, stock and PV have already committed, so a failure to write a
+    bell row must never look like the order itself failed -- the same
+    contract every other notification site in this codebase has. Returns
+    the row, or None if it could not be recorded.
+
+    The push is deferred to transaction.on_commit for the same reason
+    send_notification above defers: pushing from inside an open
+    transaction can announce an event that then rolls back, and a bell
+    showing an order that does not exist is worse than a bell that is a
+    moment late.
+    """
+    from .models import AdminNotification
+
+    # Code review (PR #92): the same guard _create_and_push already has
+    # for the distributor path (CodeRabbit, PR #79), missing here. The
+    # bell body is "New order {reference} -- GHS {total} from {full_name}"
+    # where reference is max_length=100 and full_name max_length=255 --
+    # about 380 characters against a 255-character column. SQLite ignores
+    # varchar limits so this never surfaces locally; MySQL 8 under
+    # STRICT_TRANS_TABLES raises DataError and the bell silently drops
+    # that order. This is also the most likely real trigger for the
+    # needs-rollback problem the savepoint below guards against.
+    max_length = AdminNotification._meta.get_field("message").max_length
+    if len(message) > max_length:
+        message = message[:max_length]
+
+    try:
+        # CodeRabbit (PR #92): the write needs its own savepoint. Django's
+        # docs are explicit that catching a database error inside an open
+        # atomic block does NOT make that block usable again -- the BLOCK
+        # is marked for rollback (connection.needs_rollback) and the
+        # CALLER then fails on its next query. Without this inner
+        # atomic(), the "never breaks the caller" contract above was
+        # false for exactly the callers most likely to rely on it: ones
+        # inside a transaction.
+        #
+        # Note the trigger is whether a real statement ran, NOT the
+        # exception type: Model.save_base wraps the write in
+        # mark_for_rollback_on_error, which catches bare Exception. This
+        # savepoint covers the common cases (constraint violation, data
+        # error); a MySQL deadlock or a dropped connection rolls back the
+        # whole transaction server-side regardless.
+        with transaction.atomic():
+            notification = AdminNotification.objects.create(
+                event_type=event_type, message=message, order=order
+            )
+    except Exception:
+        logger.exception(
+            "send_admin_notification: could not record %s -- the caller's "
+            "own work is unaffected.",
+            event_type,
+        )
+        return None
+
+    def _push():
+        try:
+            channel_layer = get_channel_layer()
+            if channel_layer is None:
+                return
+            async_to_sync(channel_layer.group_send)(
+                admin_notification_group_name(),
+                {
+                    "type": "notification_push",
+                    "id": notification.pk,
+                    "event_type": notification.event_type,
+                    "message": notification.message,
+                    "created_at": notification.created_at.isoformat(),
+                    "unread_count": AdminNotification.unread_count(),
+                },
+            )
+        except Exception:
+            logger.exception(
+                "send_admin_notification: recorded %s but could not push it "
+                "live. It will still appear on the next page load.",
+                notification.pk,
+            )
+
+    transaction.on_commit(_push)
+    return notification
+
+
+def broadcast_admin_unread_count():
+    """Task 61c. Cross-tab badge reconciliation: one admin marking the
+    bell read in one tab must not leave a stale badge in another, or in
+    another admin's browser.
+
+    Never raises -- a badge that is briefly out of date is not worth
+    failing a request over, and this is called from a view that has
+    already done its real work by the time it runs.
+    """
+    from .models import AdminNotification
+
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+        async_to_sync(channel_layer.group_send)(
+            admin_notification_group_name(),
+            {
+                "type": "unread_count_update",
+                "unread_count": AdminNotification.unread_count(),
+            },
+        )
+    except Exception:
+        logger.exception(
+            "broadcast_admin_unread_count: could not push the updated count. "
+            "Badges will correct themselves on the next page load."
         )

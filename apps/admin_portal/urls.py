@@ -178,4 +178,14 @@ urlpatterns = [
         views.social_link_detect_platform,
         name="social_link_detect_platform",
     ),
+    path(
+        "notifications/dropdown/",
+        views.admin_notification_dropdown,
+        name="admin_notification_dropdown",
+    ),
+    path(
+        "notifications/mark-all-read/",
+        views.admin_notification_mark_all_read,
+        name="admin_notification_mark_all_read",
+    ),
 ]

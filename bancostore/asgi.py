@@ -30,10 +30,24 @@ django_asgi_app = get_asgi_application()
 if settings.DEBUG:
     django_asgi_app = ASGIStaticFilesHandler(django_asgi_app)
 
-# Imported after get_asgi_application() (which calls django.setup())
-# since apps.distributors.routing imports consumers.py, which imports
-# models -- importing this any earlier raises AppRegistryNotReady.
-from apps.distributors.routing import websocket_urlpatterns  # noqa: E402
+
+def _websocket_urlpatterns():
+    """Every consumer route in the project, in one list.
+
+    Imported inside a function, not at module level: each routing module
+    imports consumers.py, which imports models, so importing any of them
+    before get_asgi_application() has called django.setup() raises
+    AppRegistryNotReady. A module-level import here would additionally
+    trip ruff's E402 (module import not at top of file) and need a
+    suppression comment -- Task 61c removed the two that used to sit
+    here by moving the imports into this function, where E402 does not
+    apply at all. Called once below, after setup() has run.
+    """
+    from apps.admin_portal.routing import websocket_urlpatterns as admin_patterns
+    from apps.distributors.routing import websocket_urlpatterns as distributor_patterns
+
+    return distributor_patterns + admin_patterns
+
 
 application = ProtocolTypeRouter(
     {
@@ -44,7 +58,7 @@ application = ProtocolTypeRouter(
         # hijacking (a fresh-context review flagged this for Task 20d,
         # since this channel carries real wallet-balance data).
         "websocket": AllowedHostsOriginValidator(
-            AuthMiddlewareStack(URLRouter(websocket_urlpatterns))
+            AuthMiddlewareStack(URLRouter(_websocket_urlpatterns()))
         ),
     }
 )
