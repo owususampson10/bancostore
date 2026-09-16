@@ -208,6 +208,17 @@ class NotificationTemplate(models.Model):
             "order_status_update_email",
             "Order Status Update (Email)",
         )
+        # Task 60. Task 48c migrated every other send site onto this
+        # system but missed apps.orders.services::
+        # _send_confirmation_notifications, which stayed a hardcoded
+        # f-string -- so an admin could reword "your order is now
+        # Dispatched" but not the confirmation message a customer sees on
+        # every single purchase.
+        ORDER_CONFIRMED_SMS = "order_confirmed_sms", "Order Confirmed (SMS)"
+        ORDER_CONFIRMED_EMAIL = (
+            "order_confirmed_email",
+            "Order Confirmed (Email receipt)",
+        )
 
     key = models.CharField(max_length=40, choices=Key.choices, unique=True)
     # Email-only -- blank for the SMS/in-app keys above. Whether `subject`

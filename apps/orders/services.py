@@ -26,6 +26,7 @@ from apps.notifications.email import get_sender_email
 from apps.notifications.models import NotificationTemplate
 from apps.notifications.rendering import render_email_or_default, render_or_default
 from apps.notifications.sms import send_sms
+from apps.orders.receipts import build_receipt_context
 from apps.promotions.services import (
     consume_discount_code,
     redeem_discount_code,
@@ -559,11 +560,30 @@ def _send_confirmation_notifications(order: Order) -> None:
     # committed by this point, so a notification-provider outage must
     # never look like this confirmation was rolled back, and one
     # channel's failure must not skip the other.
+    #
+    # Task 60: both channels now render an admin-editable
+    # NotificationTemplate, matching what Task 48c did for every other
+    # send site. This one was missed and stayed a hardcoded f-string --
+    # so the confirmation a customer sees on every purchase was the one
+    # message an admin could not reword, while "your order is now
+    # Dispatched" was editable.
+    #
+    # The receipt context is built once and shared by both channels, but
+    # only the email body uses the itemised placeholders: SMS is billed
+    # per 160 characters by mNotify, so an item list there would multiply
+    # the messaging cost of every single order.
+    context = build_receipt_context(order)
     try:
         send_sms(
             str(order.phone_number),
-            f"Your Bancostore order (GHS {order.total}) is confirmed! "
-            f"Reference: {order.payment_reference}",
+            render_or_default(
+                NotificationTemplate.Key.ORDER_CONFIRMED_SMS,
+                context,
+                default_body=(
+                    "Your Bancostore order (GHS {{total}}) is confirmed! "
+                    "Reference: {{reference}}"
+                ),
+            ),
         )
     except Exception:
         logger.exception(
@@ -574,12 +594,18 @@ def _send_confirmation_notifications(order: Order) -> None:
 
     if order.email:
         try:
-            send_mail(
-                subject="Your Bancostore order is confirmed",
-                message=(
-                    f"Your order (GHS {order.total}) is confirmed. "
-                    f"Reference: {order.payment_reference}"
+            subject, message = render_email_or_default(
+                NotificationTemplate.Key.ORDER_CONFIRMED_EMAIL,
+                context,
+                default_subject="Your Bancostore order {{reference}} is confirmed",
+                default_body=(
+                    "Your order (GHS {{total}}) is confirmed. "
+                    "Reference: {{reference}}"
                 ),
+            )
+            send_mail(
+                subject=subject,
+                message=message,
                 from_email=get_sender_email(),
                 recipient_list=[order.email],
             )
