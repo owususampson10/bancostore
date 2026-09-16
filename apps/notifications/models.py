@@ -214,6 +214,17 @@ class NotificationTemplate(models.Model):
         # f-string -- so an admin could reword "your order is now
         # Dispatched" but not the confirmation message a customer sees on
         # every single purchase.
+        # Task 61a/61b: admin-facing, unlike every key above it. The
+        # recipient is a single configured address/number, not the
+        # customer on the order.
+        ADMIN_NEW_ORDER_EMAIL = (
+            "admin_new_order_email",
+            "New Order -- Admin Alert (Email)",
+        )
+        ADMIN_NEW_ORDER_SMS = (
+            "admin_new_order_sms",
+            "New Order -- Admin Alert (SMS)",
+        )
         ORDER_CONFIRMED_SMS = "order_confirmed_sms", "Order Confirmed (SMS)"
         ORDER_CONFIRMED_EMAIL = (
             "order_confirmed_email",

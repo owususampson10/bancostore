@@ -26,6 +26,7 @@ from apps.notifications.email import get_sender_email
 from apps.notifications.models import NotificationTemplate
 from apps.notifications.rendering import render_email_or_default, render_or_default
 from apps.notifications.sms import send_sms
+from apps.orders.admin_alerts import send_admin_order_alert
 from apps.orders.receipts import build_receipt_context
 from apps.promotions.services import (
     consume_discount_code,
@@ -419,6 +420,25 @@ def confirm_order_payment(reference: str) -> None:
             order.confirmed_at = now
             order.save(update_fields=["pv_earned", "status", "confirmed_at"])
         _send_confirmation_notifications(order)
+        # Task 61. The admin is told too, not just the customer. Its own
+        # call rather than a channel inside _send_confirmation_notifications
+        # because the audience, the recipient setting and the template are
+        # all different -- folding it in would mean one function deciding
+        # who it is talking to per channel.
+        #
+        # send_admin_order_alert never raises (see its module docstring),
+        # but the guard here is belt-and-braces: this runs after the
+        # money/stock/PV transaction has committed and inside
+        # retry_on_lock_contention's _attempt, so anything escaping would
+        # either strand a paid order or re-run a committed transaction.
+        try:
+            send_admin_order_alert(order)
+        except Exception:
+            logger.exception(
+                "confirm_order_payment: admin alert failed for reference=%s "
+                "-- the order is confirmed and unaffected.",
+                order.payment_reference,
+            )
         # Task 47b. Outside the lock -- see check_retail_ratio_and_alert's
         # own docstring.
         check_retail_ratio_and_alert()

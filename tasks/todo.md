@@ -8719,3 +8719,63 @@ font (its 190 ligatures include Google's automatic aliases, e.g. `access_time` f
 `static/src/main.css`, `tests/unit/test_icon_font.py`.
 
 **Estimated scope:** S
+
+### Task 61: Tell the admin when an order is placed (email, SMS, in-app bell)
+
+**The gap, found by the user 2026-09-16 while reviewing Task 60's receipt work:** a paid
+order notifies the CUSTOMER (SMS + email, `_send_confirmation_notifications`) and nobody
+else. The admin learns about it only by logging in and looking at the Admin Dashboard's
+"Orders Awaiting Action" card (`apps/admin_portal/views.py:122`, counting CONFIRMED +
+PROCESSING) or the Order Management Queue. Pull, never push. The only admin alert emails
+that exist anywhere are `LOCKOUT_ALERT_EMAIL` (account lockout) and
+`COMPLIANCE_ALERT_EMAIL` (retail PV ratio) -- a new order fires neither. If nobody logs in
+on a Saturday, Saturday's paid orders sit unseen while the customer waits. Pre-existing
+since the order system shipped; not introduced by Task 59/60.
+
+**Shared design (all three sub-tasks):**
+- Recipients are constance settings, blank-means-disabled, matching `COMPLIANCE_ALERT_EMAIL`'s
+  own established convention exactly -- never a hardcoded address, never "every staff user".
+- Wording lives in `NotificationTemplate` rows, admin-editable, per Task 48c/60. A hardcoded
+  default stays in code as the fallback for a deleted row.
+- Fired from `confirm_order_payment` AFTER the customer notifications, each channel in its
+  own `try`, building its own context inside that `try` -- the exact per-channel shape
+  CodeRabbit's PR #91 finding forced on `_send_confirmation_notifications`. Money/stock/PV
+  are committed by then, and this runs inside `retry_on_lock_contention(_attempt)`, so an
+  alert failure must never look like the confirmation was rolled back or trigger a re-run.
+
+- [ ] **61a (START HERE): Email the admin on every paid order.**
+  - [ ] `ADMIN_ORDER_ALERT_EMAIL` constance setting, blank default = disabled
+  - [ ] `ADMIN_NEW_ORDER_EMAIL` NotificationTemplate key + seed migration
+  - [ ] `apps/orders/admin_alerts.py::send_admin_order_alert` -- reuses Task 60's
+        `build_receipt_context`, adds admin-only fields (customer name/phone, order link)
+  - [ ] Wired into `confirm_order_payment`, own guarded block
+  - **Acceptance:** a confirmed order sends one email to the configured address containing
+        the reference, total, customer contact and item list; a blank setting sends nothing
+        and logs nothing alarming; a send failure never propagates.
+  - **Files:** `apps/orders/admin_alerts.py`, `apps/orders/services.py`,
+        `apps/notifications/models.py`, `apps/platform_settings/config.py`, 2 migrations
+
+- [ ] **61b: SMS the admin on every paid order.**
+  - [ ] `ADMIN_ORDER_ALERT_SMS_NUMBER` constance setting, blank default = disabled
+  - [ ] `ADMIN_NEW_ORDER_SMS` template key + seed
+  - [ ] Same function, second channel, independently guarded
+  - **Acceptance:** SMS body stays short (reference + total + customer name) since mNotify
+        bills per 160 chars; blank setting sends nothing; independent of the email channel
+        (one failing must not skip the other).
+
+- [ ] **61c: Admin notification bell.**
+  - [ ] `AdminNotification` model -- SEPARATE from the distributor-facing `Notification`,
+        which is FK'd to `Distributor` and documented as "exactly 6 event types because
+        Section 6.6 names exactly 6". Widening that contract would muddy it.
+  - [ ] `AdminNotificationConsumer`, group scoped from the authenticated staff session only,
+        never a client-supplied id -- the exact auth shape `WalletBalanceConsumer` and
+        `NotificationConsumer` already established
+  - [ ] Bell UI in `templates/admin_portal/base_dashboard.html`
+  - **Known limit, stated up front:** a bell only reaches someone already logged in, so it
+        does NOT solve the Saturday problem 61a/61b solve. Built because the user asked for
+        all three, not because it substitutes for them.
+
+**Verification:** full suite green; `make check-fast` green; live browser check on the admin
+portal after deploy. Single batched PR for all three per the user's explicit instruction
+(CodeRabbit rate-limits a second pass -- see the `project_coderabbit_no_longer_auto_reviews`
+memory).
