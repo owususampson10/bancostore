@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 from unittest.mock import Mock, patch
 
 from django.test import override_settings
@@ -16,16 +17,23 @@ from apps.distributors.paystack import (
     initialize_transaction,
     initiate_transfer,
     list_banks,
+    paystack_customer_email,
     verify_transaction,
     verify_transfer,
     verify_webhook_signature,
 )
 
 
-def _fake_response(json_data, status_code=200):
+def _fake_response(json_data, status_code=200, text=None):
     response = Mock()
     response.status_code = status_code
     response.json.return_value = json_data
+    # Task 59: a real requests.Response always exposes .text -- without
+    # setting it here, a Mock hands back an auto-created attribute and
+    # _raise_as_paystack_error's body capture could never be tested
+    # against anything resembling real behavior. Defaults to the JSON
+    # body's own serialized form, which is what Paystack really sends.
+    response.text = json.dumps(json_data) if text is None else text
     if status_code >= 400:
         # response=response, matching requests.Response.raise_for_status()'s
         # real behavior exactly -- without this, exc.response is None
@@ -386,3 +394,160 @@ def test_verify_webhook_signature_rejects_a_tampered_body():
     tampered_body = b'{"event": "charge.success", "data": {"amount": 1}}'
 
     assert verify_webhook_signature(tampered_body, signature) is False
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.post")
+def test_paystack_error_message_includes_the_response_body(mock_post):
+    """Task 59: a real live-key checkout failure on production could not
+    be diagnosed from the log, because requests.HTTPError's string form
+    is only ever "401 Client Error: Unauthorized for url: ..." -- the
+    reason Paystack actually rejected the call lives in the response
+    body and was being dropped entirely."""
+    mock_post.return_value = _fake_response(
+        {"status": False, "message": "Invalid key"}, status_code=401
+    )
+
+    with pytest.raises(PaystackError) as exc_info:
+        initialize_transaction(
+            email="kofi@example.test",
+            amount_pesewas=10000,
+            reference="ref123",
+            callback_url="https://bancostore.test/callback/",
+        )
+
+    assert "Invalid key" in str(exc_info.value)
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.get")
+def test_paystack_error_message_includes_the_response_body_for_a_404(mock_get):
+    """The 404 branch raises a different exception class from a separate
+    line, so it needs its own proof that the body survives -- only one of
+    the two raise sites being right is a real possibility."""
+    mock_get.return_value = _fake_response(
+        {"status": False, "message": "Transaction not found"}, status_code=404
+    )
+
+    with pytest.raises(PaystackNotFoundError) as exc_info:
+        verify_transaction("ref123")
+
+    assert "Transaction not found" in str(exc_info.value)
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.post")
+def test_paystack_error_message_truncates_an_oversized_response_body(mock_post):
+    """Not every failure body is Paystack's own small JSON -- a proxy or
+    gateway in front of the API can return a full HTML error page, and an
+    unbounded body would go into the production log on every failure."""
+    mock_post.return_value = _fake_response(
+        {"status": False}, status_code=502, text="<html>" + ("x" * 5000) + "</html>"
+    )
+
+    with pytest.raises(PaystackError) as exc_info:
+        initialize_transaction(
+            email="kofi@example.test",
+            amount_pesewas=10000,
+            reference="ref123",
+            callback_url="https://bancostore.test/callback/",
+        )
+
+    message = str(exc_info.value)
+    assert "truncated" in message
+    assert len(message) < 1000
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.post")
+def test_paystack_error_still_raises_when_there_is_no_response_at_all(mock_post):
+    """A timeout has no response to read a body from. Capturing the body
+    must not turn "we could not reach Paystack" into an AttributeError
+    that masks the real failure."""
+    mock_post.side_effect = requests.Timeout("connection timed out")
+
+    with pytest.raises(PaystackError) as exc_info:
+        initialize_transaction(
+            email="kofi@example.test",
+            amount_pesewas=10000,
+            reference="ref123",
+            callback_url="https://bancostore.test/callback/",
+        )
+
+    assert "connection timed out" in str(exc_info.value)
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.post")
+def test_paystack_error_message_omits_an_empty_response_body(mock_post):
+    """An empty body should not leave a dangling "response body:" label
+    with nothing after it in the log."""
+    mock_post.return_value = _fake_response({}, status_code=500, text="   ")
+
+    with pytest.raises(PaystackError) as exc_info:
+        initialize_transaction(
+            email="kofi@example.test",
+            amount_pesewas=10000,
+            reference="ref123",
+            callback_url="https://bancostore.test/callback/",
+        )
+
+    assert "response body" not in str(exc_info.value)
+
+
+def test_paystack_customer_email_uses_the_real_email_when_there_is_one():
+    assert (
+        paystack_customer_email("kofi@example.com", "+233241234567")
+        == "kofi@example.com"
+    )
+
+
+def test_paystack_customer_email_treats_a_whitespace_only_email_as_absent():
+    """Order.email is blank=True with a "" default, but a form value of
+    "   " would otherwise be handed to Paystack verbatim as an address."""
+    result = paystack_customer_email("   ", "+233241234567")
+
+    assert result != "   "
+    assert result.endswith("@guests.bancostore.com")
+
+
+def test_paystack_customer_email_fallback_contains_no_plus_sign():
+    """Task 59, confirmed against the live API: a blank email produced
+    "+233241234567@bancostore.test", and Paystack's LIVE mode answers
+    that payload with 400 Bad Request (test mode accepted it, which is
+    why this survived to production). PhoneNumberField stores E.164, so
+    the "+" is always there unless it is stripped deliberately."""
+    result = paystack_customer_email("", "+233241234567")
+
+    assert "+" not in result
+    assert "233241234567" in result
+
+
+def test_paystack_customer_email_fallback_uses_a_resolvable_domain():
+    """ ".test" is a reserved TLD (RFC 2606) that resolves nowhere. Either
+    it or the "+" could have been what Paystack rejected -- the fallback
+    avoids both rather than guessing which one mattered."""
+    result = paystack_customer_email("", "+233241234567")
+
+    assert ".test" not in result
+    assert result.endswith("@guests.bancostore.com")
+
+
+def test_paystack_customer_email_fallback_is_distinct_per_phone_number():
+    """A single shared address for every guest would collapse them into
+    one customer on Paystack's own dashboard, making reconciliation of
+    real orders impossible."""
+    first = paystack_customer_email("", "+233241234567")
+    second = paystack_customer_email("", "+233209876543")
+
+    assert first != second
+
+
+def test_paystack_customer_email_fallback_survives_a_phone_with_no_digits():
+    """Every current caller has a required phone field, so this cannot
+    happen today -- but returning "guest-@guests.bancostore.com" if one ever
+    changed would be a malformed address, which is the exact class of
+    bug this function exists to stop."""
+    result = paystack_customer_email("", "")
+
+    assert result == "guest@guests.bancostore.com"

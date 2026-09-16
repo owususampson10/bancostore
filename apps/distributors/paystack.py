@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import re
 
 from django.conf import settings
 
@@ -41,8 +42,88 @@ class PaystackNotFoundError(PaystackError):
     catches the base class keeps working unchanged."""
 
 
+# Task 59: the domain a placeholder payer address is built on.
+#
+# A subdomain, not bancostore.com itself, and deliberately one with no MX
+# record: bancostore.com has real mail servers (secureserver.net, checked
+# 2026-09-15), so a placeholder address there would genuinely deliver
+# Paystack's receipt into a live mailbox or a catch-all. A lookup for
+# guests.bancostore.com finds nothing, so the receipt is rejected at the
+# sending server and never reaches anyone.
+#
+# Paystack's API only validates the address's SHAPE, never its
+# deliverability -- which is what makes this work, and is also why the
+# original "@bancostore.test" failed: ".test" is a reserved TLD (RFC
+# 2606), and combined with the "+" carried over from the E.164 phone
+# number, live Paystack rejected the whole payload with 400.
+PLACEHOLDER_EMAIL_DOMAIN = "guests.bancostore.com"
+
+
+def paystack_customer_email(contact_email, phone_number):
+    """Paystack requires an email on every transaction, but a customer's
+    email is optional everywhere in this codebase (SPEC.md Section 4
+    lists it as "for notifications only") -- a guest checking out, a
+    distributor registering by phone, and a distributor buying a starter
+    pack can all legitimately have none.
+
+    Task 59, confirmed against the live API in a real browser: the
+    previous fallback built "+233241234567@bancostore.test" from the
+    E.164 phone number, and Paystack's LIVE mode rejects that payload
+    with 400 Bad Request. Test mode accepted it, which is why all three
+    payment entry points shipped broken for email-less users and stayed
+    that way until the account went live. Either the "+" in the local
+    part or the reserved ".test" TLD could have been the trigger; this
+    avoids both rather than guessing which one mattered.
+
+    The fallback stays distinct per phone number on purpose -- one
+    shared address for every guest would collapse them into a single
+    customer on Paystack's own dashboard. It is never persisted onto
+    Order.email or User.email; it exists only for the duration of the
+    API call.
+    """
+    contact_email = (contact_email or "").strip()
+    if contact_email:
+        return contact_email
+    digits = re.sub(r"\D", "", str(phone_number or ""))
+    local_part = f"guest-{digits}" if digits else "guest"
+    return f"{local_part}@{PLACEHOLDER_EMAIL_DOMAIN}"
+
+
 def _auth_headers():
     return {"Authorization": f"Bearer {settings.PAYSTACK_SECRET_KEY}"}
+
+
+# Task 59: bounded because not every failure body is Paystack's own small
+# JSON -- a proxy or gateway in front of the API can return a full HTML
+# error page, and every caller below funnels this straight into a
+# logger.exception() call on a production server.
+MAX_LOGGED_RESPONSE_BODY_CHARS = 500
+
+
+def _response_body_detail(response):
+    """Task 59: requests.HTTPError's own string form is only ever
+    "401 Client Error: Unauthorized for url: ..." -- it carries the
+    status and nothing else. Paystack's actual explanation for the
+    failure ("Invalid key", "Business not activated", a rejected
+    payload field) lives in the response body, which was being dropped
+    entirely. A real live-key checkout failure on production could not
+    be diagnosed from the log because of exactly that gap.
+
+    Safe to log: Paystack error bodies describe the request's outcome,
+    never echoing back the Authorization header the request was sent
+    with, so no secret material passes through here.
+
+    Returns a fragment ready to append to an error message, or "" when
+    there is no body worth reporting (a timeout has no response at all).
+    """
+    if response is None:
+        return ""
+    body = (response.text or "").strip()
+    if not body:
+        return ""
+    if len(body) > MAX_LOGGED_RESPONSE_BODY_CHARS:
+        body = body[:MAX_LOGGED_RESPONSE_BODY_CHARS] + "... (truncated)"
+    return f" -- response body: {body}"
 
 
 def _raise_as_paystack_error(exc, action):
@@ -52,9 +133,10 @@ def _raise_as_paystack_error(exc, action):
     response at all, e.g. a timeout -- those are "we don't know", not
     "not found", and must not be treated as the same thing)."""
     response = getattr(exc, "response", None)
+    detail = _response_body_detail(response)
     if response is not None and response.status_code == 404:
-        raise PaystackNotFoundError(f"Paystack {action} failed: {exc}") from exc
-    raise PaystackError(f"Paystack {action} failed: {exc}") from exc
+        raise PaystackNotFoundError(f"Paystack {action} failed: {exc}{detail}") from exc
+    raise PaystackError(f"Paystack {action} failed: {exc}{detail}") from exc
 
 
 def initialize_transaction(*, email, amount_pesewas, reference, callback_url):
