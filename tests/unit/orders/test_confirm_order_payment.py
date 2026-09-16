@@ -681,11 +681,14 @@ def test_sms_failure_does_not_undo_an_already_applied_confirmation(
 
 
 @pytest.mark.django_db(transaction=True)
+# Task 62: transaction=True really commits, so on_commit really fires and the
+# receipt task would otherwise be published to the real Redis broker.
+@patch("apps.orders.services.send_order_receipt_email_task")
 @patch("apps.orders.services.send_mail")
 @patch("apps.orders.services.send_sms")
 @patch("apps.orders.services.verify_transaction")
 def test_concurrent_confirmation_attempts_never_double_decrement_or_double_credit_pv(
-    mock_verify, mock_sms, mock_mail
+    mock_verify, mock_sms, mock_mail, mock_receipt_task
 ):
     """Debugging-and-error-recovery (2026-07-25): originally written with
     5 threads racing the same reference, matching this codebase's own
@@ -871,11 +874,14 @@ def test_confirming_an_order_honors_a_discount_code_disabled_after_creation(
 
 
 @pytest.mark.django_db(transaction=True)
+# Task 62: transaction=True really commits, so on_commit really fires and the
+# receipt task would otherwise be published to the real Redis broker.
+@patch("apps.orders.services.send_order_receipt_email_task")
 @patch("apps.orders.services.send_mail")
 @patch("apps.orders.services.send_sms")
 @patch("apps.orders.services.verify_transaction")
 def test_concurrent_order_confirmations_never_lose_a_discount_code_usage_count(
-    mock_verify, mock_sms, mock_mail
+    mock_verify, mock_sms, mock_mail, mock_receipt_task
 ):
     """Mirrors apps/wallet's own concurrent-credits test: the times_used
     increment happens via a bulk F() update entirely inside one DB

@@ -557,6 +557,9 @@ def test_concurrent_binary_bonus_consumption_and_reversal_never_drive_pv_negativ
     with (
         patch("apps.orders.services.send_mail"),
         patch("apps.orders.services.send_sms"),
+        # Task 62: transaction=True really commits, so on_commit really fires
+        # and the receipt task would otherwise be published to real Redis.
+        patch("apps.orders.services.send_order_receipt_email_task"),
     ):
         order = _confirm(order, 45000)
 
