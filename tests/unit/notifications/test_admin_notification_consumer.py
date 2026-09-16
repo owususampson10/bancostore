@@ -24,15 +24,39 @@ from apps.admin_portal.consumers import AdminNotificationConsumer
 User = get_user_model()
 
 
-def _connect_as(user):
+def _verified_session(user, with_2fa=True):
+    """A real session in the configured store, optionally carrying a
+    verified 2FA device -- what is_admin_portal_staff requires on the
+    HTTP side, and what the consumer now requires too."""
+    from importlib import import_module
+
+    from django.conf import settings
+
+    from django_otp import DEVICE_ID_SESSION_KEY
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    engine = import_module(settings.SESSION_ENGINE)
+    store = engine.SessionStore()
+    store["_auth_user_id"] = str(user.pk)
+    if with_2fa:
+        device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+        store[DEVICE_ID_SESSION_KEY] = device.persistent_id
+    store.save()
+    return store
+
+
+def _connect_as(user, session=None):
     """Returns whether the consumer accepted the connection."""
     result = {}
+    if session is None and getattr(user, "pk", None) is not None:
+        session = _verified_session(user)
 
     async def run():
         communicator = WebsocketCommunicator(
             AdminNotificationConsumer.as_asgi(), "/ws/admin/notifications/"
         )
         communicator.scope["user"] = user
+        communicator.scope["session"] = session
         connected, _ = await communicator.connect()
         result["connected"] = connected
         await communicator.disconnect()
@@ -93,6 +117,7 @@ def test_a_push_stops_once_staff_access_is_revoked_mid_session():
     user = User.objects.create_user(
         username="revoked-admin", password="Passw0rd!", is_staff=True
     )
+    session = _verified_session(user)
     received = {}
 
     async def run():
@@ -102,6 +127,7 @@ def test_a_push_stops_once_staff_access_is_revoked_mid_session():
             AdminNotificationConsumer.as_asgi(), "/ws/admin/notifications/"
         )
         communicator.scope["user"] = user
+        communicator.scope["session"] = session
         connected, _ = await communicator.connect()
         assert connected is True
 
@@ -140,6 +166,7 @@ def test_a_badge_update_also_stops_once_staff_access_is_revoked():
     user = User.objects.create_user(
         username="revoked-admin-2", password="Passw0rd!", is_staff=True
     )
+    session = _verified_session(user)
     received = {}
 
     async def run():
@@ -149,6 +176,7 @@ def test_a_badge_update_also_stops_once_staff_access_is_revoked():
             AdminNotificationConsumer.as_asgi(), "/ws/admin/notifications/"
         )
         communicator.scope["user"] = user
+        communicator.scope["session"] = session
         connected, _ = await communicator.connect()
         assert connected is True
 
@@ -164,3 +192,71 @@ def test_a_badge_update_also_stops_once_staff_access_is_revoked():
     async_to_sync(run)()
     assert received["output"]["type"] == "websocket.close"
     assert "42" not in str(received["output"])
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_staff_user_without_verified_2fa_cannot_connect():
+    """CodeRabbit (PR #92), CWE-863: the HTTP gate is is_staff AND
+    is_verified(), so a socket checking only is_staff made this the
+    weakest entry point in the whole admin surface -- customer names,
+    phone numbers and order totals readable over a channel that the
+    equivalent admin PAGE would have refused."""
+    user = User.objects.create_user(
+        username="no-2fa-admin", password="Passw0rd!", is_staff=True
+    )
+    session = _verified_session(user, with_2fa=False)
+
+    assert _connect_as(user, session=session) is False
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_expired_session_cannot_connect():
+    """CodeRabbit (PR #92): SessionTimeoutMiddleware only runs on HTTP
+    requests and AuthMiddlewareStack never re-authenticates an open
+    socket, so without this an expired session kept receiving customer
+    data for as long as the DB flags stayed true."""
+    user = User.objects.create_user(
+        username="expired-admin", password="Passw0rd!", is_staff=True
+    )
+    session = _verified_session(user)
+    session.delete()  # what expiry looks like to the store
+
+    assert _connect_as(user, session=session) is False
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_revoked_socket_closes_with_the_policy_code():
+    """CodeRabbit (PR #92): the close carried no code, so Channels sent
+    1000 and the browser client treated it as an ordinary disconnect and
+    reconnected every 30 seconds forever. 1008 tells the client this is a
+    refusal, not a blip."""
+    from apps.notifications.realtime import admin_notification_group_name
+
+    user = User.objects.create_user(
+        username="policy-code-admin", password="Passw0rd!", is_staff=True
+    )
+    session = _verified_session(user)
+    received = {}
+
+    async def run():
+        from channels.layers import get_channel_layer
+
+        communicator = WebsocketCommunicator(
+            AdminNotificationConsumer.as_asgi(), "/ws/admin/notifications/"
+        )
+        communicator.scope["user"] = user
+        communicator.scope["session"] = session
+        connected, _ = await communicator.connect()
+        assert connected is True
+
+        await User.objects.filter(pk=user.pk).aupdate(is_staff=False)
+        await get_channel_layer().group_send(
+            admin_notification_group_name(),
+            {"type": "unread_count_update", "unread_count": 42},
+        )
+        received["output"] = await communicator.receive_output(timeout=2)
+        await communicator.disconnect()
+
+    async_to_sync(run)()
+    assert received["output"]["type"] == "websocket.close"
+    assert received["output"].get("code") == 1008

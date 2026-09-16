@@ -214,7 +214,16 @@ environment it is developed in.
         setUnread(data.unread_count);
       };
 
-      socket.onclose = function () {
+      socket.onclose = function (event) {
+        // CodeRabbit (PR #92): 1008 is the policy-violation code the
+        // consumer sends when this session is no longer authorised --
+        // staff access revoked, 2FA session gone, or the session expired.
+        // Reconnecting would just be refused again every 30 seconds
+        // forever, so stop. Any other code (a restart, a dropped
+        // network) still reconnects.
+        if (event && event.code === 1008) {
+          return;
+        }
         // Capped backoff: a server restart must not turn every open admin
         // tab into a reconnect storm.
         setTimeout(connect, reconnectDelay);

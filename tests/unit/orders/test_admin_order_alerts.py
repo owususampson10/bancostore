@@ -413,7 +413,12 @@ def test_an_oversized_admin_edited_sms_is_truncated():
     from apps.notifications.models import NotificationTemplate
 
     config.ADMIN_ORDER_ALERT_SMS_NUMBER = "+233201112222"
-    order = _make_order(full_name="A" * 300)
+    # 200, not 300: Order.full_name is max_length=255. SQLite ignores
+    # varchar limits but MySQL rejects the row outright, so the original
+    # 300 passed locally and failed CI -- the very bug class this batch
+    # fixed elsewhere, reproduced in its own test. The over-length body
+    # comes from the repeated template below, not from one giant name.
+    order = _make_order(full_name="A" * 200)
     _add_item(order)
     NotificationTemplate.objects.filter(
         key=NotificationTemplate.Key.ADMIN_NEW_ORDER_SMS

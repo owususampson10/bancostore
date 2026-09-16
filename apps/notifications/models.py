@@ -150,7 +150,15 @@ class AdminNotification(models.Model):
         # pagination bug was exactly this -- two rows sharing a timestamp
         # could be skipped or repeated across a page boundary.
         ordering = ["-created_at", "-pk"]
-        indexes = [models.Index(fields=["is_read", "-created_at"])]
+        indexes = [
+            models.Index(fields=["is_read", "-created_at"]),
+            # CodeRabbit (PR #92): both bell views run an UNFILTERED
+            # .all()[:10], so the index above cannot serve the ordering --
+            # its leading is_read column is not part of that query. Without
+            # this, MySQL scans and sorts the whole table on every dropdown
+            # open, and nothing bounds the table's growth today.
+            models.Index(fields=["-created_at", "-id"]),
+        ]
 
     def __str__(self):
         return f"{self.get_event_type_display()}: {self.message}"
