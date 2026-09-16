@@ -38,6 +38,9 @@ def _verified_session(user, with_2fa=True):
     engine = import_module(settings.SESSION_ENGINE)
     store = engine.SessionStore()
     store["_auth_user_id"] = str(user.pk)
+    # A real django.contrib.auth.login() stores this; the consumer now
+    # checks it so a password change evicts an open socket.
+    store["_auth_user_hash"] = user.get_session_auth_hash()
     if with_2fa:
         device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
         store[DEVICE_ID_SESSION_KEY] = device.persistent_id
@@ -213,8 +216,17 @@ def test_a_staff_user_without_verified_2fa_cannot_connect():
 def test_an_expired_session_cannot_connect():
     """CodeRabbit (PR #92): SessionTimeoutMiddleware only runs on HTTP
     requests and AuthMiddlewareStack never re-authenticates an open
-    socket, so without this an expired session kept receiving customer
-    data for as long as the DB flags stayed true."""
+    socket, so an expired session must be refused.
+
+    HONEST SCOPE, per code review (PR #92): this test is an END-TO-END
+    check that an expired session is refused, NOT a unit test of any one
+    guard. An expired session loads as {}, which fails BOTH the session
+    ownership comparison AND the 2FA device check -- so removing either
+    guard alone does not fail this test. The ownership guard is pinned on
+    its own by test_a_session_belonging_to_another_user_cannot_connect,
+    which was verified to fail when that guard is removed. Kept because
+    the end-to-end behaviour is still worth asserting; renamed in spirit
+    so nobody reads it as proof of a single check."""
     user = User.objects.create_user(
         username="expired-admin", password="Passw0rd!", is_staff=True
     )
@@ -260,3 +272,83 @@ def test_a_revoked_socket_closes_with_the_policy_code():
     async_to_sync(run)()
     assert received["output"]["type"] == "websocket.close"
     assert received["output"].get("code") == 1008
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_password_change_closes_an_open_socket():
+    """Code review (PR #92), proven live against the real ASGI stack:
+    changing a password is THE standard way to evict a stolen session.
+    Django's HTTP get_user compares the session's stored auth hash to
+    user.get_session_auth_hash() on every request; Channels does so only
+    once, at connect. So after a password change the same session was
+    bounced over HTTP while its open socket kept receiving customer data.
+    The session row still exists, so "does the session exist" never
+    noticed."""
+    from apps.notifications.realtime import admin_notification_group_name
+
+    user = User.objects.create_user(
+        username="pw-change-admin", password="Passw0rd!", is_staff=True
+    )
+    session = _verified_session(user)
+    received = {}
+
+    async def run():
+        from django.contrib.auth.hashers import make_password
+
+        from channels.layers import get_channel_layer
+
+        communicator = WebsocketCommunicator(
+            AdminNotificationConsumer.as_asgi(), "/ws/admin/notifications/"
+        )
+        communicator.scope["user"] = user
+        communicator.scope["session"] = session
+        connected, _ = await communicator.connect()
+        assert connected is True
+
+        # Changed out from under the open socket, as from another device.
+        await User.objects.filter(pk=user.pk).aupdate(
+            password=make_password("A-Completely-New-Passw0rd!")
+        )
+        await get_channel_layer().group_send(
+            admin_notification_group_name(),
+            {"type": "unread_count_update", "unread_count": 42},
+        )
+        received["output"] = await communicator.receive_output(timeout=2)
+        await communicator.disconnect()
+
+    async_to_sync(run)()
+    assert received["output"]["type"] == "websocket.close"
+    assert received["output"].get("code") == 1008
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_session_belonging_to_another_user_cannot_connect():
+    """Code review (PR #92): the previous expired-session test was
+    rejected by the 2FA check, NOT by the session check it was named
+    after -- the reviewer deleted the session-ownership code entirely and
+    every test still passed. This test gives the session a VALID 2FA
+    device for the right user but an _auth_user_id for a different one,
+    so only the ownership comparison can refuse it."""
+    from importlib import import_module
+
+    from django.conf import settings
+
+    from django_otp import DEVICE_ID_SESSION_KEY
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    user = User.objects.create_user(
+        username="real-admin", password="Passw0rd!", is_staff=True
+    )
+    other = User.objects.create_user(
+        username="other-admin", password="Passw0rd!", is_staff=True
+    )
+    device = TOTPDevice.objects.create(user=user, name="default", confirmed=True)
+
+    engine = import_module(settings.SESSION_ENGINE)
+    store = engine.SessionStore()
+    store["_auth_user_id"] = str(other.pk)  # the mismatch under test
+    store["_auth_user_hash"] = user.get_session_auth_hash()
+    store[DEVICE_ID_SESSION_KEY] = device.persistent_id  # valid 2FA
+    store.save()
+
+    assert _connect_as(user, session=store) is False

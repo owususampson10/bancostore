@@ -20,13 +20,16 @@ checked, and all three are re-checked before every push:
    weakest entry point in the whole admin surface -- a staff account that
    logged in but never completed 2FA could read customer data here that
    it cannot read on any admin page.
-3. The session still exists. SessionTimeoutMiddleware only runs on HTTP
-   requests, and AuthMiddlewareStack never re-authenticates an already
-   open socket, so an expired session would otherwise keep receiving
-   pushes indefinitely as long as the DB flags stayed true.
+3. The session is still valid and still belongs to this user.
+   SessionTimeoutMiddleware only runs on HTTP requests, and
+   AuthMiddlewareStack never re-authenticates an already open socket, so
+   an expired session would otherwise keep receiving pushes indefinitely.
+4. The session's auth hash still matches the user's current one -- so a
+   password change, the standard way to evict a stolen session, closes
+   the socket too instead of only bouncing HTTP requests.
 
-All three were raised by review on PR #92; the original version checked
-only is_staff, at connect time only.
+All four were raised across review rounds on PR #92; the original version
+checked only is_staff, at connect time only.
 """
 
 import json
@@ -134,32 +137,62 @@ class AdminNotificationConsumer(AsyncWebsocketConsumer):
         cost. Deliberately not cached: the point of the check is that
         revocation takes effect immediately.
         """
-        from django.contrib.auth import get_user_model
+        from django.contrib.auth import HASH_SESSION_KEY, get_user_model
 
         from django_otp.models import Device
 
-        if (
-            not get_user_model()
+        user = (
+            get_user_model()
             .objects.filter(pk=user_id, is_active=True, is_staff=True)
-            .exists()
-        ):
+            .first()
+        )
+        if user is None:
             return False
 
-        # A fresh read of the session store: an expired session is simply
-        # absent, which is exactly what needs detecting here.
+        # load(), not exists(). Code review (PR #92) showed exists() is not
+        # a guard at all under this project's cached_db engine: DBStore
+        # .exists does not filter on expire_date, so an expired row that
+        # clearsessions has not yet removed still reads as existing.
+        # load() DOES filter on it and returns {} for an expired session,
+        # which the _auth_user_id comparison below then rejects.
         engine = import_module(settings.SESSION_ENGINE)
-        store = engine.SessionStore(session_key)
-        if not store.exists(session_key):
-            return False
-        data = store.load()
+        data = engine.SessionStore(session_key).load()
         if str(data.get("_auth_user_id") or "") != str(user_id):
             return False
 
-        # The 2FA half of is_admin_portal_staff. django_otp stores the
-        # verified device's persistent id in the session; resolving it and
-        # confirming it belongs to THIS user is what is_verified() checks.
+        # Code review (PR #92), proven live: a password change did not
+        # close an open socket. Django's HTTP get_user compares this
+        # stored hash with the user's current one on every request;
+        # Channels does it once, at connect. Changing a password is the
+        # standard way to evict a stolen session, and the session row
+        # still exists afterwards, so nothing else here would notice.
+        # SECRET_KEY_FALLBACKS mirrors Django 5.2's own get_user, so
+        # rotating the secret key does not lock every admin out.
+        if not self._session_hash_matches(user, data.get(HASH_SESSION_KEY)):
+            return False
+
+        # The 2FA half of is_admin_portal_staff. Verified against the
+        # installed django-otp 1.7.0: OTPMiddleware resolves exactly this
+        # key with from_persistent_id and requires device.user_id to match
+        # -- it does not check `confirmed`, so neither does this, keeping
+        # the socket equal to the HTTP gate rather than stricter or looser.
         device_id = data.get(DEVICE_ID_SESSION_KEY)
         if not device_id:
             return False
         device = Device.from_persistent_id(device_id)
         return device is not None and device.user_id == user_id
+
+    @staticmethod
+    def _session_hash_matches(user, session_hash) -> bool:
+        from django.utils.crypto import constant_time_compare
+
+        if not session_hash:
+            return False
+        if constant_time_compare(session_hash, user.get_session_auth_hash()):
+            return True
+        return any(
+            constant_time_compare(
+                session_hash, user._get_session_auth_hash(secret=fallback)
+            )
+            for fallback in getattr(settings, "SECRET_KEY_FALLBACKS", [])
+        )
