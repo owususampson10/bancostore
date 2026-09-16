@@ -108,8 +108,14 @@ Contact Information
 {% for error in form.phone_number.errors %}<p class="text-error text-sm mt-1">{{ error }}</p>{% endfor %}
 </div>
 <div class="md:col-span-2">
-<label for="{{ form.email.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary mb-1">Email (Optional)</label>
+<label for="{{ form.email.id_for_label }}" class="block text-xs font-bold uppercase tracking-widest text-secondary mb-1">Email</label>
 {{ form.email }}
+{% comment %}
+Task 59: email became required at checkout so every customer gets both an
+email receipt and an SMS one. The caption says why the field is being
+asked for, rather than leaving a newly-required field unexplained.
+{% endcomment %}
+<p class="text-on-surface-variant text-sm mt-1">Your receipt is sent here. You'll also get an SMS.</p>
 {% for error in form.email.errors %}<p class="text-error text-sm mt-1">{{ error }}</p>{% endfor %}
 </div>
 </div>

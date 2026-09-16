@@ -30,8 +30,14 @@ class CheckoutForm(forms.Form):
             attrs={"class": INPUT_CLASSES, "placeholder": "+233 XX XXX XXXX"}
         )
     )
+    # Task 59: required, unlike the optional email field on the two
+    # distributor payment flows. A customer gets an email receipt AND an
+    # SMS one on a confirmed order (apps/orders/services.py's
+    # _send_confirmation_notifications), and the email half is impossible
+    # without a real address. Order.email itself stays blank=True at the
+    # model level -- orders placed before this task legitimately have no
+    # email, and a schema change would invalidate them.
     email = forms.EmailField(
-        required=False,
         widget=forms.EmailInput(
             attrs={"class": INPUT_CLASSES, "placeholder": "john@example.com"}
         ),
