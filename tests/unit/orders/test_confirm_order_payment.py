@@ -607,47 +607,59 @@ def test_insufficient_stock_still_cancels_when_backorders_not_allowed_at_checkou
 
 
 @pytest.mark.django_db
-@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_order_receipt_email_task")
 @patch("apps.orders.services.send_sms")
 @patch("apps.orders.services.verify_transaction")
 def test_confirmation_sends_sms_and_email_when_email_is_present(
-    mock_verify, mock_sms, mock_mail
+    mock_verify, mock_sms, mock_receipt_task, django_capture_on_commit_callbacks
 ):
+    """Task 62: the receipt email is ENQUEUED to the Celery worker rather
+    than sent inline, because confirm_order_payment runs in the Paystack
+    webhook and the customer's redirect, where a PDF render would make
+    both wait. This originally asserted send_mail was called; it now
+    asserts the enqueue, with the exact order id."""
     product = _make_product(stock=5)
     order = _make_order(total=Decimal("450.00"), email="ama@example.test")
     _add_item(order, product, quantity=1)
     mock_verify.return_value = _success_verify(amount=45000)
 
-    confirm_order_payment(order.payment_reference)
+    with django_capture_on_commit_callbacks(execute=True):
+        confirm_order_payment(order.payment_reference)
 
     mock_sms.assert_called_once()
-    mock_mail.assert_called_once()
+    mock_receipt_task.delay.assert_called_once_with(order.pk)
 
 
 @pytest.mark.django_db
-@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_order_receipt_email_task")
 @patch("apps.orders.services.send_sms")
 @patch("apps.orders.services.verify_transaction")
 def test_confirmation_skips_email_when_order_email_is_blank(
-    mock_verify, mock_sms, mock_mail
+    mock_verify, mock_sms, mock_receipt_task, django_capture_on_commit_callbacks
 ):
+    """This originally asserted send_mail was NOT called. After Task 62
+    moved the receipt to Celery, send_mail is never called from here for
+    ANY order -- so that assertion passed even with the blank-email check
+    deleted outright (verified by deleting it). It now asserts the thing
+    the check actually controls: whether the receipt task is enqueued."""
     product = _make_product(stock=5)
     order = _make_order(total=Decimal("450.00"), email="")
     _add_item(order, product, quantity=1)
     mock_verify.return_value = _success_verify(amount=45000)
 
-    confirm_order_payment(order.payment_reference)
+    with django_capture_on_commit_callbacks(execute=True):
+        confirm_order_payment(order.payment_reference)
 
     mock_sms.assert_called_once()
-    mock_mail.assert_not_called()
+    mock_receipt_task.delay.assert_not_called()
 
 
 @pytest.mark.django_db
-@patch("apps.orders.services.send_mail")
+@patch("apps.orders.services.send_order_receipt_email_task")
 @patch("apps.orders.services.send_sms")
 @patch("apps.orders.services.verify_transaction")
 def test_sms_failure_does_not_undo_an_already_applied_confirmation(
-    mock_verify, mock_sms, mock_mail
+    mock_verify, mock_sms, mock_receipt_task, django_capture_on_commit_callbacks
 ):
     product = _make_product(stock=5)
     order = _make_order(total=Decimal("450.00"))
@@ -655,13 +667,17 @@ def test_sms_failure_does_not_undo_an_already_applied_confirmation(
     mock_verify.return_value = _success_verify(amount=45000)
     mock_sms.side_effect = Exception("SMS provider outage")
 
-    confirm_order_payment(order.payment_reference)  # must not raise
+    with django_capture_on_commit_callbacks(execute=True):
+        confirm_order_payment(order.payment_reference)  # must not raise
 
     order.refresh_from_db()
     assert order.status == Order.Status.CONFIRMED
     product.refresh_from_db()
     assert product.stock == 4
-    mock_mail.assert_called_once()  # the outage didn't stop the email attempt either
+    # The outage didn't stop the receipt either. Task 62: asserted on the
+    # Celery enqueue rather than send_mail, since the receipt is no longer
+    # sent inline from the payment path.
+    mock_receipt_task.delay.assert_called_once_with(order.pk)
 
 
 @pytest.mark.django_db(transaction=True)

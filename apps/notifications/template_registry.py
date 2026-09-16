@@ -45,6 +45,12 @@ PLACEHOLDERS_BY_KEY: dict[str, list[str]] = {
         "delivery_details",
     ],
     Key.ADMIN_NEW_ORDER_SMS: ["reference", "total", "customer_name"],
+    # Task 62: short text blocks inside the branded receipt. The line items,
+    # totals and address are rendered by the fixed HTML design itself, so
+    # they are deliberately NOT offered here -- an admin rewording a
+    # greeting has no reason to move an amount.
+    Key.ORDER_RECEIPT_INTRO: ["customer_name", "reference", "total"],
+    Key.ORDER_RECEIPT_CLOSING: ["customer_name", "reference", "total"],
     Key.ORDER_CONFIRMED_SMS: ["total", "reference"],
     Key.ORDER_CONFIRMED_EMAIL: [
         "customer_name",

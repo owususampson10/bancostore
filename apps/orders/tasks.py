@@ -8,7 +8,15 @@ from celery import shared_task
 from constance import config
 
 from .models import Order, OrderCycleFailure, OrderCycleRun
+from .receipt_email import send_order_receipt_email_task
 from .services import _auto_cancel_pending_order
+
+# Task 62: send_order_receipt_email_task is DEFINED in receipt_email.py
+# (defining it here and importing it into services.py would be circular,
+# since this module already imports from services). Re-exported so
+# Celery's autodiscovery of apps.orders.tasks registers it explicitly
+# rather than relying on a transitive import.
+__all__ = ["auto_cancel_unpaid_orders", "send_order_receipt_email_task"]
 
 logger = logging.getLogger(__name__)
 

@@ -227,10 +227,12 @@ def test_the_real_send_site_uses_the_admin_editable_template(settings):
     """Task 60's actual wiring. Task 48 added a dedicated test per send
     site proving a live admin edit reaches the next real send -- this is
     the one that was missing, because this send site was never migrated."""
+    from unittest.mock import patch
+
     from django.core import mail
 
     from apps.notifications.models import NotificationTemplate
-    from apps.orders.services import _send_confirmation_notifications
+    from apps.orders.receipt_email import send_order_receipt_email
 
     settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
     order = _make_order()
@@ -239,7 +241,11 @@ def test_the_real_send_site_uses_the_admin_editable_template(settings):
         key=NotificationTemplate.Key.ORDER_CONFIRMED_EMAIL
     ).update(subject="Edited subject", body="Edited body for {{customer_name}}")
 
-    _send_confirmation_notifications(order)
+    # Task 62: the email is built by send_order_receipt_email in the Celery
+    # worker; _send_confirmation_notifications now only enqueues it. The
+    # PDF renderer is patched so WeasyPrint is never imported in tests.
+    with patch("apps.orders.receipt_pdf.render_receipt_pdf", return_value=None):
+        send_order_receipt_email(order)
 
     assert len(mail.outbox) == 1
     assert mail.outbox[0].subject == "Edited subject"

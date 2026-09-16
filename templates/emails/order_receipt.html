@@ -1,0 +1,245 @@
+{% comment %}
+Task 62. The customer's order receipt, styled like a till/POS receipt.
+
+EMAIL HTML, NOT WEB HTML -- every rule below exists because a real email
+client breaks the ordinary way of doing it:
+- Tables for all layout, never flexbox/grid: Outlook's Word-based renderer
+  and several webmail clients ignore both.
+- Styles inline on every element: Gmail strips or ignores much of <style>,
+  and child elements do not reliably inherit font-family, so it is repeated.
+- Courier/monospace, not a web font: Gmail strips @font-face entirely. The
+  till-receipt look comes from monospace, which every client already has.
+- The logo is a PNG, never SVG: Gmail does not render SVG images.
+- Everything must still read correctly with images OFF, since many clients
+  hide them until "show images" is tapped -- hence the alt text and a real
+  text heading rather than relying on the logo to say what this is.
+
+This design is developer-owned and fixed in code, so it may loop over order
+lines directly. The admin-editable parts are ONLY `intro` and `closing`,
+which arrive as plain strings and are autoescaped here: an admin can change
+the words, but anything typed as markup renders as visible text.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="x-apple-disable-message-reformatting">
+<title>Bancostore order {{ reference }}</title>
+{% comment %}
+Every layout table also carries style="width:100%", not only the width="100%"
+attribute. Found by rendering the real PDF with WeasyPrint on the production
+server: WeasyPrint largely ignores the presentational attribute and shrinks
+each table to its content, which jammed labels against prices
+("SubtotalGHS 590.00"), stopped prices aligning right, shrank the dashed
+dividers, and left the logo short of the header. Email clients honour both,
+so stating it as CSS as well costs nothing there.
+
+The pdf-only rules below are an in-document <style> block. That is NOT the
+write_pdf(stylesheets=...) option named in PYSEC-2026-3940 -- nothing is
+fetched, so the url_fetcher bypass in that advisory does not apply.
+{% endcomment %}
+{% if pdf %}
+<style>
+  /* A4, not A5: A5 split even a two-item receipt across two pages, and A4
+     is what customers here actually print on. The card stays a narrow,
+     centred column so it still reads as a till receipt. */
+  @page { size: A4; margin: 14mm; }
+  html, body { background-color: #ffffff !important; }
+  .receipt-backdrop { background-color: #ffffff !important; }
+  .receipt-backdrop > tbody > tr > td { padding: 0 !important; }
+  .receipt-card { width: 118mm !important; max-width: none !important; margin: 0 auto !important; }
+  /* The email caps the logo at 380px; in the PDF it must fill the card, or
+     the header shows an edge where the image stops. */
+  .receipt-card img { width: 100% !important; max-width: none !important; }
+</style>
+{% endif %}
+</head>
+<body style="margin:0;padding:0;background-color:#eeeeee;">
+{% comment %}Preheader: the grey preview line shown next to the subject in an inbox list. Hidden in the body itself.{% endcomment %}
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#eeeeee;">Your order is confirmed &mdash; GHS {{ total }}</div>
+
+<table role="presentation" class="receipt-backdrop" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#eeeeee;">
+<tr>
+<td align="center" style="padding:24px 12px;">
+
+<table role="presentation" class="receipt-card" width="380" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:380px;background-color:#ffffff;">
+
+{% comment %}
+Header: the orange logo banner. Its own background is #F74F09, matched
+here so there is no seam if the image loads a pixel short.
+
+IMAGES-OFF FALLBACK, fixed after a real Gmail test (the email landed in
+Spam, where Gmail blocks all images). The first version zeroed this cell's
+font-size and line-height to kill the gap under the image -- which also
+crushed the alt text, collapsing the header to a thin strip with
+"Bancostore" chopped off and a broken-image icon. Now:
+- the cell has a real height and centres its content, so with no image it
+  is still a proper orange banner;
+- the alt text is sized and styled as the wordmark, so it reads as a
+  deliberate header rather than an error;
+- `display:block` on the image is what removes the gap below it, so the
+  zeroed font metrics were never needed.
+{% endcomment %}
+<tr>
+<td align="center" valign="middle" height="127" style="background-color:#F74F09;padding:0;height:127px;text-align:center;">
+<img src="{{ logo_src }}" width="380" alt="Bancostore" style="display:block;width:100%;max-width:380px;height:auto;border:0;outline:none;text-decoration:none;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:34px;line-height:127px;font-weight:bold;text-align:center;margin:0 auto;">
+</td>
+</tr>
+
+<tr>
+<td style="padding:20px 22px 4px 22px;font-family:'Courier New',Courier,monospace;color:#1a1c1c;">
+
+<p style="margin:0 0 4px 0;text-align:center;font-family:'Courier New',Courier,monospace;font-size:16px;font-weight:bold;letter-spacing:2px;color:#1a1c1c;">ORDER RECEIPT</p>
+{% comment %}
+An explicit, styled link. Gmail auto-links bare domains and phone numbers
+in blue underline, which broke the monochrome receipt look in the real
+test. Making it a real link with the design's own colour keeps it tappable
+while stopping Gmail restyling it.
+{% endcomment %}
+<p style="margin:0 0 16px 0;text-align:center;font-family:'Courier New',Courier,monospace;font-size:12px;color:#4a607a;"><a href="https://bancostore.com" style="color:#4a607a;text-decoration:none;">bancostore.com</a></p>
+
+<p style="margin:0 0 6px 0;font-family:'Courier New',Courier,monospace;font-size:13px;line-height:19px;color:#1a1c1c;">Hi {{ customer_name }},</p>
+<p style="margin:0 0 14px 0;font-family:'Courier New',Courier,monospace;font-size:13px;line-height:19px;color:#1a1c1c;">{{ intro|linebreaksbr }}</p>
+
+</td>
+</tr>
+
+<tr>
+<td style="padding:0 22px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+{% comment %}
+Order number and date STACKED, not side by side. Side by side, the date
+column stole enough width to split the reference mid-code across two lines
+-- and that reference is what a customer reads out to support, so it must
+stay on one line and be easy to copy.
+{% endcomment %}
+<tr><td style="border-top:1px dashed #1a1c1c;font-size:0;line-height:0;">&nbsp;</td></tr>
+<tr>
+<td style="padding:10px 0 2px 0;font-family:'Courier New',Courier,monospace;font-size:11px;letter-spacing:1px;color:#4a607a;">ORDER NO.</td>
+</tr>
+<tr>
+<td style="padding:0 0 8px 0;font-family:'Courier New',Courier,monospace;font-size:12px;color:#1a1c1c;word-break:break-all;">{{ reference }}</td>
+</tr>
+<tr>
+<td style="padding:0 0 2px 0;font-family:'Courier New',Courier,monospace;font-size:11px;letter-spacing:1px;color:#4a607a;">DATE</td>
+</tr>
+<tr>
+<td style="padding:0 0 10px 0;font-family:'Courier New',Courier,monospace;font-size:12px;color:#1a1c1c;">{{ order_date }}</td>
+</tr>
+<tr><td style="border-top:1px dashed #1a1c1c;font-size:0;line-height:0;">&nbsp;</td></tr>
+</table>
+</td>
+</tr>
+
+{% comment %}Line items, POS style: the product name on its own line, then "qty x unit price" on the left with the line total on the right.{% endcomment %}
+<tr>
+<td style="padding:6px 22px 0 22px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+{% for item in items %}
+<tr>
+<td colspan="2" style="padding:8px 0 0 0;font-family:'Courier New',Courier,monospace;font-size:13px;line-height:18px;font-weight:bold;color:#1a1c1c;">{{ item.name }}</td>
+</tr>
+<tr>
+<td style="padding:2px 0 6px 0;font-family:'Courier New',Courier,monospace;font-size:12px;color:#4a607a;">{{ item.quantity }} x GHS {{ item.unit_price }}</td>
+<td align="right" style="text-align:right;padding:2px 0 6px 8px;font-family:'Courier New',Courier,monospace;font-size:13px;color:#1a1c1c;white-space:nowrap;">GHS {{ item.line_total }}</td>
+</tr>
+{% endfor %}
+</table>
+</td>
+</tr>
+
+<tr>
+<td style="padding:6px 22px 0 22px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+<tr><td colspan="2" style="border-top:1px dashed #1a1c1c;font-size:0;line-height:0;">&nbsp;</td></tr>
+<tr>
+<td style="padding:10px 0 3px 0;font-family:'Courier New',Courier,monospace;font-size:13px;color:#1a1c1c;">Subtotal</td>
+<td align="right" style="text-align:right;padding:10px 0 3px 0;font-family:'Courier New',Courier,monospace;font-size:13px;color:#1a1c1c;white-space:nowrap;">GHS {{ subtotal }}</td>
+</tr>
+{% if show_discount %}
+<tr>
+<td style="padding:3px 0;font-family:'Courier New',Courier,monospace;font-size:13px;color:#1a1c1c;">Discount</td>
+<td align="right" style="text-align:right;padding:3px 0;font-family:'Courier New',Courier,monospace;font-size:13px;color:#1a1c1c;white-space:nowrap;">GHS {{ discount_amount }}</td>
+</tr>
+{% endif %}
+<tr>
+<td style="padding:3px 0 10px 0;font-family:'Courier New',Courier,monospace;font-size:13px;color:#1a1c1c;">Delivery</td>
+<td align="right" style="text-align:right;padding:3px 0 10px 0;font-family:'Courier New',Courier,monospace;font-size:13px;color:#1a1c1c;white-space:nowrap;">{% if delivery_is_free %}FREE{% else %}GHS {{ delivery_fee }}{% endif %}</td>
+</tr>
+<tr><td colspan="2" style="border-top:2px solid #1a1c1c;font-size:0;line-height:0;">&nbsp;</td></tr>
+<tr>
+<td style="padding:10px 0;font-family:'Courier New',Courier,monospace;font-size:17px;font-weight:bold;letter-spacing:1px;color:#1a1c1c;">TOTAL</td>
+<td align="right" style="text-align:right;padding:10px 0;font-family:'Courier New',Courier,monospace;font-size:17px;font-weight:bold;color:#f75609;white-space:nowrap;">GHS {{ total }}</td>
+</tr>
+<tr><td colspan="2" style="border-top:2px solid #1a1c1c;font-size:0;line-height:0;">&nbsp;</td></tr>
+</table>
+</td>
+</tr>
+
+<tr>
+<td style="padding:14px 22px 0 22px;font-family:'Courier New',Courier,monospace;">
+<p style="margin:0 0 6px 0;font-family:'Courier New',Courier,monospace;font-size:12px;letter-spacing:1px;color:#4a607a;">{% if is_pickup %}COLLECTION{% else %}DELIVER TO{% endif %}</p>
+{% comment %}
+Name and phone as separate fields, not one pre-joined string: Gmail
+auto-linked the phone in blue underline inside plain text. A real tel:
+link styled with the receipt's own colour stays tappable on a phone but
+no longer restyles the receipt.
+{% endcomment %}
+<p style="margin:0;font-family:'Courier New',Courier,monospace;font-size:13px;line-height:19px;color:#1a1c1c;">{{ delivery_name }}, <a href="tel:{{ delivery_phone_e164 }}" style="color:#1a1c1c;text-decoration:none;">{{ delivery_phone }}</a></p>
+{% for line in delivery_lines %}
+<p style="margin:0;font-family:'Courier New',Courier,monospace;font-size:13px;line-height:19px;color:#1a1c1c;">{{ line }}</p>
+{% endfor %}
+</td>
+</tr>
+
+<tr>
+<td style="padding:16px 22px 0 22px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+<tr><td style="border-top:1px dashed #1a1c1c;font-size:0;line-height:0;">&nbsp;</td></tr>
+</table>
+</td>
+</tr>
+
+<tr>
+<td style="padding:14px 22px 6px 22px;font-family:'Courier New',Courier,monospace;">
+<p style="margin:0 0 16px 0;text-align:center;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:18px;color:#4a607a;">{{ closing|linebreaksbr }}</p>
+<p style="margin:0 0 4px 0;text-align:center;font-family:'Courier New',Courier,monospace;font-size:15px;font-weight:bold;letter-spacing:3px;color:#1a1c1c;">THANK YOU</p>
+<p style="margin:0 0 18px 0;text-align:center;font-family:'Courier New',Courier,monospace;font-size:11px;color:#4a607a;">for shopping with Bancostore</p>
+</td>
+</tr>
+
+{% comment %}
+Torn-paper edge. A row of characters rather than a CSS gradient: gradients
+and clip-path are unsupported in most email clients.
+
+It sits inside a table-layout:fixed table, and that is load-bearing. The
+line is nowrap so it clips instead of wrapping a stray dash onto a second
+line -- but in an ordinary auto-layout table a nowrap line sets the
+table's MINIMUM width, and a table will not shrink below that no matter
+what max-width says. Measured at a true 360px phone width, this one
+decorative line was forcing the whole receipt to 495px, pushing every
+price off the right edge of the screen. table-layout:fixed takes column
+width from the table rather than its content, so the line is clipped
+instead of widening everything around it.
+{% endcomment %}
+<tr>
+<td style="padding:0 22px 14px 22px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;table-layout:fixed;">
+<tr>
+<td style="white-space:nowrap;overflow:hidden;text-align:center;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:14px;letter-spacing:2px;color:#cccccc;">&#9986;&#65038; - - - - - - - - - - - - - - - - - - - - - - - -</td>
+</tr>
+</table>
+</td>
+</tr>
+
+<tr>
+<td style="background-color:#F74F09;height:6px;font-size:0;line-height:0;">&nbsp;</td>
+</tr>
+
+</table>
+
+</td>
+</tr>
+</table>
+</body>
+</html>

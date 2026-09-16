@@ -301,6 +301,17 @@ class NotificationTemplate(models.Model):
             "admin_new_order_sms",
             "New Order -- Admin Alert (SMS)",
         )
+        # Task 62: text BLOCKS placed inside the branded HTML receipt,
+        # not whole emails -- hence no subject. The design itself is fixed
+        # in code; these are the only parts of it an admin can reword.
+        ORDER_RECEIPT_INTRO = (
+            "order_receipt_intro",
+            "Order Receipt -- Intro Message (Email)",
+        )
+        ORDER_RECEIPT_CLOSING = (
+            "order_receipt_closing",
+            "Order Receipt -- Closing Message (Email)",
+        )
         ORDER_CONFIRMED_SMS = "order_confirmed_sms", "Order Confirmed (SMS)"
         ORDER_CONFIRMED_EMAIL = (
             "order_confirmed_email",
