@@ -75,18 +75,28 @@ def generate_otp(
         # reporting failure. verify_otp checks the NEWEST code, so leaving
         # it would quietly break the code the distributor already has.
         if purpose not in EMAIL_FALLBACK_PURPOSES or not fallback_email:
-            otp.delete()
+            _discard_undelivered(otp)
             raise OtpDeliveryFailed(f"could not deliver the {purpose} code") from None
         try:
             _send_otp_email(fallback_email, code)
         except OtpDeliveryFailed:
-            otp.delete()
+            _discard_undelivered(otp)
             raise
         otp.delivered_via = "email"
         return otp
 
     otp.delivered_via = "sms"
     return otp
+
+
+def _discard_undelivered(otp) -> None:
+    """Best effort. The views catch only OtpDeliveryFailed, so a database
+    error here must not replace it and turn a friendly message into an
+    error page (agent review, PR #94)."""
+    try:
+        otp.delete()
+    except Exception:
+        logger.exception("generate_otp: could not delete an undelivered code")
 
 
 def _send_otp_email(email: str, code: str) -> None:

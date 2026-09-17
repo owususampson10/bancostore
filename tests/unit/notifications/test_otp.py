@@ -263,3 +263,18 @@ def test_a_failed_email_fallback_does_not_replace_the_last_code(locmem):
     assert verify_otp(
         "+233241234567", purpose="password_reset", submitted_code=delivered.code
     )
+
+
+@pytest.mark.django_db
+def test_a_failed_cleanup_still_reports_a_friendly_failure(locmem):
+    """Agent review (PR #94). The views only catch OtpDeliveryFailed; a
+    database error while deleting the undelivered code must not turn the
+    friendly message into an error page."""
+    with (
+        _SMS_DOWN,
+        patch(
+            "apps.notifications.otp.OTPCode.delete", side_effect=RuntimeError("db down")
+        ),
+        pytest.raises(OtpDeliveryFailed),
+    ):
+        generate_otp("+233241234567", purpose="registration")

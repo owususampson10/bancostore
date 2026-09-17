@@ -9,6 +9,7 @@ nobody knew. The only trace was a traceback in the server's error log.
 from unittest.mock import patch
 
 from django.core import mail
+from django.core.cache import cache
 from django.test import override_settings
 
 import pytest
@@ -16,7 +17,11 @@ from constance import config
 
 from apps.notifications.models import AdminNotification
 from apps.notifications.sms import SmsOutOfCredit, SmsSendError, send_sms
-from apps.notifications.sms_alerts import alert_admin_about_sms_credit
+from apps.notifications.sms_alerts import (
+    ALERT_RETRY_SECONDS,
+    OUT_OF_CREDIT_ALERT_KEY,
+    alert_admin_about_sms_credit,
+)
 from apps.notifications.tasks import check_sms_credit
 
 
@@ -220,18 +225,35 @@ def test_the_hourly_check_is_scheduled():
 
 
 @pytest.mark.django_db
-def test_when_every_channel_fails_the_alert_is_tried_again(locmem, alert_email):
+@pytest.mark.parametrize(
+    "bell_failure",
+    [
+        # How send_admin_notification really fails: it returns None rather
+        # than raising (agent review, PR #94).
+        {"return_value": None},
+        {"side_effect": RuntimeError("down")},
+    ],
+    ids=["bell-returns-none", "bell-raises"],
+)
+def test_when_every_channel_fails_the_alert_is_tried_again(
+    locmem, alert_email, bell_failure
+):
     """CodeRabbit (PR #94). The once-a-day limit must only start once an
-    admin was actually told; otherwise one bad moment silences a day."""
+    admin was actually told; otherwise one bad moment silences a day. The
+    retry waits a few minutes, though (agent review): every failed send
+    triggers this inline, and trying again on each one would add an
+    email-timeout wait to every send during an outage."""
     with (
         patch("apps.notifications.sms_alerts.send_mail", side_effect=OSError("down")),
-        patch(
-            "apps.notifications.sms_alerts.send_admin_notification",
-            side_effect=RuntimeError("down"),
-        ),
+        patch("apps.notifications.sms_alerts.send_admin_notification", **bell_failure),
     ):
         alert_admin_about_sms_credit(credits=0)
+        alert_admin_about_sms_credit(credits=0)  # the next failed send, moments later
 
+    ttl = cache.ttl(OUT_OF_CREDIT_ALERT_KEY)
+    assert 0 < ttl <= ALERT_RETRY_SECONDS  # retried soon, not tomorrow
+
+    cache.delete(OUT_OF_CREDIT_ALERT_KEY)  # those few minutes have passed
     alert_admin_about_sms_credit(credits=0)  # everything works again
 
     assert len(mail.outbox) == 1
@@ -246,3 +268,20 @@ def test_one_working_channel_is_enough_to_start_the_daily_limit(locmem, alert_em
     alert_admin_about_sms_credit(credits=0)
 
     assert AdminNotification.objects.count() == 1  # not rung a second time
+
+
+@pytest.mark.django_db
+def test_a_failed_email_and_a_bell_that_returns_nothing_starts_no_daily_limit(
+    locmem, alert_email
+):
+    """Agent review (PR #94): the real bell signals failure by returning
+    None. Treating any return as success would silence alerts for a day."""
+    with (
+        patch("apps.notifications.sms_alerts.send_mail", side_effect=OSError("down")),
+        patch(
+            "apps.notifications.sms_alerts.send_admin_notification", return_value=None
+        ),
+    ):
+        alert_admin_about_sms_credit(credits=0)
+
+    assert cache.ttl(OUT_OF_CREDIT_ALERT_KEY) <= ALERT_RETRY_SECONDS

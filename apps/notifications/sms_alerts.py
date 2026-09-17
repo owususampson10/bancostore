@@ -33,6 +33,11 @@ logger = logging.getLogger(__name__)
 LOW_CREDIT_ALERT_KEY = "notifications:sms_credit_alert:low"
 OUT_OF_CREDIT_ALERT_KEY = "notifications:sms_credit_alert:out"
 ALERT_INTERVAL_SECONDS = 24 * 60 * 60
+# When no channel reached the admin, try again after this long rather than
+# on the very next failed send: every failed send runs the alert inline, so
+# retrying each time would add an email-timeout wait to every send during
+# an outage (agent review, PR #94).
+ALERT_RETRY_SECONDS = 10 * 60
 
 
 def alert_admin_about_sms_credit(*, credits: int) -> None:
@@ -67,11 +72,10 @@ def alert_admin_about_sms_credit(*, credits: int) -> None:
     emailed = _email_admin(subject, summary)
     rang = _ring_bell(summary)
     if not (emailed or rang):
-        # CodeRabbit (PR #94): nobody was told, so don't start the
-        # once-a-day limit -- let the next failed send or hourly check try
-        # again.
+        # CodeRabbit (PR #94): nobody was told, so don't hold the limit for a
+        # day -- only for ALERT_RETRY_SECONDS.
         try:
-            cache.delete(key)
+            cache.set(key, 1, ALERT_RETRY_SECONDS)
         except Exception:
             logger.exception(
                 "alert_admin_about_sms_credit: could not clear the alert limit"

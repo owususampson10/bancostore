@@ -187,3 +187,17 @@ def test_a_non_finite_bonus_counts_as_no_bonus(mock_get):
     )
 
     assert get_sms_credit_balance() == 150
+
+
+@pytest.mark.django_db
+@override_settings(MNOTIFY_API_KEY=LEAK_MARKER)
+@patch("apps.notifications.sms.requests.get")
+def test_an_absurdly_large_balance_is_read_without_crashing(mock_get):
+    """Agent review (PR #94). Python's JSON parser turns a long run of digits
+    into an int, and math.isfinite() on that raises OverflowError."""
+    import json
+
+    body = json.loads('{"balance": ' + "9" * 400 + ', "bonus": 0}')
+    mock_get.return_value = MagicMock(status_code=200, json=lambda: body)
+
+    assert get_sms_credit_balance() == body["balance"]

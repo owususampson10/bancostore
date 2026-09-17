@@ -103,11 +103,12 @@ def _is_finite_number(value) -> bool:
     """A real number int() can take. bool is excluded (it's an int
     subclass), and so are NaN and infinity, which Python's JSON parser
     accepts and int() rejects with the wrong exception (CodeRabbit, PR #94)."""
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-    )
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    # Only floats can be NaN or infinite. math.isfinite() on a huge int
+    # raises OverflowError, and JSON turns a long run of digits into an int
+    # (agent review, PR #94).
+    return not isinstance(value, float) or math.isfinite(value)
 
 
 def get_sms_credit_balance() -> int | None:
