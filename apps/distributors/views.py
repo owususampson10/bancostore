@@ -92,7 +92,7 @@ from .services import (
     snapshot_payment_reference,
     snapshot_starter_pack_choice,
 )
-from .tasks import consume_didit_result_task
+from .tasks import consume_didit_result_task, send_password_reset_code_task
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -488,13 +488,11 @@ def resend_otp(request):
         return redirect("distributors:verify_otp")
 
     if purpose == "password_reset":
-        # Task 63b. Mirrors forgot_password: no code for a number with no
-        # account (this used to spend a real SMS credit on any number typed
-        # into the reset form), an email fallback when the text fails, and
-        # the same response whatever happened -- saying "we couldn't send"
-        # would only ever happen for real accounts, revealing which numbers
-        # are registered.
-        _send_password_reset_code(phone_number)
+        # Task 63b / 65. Mirrors forgot_password: the same queued job and
+        # the same response whatever happened. Saying "we couldn't send", or
+        # taking longer, would only ever happen for real accounts, revealing
+        # which numbers are registered.
+        _queue_password_reset_code(phone_number)
         return redirect("distributors:verify_otp")
 
     try:
@@ -510,27 +508,20 @@ def resend_otp(request):
     return redirect("distributors:verify_otp")
 
 
-def _send_password_reset_code(phone_number):
-    """Sends a reset code if the number has an account, by SMS or, if that
-    fails and the account has one, by email. Never raises and returns
-    nothing, so callers can't accidentally reveal which case happened."""
-    distributor = (
-        Distributor.objects.select_related("user")
-        .filter(phone_number=phone_number)
-        .first()
-    )
-    if distributor is None:
-        return
+def _queue_password_reset_code(phone_number):
+    """Task 65. Hands the reset code to the Celery worker for EVERY number.
+
+    Looking the number up and texting the code here made the page about a
+    second slower for real accounts than for unknown numbers, so timing it
+    revealed which numbers are registered (CWE-208; CodeRabbit, PR #94).
+    Queuing is the same, constant work either way. Never raises: an error
+    only when the broker is down would be the same leak by another route.
+    """
     try:
-        generate_otp(
-            phone_number,
-            purpose="password_reset",
-            fallback_email=distributor.user.email,
-        )
-    except OtpDeliveryFailed:
-        # Already logged in generate_otp. Nothing to tell the visitor
-        # without revealing that the account exists.
-        pass
+        send_password_reset_code_task.delay(phone_number)
+    except Exception:
+        # No phone number in the log line, matching generate_otp's.
+        logger.exception("could not queue a password reset code")
 
 
 @ratelimit(key="ip", rate="20/m", method="POST")
@@ -582,7 +573,7 @@ def forgot_password(request):
     form = DistributorForgotPasswordForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         phone_number = str(form.cleaned_data["phone_number"])
-        _send_password_reset_code(phone_number)
+        _queue_password_reset_code(phone_number)
         # Redirect the same way regardless of whether the account exists,
         # to avoid revealing which phone numbers are registered.
         request.session["otp_phone_number"] = phone_number

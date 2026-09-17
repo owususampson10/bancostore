@@ -5,7 +5,7 @@ from django.utils import timezone
 from celery import shared_task
 
 from .models import PendingRegistration
-from .services import consume_didit_result
+from .services import consume_didit_result, send_password_reset_code
 
 PENDING_REGISTRATION_TTL = timedelta(hours=1)
 
@@ -37,3 +37,11 @@ def consume_didit_result_task(session_id: str) -> None:
     -- it's a browser redirect waiting on a "Confirming..." interstitial,
     not a third-party webhook with an enforced timeout."""
     consume_didit_result(session_id)
+
+
+@shared_task
+def send_password_reset_code_task(phone_number: str) -> None:
+    """Task 65. Queued by forgot_password and resend_otp for EVERY number,
+    known or not, so those pages do identical work whatever the answer --
+    see send_password_reset_code for why."""
+    send_password_reset_code(phone_number)

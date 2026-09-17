@@ -23,6 +23,21 @@ User = get_user_model()
 PASSWORD = "Passw0rd-123!"
 
 
+@pytest.fixture(autouse=True)
+def _reset_codes_are_sent_straight_away():
+    """Task 65 moved sending a password reset code into a Celery job. These
+    tests follow the whole journey, so the queued job runs immediately here:
+    the code still arrives before the next step, and nothing is published to
+    a real broker."""
+    from apps.distributors.services import send_password_reset_code
+
+    with patch(
+        "apps.distributors.views.send_password_reset_code_task.delay",
+        side_effect=send_password_reset_code,
+    ):
+        yield
+
+
 def _distributor(phone="+233241234567", email="", phone_verified=False):
     user = User.objects.create_user(username=phone, password=PASSWORD, email=email)
     group, _ = Group.objects.get_or_create(name="distributor")

@@ -18,6 +18,7 @@ from constance import config
 from apps.binary_tree.services import AlreadyPlacedError, BinaryTree
 from apps.commissions.services import calculate_direct_referral_bonus
 from apps.notifications.models import Notification, NotificationTemplate
+from apps.notifications.otp import OtpDeliveryFailed, generate_otp
 from apps.notifications.rendering import render_or_default
 from apps.notifications.services import send_notification
 from apps.notifications.sms import send_sms
@@ -934,3 +935,33 @@ def reject_kyc(distributor, reason: str) -> None:
                 default_body="Your KYC verification was rejected: {{reason}}",
             ),
         )
+
+
+def send_password_reset_code(phone_number: str) -> None:
+    """Task 63b / 65. Sends a password reset code if the number has an
+    account: by SMS, or by email if the text fails and the account has an
+    address. Never raises and returns nothing, so no caller can reveal which
+    case happened.
+
+    Runs in the Celery worker (send_password_reset_code_task), never in the
+    request: the lookup and the ~1 second mNotify call happen only for real
+    accounts, so doing them in the request let anyone tell registered
+    numbers apart by how long the page took (Task 65)."""
+    distributor = (
+        Distributor.objects.select_related("user")
+        .filter(phone_number=phone_number)
+        .first()
+    )
+    if distributor is None:
+        return
+    try:
+        generate_otp(
+            phone_number,
+            purpose="password_reset",
+            fallback_email=distributor.user.email,
+        )
+    except OtpDeliveryFailed:
+        # Already logged in generate_otp. Retrying the same job can't help:
+        # the distributor can ask for a new code, and the admin has already
+        # been alerted if credit ran out.
+        pass

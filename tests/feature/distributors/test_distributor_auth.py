@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -13,6 +14,21 @@ from apps.notifications.otp import generate_otp
 from apps.notifications.sms import fake_outbox
 
 User = get_user_model()
+
+
+@pytest.fixture(autouse=True)
+def _reset_codes_are_sent_straight_away():
+    """Task 65 moved sending a password reset code into a Celery job. These
+    tests follow the whole journey, so the queued job runs immediately here:
+    the code still arrives before the next step, and nothing is published to
+    a real broker."""
+    from apps.distributors.services import send_password_reset_code
+
+    with patch(
+        "apps.distributors.views.send_password_reset_code_task.delay",
+        side_effect=send_password_reset_code,
+    ):
+        yield
 
 
 def _create_unverified_distributor_with_registration_otp(
