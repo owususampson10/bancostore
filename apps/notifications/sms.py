@@ -1,7 +1,11 @@
+import logging
+
 from django.conf import settings
 
 import requests
 from constance import config
+
+logger = logging.getLogger(__name__)
 
 MNOTIFY_SEND_URL = "https://api.mnotify.com/api/sms/quick"
 # Shape verified live against production on 2026-09-17:
@@ -71,6 +75,7 @@ def _send_via_mnotify(phone_number: str, message: str, *, sms_type: str | None) 
         ) from None
 
     if response.status_code == 402:
+        _alert_admin_out_of_credit()
         raise SmsOutOfCredit("mNotify refused the SMS: the account is out of credit")
     try:
         response.raise_for_status()
@@ -78,6 +83,19 @@ def _send_via_mnotify(phone_number: str, message: str, *, sms_type: str | None) 
         raise SmsSendError(
             f"mNotify refused the SMS with HTTP {response.status_code}"
         ) from None
+
+
+def _alert_admin_out_of_credit() -> None:
+    """Task 63c. Imported here, not at the top: sms_alerts pulls in the
+    notification services, which this low-level module shouldn't load just
+    to send a text. Guarded again on top of the alert's own guard, so the
+    caller always gets SmsOutOfCredit, whatever happens here."""
+    try:
+        from .sms_alerts import alert_admin_about_sms_credit
+
+        alert_admin_about_sms_credit(credits=0)
+    except Exception:
+        logger.exception("send_sms: could not alert the admin about SMS credit")
 
 
 def get_sms_credit_balance() -> int | None:

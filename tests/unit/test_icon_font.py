@@ -37,9 +37,17 @@ def _icon_names_used_in_code():
     for module in ["apps/notifications/models.py", "apps/admin_portal/views.py"]:
         text = (BASE_DIR / module).read_text()
         for block in re.findall(
-            r"_(?:ICON_BY_EVENT_TYPE|GROUP_ICONS)\s*=\s*\{(.*?)\n\}", text, re.S
+            # \s* before the closing brace (Task 63c): the dicts inside model
+            # classes are indented, and the old `\n\}` only matched a brace
+            # at column 0 -- so a new, missing bell icon passed unnoticed.
+            r"_(?:ICON_BY_EVENT_TYPE|GROUP_ICONS)\s*=\s*\{(.*?)\n\s*\}",
+            text,
+            re.S,
         ):
-            used |= set(re.findall(r':\s*"([a-z0-9_]+)"', block))
+            # \(? (Task 63c): event-type icons are tuples, `: ("name", classes)`,
+            # sometimes wrapped onto the next line. Without it none of them
+            # were ever checked.
+            used |= set(re.findall(r':\s*\(?\s*"([a-z0-9_]+)"', block))
     return used
 
 

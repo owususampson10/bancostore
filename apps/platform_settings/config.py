@@ -640,6 +640,21 @@ NOTIFICATION_AND_COMMUNICATION_SETTINGS = {
         "The From address used for transactional email -- leave blank to "
         "use the server's configured default",
     ),
+    # Task 63c. 200 user-confirmed 2026-09-17. Checked hourly by
+    # apps.notifications.tasks.check_sms_credit. 0 turns the early warning
+    # off; running out entirely is still announced.
+    "SMS_LOW_CREDIT_THRESHOLD": (
+        200,
+        "Warn the admin when SMS credit falls below this many credits. Set to "
+        "0 to be told only when credit runs out.",
+    ),
+    # Same blank-means-disabled convention as ADMIN_ORDER_ALERT_EMAIL. The
+    # admin bell always rings regardless.
+    "SMS_CREDIT_ALERT_EMAIL": (
+        "",
+        "Emailed when SMS credit is low or has run out. Leave blank to rely on "
+        "the admin bell only.",
+    ),
 }
 
 # Custom-bounded form fields for the small set of constance keys where an
