@@ -64,8 +64,18 @@ def alert_admin_about_sms_credit(*, credits: int) -> None:
             "codes and order texts keep sending."
         )
 
-    _email_admin(subject, summary)
-    _ring_bell(summary)
+    emailed = _email_admin(subject, summary)
+    rang = _ring_bell(summary)
+    if not (emailed or rang):
+        # CodeRabbit (PR #94): nobody was told, so don't start the
+        # once-a-day limit -- let the next failed send or hourly check try
+        # again.
+        try:
+            cache.delete(key)
+        except Exception:
+            logger.exception(
+                "alert_admin_about_sms_credit: could not clear the alert limit"
+            )
 
 
 def reset_sms_credit_alerts() -> None:
@@ -77,11 +87,12 @@ def reset_sms_credit_alerts() -> None:
         logger.exception("reset_sms_credit_alerts: could not clear the alert limit")
 
 
-def _email_admin(subject, summary):
+def _email_admin(subject, summary) -> bool:
+    """True if the email was sent. False if it failed or no address is set."""
     try:
         recipient = (config.SMS_CREDIT_ALERT_EMAIL or "").strip()
         if not recipient:
-            return
+            return False
         send_mail(
             subject=subject,
             message=(
@@ -97,10 +108,18 @@ def _email_admin(subject, summary):
         )
     except Exception:
         logger.exception("alert_admin_about_sms_credit: the email alert failed")
+        return False
+    return True
 
 
-def _ring_bell(summary):
+def _ring_bell(summary) -> bool:
+    """True if the bell row was recorded. send_admin_notification returns
+    None, never raising, when it couldn't be."""
     try:
-        send_admin_notification(AdminNotification.EventType.SMS_CREDIT, summary)
+        return (
+            send_admin_notification(AdminNotification.EventType.SMS_CREDIT, summary)
+            is not None
+        )
     except Exception:
         logger.exception("alert_admin_about_sms_credit: the bell notification failed")
+        return False

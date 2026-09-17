@@ -217,3 +217,32 @@ def test_the_hourly_check_is_scheduled():
     assert task.task == "apps.notifications.tasks.check_sms_credit"
     assert task.interval.every == 60
     assert task.interval.period == "minutes"
+
+
+@pytest.mark.django_db
+def test_when_every_channel_fails_the_alert_is_tried_again(locmem, alert_email):
+    """CodeRabbit (PR #94). The once-a-day limit must only start once an
+    admin was actually told; otherwise one bad moment silences a day."""
+    with (
+        patch("apps.notifications.sms_alerts.send_mail", side_effect=OSError("down")),
+        patch(
+            "apps.notifications.sms_alerts.send_admin_notification",
+            side_effect=RuntimeError("down"),
+        ),
+    ):
+        alert_admin_about_sms_credit(credits=0)
+
+    alert_admin_about_sms_credit(credits=0)  # everything works again
+
+    assert len(mail.outbox) == 1
+    assert AdminNotification.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_one_working_channel_is_enough_to_start_the_daily_limit(locmem, alert_email):
+    with patch("apps.notifications.sms_alerts.send_mail", side_effect=OSError("down")):
+        alert_admin_about_sms_credit(credits=0)  # bell rings, email fails
+
+    alert_admin_about_sms_credit(credits=0)
+
+    assert AdminNotification.objects.count() == 1  # not rung a second time

@@ -71,9 +71,17 @@ def generate_otp(
         # failed login or reset attempt for anyone reading the logs.
         logger.exception("generate_otp: SMS failed for purpose=%s", purpose)
         fallback_email = (fallback_email or "").strip()
+        # CodeRabbit (PR #94): an undelivered code is deleted before
+        # reporting failure. verify_otp checks the NEWEST code, so leaving
+        # it would quietly break the code the distributor already has.
         if purpose not in EMAIL_FALLBACK_PURPOSES or not fallback_email:
+            otp.delete()
             raise OtpDeliveryFailed(f"could not deliver the {purpose} code") from None
-        _send_otp_email(fallback_email, code)
+        try:
+            _send_otp_email(fallback_email, code)
+        except OtpDeliveryFailed:
+            otp.delete()
+            raise
         otp.delivered_via = "email"
         return otp
 

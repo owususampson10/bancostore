@@ -647,6 +647,7 @@ NOTIFICATION_AND_COMMUNICATION_SETTINGS = {
         200,
         "Warn the admin when SMS credit falls below this many credits. Set to "
         "0 to be told only when credit runs out.",
+        "non_negative_count_field",
     ),
     # Same blank-means-disabled convention as ADMIN_ORDER_ALERT_EMAIL. The
     # admin bell always rings regardless.
@@ -717,6 +718,16 @@ CONSTANCE_ADDITIONAL_FIELDS = {
             # cadence, unlike "every 5 minutes" being the practical floor
             # for a job with real per-distributor DB work.
             "min_value": 1,
+        },
+    ],
+    # Task 63c (CodeRabbit, PR #94). A plain count where negative has no
+    # meaning -- SMS_LOW_CREDIT_THRESHOLD, where a negative value would
+    # silently mean "never warn early".
+    "non_negative_count_field": [
+        "django.forms.fields.IntegerField",
+        {
+            "widget": "django.forms.NumberInput",
+            "min_value": 0,
         },
     ],
     "non_negative_depth_field": [

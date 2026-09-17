@@ -10,7 +10,6 @@ dozens -- so the gap was a real way to weaken a test without a trace.
 """
 
 import pytest
-
 from floor_guard import ASSERTION
 
 

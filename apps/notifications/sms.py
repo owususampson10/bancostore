@@ -1,4 +1,5 @@
 import logging
+import math
 
 from django.conf import settings
 
@@ -98,6 +99,17 @@ def _alert_admin_out_of_credit() -> None:
         logger.exception("send_sms: could not alert the admin about SMS credit")
 
 
+def _is_finite_number(value) -> bool:
+    """A real number int() can take. bool is excluded (it's an int
+    subclass), and so are NaN and infinity, which Python's JSON parser
+    accepts and int() rejects with the wrong exception (CodeRabbit, PR #94)."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
 def get_sms_credit_balance() -> int | None:
     """SMS credits left on the mNotify account, bonus credits included.
 
@@ -127,8 +139,8 @@ def get_sms_credit_balance() -> int | None:
         data = {}
     balance = data.get("balance")
     bonus = data.get("bonus") or 0
-    if isinstance(balance, bool) or not isinstance(balance, (int, float)):
+    if not _is_finite_number(balance):
         raise SmsSendError("mNotify's balance response had no credit balance")
-    if isinstance(bonus, bool) or not isinstance(bonus, (int, float)):
+    if not _is_finite_number(bonus):
         bonus = 0
     return int(balance) + int(bonus)

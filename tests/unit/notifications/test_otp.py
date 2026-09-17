@@ -230,3 +230,36 @@ def test_any_sms_failure_counts_not_only_running_out_of_credit(locmem):
         pytest.raises(OtpDeliveryFailed),
     ):
         generate_otp("+233241234567", purpose="registration")
+
+
+@pytest.mark.django_db
+def test_a_code_that_could_not_be_delivered_does_not_replace_the_last_one(locmem):
+    """CodeRabbit (PR #94). verify_otp checks the NEWEST code. A resend
+    that fails must not leave an undelivered code on top, or the code the
+    distributor already received stops working."""
+    delivered = generate_otp("+233241234567", purpose="registration")
+
+    with _SMS_DOWN, pytest.raises(OtpDeliveryFailed):
+        generate_otp("+233241234567", purpose="registration")
+
+    assert verify_otp(
+        "+233241234567", purpose="registration", submitted_code=delivered.code
+    )
+
+
+@pytest.mark.django_db
+def test_a_failed_email_fallback_does_not_replace_the_last_code(locmem):
+    delivered = generate_otp("+233241234567", purpose="password_reset")
+
+    with (
+        _SMS_DOWN,
+        patch("apps.notifications.otp.send_mail", side_effect=OSError("smtp down")),
+        pytest.raises(OtpDeliveryFailed),
+    ):
+        generate_otp(
+            "+233241234567", purpose="password_reset", fallback_email="kofi@example.com"
+        )
+
+    assert verify_otp(
+        "+233241234567", purpose="password_reset", submitted_code=delivered.code
+    )

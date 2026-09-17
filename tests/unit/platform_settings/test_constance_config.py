@@ -265,3 +265,16 @@ def test_validate_withdrawal_amount_bounds_accepts_equal_min_and_max():
             "MAX_WITHDRAWAL_AMOUNT": Decimal("500"),
         }
     )
+
+
+def test_sms_low_credit_threshold_rejects_a_negative_number():
+    """CodeRabbit (PR #94). A negative warning level would silently mean
+    "never warn early" -- fail loudly on the form instead."""
+    assert (
+        settings.CONSTANCE_CONFIG["SMS_LOW_CREDIT_THRESHOLD"][2]
+        == "non_negative_count_field"
+    )
+    field = _build_additional_field("non_negative_count_field")
+    with pytest.raises(ValidationError):
+        field.clean("-1")
+    assert field.clean("0") == 0  # 0 = only tell me when it runs out

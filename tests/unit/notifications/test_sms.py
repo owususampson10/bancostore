@@ -161,3 +161,29 @@ def test_a_balance_response_without_a_number_is_an_error(mock_get):
 def test_there_is_no_balance_to_check_without_a_key():
     """Local dev and tests use the fake sender, which has no credit."""
     assert get_sms_credit_balance() is None
+
+
+@pytest.mark.django_db
+@override_settings(MNOTIFY_API_KEY=LEAK_MARKER)
+@patch("apps.notifications.sms.requests.get")
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_a_non_finite_balance_is_an_sms_error(mock_get, value):
+    """CodeRabbit (PR #94). Python's JSON parser accepts NaN and Infinity,
+    and int() of either raises ValueError/OverflowError, not SmsSendError."""
+    mock_get.return_value = MagicMock(
+        status_code=200, json=lambda: {"balance": value, "bonus": 0}
+    )
+
+    with pytest.raises(SmsSendError):
+        get_sms_credit_balance()
+
+
+@pytest.mark.django_db
+@override_settings(MNOTIFY_API_KEY=LEAK_MARKER)
+@patch("apps.notifications.sms.requests.get")
+def test_a_non_finite_bonus_counts_as_no_bonus(mock_get):
+    mock_get.return_value = MagicMock(
+        status_code=200, json=lambda: {"balance": 150, "bonus": float("inf")}
+    )
+
+    assert get_sms_credit_balance() == 150
