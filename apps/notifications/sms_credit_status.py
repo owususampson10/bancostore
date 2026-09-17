@@ -9,6 +9,7 @@ never mNotify, so showing it costs one small query per admin page.
 import logging
 from dataclasses import dataclass
 
+from django.db import transaction
 from django.utils import timezone
 
 from constance import config
@@ -47,17 +48,23 @@ def record_sms_credit(credits: int) -> None:
     """Store a freshly read balance. Never raises: this runs inside failing
     SMS sends and the hourly job, and must never break either."""
     try:
-        now = timezone.now()
-        status, _ = SmsCreditStatus.objects.update_or_create(
-            pk=STATUS_PK, defaults={"credits": credits, "checked_at": now}
-        )
-        short = _shortage_kind(credits, config.SMS_LOW_CREDIT_THRESHOLD or 0)
-        if short and status.shortage_started_at is None:
-            status.shortage_started_at = now
-            status.save(update_fields=["shortage_started_at"])
-        elif not short and status.shortage_started_at is not None:
-            status.shortage_started_at = None
-            status.save(update_fields=["shortage_started_at"])
+        threshold = config.SMS_LOW_CREDIT_THRESHOLD or 0
+        # One transaction (CodeRabbit, PR #96): update_or_create locks the row,
+        # and the shortage transition must happen under that same lock, or
+        # the hourly check and a failing send recording at the same moment
+        # could interleave and lose or duplicate a shortage start.
+        with transaction.atomic():
+            now = timezone.now()
+            status, _ = SmsCreditStatus.objects.update_or_create(
+                pk=STATUS_PK, defaults={"credits": credits, "checked_at": now}
+            )
+            short = _shortage_kind(credits, threshold)
+            if short and status.shortage_started_at is None:
+                status.shortage_started_at = now
+                status.save(update_fields=["shortage_started_at"])
+            elif not short and status.shortage_started_at is not None:
+                status.shortage_started_at = None
+                status.save(update_fields=["shortage_started_at"])
     except Exception:
         logger.exception("record_sms_credit: could not store the SMS credit balance")
 

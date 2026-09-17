@@ -222,3 +222,19 @@ def test_both_actions_are_post_only(staff_client, url_name):
     response = staff_client.get(reverse(f"admin_portal:{url_name}"))
 
     assert response.status_code == 405
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "url_name", ["sms_credit_banner_dismiss", "sms_credit_banner_check"]
+)
+def test_both_actions_refuse_a_request_without_a_csrf_token(staff_client, url_name):
+    """CodeRabbit (PR #96). The test client skips CSRF checks by default, so
+    nothing else here would notice if the protection were removed."""
+    staff_client.handler.enforce_csrf_checks = True
+
+    with patch("apps.admin_portal.views.get_sms_credit_balance") as balance:
+        response = staff_client.post(reverse(f"admin_portal:{url_name}"))
+
+    assert response.status_code == 403
+    balance.assert_not_called()
