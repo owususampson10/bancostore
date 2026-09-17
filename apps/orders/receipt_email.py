@@ -18,11 +18,16 @@ cannot load, "no PDF" is the normal case.
 """
 
 import logging
+import uuid
+from smtplib import SMTPRecipientsRefused
 
+from django.core.cache import cache
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
+from django.utils import timezone
 
 from celery import shared_task
+from celery.exceptions import SoftTimeLimitExceeded
 
 from apps.notifications.email import get_sender_email
 from apps.notifications.models import NotificationTemplate
@@ -32,6 +37,12 @@ from . import receipt_pdf
 from .receipts import build_receipt_context, build_receipt_html_context
 
 logger = logging.getLogger(__name__)
+
+# How many times the sweep (apps.orders.tasks.resend_missing_order_receipts)
+# re-queues one receipt before giving up. Defined here, not in tasks.py,
+# because the task below also sets it when an address is refused, and
+# tasks.py imports this module (not the other way round).
+RECEIPT_SWEEP_MAX_SWEEPS = 3
 
 _DEFAULT_INTRO = "Your order is confirmed. Thank you for shopping with Bancostore."
 _DEFAULT_CLOSING = "We'll send you an SMS each time your order status changes."
@@ -105,8 +116,54 @@ def _render_pdf_or_none(order, intro, closing):
         return None
 
 
-@shared_task
-def send_order_receipt_email_task(order_id) -> None:
+# --- Delivery: retried, recorded, and never sent twice at once --------------
+#
+# Task 62 follow-up (CodeRabbit, PR #93): a failed send used to be logged and
+# forgotten, so a Gmail hiccup cost the customer their receipt for good. Now
+# the worker retries with growing pauses, the order records when its receipt
+# actually went out, and apps.orders.tasks.resend_missing_order_receipts
+# re-queues any confirmed order still without one.
+
+RECEIPT_SEND_MAX_RETRIES = 3
+RECEIPT_RETRY_BASE_SECONDS = 60  # 1, 2, then 4 minutes between tries
+
+# The lock must outlive any single send, or a second worker could start
+# sending while the first is still stalled on Gmail. EMAIL_TIMEOUT (settings)
+# bounds each SMTP call; the task's hard time limit bounds the whole run,
+# PDF render included. Both sit well under the lock's lifetime.
+RECEIPT_SEND_SOFT_TIME_LIMIT_SECONDS = 240
+RECEIPT_SEND_TIME_LIMIT_SECONDS = 300
+RECEIPT_LOCK_TIMEOUT_SECONDS = 600
+
+
+# Worth retrying within minutes: the mail server or network had a moment.
+# smtplib's errors, socket timeouts and refused connections are all OSError.
+# SMTPRecipientsRefused is an OSError too, but is caught first, since
+# retrying a refused address can't help.
+_TRANSIENT_SEND_ERRORS = (OSError, SoftTimeLimitExceeded)
+
+
+def receipt_email_lock_key(order_id) -> str:
+    return f"orders:receipt_email_lock:{order_id}"
+
+
+def _release_lock(key, token):
+    """Deletes the lock only if this run still owns it. If a stalled send
+    outlived the lock and another run took it over, deleting blindly would
+    free that run's lock too and let a third run in. (get-then-delete is
+    not atomic; the window is tiny, and the worst case is a duplicate
+    receipt, never a lost one.)"""
+    if cache.get(key) == token:
+        cache.delete(key)
+
+
+@shared_task(
+    bind=True,
+    max_retries=RECEIPT_SEND_MAX_RETRIES,
+    soft_time_limit=RECEIPT_SEND_SOFT_TIME_LIMIT_SECONDS,
+    time_limit=RECEIPT_SEND_TIME_LIMIT_SECONDS,
+)
+def send_order_receipt_email_task(self, order_id) -> None:
     """Celery entry point. Takes an id, not an Order: task arguments are
     serialised, and the worker should read the order as it is when the task
     runs.
@@ -118,14 +175,75 @@ def send_order_receipt_email_task(order_id) -> None:
     from .models import Order
 
     order = Order.objects.filter(pk=order_id).first()
-    if order is None or not order.email:
+    if order is None or not order.email or order.receipt_email_sent_at is not None:
         return
 
+    key = receipt_email_lock_key(order_id)
+    token = uuid.uuid4().hex
     try:
-        send_order_receipt_email(order)
-    except Exception:
-        logger.exception(
-            "send_order_receipt_email_task: failed to send the receipt for "
-            "order_id=%s. The order itself is confirmed and unaffected.",
+        acquired = cache.add(key, token, timeout=RECEIPT_LOCK_TIMEOUT_SECONDS)
+        if acquired:
+            # Re-read AFTER taking the lock (design review): two queued
+            # copies can both pass the check above, and the first may have
+            # finished and released the lock before the second got here.
+            order.refresh_from_db()
+            if order.receipt_email_sent_at is not None or not order.email:
+                _release_lock(key, token)
+                return
+            send_order_receipt_email(order)
+    except SMTPRecipientsRefused:
+        _release_lock(key, token)
+        # The address itself was refused. Retrying cannot fix that, so the
+        # sweep is told to stop too.
+        Order.objects.filter(pk=order_id).update(
+            receipt_email_sweeps=RECEIPT_SWEEP_MAX_SWEEPS
+        )
+        # logger.error, not .exception: SMTPRecipientsRefused's text holds
+        # the customer's email address, and these logs record order ids,
+        # never contact details.
+        logger.error(
+            "send_order_receipt_email_task: the mail server refused the "
+            "address for order_id=%s; not retrying. The order itself is "
+            "confirmed and unaffected.",
             order_id,
         )
+        return
+    except _TRANSIENT_SEND_ERRORS as exc:
+        _release_lock(key, token)
+        if self.request.retries < self.max_retries:
+            raise self.retry(
+                exc=exc,
+                countdown=RECEIPT_RETRY_BASE_SECONDS * 2**self.request.retries,
+            )
+        logger.exception(
+            "send_order_receipt_email_task: failed to send the receipt for "
+            "order_id=%s after %s retries; the receipt sweep will try again "
+            "later. The order itself is confirmed and unaffected.",
+            order_id,
+            self.max_retries,
+        )
+        return
+    except Exception:
+        _release_lock(key, token)
+        # A bug (say, a broken template) fails the same way on every try,
+        # so the worker does not retry it within minutes. The order stays
+        # unmarked: the sweep's few, widely spaced attempts will pick it up,
+        # which also covers a fix being deployed in the meantime.
+        logger.exception(
+            "send_order_receipt_email_task: failed to send the receipt for "
+            "order_id=%s (not a mail or network error, so not retried now). "
+            "The order itself is confirmed and unaffected.",
+            order_id,
+        )
+        return
+
+    if not acquired:
+        logger.info(
+            "send_order_receipt_email_task: order_id=%s is already being "
+            "sent by another run; skipping.",
+            order_id,
+        )
+        return
+
+    Order.objects.filter(pk=order_id).update(receipt_email_sent_at=timezone.now())
+    _release_lock(key, token)

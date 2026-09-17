@@ -471,6 +471,10 @@ AUTH_PASSWORD_VALIDATORS = [
 # credentials are set in .env, so local dev/tests never need real credentials for this.
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+# Without a timeout a stalled Gmail connection blocks a Celery worker process
+# indefinitely -- long enough to outlive the receipt email's send lock and
+# let a second copy go out (Task 62 design review). Applies to every email.
+EMAIL_TIMEOUT = 30
 
 if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
     EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"

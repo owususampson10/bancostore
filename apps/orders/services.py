@@ -638,7 +638,9 @@ def _send_confirmation_notifications(order: Order) -> None:
         # describes is visible to the worker's own connection. Guarded
         # like every other channel here: an enqueue failure (a broker
         # outage) must not escape into confirm_order_payment's retry
-        # wrapper after the money has already moved.
+        # wrapper after the money has already moved. The receipt is not
+        # lost when that happens: the order has no receipt_email_sent_at,
+        # so apps.orders.tasks.resend_missing_order_receipts queues it later.
         order_id = order.pk
         try:
             transaction.on_commit(lambda: send_order_receipt_email_task.delay(order_id))

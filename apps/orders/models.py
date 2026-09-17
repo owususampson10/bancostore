@@ -140,6 +140,18 @@ class Order(models.Model):
         max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True
     )
     confirmed_at = models.DateTimeField(null=True, blank=True)
+    # Task 62 follow-up (CodeRabbit, PR #93): when the receipt email was
+    # actually sent. NULL on a confirmed order with an email address means
+    # the receipt has not gone out yet, and resend_missing_order_receipts
+    # will queue it again. Written only through a queryset .update(), so a
+    # later plain order.save() of an instance loaded BEFORE the send would
+    # reset it to NULL and send a second receipt -- every Order write in
+    # this codebase passes update_fields today; keep it that way.
+    receipt_email_sent_at = models.DateTimeField(null=True, blank=True)
+    # How many times the sweep has re-queued this receipt. Capped, so an
+    # order whose email can never be delivered stops being retried rather
+    # than hogging every future sweep.
+    receipt_email_sweeps = models.PositiveSmallIntegerField(default=0)
     # Task 46b (ADR-0010): indexed for the first time here -- both
     # order_management_queue's existing admin date-range filter
     # (_filtered_orders) and this task's new reporting rollup job scan
@@ -160,6 +172,15 @@ class Order(models.Model):
     history = HistoricalRecords()
 
     class Meta:
+        indexes = [
+            # The receipt sweep's query: unsent receipts in a recent
+            # confirmed_at window. Almost every row has a sent time, so the
+            # NULL prefix of this index stays tiny at any table size.
+            models.Index(
+                fields=["receipt_email_sent_at", "confirmed_at"],
+                name="order_receipt_sweep_idx",
+            ),
+        ]
         constraints = [
             # Task 43b: total now accounts for discount_amount. Deliberately
             # NOT a "discount_code IS NULL implies discount_amount = 0"
