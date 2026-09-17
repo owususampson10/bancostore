@@ -50,7 +50,11 @@ class Notification(models.Model):
         EventType.DOWNLINE_JOINED: ("person", "bg-primary-container/10 text-primary"),
         EventType.BINARY_BONUS_CREDITED: ("payments", "bg-primary/10 text-primary"),
         EventType.REFERRAL_BONUS_PAID: (
-            "redeem",
+            # Was "redeem", which the self-hosted icon subset (Task 50) never
+            # contained, so the bell showed the word "redeem" instead of an
+            # icon. Caught by tests/unit/test_icon_font.py once Task 63c fixed
+            # that test to actually read these tuples.
+            "monetization_on",
             "bg-secondary-container text-secondary",
         ),
         EventType.WITHDRAWAL_APPROVED: (
@@ -125,9 +129,12 @@ class AdminNotification(models.Model):
 
     class EventType(models.TextChoices):
         NEW_ORDER = "new_order", "New order paid"
+        # Task 63c: SMS credit is low or has run out.
+        SMS_CREDIT = "sms_credit", "SMS credit low"
 
     _ICON_BY_EVENT_TYPE = {
         EventType.NEW_ORDER: ("shopping_bag", "bg-primary/10 text-primary"),
+        EventType.SMS_CREDIT: ("warning", "bg-error/10 text-error"),
     }
 
     event_type = models.CharField(max_length=32, choices=EventType.choices)

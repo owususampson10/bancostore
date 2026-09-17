@@ -126,7 +126,17 @@ SECRET_ASSIGNMENT_ALLOWED = re.compile(
 )
 
 TEST_FILE = re.compile(r"(^|/)tests?/|(^|/)test_[^/]*\.py$|_test\.py$")
-ASSERTION = re.compile(r"\bassert\b|\bassertRaises\b|pytest\.raises")
+# Task 64: plain `assert`; unittest's assertX(...) methods (only
+# assertRaises was recognised before); mock checks such as
+# `.assert_called_once()` / `.assert_not_called()` (the underscore after
+# "assert" meant `\bassert\b` never matched them, so deleting one went
+# unnoticed); and pytest.raises / pytest.fail.
+ASSERTION = re.compile(
+    r"\bassert\b"
+    r"|\bassert[A-Z]\w*\s*\("
+    r"|\.assert_\w+\s*\("
+    r"|\bpytest\.(?:raises|fail)\b"
+)
 EXCEPTION_ROW = re.compile(r"^\|\s*(W|E)\d+\s*\|")
 
 

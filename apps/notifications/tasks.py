@@ -21,6 +21,8 @@ from .models import (
 )
 from .rendering import render_or_default
 from .services import send_notification
+from .sms import SmsSendError, get_sms_credit_balance
+from .sms_alerts import alert_admin_about_sms_credit, reset_sms_credit_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -204,3 +206,30 @@ def send_pv_expiry_notifications():
         }
     finally:
         cache.delete(PV_EXPIRY_LOCK_KEY)
+
+
+@shared_task
+def check_sms_credit():
+    """Task 63c. Hourly: warn the admin before SMS credit runs out.
+
+    Below SMS_LOW_CREDIT_THRESHOLD (or at 0, whatever the threshold) the
+    admin is alerted, at most once a day. At or above it, the alert limit is
+    cleared, so the next drop after a top-up warns straight away. Nothing to
+    check without an mNotify key (local dev and tests).
+    """
+    try:
+        credits = get_sms_credit_balance()
+    except SmsSendError:
+        logger.warning(
+            "check_sms_credit: could not read the mNotify credit balance",
+            exc_info=True,
+        )
+        return
+    if credits is None:
+        return
+
+    threshold = config.SMS_LOW_CREDIT_THRESHOLD or 0
+    if credits <= 0 or credits < threshold:
+        alert_admin_about_sms_credit(credits=credits)
+    else:
+        reset_sms_credit_alerts()

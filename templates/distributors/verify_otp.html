@@ -10,6 +10,11 @@
 <p class="font-body-md text-body-md text-gray-muted max-w-[340px]">
 We've sent a 6-digit code via SMS to {{ phone_number }}. Please enter it below to verify your account.
 </p>
+{% if purpose == "password_reset" %}
+<p class="font-body-sm text-body-sm text-gray-muted max-w-[340px] mt-stack-xs">
+No text message? If your account has an email address, check your email too.
+</p>
+{% endif %}
 </div>
 <form class="space-y-stack-lg" method="post" action="{% url 'distributors:verify_otp' %}" id="otp-form">
 {% csrf_token %}
