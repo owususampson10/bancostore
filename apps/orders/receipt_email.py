@@ -44,6 +44,12 @@ logger = logging.getLogger(__name__)
 # because the task below also sets it when an address is refused, and
 # tasks.py imports this module (not the other way round).
 RECEIPT_SWEEP_MAX_SWEEPS = 3
+# Written when retrying can never help (a refused address). A value of its
+# own, well above the cap, rather than the cap itself: the sweep's
+# "give an attempt back" update matches on the count it just claimed, and
+# on a final attempt that count IS the cap -- so marking a refusal with the
+# cap could be silently undone (agent review, PR #93).
+RECEIPT_SWEEPS_GAVE_UP = 100
 
 # A paid order later cancelled or refunded gets no receipt: arriving after
 # the cancellation, a "your order is confirmed" email would be wrong. Shared
@@ -206,7 +212,7 @@ def send_order_receipt_email_task(self, order_id) -> None:
         # The address itself was refused. Retrying cannot fix that, so the
         # sweep is told to stop too.
         Order.objects.filter(pk=order_id).update(
-            receipt_email_sweeps=RECEIPT_SWEEP_MAX_SWEEPS
+            receipt_email_sweeps=RECEIPT_SWEEPS_GAVE_UP
         )
         # logger.error, not .exception: SMTPRecipientsRefused's text holds
         # the customer's email address, and these logs record order ids,

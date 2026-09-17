@@ -641,15 +641,26 @@ def _send_confirmation_notifications(order: Order) -> None:
         # wrapper after the money has already moved. The receipt is not
         # lost when that happens: the order has no receipt_email_sent_at,
         # so apps.orders.tasks.resend_missing_order_receipts queues it later.
+        #
+        # The guard sits INSIDE the callback (agent review, PR #93): wrapped
+        # around on_commit itself, it only caught a broker error when
+        # on_commit ran the callback immediately, i.e. when no transaction
+        # was open. Called from inside one, the error would surface at
+        # commit time, past the guard.
         order_id = order.pk
-        try:
-            transaction.on_commit(lambda: send_order_receipt_email_task.delay(order_id))
-        except Exception:
-            logger.exception(
-                "confirm_order_payment: failed to enqueue the receipt email "
-                "for reference=%s",
-                order.payment_reference,
-            )
+        reference = order.payment_reference
+
+        def enqueue_receipt():
+            try:
+                send_order_receipt_email_task.delay(order_id)
+            except Exception:
+                logger.exception(
+                    "confirm_order_payment: failed to enqueue the receipt email "
+                    "for reference=%s",
+                    reference,
+                )
+
+        transaction.on_commit(enqueue_receipt)
 
 
 def _send_stock_unavailable_notification(order: Order) -> None:

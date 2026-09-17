@@ -33,6 +33,7 @@ from apps.orders.receipt_email import (
     RECEIPT_LOCK_TIMEOUT_SECONDS,
     RECEIPT_SEND_MAX_RETRIES,
     RECEIPT_SWEEP_MAX_SWEEPS,
+    RECEIPT_SWEEPS_GAVE_UP,
     receipt_email_lock_key,
     send_order_receipt_email_task,
 )
@@ -197,6 +198,26 @@ def test_a_job_that_runs_after_cancellation_sends_nothing(locmem, no_pdf, status
     assert mail.outbox == []
 
 
+@pytest.mark.django_db
+def test_a_cancellation_just_before_sending_is_still_caught(locmem, no_pdf):
+    """Agent review (PR #93): the status must be checked AFTER the lock is
+    taken, not only in the early check, or a cancellation landing between
+    the two still gets a "your order is confirmed" email."""
+    order = _make_order()
+    real_add = cache.add
+
+    def add_after_cancellation(*args, **kwargs):
+        Order.objects.filter(pk=order.pk).update(status=Order.Status.CANCELLED)
+        return real_add(*args, **kwargs)
+
+    with patch(
+        "apps.orders.receipt_email.cache.add", side_effect=add_after_cancellation
+    ):
+        send_order_receipt_email_task(order.pk)
+
+    assert mail.outbox == []
+
+
 # --- A failed send is retried, then left for the sweep ----------------------
 
 
@@ -332,7 +353,7 @@ def test_a_refused_address_is_not_retried_by_the_worker_or_the_sweep(no_pdf, cap
     retry.assert_not_called()
     order.refresh_from_db()
     assert order.receipt_email_sent_at is None
-    assert order.receipt_email_sweeps == RECEIPT_SWEEP_MAX_SWEEPS
+    assert order.receipt_email_sweeps == RECEIPT_SWEEPS_GAVE_UP
     assert order.email not in caplog.text  # logs hold order ids, not addresses
 
 
@@ -418,6 +439,32 @@ def test_a_failed_requeue_does_not_use_up_an_attempt():
 
 
 @pytest.mark.django_db
+def test_giving_an_attempt_back_never_undoes_a_change_made_meanwhile():
+    """Agent review (PR #93): on a final attempt, the job can give up on a
+    refused address between the sweep's claim and a failed queue. Giving the
+    attempt back must not make that address eligible again."""
+    grace_minutes = RECEIPT_SWEEP_GRACE.total_seconds() / 60
+    final_attempt = RECEIPT_SWEEP_MAX_SWEEPS - 1
+    order = _make_order(
+        confirmed_at=_age(grace_minutes * 2**final_attempt + 5),
+        receipt_email_sweeps=final_attempt,
+    )
+
+    def job_gave_up_then_queue_failed(order_id):
+        Order.objects.filter(pk=order_id).update(
+            receipt_email_sweeps=RECEIPT_SWEEPS_GAVE_UP
+        )
+        raise ConnectionError("Redis is down")
+
+    with patch("apps.orders.tasks.send_order_receipt_email_task") as task:
+        task.delay.side_effect = job_gave_up_then_queue_failed
+        resend_missing_order_receipts()
+
+    order.refresh_from_db()
+    assert order.receipt_email_sweeps == RECEIPT_SWEEPS_GAVE_UP
+
+
+@pytest.mark.django_db
 def test_each_requeue_waits_longer_than_the_last():
     grace_minutes = RECEIPT_SWEEP_GRACE.total_seconds() / 60
     not_yet = _make_order(
@@ -458,6 +505,32 @@ def test_the_sweep_gives_up_on_receipts_too_old_to_be_useful():
         resend_missing_order_receipts()
 
     task.delay.assert_not_called()
+
+
+# --- Queueing at confirmation ---------------------------------------------
+
+
+@pytest.mark.django_db
+def test_a_broker_error_at_commit_time_never_escapes(
+    django_capture_on_commit_callbacks,
+):
+    """Agent review (PR #93): when confirmation runs inside a transaction,
+    the job is queued at commit time, after the code that called on_commit
+    has returned. The guard must travel with the callback."""
+    from apps.orders.services import _send_confirmation_notifications
+
+    order = _make_order()
+
+    with (
+        patch("apps.orders.services.send_sms"),
+        patch("apps.orders.services.send_order_receipt_email_task") as task,
+    ):
+        task.delay.side_effect = ConnectionError("Redis is down")
+        with django_capture_on_commit_callbacks(execute=True) as callbacks:
+            _send_confirmation_notifications(order)  # must not raise at commit
+
+    assert len(callbacks) == 1
+    task.delay.assert_called_once_with(order.pk)
 
 
 # --- Deploy safety ----------------------------------------------------------

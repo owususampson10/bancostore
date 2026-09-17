@@ -258,19 +258,18 @@ def resend_missing_order_receipts():
             ).update(receipt_email_sweeps=F("receipt_email_sweeps") + 1)
             if not claimed:
                 continue
-            if sweeps + 1 == RECEIPT_SWEEP_MAX_SWEEPS:
-                logger.error(
-                    "resend_missing_order_receipts: final attempt for "
-                    "order_id=%s -- if this send fails too, the customer "
-                    "will not get a receipt email automatically.",
-                    order_id,
-                )
             try:
                 send_order_receipt_email_task.delay(order_id)
             except Exception:
                 # CodeRabbit (PR #93): nothing was queued, so this must not
                 # use up one of the order's few attempts -- give it back, or
                 # a flaky broker could exhaust them without a single send.
+                # Conditional on the count this sweep wrote, so a change made
+                # meanwhile (another sweep, or the job giving up) survives.
+                # The broker can occasionally raise after accepting the
+                # message; then the job runs AND the attempt is given back,
+                # which costs one extra queued job at most -- the lock and
+                # receipt_email_sent_at stop a second email.
                 Order.objects.filter(
                     pk=order_id, receipt_email_sweeps=sweeps + 1
                 ).update(receipt_email_sweeps=sweeps)
@@ -281,6 +280,15 @@ def resend_missing_order_receipts():
                 )
                 continue
             requeued += 1
+            # Logged only once actually queued: a failed queue gives the
+            # attempt back, so it would not have been the last one.
+            if sweeps + 1 == RECEIPT_SWEEP_MAX_SWEEPS:
+                logger.error(
+                    "resend_missing_order_receipts: final attempt for "
+                    "order_id=%s -- if this send fails too, the customer "
+                    "will not get a receipt email automatically.",
+                    order_id,
+                )
 
         logger.info("resend_missing_order_receipts: requeued=%s", requeued)
         return {"requeued": requeued}
