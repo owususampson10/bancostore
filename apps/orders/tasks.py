@@ -11,7 +11,11 @@ from celery import shared_task
 from constance import config
 
 from .models import Order, OrderCycleFailure, OrderCycleRun
-from .receipt_email import RECEIPT_SWEEP_MAX_SWEEPS, send_order_receipt_email_task
+from .receipt_email import (
+    RECEIPT_SKIP_STATUSES,
+    RECEIPT_SWEEP_MAX_SWEEPS,
+    send_order_receipt_email_task,
+)
 from .services import _auto_cancel_pending_order
 
 # Task 62: send_order_receipt_email_task is DEFINED in receipt_email.py
@@ -200,7 +204,6 @@ RECEIPT_SWEEP_GRACE = timedelta(minutes=30)
 # gave up on it (see below), never dropped silently.
 RECEIPT_SWEEP_MAX_AGE = timedelta(days=7)
 RECEIPT_SWEEP_BATCH_SIZE = 200
-_RECEIPT_SWEEP_SKIP_STATUSES = (Order.Status.CANCELLED, Order.Status.REFUNDED)
 
 
 def _receipt_sweep_due(now):
@@ -241,7 +244,7 @@ def resend_missing_order_receipts():
                 confirmed_at__gte=now - RECEIPT_SWEEP_MAX_AGE,
             )
             .exclude(email="")
-            .exclude(status__in=_RECEIPT_SWEEP_SKIP_STATUSES)
+            .exclude(status__in=RECEIPT_SKIP_STATUSES)
             .order_by("confirmed_at")
             .values_list("pk", "receipt_email_sweeps")[:RECEIPT_SWEEP_BATCH_SIZE]
         )
@@ -265,9 +268,15 @@ def resend_missing_order_receipts():
             try:
                 send_order_receipt_email_task.delay(order_id)
             except Exception:
+                # CodeRabbit (PR #93): nothing was queued, so this must not
+                # use up one of the order's few attempts -- give it back, or
+                # a flaky broker could exhaust them without a single send.
+                Order.objects.filter(
+                    pk=order_id, receipt_email_sweeps=sweeps + 1
+                ).update(receipt_email_sweeps=sweeps)
                 logger.exception(
                     "resend_missing_order_receipts: could not queue the "
-                    "receipt for order_id=%s.",
+                    "receipt for order_id=%s; it stays due for the next sweep.",
                     order_id,
                 )
                 continue

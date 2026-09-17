@@ -184,6 +184,19 @@ def test_a_send_can_never_outlive_its_lock(settings):
     )
 
 
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", [Order.Status.CANCELLED, Order.Status.REFUNDED])
+def test_a_job_that_runs_after_cancellation_sends_nothing(locmem, no_pdf, status):
+    """CodeRabbit (PR #93): the job is queued at confirmation but can run
+    after the order was cancelled or refunded. A "your order is confirmed"
+    email at that point would be wrong."""
+    order = _make_order(status=status)
+
+    send_order_receipt_email_task(order.pk)
+
+    assert mail.outbox == []
+
+
 # --- A failed send is retried, then left for the sweep ----------------------
 
 
@@ -382,6 +395,26 @@ def test_the_sweep_counts_each_requeue():
 
     order.refresh_from_db()
     assert order.receipt_email_sweeps == 1  # not re-queued again straight away
+
+
+@pytest.mark.django_db
+def test_a_failed_requeue_does_not_use_up_an_attempt():
+    """CodeRabbit (PR #93): if the broker refuses the job, nothing was
+    queued. Counting it anyway would let a flaky broker exhaust every
+    attempt without a single send."""
+    order = _make_order(confirmed_at=_age(RECEIPT_SWEEP_GRACE.total_seconds() / 60 + 5))
+
+    with patch("apps.orders.tasks.send_order_receipt_email_task") as task:
+        task.delay.side_effect = ConnectionError("Redis is down")
+        resend_missing_order_receipts()  # must not raise
+
+    order.refresh_from_db()
+    assert order.receipt_email_sweeps == 0
+
+    with patch("apps.orders.tasks.send_order_receipt_email_task") as task:
+        resend_missing_order_receipts()  # the broker is back
+
+    task.delay.assert_called_once_with(order.pk)
 
 
 @pytest.mark.django_db

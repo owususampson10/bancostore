@@ -34,6 +34,7 @@ from apps.notifications.models import NotificationTemplate
 from apps.notifications.rendering import render_email_or_default, render_or_default
 
 from . import receipt_pdf
+from .models import Order
 from .receipts import build_receipt_context, build_receipt_html_context
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,11 @@ logger = logging.getLogger(__name__)
 # because the task below also sets it when an address is refused, and
 # tasks.py imports this module (not the other way round).
 RECEIPT_SWEEP_MAX_SWEEPS = 3
+
+# A paid order later cancelled or refunded gets no receipt: arriving after
+# the cancellation, a "your order is confirmed" email would be wrong. Shared
+# by the task below and the sweep, so the two can never disagree.
+RECEIPT_SKIP_STATUSES = (Order.Status.CANCELLED, Order.Status.REFUNDED)
 
 _DEFAULT_INTRO = "Your order is confirmed. Thank you for shopping with Bancostore."
 _DEFAULT_CLOSING = "We'll send you an SMS each time your order status changes."
@@ -172,8 +178,6 @@ def send_order_receipt_email_task(self, order_id) -> None:
     between enqueue and run, and raising would only make Celery retry a
     task that can never succeed.
     """
-    from .models import Order
-
     order = Order.objects.filter(pk=order_id).first()
     if order is None or not order.email or order.receipt_email_sent_at is not None:
         return
@@ -187,7 +191,13 @@ def send_order_receipt_email_task(self, order_id) -> None:
             # copies can both pass the check above, and the first may have
             # finished and released the lock before the second got here.
             order.refresh_from_db()
-            if order.receipt_email_sent_at is not None or not order.email:
+            # CodeRabbit (PR #93): the status is re-checked here too. A job
+            # queued at confirmation can run after the order was cancelled.
+            if (
+                order.receipt_email_sent_at is not None
+                or not order.email
+                or order.status in RECEIPT_SKIP_STATUSES
+            ):
                 _release_lock(key, token)
                 return
             send_order_receipt_email(order)
