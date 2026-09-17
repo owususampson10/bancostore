@@ -93,7 +93,11 @@ def _alert_admin_out_of_credit() -> None:
     caller always gets SmsOutOfCredit, whatever happens here."""
     try:
         from .sms_alerts import alert_admin_about_sms_credit
+        from .sms_credit_status import record_sms_credit
 
+        # Task 66: the admin banner turns red now, not at the next hourly
+        # check. record_sms_credit never raises.
+        record_sms_credit(0)
         alert_admin_about_sms_credit(credits=0)
     except Exception:
         logger.exception("send_sms: could not alert the admin about SMS credit")

@@ -188,4 +188,15 @@ urlpatterns = [
         views.admin_notification_mark_all_read,
         name="admin_notification_mark_all_read",
     ),
+    # Task 66
+    path(
+        "sms-credit-banner/dismiss/",
+        views.sms_credit_banner_dismiss,
+        name="sms_credit_banner_dismiss",
+    ),
+    path(
+        "sms-credit-banner/check/",
+        views.sms_credit_banner_check,
+        name="sms_credit_banner_check",
+    ),
 ]
