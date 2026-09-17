@@ -366,3 +366,28 @@ class NotificationCycleFailure(models.Model):
 
     def __str__(self):
         return f"distributor_id={self.distributor_id}"
+
+
+class SmsCreditStatus(models.Model):
+    """Task 66. The last known SMS credit balance -- a single row.
+
+    Stored so every admin page can decide whether to show the credit banner
+    from the database, instead of asking mNotify on each page load. Written
+    by the hourly check_sms_credit job, by a send refused for lack of credit
+    (recorded as 0), and by the banner's "check now" button. See
+    apps.notifications.sms_credit_status.
+
+    shortage_started_at marks when credit last fell below the warning level
+    (or to 0), and is cleared once it is back above. A banner the admin
+    closed is tied to that moment, so the next shortage shows it again.
+    """
+
+    credits = models.IntegerField(null=True, blank=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    shortage_started_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name_plural = "SMS credit status"
+
+    def __str__(self):
+        return f"SMS credit: {self.credits}"

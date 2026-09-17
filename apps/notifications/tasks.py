@@ -23,6 +23,7 @@ from .rendering import render_or_default
 from .services import send_notification
 from .sms import SmsSendError, get_sms_credit_balance
 from .sms_alerts import alert_admin_about_sms_credit, reset_sms_credit_alerts
+from .sms_credit_status import record_sms_credit
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +229,7 @@ def check_sms_credit():
     if credits is None:
         return
 
+    record_sms_credit(credits)  # Task 66: drives the admin portal banner
     threshold = config.SMS_LOW_CREDIT_THRESHOLD or 0
     if credits <= 0 or credits < threshold:
         alert_admin_about_sms_credit(credits=credits)

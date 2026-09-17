@@ -1,0 +1,47 @@
+{% comment %}
+Task 66. The SMS credit banner, sticky just below the admin header (h-16,
+so top-16). Amber while credit is low, red once it has run out
+(user-confirmed). Rendered by the {% sms_credit_banner %} tag on every admin
+page, and returned by the "check now" and close actions, which htmx swaps
+in place of it.
+{% endcomment %}
+{% if banner %}
+<div id="sms-credit-banner" data-kind="{{ banner.kind }}" role="alert"
+     class="sticky top-16 z-20 border-b px-margin-mobile md:px-margin-desktop py-3 flex flex-col sm:flex-row sm:items-center gap-3 {% if banner.kind == 'out' %}bg-error-container text-on-error-container border-error/20{% else %}bg-amber-100 text-amber-900 border-amber-300{% endif %}">
+  <div class="flex items-start gap-3 flex-1 min-w-0">
+    <span class="material-symbols-outlined text-[22px] flex-shrink-0" aria-hidden="true">warning</span>
+    <div class="min-w-0">
+      {% if banner.kind == "out" %}
+      <p class="font-label-lg text-label-lg">SMS credit has run out</p>
+      <p class="font-body-sm text-body-sm">Texts to distributors and customers are failing, including login codes. Top up mNotify now.</p>
+      {% else %}
+      <p class="font-label-lg text-label-lg">SMS credit is low: {{ banner.credits }} credits left</p>
+      <p class="font-body-sm text-body-sm">Top up mNotify soon so login codes and order texts keep sending.</p>
+      {% endif %}
+      {% if check_message %}
+      <p class="font-body-sm text-body-sm mt-1 font-semibold" aria-live="polite">{{ check_message }}</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
+    <form hx-post="{% url 'admin_portal:sms_credit_banner_check' %}" hx-target="#sms-credit-banner" hx-swap="outerHTML">
+      {% csrf_token %}
+      <button type="submit" class="px-3 py-1.5 rounded-lg border border-current font-label-md text-label-md hover:bg-black/5 transition-colors">
+        I've topped up &mdash; check now
+      </button>
+    </form>
+    <form hx-post="{% url 'admin_portal:sms_credit_banner_dismiss' %}" hx-target="#sms-credit-banner" hx-swap="outerHTML">
+      {% csrf_token %}
+      <button type="submit" class="p-1.5 rounded-full hover:bg-black/10 transition-colors" aria-label="Close this warning until your next login">
+        <span class="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
+      </button>
+    </form>
+  </div>
+</div>
+{% elif recovered_credits is not None %}
+<div role="status" aria-live="polite"
+     class="px-margin-mobile md:px-margin-desktop py-3 bg-green-50 text-green-800 border-b border-green-200 font-body-sm text-body-sm flex items-center gap-2">
+  <span class="material-symbols-outlined text-[20px]" aria-hidden="true">check_circle</span>
+  SMS credit is back: {{ recovered_credits }} credits.
+</div>
+{% endif %}

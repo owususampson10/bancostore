@@ -18,6 +18,7 @@ from django.views.decorators.http import require_POST
 
 from constance import config
 from constance.utils import get_values
+from django_ratelimit.decorators import ratelimit
 
 from apps.catalog.models import Category, Product, Review
 from apps.catalog.services import normalize_primary_image
@@ -29,6 +30,13 @@ from apps.distributors.models import Distributor
 from apps.distributors.services import approve_kyc, reject_kyc
 from apps.notifications.models import AdminNotification, NotificationTemplate
 from apps.notifications.services import broadcast_admin_unread_count
+from apps.notifications.sms import SmsSendError, get_sms_credit_balance
+from apps.notifications.sms_alerts import reset_sms_credit_alerts
+from apps.notifications.sms_credit_status import (
+    BANNER_DISMISSED_SESSION_KEY,
+    credit_banner,
+    record_sms_credit,
+)
 from apps.notifications.template_registry import PLACEHOLDERS_BY_KEY
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import (
@@ -2480,4 +2488,62 @@ def admin_notification_mark_all_read(request):
             # badge that is an acceptable trade.
             "unread_count": unread_count,
         },
+    )
+
+
+# --- Task 66: the SMS credit banner -----------------------------------------
+
+
+@login_required(login_url="two_factor:login")
+@require_POST
+def sms_credit_banner_dismiss(request):
+    """Hides the banner for the rest of this login (user-confirmed). Stored
+    in the session against the current shortage, so the banner returns at
+    the next login, when low turns into run out, or for a new shortage."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    banner = credit_banner()
+    if banner is not None:
+        request.session[BANNER_DISMISSED_SESSION_KEY] = banner.shortage_id
+    # htmx swaps the banner for this empty response.
+    return HttpResponse("")
+
+
+@login_required(login_url="two_factor:login")
+@require_POST
+@ratelimit(key="user", rate="10/m", method="POST", block=True)
+def sms_credit_banner_check(request):
+    """ "I've topped up -- check now". Re-reads the balance from mNotify
+    (free, sends no SMS) so the admin doesn't wait up to an hour for the
+    next scheduled check. Rate limited: each click is a request to mNotify.
+    """
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    message = None
+    try:
+        credits = get_sms_credit_balance()
+    except SmsSendError:
+        credits = None
+        message = "We couldn't reach mNotify just now. Please try again shortly."
+    else:
+        if credits is None:
+            message = "No SMS provider is configured, so there is no balance to check."
+        else:
+            record_sms_credit(credits)
+            if credit_banner() is None:
+                reset_sms_credit_alerts()
+                request.session.pop(BANNER_DISMISSED_SESSION_KEY, None)
+                return render(
+                    request,
+                    "admin_portal/_sms_credit_banner.html",
+                    {"banner": None, "recovered_credits": credits},
+                )
+            message = f"Checked just now: {credits} credits left."
+
+    return render(
+        request,
+        "admin_portal/_sms_credit_banner.html",
+        {"banner": credit_banner(), "check_message": message},
     )
