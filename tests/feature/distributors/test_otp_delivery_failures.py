@@ -20,7 +20,7 @@ from apps.distributors.models import Distributor
 from apps.notifications.sms import SmsOutOfCredit, fake_outbox
 
 User = get_user_model()
-PASSWORD = "S3cure-Passw0rd!"
+PASSWORD = "Passw0rd-123!"
 
 
 def _distributor(phone="+233241234567", email="", phone_verified=False):

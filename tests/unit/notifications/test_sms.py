@@ -3,9 +3,15 @@ from unittest.mock import MagicMock, patch
 from django.test import override_settings
 
 import pytest
+import requests
 from constance import config
 
-from apps.notifications.sms import send_sms
+from apps.notifications.sms import (
+    SmsOutOfCredit,
+    SmsSendError,
+    get_sms_credit_balance,
+    send_sms,
+)
 
 
 @pytest.mark.django_db
@@ -39,22 +45,14 @@ def test_uses_the_live_admin_configured_sender_name_when_set(mock_post):
 # failures with logger.exception -- so before this, production's error logs
 # held the live key on every failed send (seen on 2026-09-17).
 
-import requests  # noqa: E402
-
-from apps.notifications.sms import (  # noqa: E402
-    SmsOutOfCredit,
-    SmsSendError,
-    get_sms_credit_balance,
-)
-
-SECRET = "super-secret-key-123"
+LEAK_MARKER = "leakcheck-7f3a"
 
 
 def _http_error_response(status):
     response = MagicMock(status_code=status)
     response.raise_for_status.side_effect = requests.HTTPError(
         f"{status} Client Error for url: https://api.mnotify.com/api/sms/quick"
-        f"?key={SECRET}"
+        f"?key={LEAK_MARKER}"
     )
     return response
 
@@ -68,12 +66,12 @@ def _assert_key_not_in(exc_info):
         seen.append(exc)
         exc = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
     for e in seen:
-        assert SECRET not in str(e)
-        assert SECRET not in repr(e.args)
+        assert LEAK_MARKER not in str(e)
+        assert LEAK_MARKER not in repr(e.args)
 
 
 @pytest.mark.django_db
-@override_settings(MNOTIFY_API_KEY=SECRET)
+@override_settings(MNOTIFY_API_KEY=LEAK_MARKER)
 @patch("apps.notifications.sms.requests.post")
 def test_out_of_credit_is_its_own_error(mock_post):
     mock_post.return_value = _http_error_response(402)
@@ -85,7 +83,7 @@ def test_out_of_credit_is_its_own_error(mock_post):
 
 
 @pytest.mark.django_db
-@override_settings(MNOTIFY_API_KEY=SECRET)
+@override_settings(MNOTIFY_API_KEY=LEAK_MARKER)
 @patch("apps.notifications.sms.requests.post")
 def test_another_http_failure_raises_without_the_key(mock_post):
     mock_post.return_value = _http_error_response(500)
@@ -99,11 +97,11 @@ def test_another_http_failure_raises_without_the_key(mock_post):
 
 
 @pytest.mark.django_db
-@override_settings(MNOTIFY_API_KEY=SECRET)
+@override_settings(MNOTIFY_API_KEY=LEAK_MARKER)
 @patch("apps.notifications.sms.requests.post")
 def test_a_network_failure_raises_without_the_key(mock_post):
     mock_post.side_effect = requests.ConnectionError(
-        f"Max retries exceeded with url: /api/sms/quick?key={SECRET}"
+        f"Max retries exceeded with url: /api/sms/quick?key={LEAK_MARKER}"
     )
 
     with pytest.raises(SmsSendError) as exc_info:
@@ -113,7 +111,7 @@ def test_a_network_failure_raises_without_the_key(mock_post):
 
 
 @pytest.mark.django_db
-@override_settings(MNOTIFY_API_KEY=SECRET)
+@override_settings(MNOTIFY_API_KEY=LEAK_MARKER)
 @patch("apps.notifications.sms.requests.get")
 def test_the_credit_balance_counts_bonus_credits_too(mock_get):
     """Shape verified live against production on 2026-09-17:
@@ -134,11 +132,11 @@ def test_the_credit_balance_counts_bonus_credits_too(mock_get):
 
 
 @pytest.mark.django_db
-@override_settings(MNOTIFY_API_KEY=SECRET)
+@override_settings(MNOTIFY_API_KEY=LEAK_MARKER)
 @patch("apps.notifications.sms.requests.get")
 def test_an_unreadable_balance_response_raises_without_the_key(mock_get):
     mock_get.side_effect = requests.ConnectionError(
-        f"url: /api/balance/sms?key={SECRET}"
+        f"url: /api/balance/sms?key={LEAK_MARKER}"
     )
 
     with pytest.raises(SmsSendError) as exc_info:
@@ -148,7 +146,7 @@ def test_an_unreadable_balance_response_raises_without_the_key(mock_get):
 
 
 @pytest.mark.django_db
-@override_settings(MNOTIFY_API_KEY=SECRET)
+@override_settings(MNOTIFY_API_KEY=LEAK_MARKER)
 @patch("apps.notifications.sms.requests.get")
 def test_a_balance_response_without_a_number_is_an_error(mock_get):
     mock_get.return_value = MagicMock(

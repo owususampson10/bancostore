@@ -1,13 +1,15 @@
 from datetime import timedelta
+from unittest.mock import patch
 
+from django.core import mail
 from django.utils import timezone
 
 import pytest
 from constance import config
 
 from apps.notifications.models import NotificationTemplate
-from apps.notifications.otp import generate_otp, verify_otp
-from apps.notifications.sms import fake_outbox
+from apps.notifications.otp import OtpDeliveryFailed, generate_otp, verify_otp
+from apps.notifications.sms import SmsOutOfCredit, SmsSendError, fake_outbox
 
 
 @pytest.mark.django_db
@@ -157,12 +159,6 @@ def test_concurrent_wrong_guesses_do_not_exceed_max_attempts():
 # one (user-confirmed); the first-login phone check never does, since a code
 # delivered by email proves nothing about the phone.
 
-from unittest.mock import patch  # noqa: E402
-
-from django.core import mail  # noqa: E402
-
-from apps.notifications.otp import OtpDeliveryFailed  # noqa: E402
-from apps.notifications.sms import SmsOutOfCredit, SmsSendError  # noqa: E402
 
 _SMS_DOWN = patch(
     "apps.notifications.otp.send_sms", side_effect=SmsOutOfCredit("no credit")
