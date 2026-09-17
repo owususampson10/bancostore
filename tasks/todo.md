@@ -8779,3 +8779,50 @@ since the order system shipped; not introduced by Task 59/60.
 portal after deploy. Single batched PR for all three per the user's explicit instruction
 (CodeRabbit rate-limits a second pass -- see the `project_coderabbit_no_longer_auto_reviews`
 memory).
+
+### Task 62: Branded, till-receipt style order confirmation email
+
+**Asked for by the user 2026-09-16** after seeing Task 60's plain-text receipt land in a real inbox:
+"I want it in customize format like how POS font receipt look like and with the bancostore logo
+and colors branded." Decisions made with the user via AskUserQuestion: this goes BEFORE the SMS
+safeguard and the spam fix; wording stays admin-editable, but the design itself is fixed in code.
+
+**Known up front, recorded so nobody expects otherwise:** this does NOT fix the receipt landing
+in spam. That is caused by sending from a free `bancostore7@gmail.com` account rather than the
+store's own domain, and is its own task. A prettier email in the spam folder is still in spam.
+
+**Email-client constraints that shape the design (verified, not assumed):**
+- Gmail strips web fonts, so the till-receipt look uses a Courier/monospace stack, which renders
+  everywhere.
+- Gmail does not render SVG, and every existing logo is SVG
+  (`static/images/bancostore-brand/logo/`). A PNG must be produced. No SVG converter is
+  installed and `cairosvg` would be a new dependency, so a one-off render through the installed
+  Chrome 150 headless produces a committed PNG asset -- no runtime dependency.
+- Many clients hide images until "show images" is tapped, so the receipt must read correctly with
+  no logo at all.
+- The plain-text version keeps being sent alongside the HTML one (multipart), which helps spam
+  scoring and guarantees nobody receives an unreadable email.
+
+**Brand values** (from `static/src/main.css`): primary `#f75609`, secondary `#4a607a`, on-surface
+`#1a1c1c`. The orange logo's own background is `#F74F09` -- the header matches THAT, not the CSS
+token, so the logo sits on the header with no visible seam.
+
+- [ ] **62a: A PNG logo Gmail can actually show.** Render `bancostore-logo-orange.svg` to PNG via
+      headless Chrome, sized for a ~380px receipt header at 2x for sharp phones.
+- [ ] **62b: The POS-style HTML receipt.** `templates/emails/order_receipt.html`, table-based with
+      inline styles (email clients strip or ignore much of `<style>`). Narrow centred receipt,
+      monospace, dashed tear-line dividers, item name left and price right, bold TOTAL, orange
+      header with logo. Sent via `EmailMultiAlternatives`: plain text plus HTML. Logo embedded as
+      an inline CID attachment rather than a hosted URL, so it also renders in local-dev test
+      emails -- Gmail's image proxy cannot fetch `localhost`.
+- [ ] **62c: Wording stays admin-editable.** The HTML design is developer-owned, so it CAN loop
+      over order items directly -- the "no loops" limit belongs to admin-authored templates only.
+      Two new NotificationTemplate keys carry the editable text blocks (intro, closing). Admin text
+      is HTML-escaped when placed into the design: an admin can change words, never inject markup.
+- [ ] **62d: Verified in a real inbox**, not a browser preview. Test copies to the user's address,
+      on phone and laptop, iterated with the user until approved. Specifically check whether the
+      CID logo shows as a stray attachment paperclip.
+
+**Verification:** tests for the HTML part, both parts present, logo CID referenced, admin text
+escaped (an admin typing `<script>` must see it rendered as text), a live admin edit reaching the
+real send; `make check-fast`; one PR, reviewed, before merge.

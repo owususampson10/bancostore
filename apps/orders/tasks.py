@@ -1,14 +1,33 @@
 import logging
 from datetime import timedelta
+from functools import reduce
+from operator import or_
 
 from django.core.cache import cache
+from django.db.models import F, Q
 from django.utils import timezone
 
 from celery import shared_task
 from constance import config
 
 from .models import Order, OrderCycleFailure, OrderCycleRun
+from .receipt_email import (
+    RECEIPT_SKIP_STATUSES,
+    RECEIPT_SWEEP_MAX_SWEEPS,
+    send_order_receipt_email_task,
+)
 from .services import _auto_cancel_pending_order
+
+# Task 62: send_order_receipt_email_task is DEFINED in receipt_email.py
+# (defining it here and importing it into services.py would be circular,
+# since this module already imports from services). Re-exported so
+# Celery's autodiscovery of apps.orders.tasks registers it explicitly
+# rather than relying on a transitive import.
+__all__ = [
+    "auto_cancel_unpaid_orders",
+    "resend_missing_order_receipts",
+    "send_order_receipt_email_task",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -166,3 +185,112 @@ def auto_cancel_unpaid_orders():
         }
     finally:
         cache.delete(AUTO_CANCEL_LOCK_KEY)
+
+
+# --- Receipt sweep -----------------------------------------------------------
+#
+# Task 62 follow-up (CodeRabbit, PR #93). The receipt email is queued after
+# payment confirmation; if Redis was down at that moment, or the worker ran
+# out of retries against Gmail, the receipt never went out and nothing tried
+# again. This re-queues it.
+
+RECEIPT_SWEEP_LOCK_KEY = "orders:receipt_sweep_lock"
+RECEIPT_SWEEP_LOCK_TIMEOUT_SECONDS = 5 * 60
+# Longer than the worker's own 1+2+4 minute retries plus a normal queue
+# delay, so the sweep doesn't race a receipt that is still on its way.
+RECEIPT_SWEEP_GRACE = timedelta(minutes=30)
+# A receipt only matters for so long, and the cap bounds the query after a
+# long outage. Anything that ages out unsent is logged by the sweeps that
+# gave up on it (see below), never dropped silently.
+RECEIPT_SWEEP_MAX_AGE = timedelta(days=7)
+RECEIPT_SWEEP_BATCH_SIZE = 200
+
+
+def _receipt_sweep_due(now):
+    """Each re-queue waits twice as long as the last: 30, 60, then 120
+    minutes after confirmation. So a receipt that keeps failing is retried a
+    few times and then left alone, instead of every 15 minutes for days --
+    and, being filtered out of the query, it never holds a batch slot that a
+    newer missing receipt needs (design review finding)."""
+    return reduce(
+        or_,
+        (
+            Q(
+                receipt_email_sweeps=sweeps,
+                confirmed_at__lt=now - RECEIPT_SWEEP_GRACE * 2**sweeps,
+            )
+            for sweeps in range(RECEIPT_SWEEP_MAX_SWEEPS)
+        ),
+    )
+
+
+@shared_task
+def resend_missing_order_receipts():
+    """Re-queues the receipt email for confirmed orders that still have not
+    had one. Paid orders later cancelled or refunded are left alone."""
+    if not cache.add(RECEIPT_SWEEP_LOCK_KEY, "1", RECEIPT_SWEEP_LOCK_TIMEOUT_SECONDS):
+        logger.warning(
+            "resend_missing_order_receipts: previous sweep still running; "
+            "skipping this trigger."
+        )
+        return {"skipped": True}
+
+    try:
+        now = timezone.now()
+        due = (
+            Order.objects.filter(
+                _receipt_sweep_due(now),
+                receipt_email_sent_at__isnull=True,
+                confirmed_at__gte=now - RECEIPT_SWEEP_MAX_AGE,
+            )
+            .exclude(email="")
+            .exclude(status__in=RECEIPT_SKIP_STATUSES)
+            .order_by("confirmed_at")
+            .values_list("pk", "receipt_email_sweeps")[:RECEIPT_SWEEP_BATCH_SIZE]
+        )
+
+        requeued = 0
+        for order_id, sweeps in list(due):
+            # Conditional on the count read above, so an overlapping sweep
+            # can't queue the same receipt twice.
+            claimed = Order.objects.filter(
+                pk=order_id, receipt_email_sweeps=sweeps
+            ).update(receipt_email_sweeps=F("receipt_email_sweeps") + 1)
+            if not claimed:
+                continue
+            try:
+                send_order_receipt_email_task.delay(order_id)
+            except Exception:
+                # CodeRabbit (PR #93): nothing was queued, so this must not
+                # use up one of the order's few attempts -- give it back, or
+                # a flaky broker could exhaust them without a single send.
+                # Conditional on the count this sweep wrote, so a change made
+                # meanwhile (another sweep, or the job giving up) survives.
+                # The broker can occasionally raise after accepting the
+                # message; then the job runs AND the attempt is given back,
+                # which costs one extra queued job at most -- the lock and
+                # receipt_email_sent_at stop a second email.
+                Order.objects.filter(
+                    pk=order_id, receipt_email_sweeps=sweeps + 1
+                ).update(receipt_email_sweeps=sweeps)
+                logger.exception(
+                    "resend_missing_order_receipts: could not queue the "
+                    "receipt for order_id=%s; it stays due for the next sweep.",
+                    order_id,
+                )
+                continue
+            requeued += 1
+            # Logged only once actually queued: a failed queue gives the
+            # attempt back, so it would not have been the last one.
+            if sweeps + 1 == RECEIPT_SWEEP_MAX_SWEEPS:
+                logger.error(
+                    "resend_missing_order_receipts: final attempt for "
+                    "order_id=%s -- if this send fails too, the customer "
+                    "will not get a receipt email automatically.",
+                    order_id,
+                )
+
+        logger.info("resend_missing_order_receipts: requeued=%s", requeued)
+        return {"requeued": requeued}
+    finally:
+        cache.delete(RECEIPT_SWEEP_LOCK_KEY)

@@ -5,6 +5,7 @@ the admin found out by logging in and looking at a dashboard card. If
 nobody logged in, paid orders sat unseen while the customer waited.
 """
 
+import uuid
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -20,6 +21,13 @@ from apps.orders.models import Order, OrderItem
 
 def _make_order(**overrides):
     defaults = {
+        # A REAL reference, generated per call. Order.payment_reference has
+        # no default, so omitting it left every order with "" -- and
+        # `assert order.payment_reference in html` is then `assert "" in
+        # html`, which is true of ANY text. Those checks could never fail,
+        # whether or not the reference was rendered at all (CodeRabbit,
+        # PR #93). Unique per call because the field is unique=True.
+        "payment_reference": f"order-{uuid.uuid4().hex}",
         "full_name": "Kofi Mensah",
         "phone_number": "+233241234567",
         "email": "kofi@example.com",
@@ -264,6 +272,10 @@ def test_the_sms_stays_short_enough_not_to_multiply_cost():
     assert len(body) <= 160
     assert order.payment_reference in body
     assert "400.00" in body
+    # Code review (PR #93): the length check alone could never catch an item
+    # list -- send_admin_order_alert truncates any body to one segment, so
+    # a list is cut short rather than rejected. Check for the item itself.
+    assert "A Very Long Product Name" not in body
 
 
 @pytest.mark.django_db

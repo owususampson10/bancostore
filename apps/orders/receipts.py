@@ -89,3 +89,100 @@ def build_receipt_context(order) -> dict:
         "total": f"{order.total:.2f}",
         "delivery_details": _render_delivery_details(order),
     }
+
+
+# --- Task 62: the branded HTML receipt ---------------------------------------
+
+# Relative to a STATICFILES_DIRS root. `static/images` is itself a root (see
+# settings.STATICFILES_DIRS), so this is served at /static/bancostore-brand/...
+# with no `images/` segment -- getting that wrong returned 404 in production
+# for the EXISTING logo when first checked, which is how this was found.
+RECEIPT_LOGO_STATIC_PATH = "bancostore-brand/logo/bancostore-logo-orange-email.png"
+
+
+def receipt_logo_url() -> str:
+    """Absolute https URL for the email logo.
+
+    Absolute because email is read far from the site: a relative /static/
+    path resolves against the reader's mail client and loads nothing.
+    Built from the Site framework's domain (bancostore.com, set by Task 37b)
+    and Django's own static() rather than typed in, so it follows the
+    domain and any static storage hashing automatically.
+
+    Hosted, never an inline attachment. The first design embedded the logo
+    as a cid: attachment; in a real Gmail test it surfaced as a file the
+    user could not download, and Gmail blocks attachments in Spam outright.
+
+    A PNG, never SVG: Gmail does not render SVG images, and every logo
+    shipped before this task was SVG.
+    """
+    from django.contrib.sites.models import Site
+    from django.templatetags.static import static
+
+    domain = Site.objects.get_current().domain
+    return f"https://{domain}{static(RECEIPT_LOGO_STATIC_PATH)}"
+
+
+def build_receipt_html_context(order) -> dict:
+    """Structured context for templates/emails/order_receipt.html.
+
+    Unlike build_receipt_context, this is NOT for the admin-editable
+    renderer, which only ever substitutes plain strings and has no loop.
+    The HTML design is developer-owned and fixed in code, so it can take
+    real per-line data and loop over it -- that is what lets each line show
+    the product on its own row with "qty x price" beneath, till-style.
+
+    Money is still formatted to 2dp here, not in the template, so the
+    rounding of an amount can never depend on markup.
+    """
+    from .models import Order
+
+    items = [
+        {
+            # The snapshot taken at order creation, never item.product.name
+            # -- a later product rename must not rewrite a sent receipt.
+            "name": item.product_name,
+            "quantity": item.quantity,
+            "unit_price": f"{item.unit_price:.2f}",
+            "line_total": f"{item.unit_price * item.quantity:.2f}",
+        }
+        for item in order.items.all()
+    ]
+
+    is_pickup = order.delivery_method == Order.DeliveryMethod.PICKUP
+    if is_pickup:
+        delivery_lines = ["Pickup from our Bancostore location."]
+    else:
+        delivery_lines = [
+            line
+            for line in (
+                order.address,
+                order.area,
+                order.landmark,
+                order.get_delivery_zone_display(),
+            )
+            if line and str(line).strip()
+        ]
+
+    return {
+        "logo_src": receipt_logo_url(),
+        "reference": order.payment_reference,
+        "order_date": timezone.localtime(order.created_at).strftime("%d %B %Y"),
+        "customer_name": order.full_name,
+        "items": items,
+        "subtotal": f"{order.subtotal:.2f}",
+        # A till receipt only prints a discount line when there is one.
+        "show_discount": order.discount_amount > 0,
+        "discount_amount": f"{order.discount_amount:.2f}",
+        "delivery_fee": f"{order.delivery_fee:.2f}",
+        "delivery_is_free": order.delivery_fee == 0,
+        "total": f"{order.total:.2f}",
+        "is_pickup": is_pickup,
+        # Name and phone kept separate from the address lines so the
+        # template can wrap the phone in a styled tel: link -- Gmail
+        # otherwise auto-links a bare number in blue underline.
+        "delivery_name": order.full_name,
+        "delivery_phone": str(order.phone_number),
+        "delivery_phone_e164": str(order.phone_number).replace(" ", ""),
+        "delivery_lines": delivery_lines,
+    }

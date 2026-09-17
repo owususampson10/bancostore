@@ -27,6 +27,7 @@ from apps.notifications.models import NotificationTemplate
 from apps.notifications.rendering import render_email_or_default, render_or_default
 from apps.notifications.sms import send_sms
 from apps.orders.admin_alerts import send_admin_order_alert
+from apps.orders.receipt_email import send_order_receipt_email_task
 from apps.orders.receipts import build_receipt_context
 from apps.promotions.services import (
     consume_discount_code,
@@ -599,10 +600,10 @@ def _send_confirmation_notifications(order: Order) -> None:
     # retry_on_lock_contention -- so a failure while building the receipt
     # escaped the helper entirely, skipping both notifications on an
     # already-confirmed order and, if it happened to resemble an
-    # OperationalError, re-running an already-committed transaction. The
-    # duplicated call costs one extra query on a path that is already
-    # sending an SMS and an email; the per-channel guarantee is the whole
-    # point of this function's shape.
+    # OperationalError, re-running an already-committed transaction. Since
+    # Task 62 only the SMS builds this context here -- the email's is built
+    # by the Celery worker -- but each channel keeps its own guard; the
+    # per-channel guarantee is the whole point of this function's shape.
     try:
         context = build_receipt_context(order)
         send_sms(
@@ -624,28 +625,42 @@ def _send_confirmation_notifications(order: Order) -> None:
         )
 
     if order.email:
-        try:
-            subject, message = render_email_or_default(
-                NotificationTemplate.Key.ORDER_CONFIRMED_EMAIL,
-                build_receipt_context(order),
-                default_subject="Your Bancostore order {{reference}} is confirmed",
-                default_body=(
-                    "Your order (GHS {{total}}) is confirmed. "
-                    "Reference: {{reference}}"
-                ),
-            )
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=get_sender_email(),
-                recipient_list=[order.email],
-            )
-        except Exception:
-            logger.exception(
-                "confirm_order_payment: failed to send email confirmation "
-                "for reference=%s",
-                order.payment_reference,
-            )
+        # Task 62: the receipt email -- plain text, branded HTML and an
+        # attached PDF -- is built and sent by the Celery worker, not here.
+        # This function runs inline in the Paystack webhook AND in the
+        # customer's post-payment redirect, inside the site's single
+        # Daphne process; rendering a PDF here would make Paystack and the
+        # customer wait on it, and put a slow render directly in the
+        # payment path. Only the id is passed, so the worker reads the
+        # order as it is when the task runs.
+        #
+        # on_commit so the task can never run before the confirmation it
+        # describes is visible to the worker's own connection. Guarded
+        # like every other channel here: an enqueue failure (a broker
+        # outage) must not escape into confirm_order_payment's retry
+        # wrapper after the money has already moved. The receipt is not
+        # lost when that happens: the order has no receipt_email_sent_at,
+        # so apps.orders.tasks.resend_missing_order_receipts queues it later.
+        #
+        # The guard sits INSIDE the callback (agent review, PR #93): wrapped
+        # around on_commit itself, it only caught a broker error when
+        # on_commit ran the callback immediately, i.e. when no transaction
+        # was open. Called from inside one, the error would surface at
+        # commit time, past the guard.
+        order_id = order.pk
+        reference = order.payment_reference
+
+        def enqueue_receipt():
+            try:
+                send_order_receipt_email_task.delay(order_id)
+            except Exception:
+                logger.exception(
+                    "confirm_order_payment: failed to enqueue the receipt email "
+                    "for reference=%s",
+                    reference,
+                )
+
+        transaction.on_commit(enqueue_receipt)
 
 
 def _send_stock_unavailable_notification(order: Order) -> None:
