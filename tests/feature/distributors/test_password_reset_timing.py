@@ -49,7 +49,8 @@ def _query_shapes(captured):
         sql = query["sql"]
         if "silk_" in sql:
             continue
-        sql = re.sub(r'"s\d+_x\d+"', "?", sql)  # numbered savepoint names
+        # Numbered savepoint names: "s1_x2" on SQLite, `s1_x2` on MySQL (CI).
+        sql = re.sub(r'["`]s\d+_x\d+["`]', "?", sql)
         sql = re.sub(r"'(?:[^']|'')*'", "?", sql)
         sql = re.sub(r"\b\d+(?:\.\d+)?\b", "?", sql)
         shapes.append(sql)
