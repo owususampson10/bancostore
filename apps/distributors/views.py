@@ -6,6 +6,7 @@ from decimal import Decimal
 from functools import wraps
 from urllib.parse import quote
 
+from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
@@ -35,7 +36,7 @@ from apps.distributors.cooling_off_services import (
     cancel_membership_and_refund,
 )
 from apps.notifications.models import Notification
-from apps.notifications.otp import generate_otp, verify_otp
+from apps.notifications.otp import OtpDeliveryFailed, generate_otp, verify_otp
 from apps.notifications.services import push_unread_count_update
 from apps.orders.services import confirm_order_payment
 from apps.pv_ledger.models import MonthlyPersonalPv
@@ -469,7 +470,7 @@ def verify_otp_view(request):
     return render(
         request,
         "distributors/verify_otp.html",
-        {"form": form, "phone_number": phone_number},
+        {"form": form, "phone_number": phone_number, "purpose": purpose},
     )
 
 
@@ -483,9 +484,53 @@ def resend_otp(request):
     # send while a victim had an in-progress OTP flow.
     phone_number = request.session.get("otp_phone_number")
     purpose = request.session.get("otp_purpose")
-    if phone_number and purpose:
+    if not (phone_number and purpose):
+        return redirect("distributors:verify_otp")
+
+    if purpose == "password_reset":
+        # Task 63b. Mirrors forgot_password: no code for a number with no
+        # account (this used to spend a real SMS credit on any number typed
+        # into the reset form), an email fallback when the text fails, and
+        # the same response whatever happened -- saying "we couldn't send"
+        # would only ever happen for real accounts, revealing which numbers
+        # are registered.
+        _send_password_reset_code(phone_number)
+        return redirect("distributors:verify_otp")
+
+    try:
         generate_otp(phone_number, purpose=purpose)
+    except OtpDeliveryFailed:
+        # Only reachable after a correct password, so saying so reveals
+        # nothing an attacker doesn't already have.
+        messages.error(
+            request,
+            "We couldn't send a new code right now. Please try again in a few "
+            "minutes.",
+        )
     return redirect("distributors:verify_otp")
+
+
+def _send_password_reset_code(phone_number):
+    """Sends a reset code if the number has an account, by SMS or, if that
+    fails and the account has one, by email. Never raises and returns
+    nothing, so callers can't accidentally reveal which case happened."""
+    distributor = (
+        Distributor.objects.select_related("user")
+        .filter(phone_number=phone_number)
+        .first()
+    )
+    if distributor is None:
+        return
+    try:
+        generate_otp(
+            phone_number,
+            purpose="password_reset",
+            fallback_email=distributor.user.email,
+        )
+    except OtpDeliveryFailed:
+        # Already logged in generate_otp. Nothing to tell the visitor
+        # without revealing that the account exists.
+        pass
 
 
 @ratelimit(key="ip", rate="20/m", method="POST")
@@ -504,7 +549,17 @@ def login_view(request):
                 {"minutes_remaining": minutes_remaining},
             )
         elif result.needs_verification:
-            generate_otp(phone_number, purpose="registration")
+            try:
+                generate_otp(phone_number, purpose="registration")
+            except OtpDeliveryFailed:
+                # Task 63b: this was a server error page. The password was
+                # already correct, so explaining reveals nothing.
+                form.add_error(
+                    None,
+                    "We couldn't send your verification code right now. Please "
+                    "try again in a few minutes.",
+                )
+                return render(request, "distributors/login.html", {"form": form})
             request.session["otp_phone_number"] = phone_number
             request.session["otp_purpose"] = "registration"
             return redirect("distributors:verify_otp")
@@ -527,8 +582,7 @@ def forgot_password(request):
     form = DistributorForgotPasswordForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         phone_number = str(form.cleaned_data["phone_number"])
-        if Distributor.objects.filter(phone_number=phone_number).exists():
-            generate_otp(phone_number, purpose="password_reset")
+        _send_password_reset_code(phone_number)
         # Redirect the same way regardless of whether the account exists,
         # to avoid revealing which phone numbers are registered.
         request.session["otp_phone_number"] = phone_number

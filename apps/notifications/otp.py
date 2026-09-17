@@ -1,6 +1,8 @@
+import logging
 import secrets
 from datetime import timedelta
 
+from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
 
@@ -11,12 +13,35 @@ from bancostore.concurrency import (
     select_for_update_nowait_if_supported,
 )
 
+from .email import get_sender_email
 from .models import NotificationTemplate, OTPCode
 from .rendering import render_or_default
-from .sms import send_sms
+from .sms import SmsSendError, send_sms
+
+logger = logging.getLogger(__name__)
+
+# Task 63b. Only a password reset may fall back to email. The "registration"
+# code exists to prove the distributor holds that phone number, and a code
+# delivered by email proves nothing about the phone (user-confirmed
+# 2026-09-17).
+EMAIL_FALLBACK_PURPOSES = frozenset({"password_reset"})
 
 
-def generate_otp(phone_number: str, *, purpose: str) -> OTPCode:
+class OtpDeliveryFailed(Exception):
+    """The code was created but could not be delivered by any allowed
+    route. Callers show a friendly message instead of an error page."""
+
+
+def generate_otp(
+    phone_number: str, *, purpose: str, fallback_email: str = ""
+) -> OTPCode:
+    """Creates a code and sends it by SMS.
+
+    If the SMS can't be sent (e.g. mNotify is out of credit), a password
+    reset code goes to `fallback_email` instead, when there is one. Anything
+    else raises OtpDeliveryFailed. The returned code's `delivered_via` says
+    which route worked ("sms" or "email").
+    """
     code = f"{secrets.randbelow(1_000_000):06d}"
     otp = OTPCode.objects.create(
         phone_number=phone_number,
@@ -35,12 +60,45 @@ def generate_otp(phone_number: str, *, purpose: str) -> OTPCode:
             "{{expiry_minutes}} minutes."
         ),
     )
-    send_sms(
-        phone_number,
-        message,
-        sms_type="otp",
-    )
+    try:
+        send_sms(
+            phone_number,
+            message,
+            sms_type="otp",
+        )
+    except SmsSendError:
+        # No phone number in the log line: it would tie a person to a
+        # failed login or reset attempt for anyone reading the logs.
+        logger.exception("generate_otp: SMS failed for purpose=%s", purpose)
+        fallback_email = (fallback_email or "").strip()
+        if purpose not in EMAIL_FALLBACK_PURPOSES or not fallback_email:
+            raise OtpDeliveryFailed(f"could not deliver the {purpose} code") from None
+        _send_otp_email(fallback_email, code)
+        otp.delivered_via = "email"
+        return otp
+
+    otp.delivered_via = "sms"
     return otp
+
+
+def _send_otp_email(email: str, code: str) -> None:
+    try:
+        send_mail(
+            subject="Your Bancostore password reset code",
+            message=(
+                f"Your Bancostore password reset code is {code}. It expires in "
+                f"{config.OTP_CODE_EXPIRY_MINUTES} minutes.\n\n"
+                "We sent it by email because we couldn't reach your phone by "
+                "text message.\n\n"
+                "If you didn't ask to reset your password, you can ignore this "
+                "email -- your password has not changed."
+            ),
+            from_email=get_sender_email(),
+            recipient_list=[email],
+        )
+    except Exception:
+        logger.exception("generate_otp: the email fallback failed too")
+        raise OtpDeliveryFailed("could not deliver the password reset code") from None
 
 
 def verify_otp(phone_number: str, *, purpose: str, submitted_code: str) -> bool:
