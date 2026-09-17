@@ -1,8 +1,11 @@
 import re
+from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password
 from django.urls import reverse
+from django.utils import timezone
 
 import pytest
 
@@ -277,3 +280,187 @@ def test_lock_state_survives_a_failed_post_rerender(client):
     content = response.content.decode()
     assert "readonly" in _sponsor_field_tag(content)
     assert response.context["sponsor_locked"] is True
+
+
+# --- Task 67: taking over an abandoned registration ----------------------------
+#
+# Cleanup now keeps an unpaid registration for 72 hours of idle checkout (it
+# used to be deleted after one), so without this a person who gave up and came
+# back the next day could not register their own number for three days.
+
+
+IN_PROGRESS = "A registration for this phone number is already in progress."
+
+
+def _existing_pending(sponsor, *, idle, age=None, reference="reg-old", consumed=False):
+    pending = PendingRegistration.objects.create(
+        full_name="Old Attempt",
+        phone_number="+233241234567",
+        email="old@example.test",
+        address="Old Road",
+        area="Osu",
+        password_hash="hashed",
+        sponsor=sponsor,
+        payment_reference=reference,
+        fee_amount_pesewas=10000,
+    )
+    now = timezone.now()
+    PendingRegistration.objects.filter(pk=pending.pk).update(
+        payment_initialized_at=now - idle,
+        created_at=now - (age or idle),
+        consumed_at=now if consumed else None,
+    )
+    return pending
+
+
+def _register_again(client, sponsor):
+    return client.post(
+        reverse("distributors:register"),
+        {**VALID_REGISTRATION_DATA, "sponsor_ir_id": sponsor.ir_id},
+    )
+
+
+def _form_errors(response):
+    return response.context["form"].errors.get("phone_number", [])
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_an_abandoned_registration_over_an_hour_old_is_replaced(mock_verify, client):
+    sponsor = _make_sponsor()
+    _existing_pending(sponsor, idle=timedelta(hours=2))
+    mock_verify.return_value = {"status": "abandoned"}
+
+    response = _register_again(client, sponsor)
+
+    assert response.status_code == 302
+    pending = PendingRegistration.objects.get(phone_number="+233241234567")
+    assert pending.full_name == "Kofi Mensah"
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_a_registration_checked_out_within_the_hour_is_not_replaced(
+    mock_verify, client
+):
+    """The person may be on the Paystack page right now."""
+    sponsor = _make_sponsor()
+    _existing_pending(sponsor, idle=timedelta(minutes=30))
+
+    response = _register_again(client, sponsor)
+
+    assert _form_errors(response) == [IN_PROGRESS]
+    assert PendingRegistration.objects.get().full_name == "Old Attempt"
+    mock_verify.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_after_a_day_reopening_checkout_no_longer_holds_the_number(mock_verify, client):
+    """Someone who registered another person's number can't keep it by
+    reopening the payment page every hour."""
+    sponsor = _make_sponsor()
+    _existing_pending(sponsor, idle=timedelta(minutes=5), age=timedelta(hours=25))
+    mock_verify.return_value = {"status": "abandoned"}
+
+    response = _register_again(client, sponsor)
+
+    assert response.status_code == 302
+    assert PendingRegistration.objects.get().full_name == "Kofi Mensah"
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_an_old_registration_that_was_actually_paid_is_completed_not_replaced(
+    mock_verify, client
+):
+    sponsor = _make_sponsor()
+    _existing_pending(sponsor, idle=timedelta(hours=2))
+    mock_verify.return_value = {"status": "success", "amount": 10000, "currency": "GHS"}
+
+    response = _register_again(client, sponsor)
+
+    assert _form_errors(response) == [IN_PROGRESS]
+    assert Distributor.objects.filter(phone_number="+233241234567").exists()
+    assert PendingRegistration.objects.get().full_name == "Old Attempt"
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_no_answer_from_paystack_keeps_the_old_registration(mock_verify, client):
+    from apps.distributors.paystack import PaystackError
+
+    sponsor = _make_sponsor()
+    _existing_pending(sponsor, idle=timedelta(hours=2), age=timedelta(days=3))
+    mock_verify.side_effect = PaystackError("timed out")
+
+    response = _register_again(client, sponsor)
+
+    assert _form_errors(response) == [IN_PROGRESS]
+    assert PendingRegistration.objects.get().full_name == "Old Attempt"
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_a_completed_registration_gives_the_same_message_and_asks_nobody(
+    mock_verify, client
+):
+    """Same words as an in-progress one, so the form never reveals which
+    numbers belong to distributors."""
+    sponsor = _make_sponsor()
+    _existing_pending(sponsor, idle=timedelta(days=5), consumed=True)
+
+    response = _register_again(client, sponsor)
+
+    assert _form_errors(response) == [IN_PROGRESS]
+    mock_verify.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.views.resolve_unconsumed_pending_registration")
+def test_losing_a_race_for_the_same_number_is_a_form_error_not_a_crash(
+    mock_resolve, client
+):
+    from apps.distributors.services import PendingRegistrationResolution
+
+    sponsor = _make_sponsor()
+    _existing_pending(sponsor, idle=timedelta(hours=2))
+    # As if another request had already replaced it with its own new row.
+    mock_resolve.return_value = PendingRegistrationResolution.DELETED
+
+    response = _register_again(client, sponsor)
+
+    assert response.status_code == 200
+    assert _form_errors(response) == [IN_PROGRESS]
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_a_charge_left_unapproved_for_a_day_does_not_hold_the_number(
+    mock_verify, client
+):
+    """Code review: starting a mobile-money charge and never approving it
+    must not keep someone else's number for 30 days."""
+    sponsor = _make_sponsor()
+    _existing_pending(sponsor, idle=timedelta(hours=2), age=timedelta(hours=25))
+    mock_verify.return_value = {"status": "ongoing"}
+
+    response = _register_again(client, sponsor)
+
+    assert response.status_code == 302
+    assert PendingRegistration.objects.get().full_name == "Kofi Mensah"
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.views.resolve_unconsumed_pending_registration")
+def test_a_locked_old_registration_is_a_form_error_not_a_crash(mock_resolve, client):
+    from django.db import OperationalError
+
+    sponsor = _make_sponsor()
+    _existing_pending(sponsor, idle=timedelta(hours=2))
+    mock_resolve.side_effect = OperationalError("could not obtain lock")
+
+    response = _register_again(client, sponsor)
+
+    assert response.status_code == 200
+    assert _form_errors(response) == [IN_PROGRESS]

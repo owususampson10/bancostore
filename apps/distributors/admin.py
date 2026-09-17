@@ -5,7 +5,7 @@ from django.utils.html import format_html
 from constance import config
 from simple_history.admin import SimpleHistoryAdmin
 
-from .models import DiditVerification, Distributor
+from .models import DiditVerification, Distributor, PaymentIssue
 from .services import approve_kyc, reject_kyc
 
 
@@ -102,3 +102,40 @@ class DistributorAdmin(SimpleHistoryAdmin):
                 "action": "reject_selected_kyc",
             },
         )
+
+
+@admin.register(PaymentIssue)
+class PaymentIssueAdmin(admin.ModelAdmin):
+    """Task 67. Payments Paystack confirmed that did not become what they
+    paid for. Everything except resolved_at is a record of what happened, so
+    it is read-only; the admin marks an issue resolved once it is refunded or
+    fixed. Never added or deleted by hand -- the site creates them."""
+
+    list_display = (
+        "reference",
+        "kind",
+        "amount_pesewas",
+        "payer_name",
+        "payer_phone",
+        "created_at",
+        "resolved_at",
+    )
+    list_filter = ("kind", ("resolved_at", admin.EmptyFieldListFilter))
+    search_fields = ("reference", "payer_name", "payer_phone", "payer_email")
+    readonly_fields = (
+        "reference",
+        "kind",
+        "amount_pesewas",
+        "paid_at",
+        "payer_name",
+        "payer_phone",
+        "payer_email",
+        "detail",
+        "created_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

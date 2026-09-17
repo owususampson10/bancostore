@@ -1,0 +1,227 @@
+"""Task 67. A payment Paystack confirmed that did not become what it paid for
+leaves a durable PaymentIssue, and the admin hears about it once.
+
+Found 2026-09-16: a distributor paid the registration fee on a checkout page
+left open past the pending registration's cleanup. No account was created,
+and the only trace was a line in the server log.
+"""
+
+from unittest.mock import patch
+
+from django.contrib.auth.hashers import make_password
+from django.core import mail
+from django.db import transaction
+
+import pytest
+from constance import config
+
+from apps.distributors.models import PaymentIssue, PendingRegistration
+from apps.distributors.payment_issues import record_payment_issue
+from apps.notifications.models import AdminNotification
+from tests.unit.distributors.test_consume_paid_registration import _make_sponsor
+
+KIND = PaymentIssue.Kind.REGISTRATION_UNMATCHED
+
+
+@pytest.fixture
+def locmem(settings, monkeypatch):
+    """Also runs on_commit callbacks straight away: the alert is deferred to
+    commit, which a plain django_db test (one rolled-back transaction) never
+    reaches. The deferral itself is covered by the transaction=True test at
+    the bottom of this file."""
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    monkeypatch.setattr(
+        "apps.distributors.payment_issues.transaction.on_commit", lambda fn: fn()
+    )
+
+
+def _verified(**overrides):
+    data = {
+        "status": "success",
+        "amount": 10000,
+        "currency": "GHS",
+        "paid_at": "2026-09-16T09:39:01.000Z",
+        "customer": {"email": "payer@example.test"},
+        "metadata": {"full_name": "Ama Owusu", "phone_number": "+233241234567"},
+    }
+    data.update(overrides)
+    return data
+
+
+@pytest.mark.django_db
+def test_records_the_issue_with_the_payer_from_paystack_metadata(locmem):
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+
+    issue = record_payment_issue("reg-abc", KIND, verified=_verified())
+
+    issue.refresh_from_db()
+    assert issue.kind == KIND
+    assert issue.amount_pesewas == 10000
+    assert issue.paid_at is not None
+    assert issue.payer_name == "Ama Owusu"
+    assert issue.payer_phone == "+233241234567"
+    assert issue.payer_email == "payer@example.test"
+
+
+@pytest.mark.django_db
+def test_emails_the_admin_and_rings_the_bell(locmem):
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+
+    record_payment_issue("reg-abc", KIND, verified=_verified())
+
+    (message,) = mail.outbox
+    assert message.to == ["ops@bancostore.test"]
+    assert "reg-abc" in message.body
+    assert "Ama Owusu" in message.body
+    assert "100.00" in message.body
+    bell = AdminNotification.objects.get()
+    assert bell.event_type == AdminNotification.EventType.PAYMENT_ISSUE
+    assert "reg-abc" in bell.message
+
+
+@pytest.mark.django_db
+def test_blank_setting_falls_back_to_the_order_alert_email(locmem):
+    config.PAYMENT_ISSUE_ALERT_EMAIL = ""
+    config.ADMIN_ORDER_ALERT_EMAIL = "orders@bancostore.test"
+
+    record_payment_issue("reg-abc", KIND, verified=_verified())
+
+    (message,) = mail.outbox
+    assert message.to == ["orders@bancostore.test"]
+
+
+@pytest.mark.django_db
+def test_no_address_anywhere_still_records_and_rings_the_bell(locmem):
+    config.PAYMENT_ISSUE_ALERT_EMAIL = ""
+    config.ADMIN_ORDER_ALERT_EMAIL = "  "
+
+    record_payment_issue("reg-abc", KIND, verified=_verified())
+
+    assert mail.outbox == []
+    assert PaymentIssue.objects.filter(reference="reg-abc").exists()
+    assert AdminNotification.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_the_same_reference_alerts_only_once(locmem):
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+
+    first = record_payment_issue("reg-abc", KIND, verified=_verified())
+    second = record_payment_issue(
+        "reg-abc", PaymentIssue.Kind.REGISTRATION_DUPLICATE, verified=_verified()
+    )
+
+    assert first.pk == second.pk
+    assert second.kind == KIND
+    assert len(mail.outbox) == 1
+    assert AdminNotification.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_payer_details_come_from_the_pending_registration_when_given(locmem):
+    pending = PendingRegistration.objects.create(
+        full_name="Kofi Mensah",
+        phone_number="+233241111111",
+        email="kofi@example.test",
+        address="1 Road",
+        area="Osu",
+        password_hash=make_password("x"),
+        sponsor=_make_sponsor(),
+    )
+
+    issue = record_payment_issue(
+        "reg-abc", KIND, verified=_verified(metadata=""), pending=pending
+    )
+
+    assert issue.payer_name == "Kofi Mensah"
+    assert issue.payer_phone == "+233241111111"
+
+
+@pytest.mark.django_db
+def test_without_metadata_the_phone_comes_from_the_placeholder_email(locmem):
+    verified = _verified(
+        metadata=None, customer={"email": "guest-233241234567@guests.bancostore.com"}
+    )
+
+    issue = record_payment_issue("reg-abc", KIND, verified=verified)
+
+    assert issue.payer_phone == "+233241234567"
+
+
+@pytest.mark.django_db
+def test_hostile_metadata_is_cleaned_and_capped(locmem):
+    """Paystack's inline checkout takes a public key, so metadata is text a
+    stranger can choose."""
+    verified = _verified(
+        metadata={"full_name": "Evil\r\nBcc: x@y.z" + "A" * 500, "phone_number": 7}
+    )
+
+    issue = record_payment_issue("reg-abc", KIND, verified=verified)
+
+    assert "\n" not in issue.payer_name and "\r" not in issue.payer_name
+    assert len(issue.payer_name) <= 255
+    assert issue.payer_phone == "7"
+
+
+@pytest.mark.django_db
+def test_metadata_sent_as_a_json_string_is_still_read(locmem):
+    verified = _verified(metadata='{"full_name": "Ama Owusu"}')
+
+    issue = record_payment_issue("reg-abc", KIND, verified=verified)
+
+    assert issue.payer_name == "Ama Owusu"
+
+
+@pytest.mark.django_db
+def test_a_failing_email_never_raises_and_the_issue_stays(locmem):
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+
+    with patch(
+        "apps.distributors.payment_issues.send_mail", side_effect=OSError("smtp")
+    ):
+        issue = record_payment_issue("reg-abc", KIND, verified=_verified())
+
+    assert PaymentIssue.objects.filter(pk=issue.pk).exists()
+    assert AdminNotification.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_a_database_failure_never_raises(locmem):
+    with patch.object(
+        PaymentIssue.objects, "get_or_create", side_effect=RuntimeError("db down")
+    ):
+        assert record_payment_issue("reg-abc", KIND, verified=_verified()) is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_alert_waits_for_the_surrounding_transaction_to_commit(settings):
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+
+    with transaction.atomic():
+        record_payment_issue("reg-abc", KIND, verified=_verified())
+        assert mail.outbox == []
+
+    assert len(mail.outbox) == 1
+
+
+@pytest.mark.django_db
+def test_an_unconfirmed_registration_email_does_not_say_it_was_paid(locmem):
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+
+    record_payment_issue("reg-abc", PaymentIssue.Kind.REGISTRATION_UNCONFIRMED)
+
+    (message,) = mail.outbox
+    assert "Paystack confirmed" not in message.body
+    assert "could not be reached" in message.body
+
+
+@pytest.mark.django_db
+def test_a_paid_issue_email_tells_the_admin_to_refund(locmem):
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+
+    record_payment_issue("reg-abc", KIND, verified=_verified())
+
+    (message,) = mail.outbox
+    assert "Paystack confirmed this payment" in message.body
+    assert "Refund" in message.body

@@ -202,9 +202,82 @@ class PendingRegistration(models.Model):
     payment_reference = models.CharField(
         max_length=100, null=True, blank=True, unique=True
     )
+    # Task 67. When the latest Paystack checkout was opened -- cleanup
+    # measures "idle" from here, not created_at, since a checkout page stays
+    # payable long after the form was filled in (the 2026-09-16 incident:
+    # form at 07:56, paid at 09:39, record already deleted).
+    payment_initialized_at = models.DateTimeField(null=True, blank=True)
+    # Task 67. The reference that actually created the account. Every
+    # visit to the payment step issues a new payment_reference, so without
+    # this a second payment on an older checkout tab is indistinguishable
+    # from a harmless webhook replay of the one that counted.
+    consumed_reference = models.CharField(
+        max_length=100, null=True, blank=True, unique=True
+    )
+    # Task 67. When cleanup last asked Paystack about this row, so a row it
+    # keeps has to wait its turn behind the others.
+    last_checked_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"PendingRegistration<{self.phone_number}>"
+
+
+class PaymentIssue(models.Model):
+    """Task 67. A payment Paystack confirmed as successful that did not turn
+    into what it paid for -- the admin's to-do list for a refund or a manual
+    fix.
+
+    Found 2026-09-16: a registration fee was paid on a checkout page left
+    open past the pending registration's cleanup, no account was created,
+    and the only trace was a server log line. Every such case now leaves
+    this row, and the admin is emailed and belled once, when it is created.
+
+    One row per Paystack reference -- a payment is refunded once, however
+    many webhook retries, cleanup runs or reconciliation passes notice it.
+    Payer details are copied in because the record that held them may be
+    deleted by then. Never history-tracked: resolving an issue is the
+    admin's own bookkeeping, not an audit event.
+    """
+
+    class Kind(models.TextChoices):
+        REGISTRATION_UNMATCHED = (
+            "registration_unmatched",
+            "Registration fee paid, no registration found",
+        )
+        REGISTRATION_DUPLICATE = (
+            "registration_duplicate",
+            "Registration fee paid twice",
+        )
+        REGISTRATION_NOT_CREATED = (
+            "registration_not_created",
+            "Registration fee paid, account could not be created",
+        )
+        REGISTRATION_UNCONFIRMED = (
+            "registration_unconfirmed",
+            "Registration payment could not be confirmed with Paystack",
+        )
+        STARTER_PACK_NOT_APPLIED = (
+            "starter_pack_not_applied",
+            "Starter pack paid, not applied",
+        )
+        ORDER_NOT_APPLIED = "order_not_applied", "Order paid, not confirmed"
+
+    reference = models.CharField(max_length=100, unique=True)
+    kind = models.CharField(max_length=40, choices=Kind.choices)
+    amount_pesewas = models.PositiveIntegerField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    payer_name = models.CharField(max_length=255, blank=True, default="")
+    payer_phone = models.CharField(max_length=32, blank=True, default="")
+    payer_email = models.CharField(max_length=254, blank=True, default="")
+    detail = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+
+    def __str__(self):
+        return f"PaymentIssue<{self.reference}>"
 
 
 class DiditVerification(models.Model):

@@ -656,6 +656,16 @@ NOTIFICATION_AND_COMMUNICATION_SETTINGS = {
         "Emailed when SMS credit is low or has run out. Leave blank to rely on "
         "the admin bell only.",
     ),
+    # Task 67. Blank falls back to ADMIN_ORDER_ALERT_EMAIL rather than
+    # meaning "off": this is money a customer has paid for nothing, and a
+    # store that has already said where order mail goes should not also have
+    # to find this setting before hearing about it. The bell always rings.
+    "PAYMENT_ISSUE_ALERT_EMAIL": (
+        "",
+        "Emailed when a payment succeeds on Paystack but no account, starter "
+        "pack or order came of it, so it can be refunded or fixed. Leave blank "
+        "to use the admin order alert email.",
+    ),
 }
 
 # Custom-bounded form fields for the small set of constance keys where an

@@ -1,6 +1,8 @@
 import hashlib
 import hmac
 import json
+from datetime import datetime
+from datetime import timezone as dt_timezone
 from unittest.mock import Mock, patch
 
 from django.test import override_settings
@@ -17,6 +19,7 @@ from apps.distributors.paystack import (
     initialize_transaction,
     initiate_transfer,
     list_banks,
+    list_transactions,
     paystack_customer_email,
     verify_transaction,
     verify_transfer,
@@ -579,3 +582,132 @@ def test_paystack_error_escapes_control_characters_in_the_response_body(mock_pos
     assert "\n" not in message
     assert "\r" not in message
     assert "forged log line" in message  # escaped, not dropped
+
+
+# Task 67. Checked against the live API 2026-09-17: verifying a reference
+# Paystack has never seen answers 400 "Transaction reference not found.",
+# not the 404 the OpenAPI spec lists. Cleanup deletes a pending
+# registration only on a DEFINITE "Paystack never saw this", so the
+# distinction has to be real.
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.get")
+def test_verify_transaction_raises_not_found_on_paystacks_real_400_answer(mock_get):
+    mock_get.return_value = _fake_response(
+        {
+            "status": False,
+            "message": "Transaction reference not found.",
+            "type": "validation_error",
+        },
+        status_code=400,
+    )
+
+    with pytest.raises(PaystackNotFoundError):
+        verify_transaction("reg-unknown")
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.get")
+def test_verify_transaction_raises_not_found_on_a_404(mock_get):
+    mock_get.return_value = _fake_response({"status": False}, status_code=404)
+
+    with pytest.raises(PaystackNotFoundError):
+        verify_transaction("reg-unknown")
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.get")
+def test_verify_transaction_other_400s_are_not_treated_as_not_found(mock_get):
+    """Any other 400 means "we don't know" -- treating it as not found
+    would let cleanup delete a registration that may well be paid."""
+    mock_get.return_value = _fake_response(
+        {"status": False, "message": "Invalid key"}, status_code=400
+    )
+
+    with pytest.raises(PaystackError) as exc_info:
+        verify_transaction("reg-unknown")
+
+    assert not isinstance(exc_info.value, PaystackNotFoundError)
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.get")
+def test_verify_transaction_400_with_a_non_json_body_is_not_not_found(mock_get):
+    response = _fake_response({}, status_code=400, text="<html>bad gateway</html>")
+    response.json.side_effect = ValueError("not json")
+    mock_get.return_value = response
+
+    with pytest.raises(PaystackError) as exc_info:
+        verify_transaction("reg-unknown")
+
+    assert not isinstance(exc_info.value, PaystackNotFoundError)
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.post")
+def test_initialize_transaction_sends_metadata_when_given(mock_post):
+    mock_post.return_value = _fake_response(
+        {"status": True, "data": {"authorization_url": "https://x", "reference": "r"}}
+    )
+    metadata = {"full_name": "Ama Owusu", "phone_number": "+233241234567"}
+
+    initialize_transaction(
+        email="a@example.test",
+        amount_pesewas=10000,
+        reference="r",
+        callback_url="https://cb",
+        metadata=metadata,
+    )
+
+    assert mock_post.call_args.kwargs["json"]["metadata"] == metadata
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.post")
+def test_initialize_transaction_omits_metadata_when_not_given(mock_post):
+    mock_post.return_value = _fake_response(
+        {"status": True, "data": {"authorization_url": "https://x", "reference": "r"}}
+    )
+
+    initialize_transaction(
+        email="a@example.test",
+        amount_pesewas=10000,
+        reference="r",
+        callback_url="https://cb",
+    )
+
+    assert "metadata" not in mock_post.call_args.kwargs["json"]
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.get")
+def test_list_transactions_returns_data_and_meta(mock_get):
+    mock_get.return_value = _fake_response(
+        {
+            "status": True,
+            "data": [{"reference": "reg-1", "status": "success"}],
+            "meta": {"page": 2, "pageCount": 3, "perPage": 100},
+        }
+    )
+
+    since = datetime(2026, 9, 10, tzinfo=dt_timezone.utc)
+
+    data, meta = list_transactions(status="success", page=2, per_page=100, from_=since)
+
+    assert data == [{"reference": "reg-1", "status": "success"}]
+    assert meta["pageCount"] == 3
+    params = mock_get.call_args.kwargs["params"]
+    assert params == {
+        "status": "success",
+        "page": 2,
+        "perPage": 100,
+        "from": "2026-09-10T00:00:00+00:00",
+    }
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.get")
+def test_list_transactions_raises_paystack_error_on_http_failure(mock_get):
+    mock_get.return_value = _fake_response({"status": False}, status_code=500)
+
+    with pytest.raises(PaystackError):
+        list_transactions(status="success", page=1, per_page=100)

@@ -131,10 +131,13 @@ class AdminNotification(models.Model):
         NEW_ORDER = "new_order", "New order paid"
         # Task 63c: SMS credit is low or has run out.
         SMS_CREDIT = "sms_credit", "SMS credit low"
+        # Task 67: a confirmed payment that did not become what it paid for.
+        PAYMENT_ISSUE = "payment_issue", "Payment needs attention"
 
     _ICON_BY_EVENT_TYPE = {
         EventType.NEW_ORDER: ("shopping_bag", "bg-primary/10 text-primary"),
         EventType.SMS_CREDIT: ("warning", "bg-error/10 text-error"),
+        EventType.PAYMENT_ISSUE: ("payments", "bg-error/10 text-error"),
     }
 
     event_type = models.CharField(max_length=32, choices=EventType.choices)

@@ -1,9 +1,11 @@
 import ipaddress
 import logging
+import re
 import socket
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import Enum
 from urllib.parse import urlparse
 
 from django.contrib.auth import authenticate, get_user_model
@@ -32,8 +34,15 @@ from bancostore.concurrency import (
 from bancostore.media import resize_and_convert_to_webp
 
 from .didit import DiditError, get_session_decision
-from .models import DiditVerification, Distributor, IrIdSequence, PendingRegistration
-from .paystack import PaystackError, verify_transaction
+from .models import (
+    DiditVerification,
+    Distributor,
+    IrIdSequence,
+    PaymentIssue,
+    PendingRegistration,
+)
+from .payment_issues import record_payment_issue
+from .paystack import PaystackError, PaystackNotFoundError, verify_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -190,59 +199,117 @@ def snapshot_payment_reference(token) -> PendingRegistration:
             pending.payment_reference = (
                 f"reg-{pending.token.hex}-{uuid.uuid4().hex[:8]}"
             )
-            pending.save(update_fields=["fee_amount_pesewas", "payment_reference"])
+            pending.payment_initialized_at = timezone.now()
+            pending.save(
+                update_fields=[
+                    "fee_amount_pesewas",
+                    "payment_reference",
+                    "payment_initialized_at",
+                ]
+            )
             return pending
 
     return retry_on_lock_contention(_attempt)
 
 
-def consume_paid_registration(reference: str) -> None:
+class RegistrationPaymentOutcome(str, Enum):
+    """Task 67. What consume_paid_registration did with a reference -- so the
+    webhook can ask Paystack to retry a verify that failed, and cleanup can
+    tell "definitely handled" from "don't know yet"."""
+
+    CREATED = "created"
+    ALREADY_APPLIED = "already_applied"
+    NOT_PAID = "not_paid"
+    VERIFY_FAILED = "verify_failed"
+    ISSUE_RECORDED = "issue_recorded"
+    UNKNOWN_REFERENCE = "unknown_reference"
+
+
+# Task 67. The exact shape snapshot_payment_reference issues. Only a reference
+# of this shape is worth looking up by token or verifying with Paystack when
+# no row matches it -- the callback that passes references in is public.
+_REGISTRATION_REFERENCE = re.compile(r"^reg-([0-9a-f]{32})-[0-9a-f]{8}$")
+
+
+def consume_paid_registration(reference: str) -> RegistrationPaymentOutcome:
     """Task 10b: the single source of truth for turning a paid
-    PendingRegistration into a real account. Called from BOTH the Paystack
-    webhook and the callback-redirect view -- whichever arrives first
-    completes it; both call sites, and repeat calls with the same
-    reference, are always safe (idempotent). Design confirmed via
-    doubt-driven-development 2026-07-13 -- see the
+    PendingRegistration into a real account. Called from the Paystack
+    webhook, the callback-redirect view, pending-registration cleanup and
+    the daily payment reconciliation -- whichever arrives first completes
+    it; repeat calls with the same reference are always safe (idempotent).
+    Design confirmed via doubt-driven-development 2026-07-13 -- see the
     project_paystack_registration_payment_design memory.
 
     Never trusts a caller's claims about payment status/amount/currency --
     always re-verifies server-side against Paystack's authoritative
-    /transaction/verify endpoint before creating anything. Never raises:
-    every failure path logs and returns, since a webhook handler crashing
-    just means Paystack retries the same request for up to 72 hours.
-    """
+    /transaction/verify endpoint before creating anything. Never raises
+    for a payment problem: a webhook handler crashing just means Paystack
+    retries the same request.
+
+    Task 67 (found 2026-09-16, when a fee paid on a checkout page left open
+    past cleanup created nothing and left only a log line): a payment
+    Paystack confirms as successful now ALWAYS ends in an account or a
+    PaymentIssue the admin is told about. Specifically:
+    - a reference from an older checkout tab (every visit to the payment
+      step issues a new one) is resolved through the token it carries;
+    - a second successful payment for an already-created account is an
+      issue, but a replay of the reference that created it is not
+      (consumed_reference tells them apart);
+    - an amount/currency mismatch, an existing distributor on the phone, or
+      an account-creation error on a PAID reference is an issue, not just a
+      warning in the log.
+    Issues are recorded after the locked transaction returns, never inside
+    it, so a rollback can't take the record with it."""
 
     def _attempt():
         with transaction.atomic():
-            try:
+            match = _REGISTRATION_REFERENCE.match(reference)
+            pending = select_for_update_nowait_if_supported(
+                PendingRegistration.objects.filter(payment_reference=reference)
+            ).first()
+            if pending is None and match:
                 pending = select_for_update_nowait_if_supported(
-                    PendingRegistration.objects.filter(payment_reference=reference)
-                ).get()
-            except PendingRegistration.DoesNotExist:
-                logger.error(
-                    "consume_paid_registration: no PendingRegistration found for "
-                    "reference=%s -- a payment may have been confirmed with no "
-                    "matching record (cleaned up, or a reference mismatch). "
-                    "Needs manual investigation.",
-                    reference,
+                    PendingRegistration.objects.filter(token=uuid.UUID(match.group(1)))
+                ).first()
+
+            if pending is None:
+                if not match:
+                    logger.error(
+                        "consume_paid_registration: no PendingRegistration found "
+                        "for reference=%s, and it is not a registration "
+                        "reference this site issues -- not checked with Paystack.",
+                        reference,
+                    )
+                    return _Result(RegistrationPaymentOutcome.UNKNOWN_REFERENCE)
+                result = _verify_paid(reference)
+                if result.outcome is not None:
+                    return result
+                return _issue(
+                    PaymentIssue.Kind.REGISTRATION_UNMATCHED,
+                    result.verified,
+                    detail="No pending registration was found for this payment "
+                    "(it may have been cleaned up before the payment arrived).",
                 )
-                return
 
             if pending.consumed_at is not None:
-                return  # Already consumed -- idempotent no-op.
-
-            try:
-                verified = verify_transaction(reference)
-            except PaystackError:
-                logger.exception(
-                    "consume_paid_registration: Paystack verify_transaction "
-                    "failed for reference=%s",
-                    reference,
+                if pending.consumed_reference == reference:
+                    return _Result(RegistrationPaymentOutcome.ALREADY_APPLIED)
+                result = _verify_paid(reference)
+                if result.outcome is not None:
+                    return result
+                return _issue(
+                    PaymentIssue.Kind.REGISTRATION_DUPLICATE,
+                    result.verified,
+                    pending,
+                    detail=f"The account was already created by payment "
+                    f"{pending.consumed_reference}; this is a second payment.",
                 )
-                return
 
-            if verified.get("status") != "success":
-                return
+            result = _verify_paid(reference)
+            if result.outcome is not None:
+                return result
+            verified = result.verified
+
             if verified.get("currency") != "GHS":
                 logger.warning(
                     "consume_paid_registration: unexpected currency %r for "
@@ -250,7 +317,12 @@ def consume_paid_registration(reference: str) -> None:
                     verified.get("currency"),
                     reference,
                 )
-                return
+                return _issue(
+                    PaymentIssue.Kind.REGISTRATION_NOT_CREATED,
+                    verified,
+                    pending,
+                    detail=f"Paid in {verified.get('currency')!r}, not GHS.",
+                )
             if verified.get("amount") != pending.fee_amount_pesewas:
                 logger.warning(
                     "consume_paid_registration: amount mismatch for "
@@ -259,7 +331,13 @@ def consume_paid_registration(reference: str) -> None:
                     verified.get("amount"),
                     pending.fee_amount_pesewas,
                 )
-                return
+                return _issue(
+                    PaymentIssue.Kind.REGISTRATION_NOT_CREATED,
+                    verified,
+                    pending,
+                    detail=f"Paid {verified.get('amount')!r} pesewas, expected "
+                    f"{pending.fee_amount_pesewas!r}.",
+                )
 
             if Distributor.objects.filter(phone_number=pending.phone_number).exists():
                 logger.error(
@@ -269,25 +347,37 @@ def consume_paid_registration(reference: str) -> None:
                     pending.phone_number,
                     reference,
                 )
-                return
+                return _issue(
+                    PaymentIssue.Kind.REGISTRATION_NOT_CREATED,
+                    verified,
+                    pending,
+                    detail="A distributor with this phone number already exists.",
+                )
 
             try:
-                user = User(username=str(pending.phone_number), email=pending.email)
-                # Already hashed in Task 10a via make_password() -- assigning
-                # directly avoids double-hashing it through set_password().
-                user.password = pending.password_hash
-                user.save()
-                distributor_group, _ = Group.objects.get_or_create(name="distributor")
-                user.groups.add(distributor_group)
-                Distributor.objects.create(
-                    user=user,
-                    phone_number=pending.phone_number,
-                    full_name=pending.full_name,
-                    address=pending.address,
-                    area=pending.area,
-                    landmark=pending.landmark,
-                    sponsor=pending.sponsor,
-                )
+                # Task 67: its own savepoint. A failed save inside the outer
+                # atomic() would otherwise mark the whole transaction for
+                # rollback, and the caller would fail on its next query.
+                with transaction.atomic():
+                    user = User(username=str(pending.phone_number), email=pending.email)
+                    # Already hashed in Task 10a via make_password() --
+                    # assigning directly avoids double-hashing it through
+                    # set_password().
+                    user.password = pending.password_hash
+                    user.save()
+                    distributor_group, _ = Group.objects.get_or_create(
+                        name="distributor"
+                    )
+                    user.groups.add(distributor_group)
+                    Distributor.objects.create(
+                        user=user,
+                        phone_number=pending.phone_number,
+                        full_name=pending.full_name,
+                        address=pending.address,
+                        area=pending.area,
+                        landmark=pending.landmark,
+                        sponsor=pending.sponsor,
+                    )
             except IntegrityError:
                 logger.exception(
                     "consume_paid_registration: IntegrityError creating "
@@ -295,12 +385,207 @@ def consume_paid_registration(reference: str) -> None:
                     "username race)",
                     reference,
                 )
-                return
+                return _issue(
+                    PaymentIssue.Kind.REGISTRATION_NOT_CREATED,
+                    verified,
+                    pending,
+                    detail="The account could not be created (the phone number "
+                    "is already in use).",
+                )
 
             pending.consumed_at = timezone.now()
-            pending.save(update_fields=["consumed_at"])
+            pending.consumed_reference = reference
+            pending.save(update_fields=["consumed_at", "consumed_reference"])
+            return _Result(RegistrationPaymentOutcome.CREATED)
 
-    retry_on_lock_contention(_attempt)
+    def _verify_paid(ref):
+        try:
+            verified = verify_transaction(ref)
+        except PaystackNotFoundError:
+            return _Result(RegistrationPaymentOutcome.NOT_PAID)
+        except PaystackError:
+            logger.exception(
+                "consume_paid_registration: Paystack verify_transaction "
+                "failed for reference=%s",
+                ref,
+            )
+            return _Result(RegistrationPaymentOutcome.VERIFY_FAILED)
+        if verified.get("status") != "success":
+            return _Result(RegistrationPaymentOutcome.NOT_PAID)
+        return _Result(None, verified=verified)
+
+    def _issue(kind, verified, pending=None, detail=""):
+        return _Result(
+            RegistrationPaymentOutcome.ISSUE_RECORDED,
+            issue_kind=kind,
+            verified=verified,
+            pending=pending,
+            detail=detail,
+        )
+
+    result = retry_on_lock_contention(_attempt)
+    if result.issue_kind is not None:
+        issue = record_payment_issue(
+            reference,
+            result.issue_kind,
+            verified=result.verified,
+            pending=result.pending,
+            detail=result.detail,
+        )
+        if issue is None:
+            # Code review (Task 67): nothing durable was written, so this
+            # must not read as handled -- VERIFY_FAILED makes the webhook
+            # ask Paystack to retry and makes cleanup keep the row that
+            # still holds the payer's details.
+            return RegistrationPaymentOutcome.VERIFY_FAILED
+    return result.outcome
+
+
+@dataclass
+class _Result:
+    outcome: RegistrationPaymentOutcome | None
+    issue_kind: str | None = None
+    verified: dict | None = None
+    pending: PendingRegistration | None = None
+    detail: str = ""
+
+
+class PendingRegistrationResolution(str, Enum):
+    DELETED = "deleted"
+    CONSUMED = "consumed"
+    KEPT = "kept"
+
+
+# Task 67. Paystack statuses that mean this reference has not been paid.
+# "abandoned" is only "not yet": the 2026-09-16 payment went from abandoned
+# to success after 1h43m, which is why a row is never judged before it has
+# been idle for the caller's whole window.
+_NOT_PAID_STATUSES = frozenset({"abandoned", "failed", "reversed"})
+
+
+def resolve_unconsumed_pending_registration(
+    pk, *, idle_for, max_age, delete_unconfirmed
+) -> PendingRegistrationResolution:
+    """Task 67. Decides whether an unconsumed PendingRegistration can go.
+    Shared by the cleanup task (idle 72h / max 30 days) and by a new
+    registration taking over an abandoned one's phone number (idle 1h /
+    max 24h).
+
+    Before this, cleanup deleted anything over an hour old without asking
+    Paystack, and on 2026-09-16 that deleted a registration whose checkout
+    was paid 43 minutes later -- money taken, no account, one log line.
+
+    A row is only looked at once its last checkout has been idle for
+    `idle_for`, or it is older than `max_age` (which stops a checkout being
+    reopened hourly to hold a phone number forever). It is then deleted only
+    when:
+    - it never reached the payment step;
+    - Paystack says the reference was never seen, or was not paid;
+    - it was paid, and consume_paid_registration -- in THIS call -- turned
+      the payment into a recorded PaymentIssue (the issue keeps the payer's
+      details);
+    - it is older than `max_age` and Paystack answers with anything but
+      "success" (e.g. a mobile-money charge started and never approved) --
+      otherwise a stranger could hold a number by starting a charge and
+      leaving it. A payment that still lands later reaches the webhook or
+      reconciliation as an unmatched PaymentIssue, so no money is lost;
+    - `delete_unconfirmed` is set (cleanup), it is older than `max_age`, and
+      Paystack could not be reached at all: it becomes a PaymentIssue first,
+      since whether it was paid is genuinely unknown.
+    Anything else is kept for a later run. The delete re-checks the row
+    under a lock, so a checkout reopened or a payment consumed while
+    Paystack was being asked stops it."""
+    pending = PendingRegistration.objects.filter(pk=pk).first()
+    if pending is None:
+        return PendingRegistrationResolution.DELETED
+    if pending.consumed_at is not None:
+        return PendingRegistrationResolution.CONSUMED
+
+    now = timezone.now()
+    last_activity = pending.payment_initialized_at or pending.created_at
+    past_max_age = pending.created_at <= now - max_age
+    if not past_max_age and last_activity > now - idle_for:
+        return PendingRegistrationResolution.KEPT
+
+    reference = pending.payment_reference
+    if reference is None:
+        return _delete_pending_if_unchanged(pending)
+
+    try:
+        verified = verify_transaction(reference)
+    except PaystackNotFoundError:
+        return _delete_pending_if_unchanged(pending)
+    except PaystackError:
+        logger.warning(
+            "resolve_unconsumed_pending_registration: could not verify "
+            "reference=%s -- keeping it for now.",
+            reference,
+            exc_info=True,
+        )
+        verified = None
+    else:
+        status = verified.get("status")
+        if status in _NOT_PAID_STATUSES:
+            return _delete_pending_if_unchanged(pending)
+        if status == "success":
+            outcome = consume_paid_registration(reference)
+            if outcome in (
+                RegistrationPaymentOutcome.CREATED,
+                RegistrationPaymentOutcome.ALREADY_APPLIED,
+            ):
+                return PendingRegistrationResolution.CONSUMED
+            if outcome is RegistrationPaymentOutcome.ISSUE_RECORDED:
+                return _delete_pending_if_unchanged(pending)
+            return PendingRegistrationResolution.KEPT
+        if past_max_age:
+            return _delete_pending_if_unchanged(pending)
+        return PendingRegistrationResolution.KEPT
+
+    if delete_unconfirmed and past_max_age:
+        return _delete_pending_if_unchanged(
+            pending,
+            issue_detail=(
+                "Paystack could not be reached to check this registration's "
+                "payment before it reached the maximum age, so its details "
+                "were removed."
+            ),
+        )
+    return PendingRegistrationResolution.KEPT
+
+
+def _delete_pending_if_unchanged(pending, *, issue_detail=None):
+    """Deletes the row only if, under a lock, it is still unconsumed and has
+    the same checkout it had when Paystack was asked. When `issue_detail` is
+    given, the PaymentIssue is recorded in the same transaction as the
+    delete, so one never happens without the other."""
+
+    def _attempt():
+        with transaction.atomic():
+            current = select_for_update_nowait_if_supported(
+                PendingRegistration.objects.filter(pk=pending.pk)
+            ).first()
+            if current is None:
+                return PendingRegistrationResolution.DELETED
+            if current.consumed_at is not None:
+                return PendingRegistrationResolution.CONSUMED
+            if (
+                current.payment_reference != pending.payment_reference
+                or current.payment_initialized_at != pending.payment_initialized_at
+            ):
+                return PendingRegistrationResolution.KEPT
+            if issue_detail is not None:
+                issue = record_payment_issue(
+                    current.payment_reference,
+                    PaymentIssue.Kind.REGISTRATION_UNCONFIRMED,
+                    pending=current,
+                    detail=issue_detail,
+                )
+                if issue is None:
+                    return PendingRegistrationResolution.KEPT
+            current.delete()
+            return PendingRegistrationResolution.DELETED
+
+    return retry_on_lock_contention(_attempt)
 
 
 def snapshot_starter_pack_choice(distributor_pk, choice: str) -> Distributor:
