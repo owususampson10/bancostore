@@ -1,0 +1,108 @@
+{% extends "admin_portal/base_dashboard.html" %}
+{% block title %}Payments — Bancostore Admin Portal{% endblock %}
+{% block content %}
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface">Payments Needing Attention</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Payments Paystack confirmed that did not become an account, a starter pack or an order. Refund or fix each one in the Paystack dashboard, then mark it sorted here.</p>
+</div>
+{% if unresolved_count %}
+<div class="flex items-center gap-3 px-5 py-3 rounded-xl bg-error/10 border border-error/20">
+<span class="material-symbols-outlined text-error" aria-hidden="true">report_problem</span>
+<div>
+<p class="font-headline-sm text-headline-sm text-error leading-none">{{ unresolved_count }}</p>
+<p class="font-label-md text-label-md text-on-surface-variant">Still to sort</p>
+</div>
+</div>
+{% endif %}
+</div>
+
+<form
+  id="payment-issue-filter-form"
+  hx-get="{% url 'admin_portal:payment_issue_list' %}"
+  hx-target="#payment-issue-results"
+  hx-swap="outerHTML"
+  hx-push-url="true"
+  hx-trigger="change, submit, keyup changed delay:400ms from:#payment-issue-search-input"
+  class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant mb-8"
+>
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+<div class="md:col-span-9 relative">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-secondary" aria-hidden="true">search</span>
+<input id="payment-issue-search-input" type="search" name="q" value="{{ query }}" placeholder="Search by reference, name, phone number or email..." class="w-full pl-12 pr-4 py-3 bg-surface-container-low border border-outline-variant rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none font-body-md text-body-md" aria-label="Search payments">
+</div>
+{{ status|json_script:"payment-issue-status-selected" }}
+<div class="md:col-span-3 relative"
+     x-data="{
+       open: false,
+       {# json_script, never raw interpolation: the browser HTML-decodes an #}
+       {# attribute before Alpine evaluates it as JS, so Django's escaping #}
+       {# does not protect a JS string context (the XSS already found and #}
+       {# fixed in payout_settings.html and distributor_directory.html). #}
+       selected: JSON.parse(document.getElementById('payment-issue-status-selected').textContent),
+       highlighted: -1,
+       options: [
+         {value: '', label: 'Status: All'},
+         {value: 'unresolved', label: 'Still to sort'},
+         {value: 'resolved', label: 'Sorted'},
+       ],
+       get selectedLabel() {
+         const found = this.options.find(o => o.value === this.selected);
+         return found ? found.label : 'Status: All';
+       },
+       openList() {
+         this.open = true;
+         this.highlighted = Math.max(this.options.findIndex(o => o.value === this.selected), 0);
+       },
+       choose(index) {
+         this.selected = this.options[index].value;
+         this.open = false;
+         {# htmx listens for a real 'change' event; Alpine's :value binding #}
+         {# updates the property without firing one. #}
+         $nextTick(() => $refs.statusInput.dispatchEvent(new Event('change', { bubbles: true })));
+       },
+     }"
+     @click.outside="open = false">
+<!-- Custom listbox, not a native <select> -- a native select's open options
+     list can't be themed via CSS in any browser (the same reason as
+     distributor_directory.html's status filter). -->
+<button type="button"
+        class="w-full h-full pl-4 pr-4 bg-white border border-outline-variant rounded-xl text-left flex items-center justify-between font-body-md text-body-md focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-label="Filter by status"
+        aria-controls="payment-issue-status-listbox"
+        :aria-expanded="open.toString()"
+        :aria-activedescendant="highlighted >= 0 ? 'payment-issue-status-option-' + highlighted : null"
+        @click="open ? (open = false) : openList()"
+        @keydown.down.prevent="open ? highlighted = Math.min(highlighted + 1, options.length - 1) : openList()"
+        @keydown.up.prevent="open ? highlighted = Math.max(highlighted - 1, 0) : openList()"
+        @keydown.enter.prevent="if (open && highlighted >= 0) choose(highlighted)"
+        @keydown.escape="open = false">
+<span x-text="selectedLabel">{% if status == "unresolved" %}Still to sort{% elif status == "resolved" %}Sorted{% else %}Status: All{% endif %}</span>
+<span class="material-symbols-outlined text-secondary transition-transform" :class="open && 'rotate-180'" aria-hidden="true">expand_more</span>
+</button>
+<ul x-show="open"
+    x-cloak
+    role="listbox"
+    id="payment-issue-status-listbox"
+    class="absolute z-10 mt-1 w-full bg-white border border-outline-variant rounded-xl shadow-lg overflow-hidden py-1">
+<template x-for="(option, index) in options" :key="option.value">
+<li :id="'payment-issue-status-option-' + index"
+    role="option"
+    :aria-selected="(selected === option.value).toString()"
+    class="px-4 py-3 font-body-md text-body-md cursor-pointer transition-colors"
+    :class="(highlighted === index) ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low'"
+    @click="choose(index)"
+    @mouseenter="highlighted = index"
+    x-text="option.label">
+</li>
+</template>
+</ul>
+<input type="hidden" name="status" x-ref="statusInput" value="{{ status }}" :value="selected">
+</div>
+</div>
+</form>
+
+{% include "admin_portal/partials/payment_issue_results.html" %}
+{% endblock %}

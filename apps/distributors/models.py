@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
@@ -275,6 +276,13 @@ class PaymentIssue(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-pk"]
+
+    @property
+    def amount_in_cedis(self):
+        """Decimal, never float -- money in this codebase is always exact."""
+        if self.amount_pesewas is None:
+            return None
+        return Decimal(self.amount_pesewas) / 100
 
     def __str__(self):
         return f"PaymentIssue<{self.reference}>"
