@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta
 
+from django.db import connection, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -39,6 +40,37 @@ CLEANUP_BATCH_SIZE = 50
 CLEANUP_RECHECK_INTERVAL = timedelta(hours=1)
 
 
+def _claim_cleanup_candidates(now):
+    """Picks this run's rows and stamps last_checked_at on them in one
+    transaction, so an overlapping run takes different rows rather than
+    repeating the same Paystack calls (CodeRabbit, PR #97).
+
+    SKIP LOCKED where the backend has it (MySQL 8 in CI and production): a
+    second run steps over rows the first already holds instead of blocking
+    behind them. SQLite, used only for local dev and tests, has no row-level
+    locking at all, so the guarantee is real in production but cannot be
+    proven by the local suite -- the same honest limit as every other
+    select_for_update in this codebase."""
+    idle_cutoff = now - PENDING_REGISTRATION_IDLE_TTL
+    candidates = (
+        PendingRegistration.objects.filter(consumed_at__isnull=True)
+        .filter(
+            Q(payment_initialized_at__lte=idle_cutoff)
+            | Q(payment_initialized_at__isnull=True, created_at__lte=idle_cutoff)
+            | Q(created_at__lte=now - PENDING_REGISTRATION_MAX_AGE)
+        )
+        .exclude(last_checked_at__gt=now - CLEANUP_RECHECK_INTERVAL)
+        .order_by(F("last_checked_at").asc(nulls_first=True), "created_at", "pk")
+    )
+    if connection.features.has_select_for_update_skip_locked:
+        candidates = candidates.select_for_update(skip_locked=True)
+
+    with transaction.atomic():
+        claimed = list(candidates.values_list("pk", flat=True)[:CLEANUP_BATCH_SIZE])
+        PendingRegistration.objects.filter(pk__in=claimed).update(last_checked_at=now)
+    return claimed
+
+
 @shared_task
 def cleanup_expired_pending_registrations():
     """Removes abandoned PendingRegistration rows so onboarding PII isn't
@@ -50,20 +82,7 @@ def cleanup_expired_pending_registrations():
     without asking Paystack. On 2026-09-16 that removed a registration
     whose still-open checkout was paid 43 minutes later."""
     now = timezone.now()
-    idle_cutoff = now - PENDING_REGISTRATION_IDLE_TTL
-    candidate_pks = list(
-        PendingRegistration.objects.filter(consumed_at__isnull=True)
-        .filter(
-            Q(payment_initialized_at__lte=idle_cutoff)
-            | Q(payment_initialized_at__isnull=True, created_at__lte=idle_cutoff)
-            | Q(created_at__lte=now - PENDING_REGISTRATION_MAX_AGE)
-        )
-        .exclude(last_checked_at__gt=now - CLEANUP_RECHECK_INTERVAL)
-        .order_by(F("last_checked_at").asc(nulls_first=True), "created_at", "pk")
-        .values_list("pk", flat=True)[:CLEANUP_BATCH_SIZE]
-    )
-    # Claimed up front, so an overlapping run picks different rows.
-    PendingRegistration.objects.filter(pk__in=candidate_pks).update(last_checked_at=now)
+    candidate_pks = _claim_cleanup_candidates(now)
 
     counts = {resolution: 0 for resolution in PendingRegistrationResolution}
     failed = 0
