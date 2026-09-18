@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from enum import Enum
 
 from django.db import transaction
 from django.utils import timezone
@@ -17,7 +18,7 @@ from bancostore.concurrency import (
     select_for_update_nowait_if_supported,
 )
 
-from .models import Distributor, StarterPackCheckout
+from .models import Distributor, PaymentIssue, StarterPackCheckout
 
 logger = logging.getLogger(__name__)
 
@@ -204,9 +205,21 @@ def _credited_pack_reference(distributor) -> str:
     return distributor.starter_pack_payment_reference
 
 
+class BonusReversal(str, Enum):
+    """What _reverse_direct_referral_bonus actually did, so a caller can say
+    so plainly instead of guessing (third security review: a single bool
+    collapsed "no bonus was ever credited" into "their wallet no longer held
+    it", which invites an admin to claw back money legitimately owed)."""
+
+    REVERSED = "reversed"
+    NOTHING_LEFT = "nothing_left"
+    NO_CREDIT_FOUND = "no_credit_found"
+    ALREADY_HANDLED = "already_handled"
+
+
 def _reverse_direct_referral_bonus(
     distributor, reference: str, credited_reference: str | None = None
-) -> bool:
+) -> BonusReversal:
     """ADR-0007 Decisions 3/4: reverses the ONE-TIME direct referral bonus
     `distributor.sponsor` was credited at starter-pack confirmation --
     nothing else. Called from inside cancel_membership_and_refund's own
@@ -237,6 +250,41 @@ def _reverse_direct_referral_bonus(
     # current reference silently found nothing, returned quietly, and let
     # the caller report a clawback that never happened.
     credited_reference = credited_reference or _credited_pack_reference(distributor)
+
+    # The guard lives HERE, not in one caller (third security review): the
+    # cooling-off cancellation and a Paystack refund both reverse this same
+    # bonus, by different references, so a guard in either one alone let the
+    # other debit the sponsor a second time -- taking commission they had
+    # earned elsewhere. Locked and set in the same transaction as the debit,
+    # so two concurrent refund deliveries cannot both pass it.
+    checkout = None
+    if credited_reference:
+        checkout = select_for_update_nowait_if_supported(
+            StarterPackCheckout.objects.filter(reference=credited_reference)
+        ).first()
+    already_handled = checkout is not None and checkout.refund_handled_at is not None
+    if not already_handled and checkout is None and credited_reference:
+        # A pack paid for before Task 68b started recording checkouts has no
+        # row to stamp. The backfill migration gave every distributor's
+        # current reference one, so this is the rarer case of an older,
+        # overwritten reference -- fall back to "this payment has already
+        # been recorded as money going back", which covers both a refund and
+        # a dispute (a dispute event rewrites the kind but keeps the row).
+        already_handled = PaymentIssue.objects.filter(
+            reference=credited_reference,
+            kind__in=(
+                PaymentIssue.Kind.REFUND_RECEIVED,
+                PaymentIssue.Kind.DISPUTE_OPENED,
+            ),
+        ).exists()
+    if already_handled:
+        logger.info(
+            "_reverse_direct_referral_bonus: reference=%s was already "
+            "handled -- not reversing a second time.",
+            credited_reference,
+        )
+        return BonusReversal.ALREADY_HANDLED
+
     original_bonus_txn = WalletTransaction.objects.filter(
         wallet__distributor_id=distributor.sponsor_id,
         transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
@@ -253,7 +301,7 @@ def _reverse_direct_referral_bonus(
             distributor.sponsor_id,
             credited_reference,
         )
-        return False
+        return BonusReversal.NO_CREDIT_FOUND
 
     bonus = original_bonus_txn.amount
 
@@ -270,7 +318,7 @@ def _reverse_direct_referral_bonus(
             distributor.pk,
             distributor.sponsor_id,
         )
-        return False
+        return BonusReversal.NO_CREDIT_FOUND
 
     debit_amount = min(sponsor_wallet.balance, bonus)
     if debit_amount > 0:
@@ -292,4 +340,9 @@ def _reverse_direct_referral_bonus(
             sponsor_wallet.balance,
             bonus,
         )
-    return debit_amount > 0
+
+    if checkout is not None:
+        StarterPackCheckout.objects.filter(pk=checkout.pk).update(
+            refund_handled_at=timezone.now()
+        )
+    return BonusReversal.REVERSED if debit_amount > 0 else BonusReversal.NOTHING_LEFT

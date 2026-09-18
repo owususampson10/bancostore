@@ -631,6 +631,9 @@ def _refund_unfulfillable_order(order) -> PaymentOutcome:
         return PaymentOutcome.VERIFY_FAILED
     if claim.resolved_at is not None:
         return PaymentOutcome.ALREADY_APPLIED
+    if not getattr(claim, "was_created", True):
+        # Another worker claimed this refund first; it owns the Paystack call.
+        return PaymentOutcome.ALREADY_APPLIED
 
     refunded = False
     try:
@@ -706,10 +709,17 @@ def _auto_cancel_pending_order(order_id) -> bool:
     # Deliberately outside the row lock below: a 10s HTTP call inside
     # select_for_update would hold this order's row against the webhook
     # trying to confirm that very payment.
-    Order.objects.filter(pk=order.pk).update(payment_checked_at=timezone.now())
+    def _mark_checked():
+        # Stamped only on a definite answer (third security review): during a
+        # Paystack outage every pending order would otherwise burn its
+        # six-hour slot on a call that told us nothing, instead of being
+        # retried on the next run.
+        Order.objects.filter(pk=order.pk).update(payment_checked_at=timezone.now())
+
     try:
         verified = verify_transaction(order.payment_reference)
     except PaystackNotFoundError:
+        _mark_checked()
         pass  # Paystack never saw it -- there is nothing to wait for.
     except PaystackError:
         logger.warning(
@@ -721,6 +731,7 @@ def _auto_cancel_pending_order(order_id) -> bool:
         )
         return False
     else:
+        _mark_checked()
         status = verified.get("status")
         if status == "success":
             logger.info(

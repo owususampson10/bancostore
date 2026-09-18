@@ -445,3 +445,85 @@ def test_a_dispute_after_a_refund_cannot_trigger_a_second_clawback(mock_verify):
 
     sponsor.wallet.refresh_from_db()
     assert sponsor.wallet.balance == Decimal("80.00")
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.external_refunds.verify_transaction")
+def test_a_cooling_off_cancellation_and_a_refund_cannot_both_claw_back(mock_verify):
+    """Third security review: the guard used to live in this caller only, so
+    a distributor who cancelled under cooling-off and whose pack was then
+    refunded on Paystack had their sponsor debited twice -- taking commission
+    earned elsewhere."""
+    from apps.distributors.cooling_off_services import (
+        _reverse_direct_referral_bonus,
+    )
+    from apps.distributors.models import StarterPackCheckout
+    from apps.wallet.models import WalletTransaction
+    from apps.wallet.services import credit as credit_wallet
+
+    sponsor = _make_distributor()
+    distributor = _make_distributor(sponsor=sponsor)
+    StarterPackCheckout.objects.create(
+        distributor=distributor,
+        reference="pack-abc",
+        amount_pesewas=50000,
+        choice="A",
+        pv=500,
+        rank="bronze",
+        consumed_at=timezone.now(),
+    )
+    Distributor.objects.filter(pk=distributor.pk).update(
+        starter_pack_payment_reference="pack-abc"
+    )
+    credit_wallet(
+        sponsor,
+        Decimal("50.00"),
+        transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+        reference="pack-abc",
+    )
+
+    # The cooling-off path reverses first, by its own reference.
+    _reverse_direct_referral_bonus(distributor, f"cooling-off-{distributor.pk}")
+    sponsor.wallet.refresh_from_db()
+    assert sponsor.wallet.balance == Decimal("0.00")
+
+    # The sponsor legitimately earns again, then Paystack reports the refund.
+    credit_wallet(
+        sponsor,
+        Decimal("90.00"),
+        transaction_type=WalletTransaction.TransactionType.BINARY_BONUS,
+        reference="binary-1",
+    )
+    mock_verify.return_value = _reversed_verify()
+    handle_external_refund("pack-abc")
+
+    sponsor.wallet.refresh_from_db()
+    assert sponsor.wallet.balance == Decimal("90.00")
+    assert "already been dealt with" in (
+        PaymentIssue.objects.get(reference="pack-abc").detail
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.external_refunds.verify_transaction")
+def test_a_refund_where_no_bonus_was_ever_paid_says_exactly_that(mock_verify):
+    """Not "their wallet no longer held it" -- that wording invites an admin
+    to claw back a bonus that is legitimately owed."""
+    from apps.distributors.models import StarterPackCheckout
+
+    sponsor = _make_distributor()
+    distributor = _make_distributor(sponsor=sponsor)
+    StarterPackCheckout.objects.create(
+        distributor=distributor,
+        reference="pack-unpaid",
+        amount_pesewas=50000,
+        choice="A",
+        pv=500,
+        rank="bronze",
+    )
+    mock_verify.return_value = _reversed_verify()
+
+    handle_external_refund("pack-unpaid")
+
+    detail = PaymentIssue.objects.get(reference="pack-unpaid").detail
+    assert "No referral bonus was ever paid" in detail

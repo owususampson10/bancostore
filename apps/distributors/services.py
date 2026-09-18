@@ -859,8 +859,28 @@ def consume_paid_starter_pack(reference: str) -> PaymentOutcome:
                 _credit_direct_referral_bonus(distributor, reference, pack_pv)
 
             distributor.rank = pack_rank
+            # Task 68 (third security review): the pack that was PAID FOR is
+            # written back, not left as whatever was last selected. Every
+            # later reader -- the cooling-off refund amount, the ancestor PV
+            # reversal -- uses these fields, so leaving them on the newer
+            # selection refunded a GHS 2,000 pack for a GHS 500 payment and
+            # stripped PV from uplines that was never credited to them.
+            distributor.starter_pack_pv = pack_pv
+            distributor.starter_pack_rank = pack_rank
+            if checkout is not None:
+                distributor.starter_pack_choice = checkout.choice
+                distributor.starter_pack_price_pesewas = checkout.amount_pesewas
             distributor.starter_pack_confirmed_at = now
-            distributor.save(update_fields=["rank", "starter_pack_confirmed_at"])
+            distributor.save(
+                update_fields=[
+                    "rank",
+                    "starter_pack_choice",
+                    "starter_pack_price_pesewas",
+                    "starter_pack_pv",
+                    "starter_pack_rank",
+                    "starter_pack_confirmed_at",
+                ]
+            )
             if checkout is not None:
                 checkout.consumed_at = now
                 checkout.save(update_fields=["consumed_at"])

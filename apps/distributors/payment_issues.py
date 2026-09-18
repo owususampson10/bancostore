@@ -101,6 +101,11 @@ def record_payment_issue(
             return None
         created = True
 
+    # Third security review: the caller needs to know whether THIS call
+    # created the row, not just that a row exists -- the stock-out refund
+    # uses it to decide whether it owns the refund or another worker does.
+    issue.was_created = created
+
     if created:
         logger.error(
             "record_payment_issue: %s for reference=%s (payment_issue_id=%s)",

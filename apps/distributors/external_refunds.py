@@ -22,9 +22,6 @@ import logging
 import re
 
 from django.db import transaction
-from django.utils import timezone
-
-from apps.wallet.models import WalletTransaction
 
 from .models import Distributor, PaymentIssue, StarterPackCheckout
 from .payment_issues import record_payment_issue
@@ -172,7 +169,7 @@ def _refund_starter_pack(reference, verified) -> PaymentOutcome:
     The distributor's own membership is left alone: cancelling it is a
     decision with consequences for their downline, and belongs to the admin
     or to the cooling-off flow, not to a webhook."""
-    from .cooling_off_services import _reverse_direct_referral_bonus
+    from .cooling_off_services import BonusReversal, _reverse_direct_referral_bonus
 
     # Via the checkout this reference belongs to, falling back to the
     # distributor's current reference for a payment made before Task 68b
@@ -200,49 +197,25 @@ def _refund_starter_pack(reference, verified) -> PaymentOutcome:
     # both refund.pending and refund.processed -- so a wallet-row check alone
     # would claw the bonus back a second time if the sponsor earned in
     # between (agent code review).
-    # A durable fact of its own, not a wallet row an empty wallet never
-    # writes, nor a PaymentIssue kind that a later dispute event overwrites
-    # (adversarial security review).
-    if checkout is not None and checkout.refund_handled_at is not None:
-        return _record(
-            reference,
-            PaymentIssue.Kind.REFUND_RECEIVED,
-            verified,
-            "This starter-pack payment was already handled as refunded.",
-        )
-
-    already_reversed = (
-        WalletTransaction.objects.filter(
-            wallet__distributor_id=distributor.sponsor_id,
-            transaction_type=(
-                WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS_REVERSAL
-            ),
-            reference=reference,
-        ).exists()
-        or PaymentIssue.objects.filter(
-            reference=reference, kind=PaymentIssue.Kind.REFUND_RECEIVED
-        ).exists()
-    )
-    reversed_any = False
+    outcome = None
     failed = False
-    if not already_reversed:
-        try:
-            with transaction.atomic():
-                # credited_reference is THIS checkout's own reference: since
-                # Task 68b the bonus may have been credited against a
-                # checkout that is no longer the distributor's current one
-                # (adversarial security review -- the lookup used to miss
-                # entirely and report success anyway).
-                reversed_any = _reverse_direct_referral_bonus(
-                    distributor, reference, credited_reference=reference
-                )
-        except Exception:
-            failed = True
-            logger.exception(
-                "handle_external_refund: could not reverse the referral bonus "
-                "for reference=%s",
-                reference,
+    try:
+        with transaction.atomic():
+            # credited_reference is THIS checkout's own reference: since Task
+            # 68b the bonus may have been credited against a checkout that is
+            # no longer the distributor's current one. The double-reversal
+            # guard lives inside that function, so the cooling-off path is
+            # covered by the same lock (third security review).
+            outcome = _reverse_direct_referral_bonus(
+                distributor, reference, credited_reference=reference
             )
+    except Exception:
+        failed = True
+        logger.exception(
+            "handle_external_refund: could not reverse the referral bonus "
+            "for reference=%s",
+            reference,
+        )
 
     if failed:
         detail = (
@@ -250,7 +223,21 @@ def _refund_starter_pack(reference, verified) -> PaymentOutcome:
             "sponsor's direct referral bonus could not be taken back "
             "automatically."
         )
-    elif reversed_any:
+    elif outcome is BonusReversal.NO_CREDIT_FOUND:
+        # Never say a bonus failed to come back when none was ever paid --
+        # that invites a manual clawback of money legitimately owed.
+        detail = (
+            "This starter-pack payment was refunded on Paystack. No referral "
+            "bonus was ever paid against this particular payment, so there "
+            "was nothing to take back."
+        )
+    elif outcome is BonusReversal.ALREADY_HANDLED:
+        detail = (
+            "This starter-pack payment was refunded on Paystack. Its referral "
+            "bonus had already been dealt with, so nothing was taken back "
+            "twice."
+        )
+    elif outcome is BonusReversal.REVERSED:
         detail = (
             "This starter-pack payment was refunded on Paystack. The "
             "sponsor's direct referral bonus has been taken back. The "
@@ -268,10 +255,6 @@ def _refund_starter_pack(reference, verified) -> PaymentOutcome:
             "was left active."
         )
 
-    if checkout is not None:
-        StarterPackCheckout.objects.filter(pk=checkout.pk).update(
-            refund_handled_at=timezone.now()
-        )
     return _record(reference, PaymentIssue.Kind.REFUND_RECEIVED, verified, detail)
 
 

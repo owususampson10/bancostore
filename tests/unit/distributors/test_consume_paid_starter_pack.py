@@ -726,3 +726,38 @@ def test_paying_an_older_checkout_gives_that_pack_not_the_newer_one(mock_verify)
     # The sponsor's bonus follows the pack that was paid for, too.
     sponsor.wallet.refresh_from_db()
     assert sponsor.wallet.balance == calculate_direct_referral_bonus(500)
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_the_paid_pack_is_written_back_so_a_refund_cannot_pay_out_more(mock_verify):
+    """Third security review: applying the paid checkout but leaving the
+    distributor's stored price/PV on the newer selection meant the
+    cooling-off refund paid out the dearer pack's price for the cheaper
+    pack's money, and stripped PV from uplines that was never credited."""
+    distributor = _make_distributor(sponsor=_make_distributor())
+    _reselect_pack(
+        distributor,
+        "pack-cheap",
+        choice="A",
+        price_pesewas=50000,
+        pv=500,
+        rank="bronze",
+    )
+    _reselect_pack(
+        distributor,
+        "pack-dear",
+        choice="B",
+        price_pesewas=200000,
+        pv=1000,
+        rank="silver",
+    )
+    mock_verify.return_value = _success_verify(50000)
+
+    consume_paid_starter_pack("pack-cheap")
+
+    distributor.refresh_from_db()
+    assert distributor.starter_pack_price_pesewas == 50000
+    assert distributor.starter_pack_pv == 500
+    assert distributor.starter_pack_choice == "A"
+    assert distributor.starter_pack_rank == "bronze"
