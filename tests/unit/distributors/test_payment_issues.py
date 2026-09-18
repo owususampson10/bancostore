@@ -263,3 +263,46 @@ def test_a_short_reference_is_left_alone():
     assert PaymentIssue(reference="pack-12-9f2c1d44").short_reference == (
         "pack-12-9f2c1d44"
     )
+
+
+# --- Task 68j: the platform says so if nobody can be alerted ------------------
+
+
+@pytest.mark.django_db
+def test_a_warning_when_no_alert_email_is_set_anywhere():
+    from apps.distributors.checks import (
+        PAYMENT_ALERT_EMAIL_WARNING_ID,
+        payment_alert_email_is_set,
+    )
+
+    config.PAYMENT_ISSUE_ALERT_EMAIL = ""
+    config.ADMIN_ORDER_ALERT_EMAIL = "  "
+
+    (warning,) = payment_alert_email_is_set(None)
+
+    assert warning.id == PAYMENT_ALERT_EMAIL_WARNING_ID
+    assert "admin bell" in warning.msg
+
+
+@pytest.mark.django_db
+def test_no_warning_once_either_address_is_set():
+    from apps.distributors.checks import payment_alert_email_is_set
+
+    config.PAYMENT_ISSUE_ALERT_EMAIL = ""
+    config.ADMIN_ORDER_ALERT_EMAIL = "ops@bancostore.test"
+
+    assert payment_alert_email_is_set(None) == []
+
+
+@pytest.mark.django_db
+def test_an_unreachable_settings_store_does_not_warn_misleadingly():
+    from apps.distributors.checks import payment_alert_email_is_set
+
+    class Unreachable:
+        def __getattr__(self, name):
+            raise RuntimeError("redis down")
+
+    # The check does `from constance import config` at call time, so
+    # replacing the module attribute is what a real outage looks like to it.
+    with patch("constance.config", Unreachable()):
+        assert payment_alert_email_is_set(None) == []

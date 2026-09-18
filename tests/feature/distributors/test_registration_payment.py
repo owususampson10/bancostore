@@ -13,6 +13,7 @@ from django.utils import timezone
 import pytest
 
 from apps.distributors.models import Distributor, PendingRegistration
+from apps.distributors.payment_outcomes import PaymentOutcome
 
 User = get_user_model()
 
@@ -325,9 +326,9 @@ def _signed_webhook(client, reference):
 def test_webhook_asks_paystack_to_retry_when_verification_failed(mock_consume, client):
     """Paystack only redelivers a webhook that did not get a 2xx. Answering
     200 after a verify timeout threw away the one push we get."""
-    from apps.distributors.services import RegistrationPaymentOutcome
+    from apps.distributors.payment_outcomes import PaymentOutcome
 
-    mock_consume.return_value = RegistrationPaymentOutcome.VERIFY_FAILED
+    mock_consume.return_value = PaymentOutcome.VERIFY_FAILED
 
     response = _signed_webhook(client, "reg-anything")
 
@@ -338,10 +339,10 @@ def test_webhook_asks_paystack_to_retry_when_verification_failed(mock_consume, c
 @pytest.mark.django_db
 @patch("apps.distributors.views.consume_paid_registration")
 def test_webhook_answers_200_for_every_definite_outcome(mock_consume, client):
-    from apps.distributors.services import RegistrationPaymentOutcome
+    from apps.distributors.payment_outcomes import PaymentOutcome
 
-    for outcome in RegistrationPaymentOutcome:
-        if outcome is RegistrationPaymentOutcome.VERIFY_FAILED:
+    for outcome in PaymentOutcome:
+        if outcome is PaymentOutcome.VERIFY_FAILED:
             continue
         mock_consume.return_value = outcome
         assert _signed_webhook(client, "reg-anything").status_code == 200
@@ -356,3 +357,77 @@ def test_callback_is_rate_limited_per_ip(mock_consume, client):
 
     assert statuses[:60] == [200] * 60
     assert statuses[60] != 200
+
+
+# --- Task 68f: refund and dispute events reach their handlers -----------------
+
+
+def _signed_event(client, payload):
+    body = json.dumps(payload).encode()
+    signature = hmac.new(b"sk_test_fake", body, hashlib.sha512).hexdigest()
+    return client.post(
+        reverse("distributors:paystack_webhook"),
+        data=body,
+        content_type="application/json",
+        HTTP_X_PAYSTACK_SIGNATURE=signature,
+    )
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@pytest.mark.django_db
+@patch("apps.distributors.views.handle_external_refund")
+def test_a_refund_event_reaches_the_refund_handler(mock_handle, client):
+    mock_handle.return_value = PaymentOutcome.ISSUE_RECORDED
+
+    response = _signed_event(
+        client,
+        {
+            "event": "refund.processed",
+            "data": {"transaction": {"reference": "order-abc"}},
+        },
+    )
+
+    assert response.status_code == 200
+    mock_handle.assert_called_once_with("order-abc")
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@pytest.mark.django_db
+@patch("apps.distributors.views.handle_external_refund")
+def test_a_refund_we_could_not_verify_asks_paystack_to_retry(mock_handle, client):
+    mock_handle.return_value = PaymentOutcome.VERIFY_FAILED
+
+    response = _signed_event(
+        client,
+        {"event": "refund.processed", "data": {"reference": "order-abc"}},
+    )
+
+    assert response.status_code == 503
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@pytest.mark.django_db
+@patch("apps.distributors.views.handle_payment_dispute")
+def test_a_dispute_event_reaches_the_dispute_handler(mock_handle, client):
+    mock_handle.return_value = PaymentOutcome.ISSUE_RECORDED
+
+    response = _signed_event(
+        client,
+        {
+            "event": "charge.dispute.create",
+            "data": {"transaction": {"reference": "order-abc"}},
+        },
+    )
+
+    assert response.status_code == 200
+    mock_handle.assert_called_once_with("order-abc", "charge.dispute.create")
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@pytest.mark.django_db
+@patch("apps.distributors.views.handle_external_refund")
+def test_a_refund_event_with_no_reference_does_not_crash(mock_handle, client):
+    response = _signed_event(client, {"event": "refund.processed", "data": {}})
+
+    assert response.status_code == 200
+    mock_handle.assert_not_called()

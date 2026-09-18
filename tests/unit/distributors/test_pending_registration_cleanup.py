@@ -17,10 +17,10 @@ from django.utils import timezone
 import pytest
 
 from apps.distributors.models import Distributor, PaymentIssue, PendingRegistration
+from apps.distributors.payment_outcomes import PaymentOutcome
 from apps.distributors.paystack import PaystackError, PaystackNotFoundError
 from apps.distributors.services import (
     PendingRegistrationResolution,
-    RegistrationPaymentOutcome,
     resolve_unconsumed_pending_registration,
 )
 from apps.distributors.tasks import (
@@ -165,7 +165,7 @@ def test_a_paid_registration_is_turned_into_the_account_not_deleted(
     mock_verify, mock_consume
 ):
     mock_verify.return_value = {"status": "success"}
-    mock_consume.return_value = RegistrationPaymentOutcome.CREATED
+    mock_consume.return_value = PaymentOutcome.APPLIED
     pending = _make_pending(_make_sponsor(), "+233241111111", idle=timedelta(hours=73))
 
     assert _resolve_like_cleanup(pending) == Resolution.CONSUMED
@@ -178,7 +178,7 @@ def test_a_paid_registration_is_turned_into_the_account_not_deleted(
 @patch(VERIFY)
 def test_a_paid_registration_that_became_an_issue_is_deleted(mock_verify, mock_consume):
     mock_verify.return_value = {"status": "success"}
-    mock_consume.return_value = RegistrationPaymentOutcome.ISSUE_RECORDED
+    mock_consume.return_value = PaymentOutcome.ISSUE_RECORDED
     pending = _make_pending(_make_sponsor(), "+233241111111", idle=timedelta(hours=73))
 
     assert _resolve_like_cleanup(pending) == Resolution.DELETED
@@ -191,7 +191,7 @@ def test_a_paid_registration_whose_consume_failed_is_kept(mock_verify, mock_cons
     """An unrelated, older PaymentIssue for the same reference must not be
     read as "handled" -- only this call's own outcome counts."""
     mock_verify.return_value = {"status": "success"}
-    mock_consume.return_value = RegistrationPaymentOutcome.VERIFY_FAILED
+    mock_consume.return_value = PaymentOutcome.VERIFY_FAILED
     pending = _make_pending(_make_sponsor(), "+233241111111", idle=timedelta(hours=73))
     PaymentIssue.objects.create(
         reference="ref-1", kind=PaymentIssue.Kind.REGISTRATION_UNCONFIRMED

@@ -236,6 +236,45 @@ class PendingRegistration(models.Model):
         return f"PendingRegistration<{self.phone_number}>"
 
 
+class StarterPackCheckout(models.Model):
+    """Task 68b. Every starter-pack checkout ever opened for a distributor,
+    with the price as it stood when that checkout was created.
+
+    Found by the Task 68 audit: snapshot_starter_pack_choice overwrites
+    Distributor.starter_pack_payment_reference on every re-selection, and
+    consume_paid_starter_pack looks a distributor up by that one field. So a
+    distributor who picked a pack, opened Paystack, went back and picked
+    again had their first checkout orphaned -- still payable, matching
+    nothing. At GHS 1,500+ a pack that is the most expensive single loss on
+    the platform.
+
+    Recording the amount here as well as the reference also fixes a second
+    case: an admin changing a starter-pack price between the checkout
+    opening and the payment landing made a correct payment fail the amount
+    check against the newer price.
+    """
+
+    distributor = models.ForeignKey(
+        "Distributor", on_delete=models.CASCADE, related_name="starter_pack_checkouts"
+    )
+    reference = models.CharField(max_length=100, unique=True)
+    # The price as it was when this checkout opened, never re-read later.
+    amount_pesewas = models.PositiveIntegerField()
+    choice = models.CharField(max_length=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    # Set on the one checkout whose payment actually applied the pack, so a
+    # payment on a DIFFERENT checkout is recognisable as a second payment
+    # rather than mistaken for a replay of the first (Task 68b, mirroring
+    # PendingRegistration.consumed_reference).
+    consumed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+
+    def __str__(self):
+        return f"StarterPackCheckout<{self.reference}>"
+
+
 class PaymentIssue(models.Model):
     """Task 67. A payment Paystack confirmed as successful that did not turn
     into what it paid for -- the admin's to-do list for a refund or a manual
@@ -275,6 +314,22 @@ class PaymentIssue(models.Model):
             "Starter pack paid, not applied",
         )
         ORDER_NOT_APPLIED = "order_not_applied", "Order paid, not confirmed"
+        # Task 68f: money given back to a customer on Paystack's side --
+        # a refund we issued, or one the customer's bank forced.
+        REFUND_RECEIVED = "refund_received", "Payment refunded on Paystack"
+        DISPUTE_OPENED = "dispute_opened", "Customer disputed a payment"
+        # Task 68i: a withdrawal whose wallet was debited but whose payout
+        # has never reached a final answer from Paystack.
+        WITHDRAWAL_NOT_PAID = (
+            "withdrawal_not_paid",
+            "Withdrawal debited, payout never confirmed",
+        )
+        # Task 68g: a successful payment on this Paystack account whose
+        # reference Bancostore never issued.
+        UNRECOGNISED_PAYMENT = (
+            "unrecognised_payment",
+            "Payment not from a Bancostore checkout",
+        )
 
     reference = models.CharField(max_length=100, unique=True)
     kind = models.CharField(max_length=40, choices=Kind.choices)

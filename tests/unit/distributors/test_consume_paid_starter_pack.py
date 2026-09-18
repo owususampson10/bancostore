@@ -5,12 +5,14 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import connection
+from django.utils import timezone
 
 import pytest
 from constance import config
 
 from apps.binary_tree.models import BinaryTreeEdge
-from apps.distributors.models import Distributor
+from apps.distributors.models import Distributor, PaymentIssue, StarterPackCheckout
+from apps.distributors.payment_outcomes import PaymentOutcome
 from apps.distributors.paystack import PaystackError
 from apps.distributors.services import consume_paid_starter_pack
 from apps.pv_ledger.models import MonthlyPersonalPv, PvLedger
@@ -492,3 +494,193 @@ def test_a_failed_sms_send_does_not_undo_the_wallet_credit(mock_verify, mock_sen
 
     wallet = Wallet.objects.get(distributor=sponsor)
     assert wallet.balance == Decimal("100.00")
+
+
+# --- Task 68c/68d: outcomes, and an issue recorded where it happens -----------
+#
+# Until now this returned None whatever happened, so the webhook answered 200
+# even on a Paystack timeout -- burning the one push Paystack guarantees --
+# and a paid-but-unapplied pack left nothing on the admin's Payments screen
+# until the next day's reconciliation.
+
+
+@pytest.fixture(autouse=True)
+def _run_on_commit_now(monkeypatch):
+    monkeypatch.setattr(
+        "apps.distributors.payment_issues.transaction.on_commit", lambda fn: fn()
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_a_confirmed_pack_reports_applied(mock_verify):
+    distributor = _select_pack_b(_make_distributor(sponsor=_make_distributor()))
+    mock_verify.return_value = _success_verify(distributor.starter_pack_price_pesewas)
+
+    assert consume_paid_starter_pack("pack-ref-1") == PaymentOutcome.APPLIED
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_a_replay_reports_already_applied(mock_verify):
+    distributor = _select_pack_b(_make_distributor(sponsor=_make_distributor()))
+    mock_verify.return_value = _success_verify(distributor.starter_pack_price_pesewas)
+    consume_paid_starter_pack("pack-ref-1")
+
+    assert consume_paid_starter_pack("pack-ref-1") == PaymentOutcome.ALREADY_APPLIED
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_a_verify_failure_reports_it_so_paystack_is_asked_again(mock_verify):
+    _select_pack_b(_make_distributor(sponsor=_make_distributor()))
+    mock_verify.side_effect = PaystackError("timed out")
+
+    assert consume_paid_starter_pack("pack-ref-1") == PaymentOutcome.VERIFY_FAILED
+    assert not PaymentIssue.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_an_unpaid_reference_reports_not_paid(mock_verify):
+    _select_pack_b(_make_distributor(sponsor=_make_distributor()))
+    mock_verify.return_value = {"status": "abandoned"}
+
+    assert consume_paid_starter_pack("pack-ref-1") == PaymentOutcome.NOT_PAID
+    assert not PaymentIssue.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_a_wrong_amount_records_an_issue_immediately(mock_verify):
+    """Not a log line the admin never reads, and not a day later."""
+    _select_pack_b(_make_distributor(sponsor=_make_distributor()))
+    mock_verify.return_value = _success_verify(5000)
+
+    assert consume_paid_starter_pack("pack-ref-1") == PaymentOutcome.ISSUE_RECORDED
+
+    issue = PaymentIssue.objects.get(reference="pack-ref-1")
+    assert issue.kind == PaymentIssue.Kind.STARTER_PACK_NOT_APPLIED
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_a_wrong_currency_records_an_issue_immediately(mock_verify):
+    distributor = _select_pack_b(_make_distributor(sponsor=_make_distributor()))
+    mock_verify.return_value = _success_verify(
+        distributor.starter_pack_price_pesewas, currency="NGN"
+    )
+
+    assert consume_paid_starter_pack("pack-ref-1") == PaymentOutcome.ISSUE_RECORDED
+    assert PaymentIssue.objects.filter(reference="pack-ref-1").exists()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_a_paid_pack_with_no_distributor_records_an_issue(mock_verify):
+    """An orphaned checkout from an earlier pack selection."""
+    mock_verify.return_value = _success_verify(10000)
+
+    assert consume_paid_starter_pack("pack-9-old") == PaymentOutcome.ISSUE_RECORDED
+
+    assert (
+        PaymentIssue.objects.get(reference="pack-9-old").kind
+        == PaymentIssue.Kind.STARTER_PACK_NOT_APPLIED
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_an_unpaid_reference_with_no_distributor_records_nothing(mock_verify):
+    mock_verify.return_value = {"status": "abandoned"}
+
+    assert consume_paid_starter_pack("pack-9-old") == PaymentOutcome.NOT_PAID
+    assert not PaymentIssue.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_a_payment_after_cooling_off_cancellation_records_an_issue(mock_verify):
+    """The member is gone, but the money is real -- it needs refunding."""
+    distributor = _select_pack_b(_make_distributor(sponsor=_make_distributor()))
+    Distributor.objects.filter(pk=distributor.pk).update(
+        cooling_off_cancelled_at=timezone.now()
+    )
+    mock_verify.return_value = _success_verify(distributor.starter_pack_price_pesewas)
+
+    assert consume_paid_starter_pack("pack-ref-1") == PaymentOutcome.ISSUE_RECORDED
+    assert PaymentIssue.objects.filter(reference="pack-ref-1").exists()
+
+
+# --- Task 68b: an earlier checkout is never orphaned --------------------------
+
+
+def _reselect_pack(distributor, reference, *, choice="A", price_pesewas=150000):
+    """What a back-button re-selection does: a new reference replaces the
+    old one on the distributor."""
+    distributor.starter_pack_choice = choice
+    distributor.starter_pack_price_pesewas = price_pesewas
+    distributor.starter_pack_pv = config.STARTER_PACK_A_PV
+    distributor.starter_pack_rank = config.STARTER_PACK_A_RANK
+    distributor.starter_pack_payment_reference = reference
+    distributor.save(
+        update_fields=[
+            "starter_pack_choice",
+            "starter_pack_price_pesewas",
+            "starter_pack_pv",
+            "starter_pack_rank",
+            "starter_pack_payment_reference",
+        ]
+    )
+    StarterPackCheckout.objects.create(
+        distributor=distributor,
+        reference=reference,
+        amount_pesewas=price_pesewas,
+        choice=choice,
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_paying_on_an_earlier_checkout_still_applies_the_pack(mock_verify):
+    """Pick a pack, open Paystack, go back, pick again, then pay on the first
+    tab. Before Task 68b that money matched nothing at all."""
+    distributor = _make_distributor(sponsor=_make_distributor())
+    _reselect_pack(distributor, "pack-first", price_pesewas=150000)
+    _reselect_pack(distributor, "pack-second", price_pesewas=150000)
+    mock_verify.return_value = _success_verify(150000)
+
+    assert consume_paid_starter_pack("pack-first") == PaymentOutcome.APPLIED
+
+    distributor.refresh_from_db()
+    assert distributor.starter_pack_confirmed_at is not None
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_the_amount_is_checked_against_that_checkouts_own_price(mock_verify):
+    """An admin changing the pack price mid-checkout must not turn a correct
+    payment into a rejected one."""
+    distributor = _make_distributor(sponsor=_make_distributor())
+    _reselect_pack(distributor, "pack-old-price", price_pesewas=150000)
+    _reselect_pack(distributor, "pack-new-price", price_pesewas=200000)
+    mock_verify.return_value = _success_verify(150000)  # paid the old price
+
+    assert consume_paid_starter_pack("pack-old-price") == PaymentOutcome.APPLIED
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_paying_twice_on_two_checkouts_applies_once_and_reports_the_second(
+    mock_verify,
+):
+    distributor = _make_distributor(sponsor=_make_distributor())
+    _reselect_pack(distributor, "pack-first", price_pesewas=150000)
+    _reselect_pack(distributor, "pack-second", price_pesewas=150000)
+    mock_verify.return_value = _success_verify(150000)
+    consume_paid_starter_pack("pack-first")
+
+    outcome = consume_paid_starter_pack("pack-second")
+
+    assert outcome == PaymentOutcome.ISSUE_RECORDED
+    assert PaymentIssue.objects.filter(reference="pack-second").exists()

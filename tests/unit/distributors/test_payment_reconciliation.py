@@ -8,6 +8,7 @@ the backstop that notices without anyone reading a log.
 
 from datetime import timedelta
 from decimal import Decimal
+from itertools import count
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -25,6 +26,7 @@ from apps.distributors.tasks import (
 from apps.orders.models import Order
 
 User = get_user_model()
+_seq = count(1)
 
 LIST = "apps.distributors.tasks.list_transactions"
 VERIFY = "apps.distributors.tasks.verify_transaction"
@@ -74,8 +76,7 @@ def _make_order(reference, **fields):
     )
 
 
-def test_it_looks_back_a_week_and_leaves_the_last_hour_to_the_webhook():
-    assert RECONCILIATION_WINDOW == timedelta(days=7)
+def test_it_leaves_the_last_hour_to_the_webhook():
     assert RECONCILIATION_GRACE == timedelta(hours=1)
 
 
@@ -358,9 +359,13 @@ def test_a_missed_order_webhook_is_confirmed_without_an_issue(
 @patch(CONFIRM_ORDER)
 @patch(CONSUME_PACK)
 @patch(LIST)
-def test_payments_that_are_not_ours_are_ignored(
+def test_a_payment_that_is_not_ours_goes_through_none_of_the_three_paths(
     mock_list, mock_pack, mock_order, mock_reg
 ):
+    """Task 68g changed what happens next: it used to be skipped in silence
+    (the old assertion here was `not PaymentIssue.objects.exists()`), which
+    reads exactly like "nothing happened". It is now recorded -- see
+    test_a_payment_from_outside_bancostore_is_recorded_not_ignored."""
     mock_list.side_effect = _one_page(_paid("T123456789"), _paid("withdrawal-payout-1"))
 
     reconcile_paystack_payments()
@@ -368,7 +373,7 @@ def test_payments_that_are_not_ours_are_ignored(
     mock_pack.assert_not_called()
     mock_order.assert_not_called()
     mock_reg.assert_not_called()
-    assert not PaymentIssue.objects.exists()
+    assert not PaymentIssue.objects.filter(reference="withdrawal-payout-1").exists()
 
 
 @pytest.mark.django_db
@@ -379,3 +384,135 @@ def test_reconciliation_is_scheduled_daily():
     assert task.task == "apps.distributors.tasks.reconcile_paystack_payments"
     assert task.enabled
     assert (task.interval.every, task.interval.period) == (1, "days")
+
+
+# --- Task 68g/68h: nothing successful is ignored ------------------------------
+
+
+def test_the_window_covers_a_late_payment():
+    """Settled by live experiment 2026-09-18: Paystack's `from` filter is on
+    CREATED time, so a 7-day window could not see a checkout opened 8 days
+    ago and paid today -- the very case this job exists to catch."""
+    assert RECONCILIATION_WINDOW == timedelta(days=30)
+
+
+@pytest.mark.django_db
+@patch(LIST)
+def test_a_payment_from_outside_bancostore_is_recorded_not_ignored(mock_list):
+    mock_list.side_effect = _one_page(_paid("T123456789"))
+
+    reconcile_paystack_payments()
+
+    issue = PaymentIssue.objects.get(reference="T123456789")
+    assert issue.kind == PaymentIssue.Kind.UNRECOGNISED_PAYMENT
+
+
+@pytest.mark.django_db
+@patch(LIST)
+def test_a_transfer_reference_is_left_to_the_payout_job(mock_list):
+    """Money going out, not a checkout nobody claimed."""
+    mock_list.side_effect = _one_page(_paid("withdrawal-payout-000042"))
+
+    reconcile_paystack_payments()
+
+    assert not PaymentIssue.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.tasks.send_admin_notification")
+@patch(LIST)
+def test_hitting_the_page_cap_alerts_instead_of_only_logging(mock_list, mock_bell):
+    from apps.distributors.tasks import RECONCILIATION_MAX_PAGES
+
+    mock_list.return_value = (
+        [],
+        {"page": 1, "pageCount": RECONCILIATION_MAX_PAGES + 5},
+    )
+    mock_list.side_effect = lambda **kwargs: (
+        [_paid(f"reg-{kwargs['page']}")],
+        {"page": kwargs["page"], "pageCount": RECONCILIATION_MAX_PAGES + 5},
+    )
+
+    with patch(CONSUME_REG):
+        reconcile_paystack_payments()
+
+    assert mock_list.call_count == RECONCILIATION_MAX_PAGES
+    mock_bell.assert_called_once()
+    assert "reconciliation stopped" in mock_bell.call_args.args[1].lower()
+
+
+# --- Task 68i: a withdrawal cannot be debited and silently never paid ---------
+
+
+def _make_queued_withdrawal(*, days_old, net_amount=Decimal("495.00")):
+    from apps.withdrawal.models import WithdrawalRequest
+
+    distributor = _make_distributor(phone=f"+2332099{next(_seq):05d}")
+    request = WithdrawalRequest.objects.create(
+        distributor=distributor,
+        amount=Decimal("500.00"),
+        tax_amount=Decimal("5.00"),
+        net_amount=net_amount,
+        status=WithdrawalRequest.Status.QUEUED_FOR_PAYOUT,
+    )
+    WithdrawalRequest.objects.filter(pk=request.pk).update(
+        created_at=timezone.now() - timedelta(days=days_old)
+    )
+    return request
+
+
+@pytest.mark.django_db
+@patch(LIST)
+def test_a_payout_stuck_for_days_is_reported(mock_list):
+    """The wallet was debited at approval; only "failed"/"reversed" put it
+    back. Paystack's other statuses (otp, abandoned, blocked, rejected)
+    leave the money gone with nobody told."""
+    mock_list.side_effect = _one_page()
+    request = _make_queued_withdrawal(days_old=3)
+
+    reconcile_paystack_payments()
+
+    issue = PaymentIssue.objects.get(reference=f"withdrawal-payout-{request.pk:010d}")
+    assert issue.kind == PaymentIssue.Kind.WITHDRAWAL_NOT_PAID
+    assert "495" in issue.detail
+
+
+@pytest.mark.django_db
+@patch(LIST)
+def test_a_payout_queued_today_is_left_alone(mock_list):
+    mock_list.side_effect = _one_page()
+    _make_queued_withdrawal(days_old=0)
+
+    reconcile_paystack_payments()
+
+    assert not PaymentIssue.objects.exists()
+
+
+@pytest.mark.django_db
+@patch(LIST)
+def test_a_stuck_payout_is_reported_once_not_daily(mock_list):
+    mock_list.side_effect = _one_page()
+    _make_queued_withdrawal(days_old=5)
+
+    reconcile_paystack_payments()
+    reconcile_paystack_payments()
+
+    assert PaymentIssue.objects.count() == 1
+
+
+@pytest.mark.django_db
+@patch(LIST)
+def test_the_wallet_is_never_credited_back_automatically(mock_list):
+    """An unknown Paystack status can still become a real transfer later;
+    crediting the wallet for one that then completes would pay twice. A
+    human decides -- this only makes sure a human knows."""
+    from apps.wallet.models import WalletTransaction
+
+    mock_list.side_effect = _one_page()
+    _make_queued_withdrawal(days_old=3)
+
+    reconcile_paystack_payments()
+
+    assert not WalletTransaction.objects.filter(
+        transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_REVERSAL
+    ).exists()

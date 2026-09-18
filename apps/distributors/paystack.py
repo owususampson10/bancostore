@@ -218,6 +218,36 @@ def _is_reference_not_found(response):
     return "reference not found" in str(message).lower()
 
 
+def refund_transaction(*, reference, reason):
+    """Source: https://paystack.com/docs/api/refund/ ("Create Refund").
+    POST /refund with `transaction` set to our own reference. No `amount` is
+    sent, which Paystack treats as a full refund -- every caller here is
+    giving back the whole payment, and naming an amount would risk a partial
+    refund from a rounding slip.
+
+    Task 68e, the first use of this API in this codebase: when an order is
+    paid for and then cannot be fulfilled (stock ran out between payment and
+    confirmation), the customer's money has already been captured, and
+    ADR-0005 left the refund to a human who was never actually told. Raises
+    PaystackNotFoundError if Paystack has never seen the reference, matching
+    verify_transaction."""
+    try:
+        response = requests.post(
+            f"{PAYSTACK_BASE_URL}/refund",
+            headers=_auth_headers(),
+            json={"transaction": reference, "merchant_note": reason},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        if _is_reference_not_found(getattr(exc, "response", None)):
+            raise PaystackNotFoundError(
+                f"Paystack refund_transaction failed: reference not found ({exc})"
+            ) from exc
+        _raise_as_paystack_error(exc, "refund_transaction")
+    return response.json()["data"]
+
+
 def list_transactions(*, status, page, per_page, from_=None):
     """Source: https://paystack.com/docs/api/transaction/ ("List
     Transactions"). GET /transaction, newest first. Returns (data, meta);

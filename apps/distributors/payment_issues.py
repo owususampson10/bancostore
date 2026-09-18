@@ -19,6 +19,7 @@ import re
 
 from django.core.mail import send_mail
 from django.db import transaction
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from constance import config
@@ -38,7 +39,17 @@ _PLACEHOLDER_EMAIL = re.compile(
 )
 
 
-def record_payment_issue(reference, kind, *, verified=None, pending=None, detail=""):
+def record_payment_issue(
+    reference,
+    kind,
+    *,
+    verified=None,
+    pending=None,
+    distributor=None,
+    order=None,
+    detail="",
+    resolved=False,
+):
     """Returns the PaymentIssue (new or already existing), or None if it
     could not be written. Never raises: callers run after money or an
     account has already committed, and a failure to record the problem must
@@ -49,7 +60,13 @@ def record_payment_issue(reference, kind, *, verified=None, pending=None, detail
     longer exists."""
     verified = verified or {}
     try:
-        fields = _issue_fields(kind, verified, pending, detail)
+        fields = _issue_fields(kind, verified, pending, distributor, order, detail)
+        if resolved:
+            # Task 68e: already put right (the stock-out refund). It still
+            # belongs on the Payments screen -- an admin should see money
+            # come in and go back out -- but it needs no action and must not
+            # add to the "still to sort" count.
+            fields["resolved_at"] = timezone.now()
         with transaction.atomic():
             issue, created = PaymentIssue.objects.get_or_create(
                 reference=reference[:100], defaults=fields
@@ -74,7 +91,7 @@ def record_payment_issue(reference, kind, *, verified=None, pending=None, detail
     return issue
 
 
-def _issue_fields(kind, verified, pending, detail):
+def _issue_fields(kind, verified, pending, distributor, order, detail):
     metadata = _metadata(verified)
     customer = verified.get("customer") if isinstance(verified, dict) else None
     payer_email = _clean(
@@ -85,6 +102,17 @@ def _issue_fields(kind, verified, pending, detail):
         payer_name = _clean(pending.full_name, 255)
         payer_phone = _clean(pending.phone_number, 32)
         payer_email = _clean(pending.email, 254) or payer_email
+    elif order is not None:
+        # Task 68d: an order carries the buyer's own details, guest or not.
+        payer_name = _clean(order.full_name, 255)
+        payer_phone = _clean(order.phone_number, 32)
+        payer_email = _clean(order.email, 254) or payer_email
+    elif distributor is not None:
+        # Task 68d: a starter-pack payment's payer is a real distributor, so
+        # their own record beats anything Paystack echoes back.
+        payer_name = _clean(distributor.full_name, 255)
+        payer_phone = _clean(distributor.phone_number, 32)
+        payer_email = _clean(getattr(distributor.user, "email", ""), 254) or payer_email
     else:
         payer_name = _clean(metadata.get("full_name"), 255)
         payer_phone = _clean(metadata.get("phone_number"), 32)

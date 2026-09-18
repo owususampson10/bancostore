@@ -40,8 +40,10 @@ from .models import (
     IrIdSequence,
     PaymentIssue,
     PendingRegistration,
+    StarterPackCheckout,
 )
 from .payment_issues import record_payment_issue
+from .payment_outcomes import PaymentOutcome
 from .paystack import PaystackError, PaystackNotFoundError, verify_transaction
 
 logger = logging.getLogger(__name__)
@@ -212,26 +214,13 @@ def snapshot_payment_reference(token) -> PendingRegistration:
     return retry_on_lock_contention(_attempt)
 
 
-class RegistrationPaymentOutcome(str, Enum):
-    """Task 67. What consume_paid_registration did with a reference -- so the
-    webhook can ask Paystack to retry a verify that failed, and cleanup can
-    tell "definitely handled" from "don't know yet"."""
-
-    CREATED = "created"
-    ALREADY_APPLIED = "already_applied"
-    NOT_PAID = "not_paid"
-    VERIFY_FAILED = "verify_failed"
-    ISSUE_RECORDED = "issue_recorded"
-    UNKNOWN_REFERENCE = "unknown_reference"
-
-
 # Task 67. The exact shape snapshot_payment_reference issues. Only a reference
 # of this shape is worth looking up by token or verifying with Paystack when
 # no row matches it -- the callback that passes references in is public.
 _REGISTRATION_REFERENCE = re.compile(r"^reg-([0-9a-f]{32})-[0-9a-f]{8}$")
 
 
-def consume_paid_registration(reference: str) -> RegistrationPaymentOutcome:
+def consume_paid_registration(reference: str) -> PaymentOutcome:
     """Task 10b: the single source of truth for turning a paid
     PendingRegistration into a real account. Called from the Paystack
     webhook, the callback-redirect view, pending-registration cleanup and
@@ -280,7 +269,7 @@ def consume_paid_registration(reference: str) -> RegistrationPaymentOutcome:
                         "reference this site issues -- not checked with Paystack.",
                         reference,
                     )
-                    return _Result(RegistrationPaymentOutcome.UNKNOWN_REFERENCE)
+                    return _Result(PaymentOutcome.UNKNOWN_REFERENCE)
                 result = _verify_paid(reference)
                 if result.outcome is not None:
                     return result
@@ -293,7 +282,7 @@ def consume_paid_registration(reference: str) -> RegistrationPaymentOutcome:
 
             if pending.consumed_at is not None:
                 if pending.consumed_reference == reference:
-                    return _Result(RegistrationPaymentOutcome.ALREADY_APPLIED)
+                    return _Result(PaymentOutcome.ALREADY_APPLIED)
                 result = _verify_paid(reference)
                 if result.outcome is not None:
                     return result
@@ -396,27 +385,27 @@ def consume_paid_registration(reference: str) -> RegistrationPaymentOutcome:
             pending.consumed_at = timezone.now()
             pending.consumed_reference = reference
             pending.save(update_fields=["consumed_at", "consumed_reference"])
-            return _Result(RegistrationPaymentOutcome.CREATED)
+            return _Result(PaymentOutcome.APPLIED)
 
     def _verify_paid(ref):
         try:
             verified = verify_transaction(ref)
         except PaystackNotFoundError:
-            return _Result(RegistrationPaymentOutcome.NOT_PAID)
+            return _Result(PaymentOutcome.NOT_PAID)
         except PaystackError:
             logger.exception(
                 "consume_paid_registration: Paystack verify_transaction "
                 "failed for reference=%s",
                 ref,
             )
-            return _Result(RegistrationPaymentOutcome.VERIFY_FAILED)
+            return _Result(PaymentOutcome.VERIFY_FAILED)
         if verified.get("status") != "success":
-            return _Result(RegistrationPaymentOutcome.NOT_PAID)
+            return _Result(PaymentOutcome.NOT_PAID)
         return _Result(None, verified=verified)
 
     def _issue(kind, verified, pending=None, detail=""):
         return _Result(
-            RegistrationPaymentOutcome.ISSUE_RECORDED,
+            PaymentOutcome.ISSUE_RECORDED,
             issue_kind=kind,
             verified=verified,
             pending=pending,
@@ -437,16 +426,22 @@ def consume_paid_registration(reference: str) -> RegistrationPaymentOutcome:
             # must not read as handled -- VERIFY_FAILED makes the webhook
             # ask Paystack to retry and makes cleanup keep the row that
             # still holds the payer's details.
-            return RegistrationPaymentOutcome.VERIFY_FAILED
+            return PaymentOutcome.VERIFY_FAILED
     return result.outcome
 
 
 @dataclass
 class _Result:
-    outcome: RegistrationPaymentOutcome | None
+    """What one locked consume attempt concluded, carried back out so the
+    PaymentIssue is recorded after the transaction commits rather than
+    inside it (Task 67: a write inside the block would be rolled back with
+    it, losing the only record of the payer)."""
+
+    outcome: PaymentOutcome | None
     issue_kind: str | None = None
     verified: dict | None = None
     pending: PendingRegistration | None = None
+    distributor: Distributor | None = None
     detail: str = ""
 
 
@@ -530,11 +525,11 @@ def resolve_unconsumed_pending_registration(
         if status == "success":
             outcome = consume_paid_registration(reference)
             if outcome in (
-                RegistrationPaymentOutcome.CREATED,
-                RegistrationPaymentOutcome.ALREADY_APPLIED,
+                PaymentOutcome.APPLIED,
+                PaymentOutcome.ALREADY_APPLIED,
             ):
                 return PendingRegistrationResolution.CONSUMED
-            if outcome is RegistrationPaymentOutcome.ISSUE_RECORDED:
+            if outcome is PaymentOutcome.ISSUE_RECORDED:
                 return _delete_pending_if_unchanged(pending)
             return PendingRegistrationResolution.KEPT
         if past_max_age:
@@ -629,6 +624,17 @@ def snapshot_starter_pack_choice(distributor_pk, choice: str) -> Distributor:
             distributor.starter_pack_payment_reference = (
                 f"pack-{distributor.pk}-{uuid.uuid4().hex[:8]}"
             )
+            # Task 68b: remembered, not just overwritten. A distributor who
+            # goes back and re-picks leaves a live, payable checkout behind,
+            # and this is the only record that it was ever ours -- with the
+            # price as it stood then, so a later price change cannot turn a
+            # correct payment into a rejected one.
+            StarterPackCheckout.objects.create(
+                distributor=distributor,
+                reference=distributor.starter_pack_payment_reference,
+                amount_pesewas=distributor.starter_pack_price_pesewas,
+                choice=choice,
+            )
             distributor.save(
                 update_fields=[
                     "starter_pack_choice",
@@ -643,7 +649,7 @@ def snapshot_starter_pack_choice(distributor_pk, choice: str) -> Distributor:
     return retry_on_lock_contention(_attempt)
 
 
-def consume_paid_starter_pack(reference: str) -> None:
+def consume_paid_starter_pack(reference: str) -> PaymentOutcome:
     """Task 10c/10d: mirrors consume_paid_registration's idempotent,
     server-verified pattern. Sets rank from the snapshotted
     starter_pack_rank (never re-derived from constance at confirmation
@@ -657,13 +663,30 @@ def consume_paid_starter_pack(reference: str) -> None:
     choice is always auto-balance (leg=None): Task 10a's registration
     form has no field for a sponsor to pick an explicit leg, so the
     "sponsor picks, or auto-balance falls back" design only exercises the
-    fallback path today (confirmed with the user 2026-07-13)."""
+    fallback path today (confirmed with the user 2026-07-13).
+
+    Task 68c/68d: returns a PaymentOutcome instead of None, so the webhook
+    can ask Paystack to retry a failed verify rather than acknowledging its
+    one push; and a payment Paystack confirms that cannot be applied now
+    records a PaymentIssue here, at the failure site, instead of only being
+    noticed by the next day's reconciliation. Issues are recorded after the
+    locked transaction returns, never inside it."""
 
     def _attempt():
         with transaction.atomic():
+            # Task 68b: the checkout this reference belongs to, whether or
+            # not it is still the distributor's current one.
+            checkout = StarterPackCheckout.objects.filter(reference=reference).first()
+            distributor_filter = (
+                Distributor.objects.filter(pk=checkout.distributor_id)
+                if checkout is not None
+                else Distributor.objects.filter(
+                    starter_pack_payment_reference=reference
+                )
+            )
             try:
                 distributor = select_for_update_nowait_if_supported(
-                    Distributor.objects.filter(starter_pack_payment_reference=reference)
+                    distributor_filter
                 ).get()
             except Distributor.DoesNotExist:
                 logger.error(
@@ -672,10 +695,34 @@ def consume_paid_starter_pack(reference: str) -> None:
                     "no matching record. Needs manual investigation.",
                     reference,
                 )
-                return
+                # An orphaned checkout from an earlier pack selection is the
+                # likeliest cause, and the money is real if it was paid.
+                result = _verify_pack_paid(reference)
+                if result.outcome is not None:
+                    return result
+                return _pack_issue(
+                    result.verified,
+                    detail="No distributor is waiting on this starter-pack "
+                    "payment (an earlier pack selection's checkout, or a "
+                    "record since removed).",
+                )
 
             if distributor.starter_pack_confirmed_at is not None:
-                return  # Already consumed -- idempotent no-op.
+                if checkout is None or checkout.consumed_at is not None:
+                    # A replay of the payment that applied the pack.
+                    return _Result(PaymentOutcome.ALREADY_APPLIED)
+                # Task 68b: a SECOND checkout paid for as well -- the pack is
+                # already theirs, so this money needs giving back.
+                result = _verify_pack_paid(reference)
+                if result.outcome is not None:
+                    return result
+                return _pack_issue(
+                    result.verified,
+                    distributor,
+                    detail="This distributor's starter pack was already paid "
+                    "for and applied by an earlier checkout, so this is a "
+                    "second payment.",
+                )
 
             # Task 19 (security-and-hardening review, post-implementation):
             # cancel_membership_and_refund clears starter_pack_confirmed_at
@@ -698,20 +745,21 @@ def consume_paid_starter_pack(reference: str) -> None:
                     distributor.pk,
                     reference,
                 )
-                return
-
-            try:
-                verified = verify_transaction(reference)
-            except PaystackError:
-                logger.exception(
-                    "consume_paid_starter_pack: Paystack verify_transaction "
-                    "failed for reference=%s",
-                    reference,
+                result = _verify_pack_paid(reference)
+                if result.outcome is not None:
+                    return result
+                return _pack_issue(
+                    result.verified,
+                    distributor,
+                    detail="This membership was already cancelled under the "
+                    "cooling-off rule, so the pack was not applied.",
                 )
-                return
 
-            if verified.get("status") != "success":
-                return
+            result = _verify_pack_paid(reference)
+            if result.outcome is not None:
+                return result
+            verified = result.verified
+
             if verified.get("currency") != "GHS":
                 logger.warning(
                     "consume_paid_starter_pack: unexpected currency %r for "
@@ -719,16 +767,32 @@ def consume_paid_starter_pack(reference: str) -> None:
                     verified.get("currency"),
                     reference,
                 )
-                return
-            if verified.get("amount") != distributor.starter_pack_price_pesewas:
+                return _pack_issue(
+                    verified,
+                    distributor,
+                    detail=f"Paid in {verified.get('currency')!r}, not GHS.",
+                )
+            # The price this very checkout was opened at, not whatever the
+            # distributor's current selection says (Task 68b).
+            expected_pesewas = (
+                checkout.amount_pesewas
+                if checkout is not None
+                else distributor.starter_pack_price_pesewas
+            )
+            if verified.get("amount") != expected_pesewas:
                 logger.warning(
                     "consume_paid_starter_pack: amount mismatch for "
                     "reference=%s (paid=%r, expected=%r)",
                     reference,
                     verified.get("amount"),
-                    distributor.starter_pack_price_pesewas,
+                    expected_pesewas,
                 )
-                return
+                return _pack_issue(
+                    verified,
+                    distributor,
+                    detail=f"Paid {verified.get('amount')!r} pesewas, expected "
+                    f"{expected_pesewas!r}.",
+                )
 
             try:
                 BinaryTree.place_distributor(distributor.sponsor, distributor, leg=None)
@@ -768,8 +832,50 @@ def consume_paid_starter_pack(reference: str) -> None:
             distributor.rank = distributor.starter_pack_rank
             distributor.starter_pack_confirmed_at = now
             distributor.save(update_fields=["rank", "starter_pack_confirmed_at"])
+            if checkout is not None:
+                checkout.consumed_at = now
+                checkout.save(update_fields=["consumed_at"])
+            return _Result(PaymentOutcome.APPLIED)
 
-    retry_on_lock_contention(_attempt)
+    def _verify_pack_paid(ref):
+        try:
+            verified = verify_transaction(ref)
+        except PaystackNotFoundError:
+            return _Result(PaymentOutcome.NOT_PAID)
+        except PaystackError:
+            logger.exception(
+                "consume_paid_starter_pack: Paystack verify_transaction "
+                "failed for reference=%s",
+                ref,
+            )
+            return _Result(PaymentOutcome.VERIFY_FAILED)
+        if verified.get("status") != "success":
+            return _Result(PaymentOutcome.NOT_PAID)
+        return _Result(None, verified=verified)
+
+    def _pack_issue(verified, distributor=None, *, detail=""):
+        return _Result(
+            PaymentOutcome.ISSUE_RECORDED,
+            issue_kind=PaymentIssue.Kind.STARTER_PACK_NOT_APPLIED,
+            verified=verified,
+            distributor=distributor,
+            detail=detail,
+        )
+
+    result = retry_on_lock_contention(_attempt)
+    if result.issue_kind is not None:
+        issue = record_payment_issue(
+            reference,
+            result.issue_kind,
+            verified=result.verified,
+            distributor=result.distributor,
+            detail=result.detail,
+        )
+        if issue is None:
+            # Nothing durable was written, so this must not read as
+            # resolved: the webhook asks Paystack to send it again.
+            return PaymentOutcome.VERIFY_FAILED
+    return result.outcome
 
 
 def _credit_direct_referral_bonus(distributor, reference: str) -> None:

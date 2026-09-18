@@ -8,6 +8,8 @@ from django.utils.dateparse import parse_datetime
 
 from celery import shared_task
 
+from apps.notifications.models import AdminNotification
+from apps.notifications.services import send_admin_notification
 from apps.orders.models import Order
 from apps.orders.services import confirm_order_payment
 from bancostore.concurrency import retry_on_lock_contention
@@ -159,7 +161,15 @@ def cleanup_expired_pending_registrations():
 
 # Task 67. How far back the daily reconciliation looks, and how recent a
 # payment it leaves to the webhook (which normally lands within seconds).
-RECONCILIATION_WINDOW = timedelta(days=7)
+# Task 68h. Widened from 7 days once the semantics were settled by
+# experiment (2026-09-18): Paystack's `from` filter is on CREATED time, not
+# paid time -- asking from 08:30 on the incident's own day returns the
+# transactions created after 08:30 and NOT the one created at 07:56 and paid
+# at 09:39. A 7-day window therefore could not see the very thing it exists
+# to catch: a checkout paid long after it was opened. 30 days covers any
+# realistic lag; the cost is API pages per run, bounded by
+# RECONCILIATION_MAX_PAGES and paid once a day.
+RECONCILIATION_WINDOW = timedelta(days=30)
 RECONCILIATION_GRACE = timedelta(hours=1)
 RECONCILIATION_PAGE_SIZE = 100
 # A runaway pageCount must not turn one run into thousands of API calls.
@@ -215,14 +225,18 @@ def reconcile_paystack_payments():
         if not transactions or page >= page_count:
             break
         if page == RECONCILIATION_MAX_PAGES:
-            logger.warning(
-                "reconcile_paystack_payments: stopped at %s pages of %s -- "
-                "older payments in the window were not checked this run.",
-                page,
-                page_count,
-            )
+            # Task 68g: an alert, not just a log line -- the payments this
+            # run never looked at are exactly the oldest ones in the window.
+            _alert_reconciliation_truncated(page, page_count)
             break
         page += 1
+
+    # Task 68i. The outbound direction, checked on the same daily pass.
+    try:
+        _alert_on_stuck_payouts(now)
+    except Exception:
+        summary["failed"] += 1
+        logger.exception("reconcile_paystack_payments: stuck-payout check failed")
 
     logger.info(
         "reconcile_paystack_payments: checked=%s failed=%s pages=%s",
@@ -240,7 +254,22 @@ def _reconcile_one(transaction_data, paid_before):
     if paid_at is None or paid_at > paid_before:
         return False
     if not reference.startswith(("reg-", "pack-", "order-")):
-        return False
+        # Task 68g: money this platform did not ask for -- a Paystack payment
+        # page or inline checkout on the same merchant account. Previously
+        # skipped in silence, which is indistinguishable from "nothing
+        # happened". Transfers are money going out and are not this job's
+        # business.
+        if reference.startswith("withdrawal-payout-"):
+            return False
+        record_payment_issue(
+            reference,
+            PaymentIssue.Kind.UNRECOGNISED_PAYMENT,
+            verified=transaction_data,
+            detail="This payment did not come from a Bancostore checkout "
+            "(its reference is not one this platform issues). It may be a "
+            "Paystack payment page or link on the same account.",
+        )
+        return True
     if PaymentIssue.objects.filter(reference=reference).exists():
         return True
 
@@ -332,3 +361,64 @@ def send_password_reset_code_task(phone_number: str) -> None:
     known or not, so those pages do identical work whatever the answer --
     see send_password_reset_code for why."""
     send_password_reset_code(phone_number)
+
+
+# Task 68i. How long a payout may sit waiting for Paystack's final answer
+# before the admin is told. Two days clears a normal weekend queue without
+# leaving a distributor's money in limbo unnoticed.
+STUCK_PAYOUT_AFTER = timedelta(days=2)
+
+
+def _alert_on_stuck_payouts(now):
+    """Task 68i. A withdrawal is debited from the wallet at approval, and
+    only Paystack's "failed"/"reversed" put it back. Their transfer
+    vocabulary also includes otp/abandoned/blocked/rejected, any of which
+    leave a request sitting in queued_for_payout with the distributor's
+    money gone and nobody told.
+
+    This does NOT reverse the wallet by itself: an unknown status can still
+    turn into a real transfer later, and crediting the wallet for one that
+    then completes would pay the distributor twice. A human decides; this
+    makes sure a human knows. The PaymentIssue's unique reference means one
+    alert per stuck payout, however many days it runs."""
+    # Imported here, not at module level: apps.withdrawal.services imports
+    # from this app's own paystack module, and a module-level import either
+    # way round would be circular.
+    from apps.withdrawal.models import WithdrawalRequest
+    from apps.withdrawal.services import _generate_transfer_reference
+
+    stuck = WithdrawalRequest.objects.select_related("distributor").filter(
+        status=WithdrawalRequest.Status.QUEUED_FOR_PAYOUT,
+        created_at__lte=now - STUCK_PAYOUT_AFTER,
+    )
+    for request in stuck:
+        record_payment_issue(
+            _generate_transfer_reference(request.pk),
+            PaymentIssue.Kind.WITHDRAWAL_NOT_PAID,
+            distributor=request.distributor,
+            detail=(
+                f"GHS {request.net_amount} was taken from this distributor's "
+                "wallet when the withdrawal was approved, but Paystack has "
+                "never confirmed the payout. Check the transfer in the "
+                "Paystack dashboard: if it failed, reverse the withdrawal so "
+                "the money goes back to their wallet; if it paid, mark the "
+                "request paid."
+            ),
+        )
+
+
+def _alert_reconciliation_truncated(pages_read, page_count):
+    """Task 68g. Tells the admin when one run could not read the whole
+    window. Never raises: the run's real work has already happened."""
+    summary = (
+        f"Payment reconciliation stopped after {pages_read} of {page_count} "
+        f"pages. The oldest payments in the window were not checked. Raise "
+        f"RECONCILIATION_MAX_PAGES or run it more often."
+    )
+    logger.warning("reconcile_paystack_payments: %s", summary)
+    try:
+        send_admin_notification(AdminNotification.EventType.PAYMENT_ISSUE, summary)
+    except Exception:
+        logger.exception(
+            "reconcile_paystack_payments: could not raise the truncation alert"
+        )

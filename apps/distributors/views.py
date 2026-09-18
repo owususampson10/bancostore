@@ -65,6 +65,7 @@ from apps.withdrawal.tasks import TRANSFER_WEBHOOK_EVENTS, process_transfer_webh
 from .didit import DiditError
 from .didit import create_verification_session as create_didit_session
 from .didit import verify_webhook_signature as verify_didit_webhook_signature
+from .external_refunds import handle_external_refund, handle_payment_dispute
 from .forms import (
     REGISTRATION_IN_PROGRESS_MESSAGE,
     DistributorForgotPasswordForm,
@@ -76,6 +77,7 @@ from .forms import (
     WithdrawalRequestForm,
 )
 from .models import DiditVerification, Distributor, PendingRegistration
+from .payment_outcomes import PaymentOutcome
 from .paystack import (
     PaystackError,
     initialize_transaction,
@@ -87,7 +89,6 @@ from .services import (
     PendingRegistrationAlreadyConsumed,
     PendingRegistrationNotFound,
     PendingRegistrationResolution,
-    RegistrationPaymentOutcome,
     StarterPackAlreadyConfirmed,
     attempt_distributor_login,
     consume_didit_result,
@@ -494,16 +495,37 @@ def paystack_webhook(request):
         )
         if handler:
             outcome = handler(reference)
-            # Task 67: Paystack only redelivers a webhook that did not get a
-            # 2xx. When we could not verify the payment ourselves, say so,
-            # rather than acknowledging the one push we get for a payment
-            # nothing has been done about yet.
-            if outcome is RegistrationPaymentOutcome.VERIFY_FAILED:
+            # Task 67/68c: Paystack only redelivers a webhook that did not
+            # get a 2xx. When we could not verify the payment ourselves, say
+            # so, rather than acknowledging the one push we get for a payment
+            # nothing has been done about yet. All three entry points now
+            # report this, not just registrations.
+            if outcome is PaymentOutcome.VERIFY_FAILED:
                 return HttpResponse(status=503)
         elif reference:
             logger.warning(
                 "paystack_webhook: unrecognized reference prefix: %s", reference
             )
+    elif event.startswith("refund.") or event.startswith("charge.dispute."):
+        # Task 68f. Money going back to a customer -- a refund we issued, or
+        # a chargeback their bank forced. Paystack's dispute events are
+        # charge.dispute.create/remind/resolve; its refund events all start
+        # "refund.". Matching on the prefix rather than a fixed list means a
+        # new event name in either family is still heard, and the handler
+        # re-verifies with Paystack regardless of what the body claims.
+        reference = (payload.get("data", {}).get("transaction") or {}).get(
+            "reference"
+        ) or payload.get("data", {}).get("reference", "")
+        if not reference:
+            logger.warning(
+                "paystack_webhook: %s carried no transaction reference", event
+            )
+        elif event.startswith("charge.dispute."):
+            outcome = handle_payment_dispute(reference, event)
+        else:
+            outcome = handle_external_refund(reference)
+            if outcome is PaymentOutcome.VERIFY_FAILED:
+                return HttpResponse(status=503)
     elif event in TRANSFER_WEBHOOK_EVENTS:
         reference = payload.get("data", {}).get("reference", "")
         # doubt-driven-development finding, 2026-07-24: a blank reference

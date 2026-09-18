@@ -15,7 +15,8 @@ from apps.binary_tree.models import BinaryTreeEdge
 from apps.binary_tree.services import BinaryTree
 from apps.catalog.models import Category, Product
 from apps.compliance.models import ComplianceAlertState, EscrowLedger, EscrowTransaction
-from apps.distributors.models import Distributor
+from apps.distributors.models import Distributor, PaymentIssue
+from apps.distributors.payment_outcomes import PaymentOutcome
 from apps.distributors.paystack import PaystackError
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import confirm_order_payment
@@ -362,7 +363,16 @@ def test_cancelled_order_confirmation_attempt_is_a_no_op(
 
     order.refresh_from_db()
     assert order.status == Order.Status.CANCELLED
-    mock_verify.assert_not_called()
+    # Task 68d: this DOES now ask Paystack again. The old assertion here was
+    # mock_verify.assert_not_called(), which encoded the very gap that lost
+    # the money: an order closed without ever being paid for, then a real
+    # payment arriving for it, was dropped in silence. The order still stays
+    # cancelled -- but the payment is now on the admin's Payments screen.
+    mock_verify.assert_called_once_with(order.payment_reference)
+    assert PaymentIssue.objects.filter(
+        reference=order.payment_reference,
+        kind=PaymentIssue.Kind.ORDER_NOT_APPLIED,
+    ).exists()
 
 
 @pytest.mark.django_db
@@ -940,3 +950,226 @@ def test_concurrent_order_confirmations_never_lose_a_discount_code_usage_count(
     assert not errors
     code.refresh_from_db()
     assert code.times_used == 2
+
+
+# --- Task 68c/68d: outcomes, and an issue recorded where it happens -----------
+
+
+@pytest.fixture(autouse=True)
+def _run_on_commit_now(monkeypatch):
+    monkeypatch.setattr(
+        "apps.distributors.payment_issues.transaction.on_commit", lambda fn: fn()
+    )
+
+
+@pytest.fixture
+def _quiet_notifications():
+    with (
+        patch("apps.orders.services.send_mail"),
+        patch("apps.orders.services.send_sms"),
+        patch("apps.orders.services.send_admin_order_alert"),
+        patch("apps.orders.services.send_order_receipt_email_task"),
+    ):
+        yield
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.verify_transaction")
+def test_a_confirmed_order_reports_applied(mock_verify, _quiet_notifications):
+    order = _make_order()
+    _add_item(order, _make_product(stock=5), quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    assert confirm_order_payment(order.payment_reference) == PaymentOutcome.APPLIED
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.verify_transaction")
+def test_a_replay_reports_already_applied(mock_verify, _quiet_notifications):
+    order = _make_order()
+    _add_item(order, _make_product(stock=5), quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+    confirm_order_payment(order.payment_reference)
+
+    outcome = confirm_order_payment(order.payment_reference)
+
+    assert outcome == PaymentOutcome.ALREADY_APPLIED
+    assert not PaymentIssue.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.verify_transaction")
+def test_a_verify_failure_reports_it_so_paystack_is_asked_again(mock_verify):
+    order = _make_order()
+    mock_verify.side_effect = PaystackError("timed out")
+
+    outcome = confirm_order_payment(order.payment_reference)
+
+    assert outcome == PaymentOutcome.VERIFY_FAILED
+    assert not PaymentIssue.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.verify_transaction")
+def test_an_unpaid_reference_reports_not_paid(mock_verify):
+    order = _make_order()
+    mock_verify.return_value = {"status": "abandoned"}
+
+    assert confirm_order_payment(order.payment_reference) == PaymentOutcome.NOT_PAID
+    assert not PaymentIssue.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.verify_transaction")
+def test_a_wrong_amount_records_an_issue_immediately(mock_verify):
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, _make_product(stock=5), quantity=1)
+    mock_verify.return_value = _success_verify(amount=5000)
+
+    outcome = confirm_order_payment(order.payment_reference)
+
+    assert outcome == PaymentOutcome.ISSUE_RECORDED
+    issue = PaymentIssue.objects.get(reference=order.payment_reference)
+    assert issue.kind == PaymentIssue.Kind.ORDER_NOT_APPLIED
+    assert issue.payer_name == "Ama Mensah"
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.verify_transaction")
+def test_a_wrong_currency_records_an_issue_immediately(mock_verify):
+    order = _make_order()
+    mock_verify.return_value = _success_verify(amount=45000, currency="NGN")
+
+    assert (
+        confirm_order_payment(order.payment_reference) == PaymentOutcome.ISSUE_RECORDED
+    )
+    assert PaymentIssue.objects.filter(reference=order.payment_reference).exists()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.verify_transaction")
+def test_a_payment_for_an_order_already_closed_records_an_issue(mock_verify):
+    """The late-payment case: the order was cancelled, then the customer paid
+    on the checkout page they still had open. Until Task 68 this returned
+    silently, with not even a log line."""
+    order = _make_order()
+    Order.objects.filter(pk=order.pk).update(status=Order.Status.CANCELLED)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    outcome = confirm_order_payment(order.payment_reference)
+
+    assert outcome == PaymentOutcome.ISSUE_RECORDED
+    assert (
+        PaymentIssue.objects.get(reference=order.payment_reference).kind
+        == PaymentIssue.Kind.ORDER_NOT_APPLIED
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.verify_transaction")
+def test_an_unpaid_reference_for_a_closed_order_records_nothing(mock_verify):
+    order = _make_order()
+    Order.objects.filter(pk=order.pk).update(status=Order.Status.CANCELLED)
+    mock_verify.return_value = {"status": "abandoned"}
+
+    assert confirm_order_payment(order.payment_reference) == PaymentOutcome.NOT_PAID
+    assert not PaymentIssue.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.verify_transaction")
+def test_a_paid_reference_with_no_order_at_all_records_an_issue(mock_verify):
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    outcome = confirm_order_payment("order-nothing-here")
+
+    assert outcome == PaymentOutcome.ISSUE_RECORDED
+    assert PaymentIssue.objects.filter(reference="order-nothing-here").exists()
+
+
+# --- Task 68e: a stock-out refunds the customer automatically -----------------
+#
+# The Amazon way, chosen by the user 2026-09-18: never leave a customer paid
+# and waiting on a human. ADR-0005 left the refund to an admin who was only
+# ever told through an ERROR log line.
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.refund_transaction")
+@patch("apps.orders.services.verify_transaction")
+def test_a_stock_out_refunds_the_customer(
+    mock_verify, mock_refund, _quiet_notifications
+):
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, _make_product(stock=0), quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    outcome = confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+    assert outcome == PaymentOutcome.ISSUE_RECORDED
+    mock_refund.assert_called_once()
+    assert mock_refund.call_args.kwargs["reference"] == order.payment_reference
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.refund_transaction")
+@patch("apps.orders.services.verify_transaction")
+def test_a_refunded_stock_out_is_recorded_as_already_handled(
+    mock_verify, mock_refund, _quiet_notifications
+):
+    """It still reaches the Payments screen -- an admin should see that money
+    came in and went back out -- but marked sorted, since nothing is owed."""
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, _make_product(stock=0), quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+
+    confirm_order_payment(order.payment_reference)
+
+    issue = PaymentIssue.objects.get(reference=order.payment_reference)
+    assert issue.kind == PaymentIssue.Kind.ORDER_NOT_APPLIED
+    assert issue.resolved_at is not None
+    assert "refunded" in issue.detail.lower()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.refund_transaction")
+@patch("apps.orders.services.verify_transaction")
+def test_a_failed_refund_leaves_the_issue_for_a_human(
+    mock_verify, mock_refund, _quiet_notifications
+):
+    from apps.distributors.paystack import PaystackError
+
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, _make_product(stock=0), quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+    mock_refund.side_effect = PaystackError("refund rejected")
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED  # never left paid-and-pending
+    issue = PaymentIssue.objects.get(reference=order.payment_reference)
+    assert issue.resolved_at is None
+    assert "could not" in issue.detail.lower()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.refund_transaction")
+@patch("apps.orders.services.verify_transaction")
+def test_the_refund_never_breaks_the_cancellation(
+    mock_verify, mock_refund, _quiet_notifications
+):
+    """The money is already captured and the order must end up cancelled
+    whatever the refund call does -- an exception escaping here would land
+    inside confirm_order_payment's retry wrapper."""
+    order = _make_order(total=Decimal("450.00"))
+    _add_item(order, _make_product(stock=0), quantity=1)
+    mock_verify.return_value = _success_verify(amount=45000)
+    mock_refund.side_effect = RuntimeError("something unexpected")
+
+    confirm_order_payment(order.payment_reference)
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED

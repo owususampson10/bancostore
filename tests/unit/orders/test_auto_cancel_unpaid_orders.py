@@ -10,6 +10,7 @@ from django.test.utils import CaptureQueriesContext
 
 import pytest
 
+import apps.orders.services as services
 import apps.orders.tasks as tasks_module
 from apps.orders.models import Order, OrderCycleFailure, OrderCycleRun
 from apps.orders.services import _auto_cancel_pending_order
@@ -20,6 +21,19 @@ from apps.orders.tasks import (
 )
 
 _ref_seq = count(1)
+
+VERIFY = "apps.orders.services.verify_transaction"
+
+
+@pytest.fixture(autouse=True)
+def _paystack_says_never_paid():
+    """Task 68a: auto-cancel now asks Paystack before cancelling anything.
+    The default for these tests is the ordinary case -- a checkout nobody
+    ever paid -- so the existing cases keep testing what they always did.
+    Cases about a paid checkout override it."""
+    with patch(VERIFY, return_value={"status": "abandoned"}) as mock_verify:
+        yield mock_verify
+
 
 RUN_AT = datetime(2026, 7, 27, 10, 0, tzinfo=dt_timezone.utc)
 
@@ -277,3 +291,127 @@ def test_query_count_stays_flat_per_order_regardless_of_eligible_count(
     # of queries, not dozens) as the eligible count grows.
     per_order_cost = (large_count - small_count) / 8
     assert per_order_cost < 10
+
+
+# ---------------------------------------------------------------------------
+# Task 68a: an order is never cancelled without asking Paystack first
+#
+# The 2026-09-16 incident's exact twin. A pending order was cancelled after 24
+# hours with no Paystack call, while the customer's checkout page stayed
+# payable -- and confirm_order_payment then dropped the payment silently,
+# because the order was no longer pending.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.confirm_order_payment")
+def test_an_order_paid_on_a_still_open_checkout_is_confirmed_not_cancelled(
+    mock_confirm, _paystack_says_never_paid
+):
+    order = _make_order()
+    _paystack_says_never_paid.return_value = {"status": "success"}
+
+    result = _auto_cancel_pending_order(order.pk)
+
+    assert result is False
+    mock_confirm.assert_called_once_with(order.payment_reference)
+    order.refresh_from_db()
+    assert order.status == Order.Status.PENDING  # confirm_order_payment is mocked
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", ["abandoned", "failed", "reversed"])
+@patch("apps.orders.services._send_auto_cancel_notification")
+def test_a_definite_not_paid_answer_still_cancels(
+    mock_notify, _paystack_says_never_paid, status
+):
+    order = _make_order()
+    _paystack_says_never_paid.return_value = {"status": status}
+
+    assert _auto_cancel_pending_order(order.pk) is True
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services._send_auto_cancel_notification")
+def test_a_reference_paystack_never_saw_still_cancels(
+    mock_notify, _paystack_says_never_paid
+):
+    from apps.distributors.paystack import PaystackNotFoundError
+
+    order = _make_order()
+    _paystack_says_never_paid.side_effect = PaystackNotFoundError("not found")
+
+    assert _auto_cancel_pending_order(order.pk) is True
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+
+
+@pytest.mark.django_db
+def test_an_unreachable_paystack_leaves_the_order_alone(_paystack_says_never_paid):
+    """Never cancel on "we don't know" -- that is how the money was lost."""
+    from apps.distributors.paystack import PaystackError
+
+    order = _make_order()
+    _paystack_says_never_paid.side_effect = PaystackError("timed out")
+
+    assert _auto_cancel_pending_order(order.pk) is False
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.PENDING
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", ["ongoing", "pending", "processing"])
+def test_a_payment_still_in_progress_is_left_alone(_paystack_says_never_paid, status):
+    """A mobile-money prompt the customer has not approved yet."""
+    order = _make_order()
+    _paystack_says_never_paid.return_value = {"status": status}
+
+    assert _auto_cancel_pending_order(order.pk) is False
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.PENDING
+
+
+@pytest.mark.django_db
+def test_paystack_is_asked_before_the_row_is_locked(_paystack_says_never_paid):
+    """A 10s HTTP call inside select_for_update would hold the order's row
+    against the webhook trying to confirm that very payment. (Asserting on
+    connection.in_atomic_block cannot show this: pytest-django wraps every
+    test in its own transaction, so it is always True here.)"""
+    order = _make_order()
+    events = []
+    real_lock = services.select_for_update_nowait_if_supported
+
+    def record_lock(queryset):
+        events.append("lock")
+        return real_lock(queryset)
+
+    def record_verify(reference):
+        events.append("verify")
+        return {"status": "abandoned"}
+
+    _paystack_says_never_paid.side_effect = record_verify
+
+    with (
+        patch.object(services, "select_for_update_nowait_if_supported", record_lock),
+        patch.object(services, "_send_auto_cancel_notification"),
+    ):
+        _auto_cancel_pending_order(order.pk)
+
+    assert events == ["verify", "lock"]
+
+
+@pytest.mark.django_db
+def test_an_order_with_no_reference_is_not_sent_to_paystack(
+    _paystack_says_never_paid,
+):
+    order = _make_order(status=Order.Status.CONFIRMED)
+
+    assert _auto_cancel_pending_order(order.pk) is False
+
+    _paystack_says_never_paid.assert_not_called()

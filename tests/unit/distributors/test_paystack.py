@@ -21,6 +21,7 @@ from apps.distributors.paystack import (
     list_banks,
     list_transactions,
     paystack_customer_email,
+    refund_transaction,
     verify_transaction,
     verify_transfer,
     verify_webhook_signature,
@@ -711,3 +712,51 @@ def test_list_transactions_raises_paystack_error_on_http_failure(mock_get):
 
     with pytest.raises(PaystackError):
         list_transactions(status="success", page=1, per_page=100)
+
+
+# Task 68e. Refunding is the first money-OUT call this codebase makes on the
+# transactions API, and the first real use of Paystack's Refund API at all
+# (ADR-0005 deferred it; the customer's money has already been captured by
+# the time an order fails for lack of stock).
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.post")
+def test_refund_transaction_returns_the_parsed_data(mock_post):
+    mock_post.return_value = _fake_response(
+        {
+            "status": True,
+            "data": {"id": 4224, "status": "processed", "amount": 45000},
+        }
+    )
+
+    result = refund_transaction(reference="order-abc", reason="Out of stock")
+
+    assert result["status"] == "processed"
+    call_kwargs = mock_post.call_args.kwargs
+    assert call_kwargs["json"]["transaction"] == "order-abc"
+    assert call_kwargs["json"]["merchant_note"] == "Out of stock"
+    assert "amount" not in call_kwargs["json"]  # full refund
+    assert call_kwargs["headers"]["Authorization"] == "Bearer sk_test_fake"
+    assert call_kwargs["timeout"] is not None
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.post")
+def test_refund_transaction_raises_paystack_error_on_http_failure(mock_post):
+    mock_post.return_value = _fake_response({"status": False}, status_code=500)
+
+    with pytest.raises(PaystackError):
+        refund_transaction(reference="order-abc", reason="Out of stock")
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@patch("apps.distributors.paystack.requests.post")
+def test_a_reference_paystack_cannot_refund_is_distinguishable(mock_post):
+    """Paystack answers 400 "Transaction reference not found." for a
+    reference it has never seen -- checked live 2026-09-17."""
+    mock_post.return_value = _fake_response(
+        {"status": False, "message": "Transaction reference not found."},
+        status_code=400,
+    )
+
+    with pytest.raises(PaystackNotFoundError):
+        refund_transaction(reference="order-abc", reason="Out of stock")

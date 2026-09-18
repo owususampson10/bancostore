@@ -1,5 +1,6 @@
 import logging
 import uuid
+from dataclasses import dataclass
 from decimal import Decimal
 
 from django.core.mail import send_mail
@@ -20,8 +21,15 @@ from apps.compliance.services import (
     credit_escrow,
     reverse_escrow,
 )
-from apps.distributors.models import Distributor
-from apps.distributors.paystack import PaystackError, verify_transaction
+from apps.distributors.models import Distributor, PaymentIssue
+from apps.distributors.payment_issues import record_payment_issue
+from apps.distributors.payment_outcomes import PaymentOutcome
+from apps.distributors.paystack import (
+    PaystackError,
+    PaystackNotFoundError,
+    refund_transaction,
+    verify_transaction,
+)
 from apps.notifications.email import get_sender_email
 from apps.notifications.models import NotificationTemplate
 from apps.notifications.rendering import render_email_or_default, render_or_default
@@ -252,7 +260,7 @@ def create_pending_order(*, user, cart_items, form_data) -> Order:
     return order
 
 
-def confirm_order_payment(reference: str) -> None:
+def confirm_order_payment(reference: str) -> PaymentOutcome:
     """Task 17d (ADR-0005 decision 4). Mirrors
     apps.distributors.services.consume_paid_starter_pack's exact shape:
     lock the Order row, no-op if already resolved, verify_transaction +
@@ -320,30 +328,58 @@ def confirm_order_payment(reference: str) -> None:
                     "record. Needs manual investigation.",
                     reference,
                 )
-                return
-
-            if order.status != Order.Status.PENDING:
-                return  # Already resolved (confirmed or cancelled) -- idempotent no-op.
-
-            try:
-                verified = verify_transaction(reference)
-            except PaystackError:
-                logger.exception(
-                    "confirm_order_payment: Paystack verify_transaction "
-                    "failed for reference=%s",
-                    reference,
+                result = _verify_order_paid(reference)
+                if result.outcome is not None:
+                    return result
+                return _order_issue(
+                    result.verified,
+                    detail="No order on Bancostore matches this payment.",
                 )
-                return
 
-            if verified.get("status") != "success":
-                return
+            if order.status == Order.Status.PENDING:
+                pass
+            elif order.confirmed_at is not None:
+                # Already confirmed -- a webhook replay, nothing to do and no
+                # Paystack call needed.
+                return _Result(PaymentOutcome.ALREADY_APPLIED)
+            else:
+                # Task 68d: closed WITHOUT ever being paid for -- auto-cancelled
+                # for non-payment, or cancelled for a stock-out -- and now a
+                # payment has arrived for it. Until Task 68 this returned in
+                # silence, not even a log line, and the money simply vanished
+                # from view.
+                logger.error(
+                    "confirm_order_payment: reference=%s arrived for an order "
+                    "already closed as %s.",
+                    reference,
+                    order.status,
+                )
+                result = _verify_order_paid(reference)
+                if result.outcome is not None:
+                    return result
+                return _order_issue(
+                    result.verified,
+                    order,
+                    detail=f"The order was already closed ({order.status}) "
+                    "when this payment arrived, so nothing was dispatched.",
+                )
+
+            result = _verify_order_paid(reference)
+            if result.outcome is not None:
+                return result
+            verified = result.verified
+
             if verified.get("currency") != "GHS":
                 logger.warning(
                     "confirm_order_payment: unexpected currency %r for " "reference=%s",
                     verified.get("currency"),
                     reference,
                 )
-                return
+                return _order_issue(
+                    verified,
+                    order,
+                    detail=f"Paid in {verified.get('currency')!r}, not GHS.",
+                )
             expected_pesewas = int(order.total * 100)
             if verified.get("amount") != expected_pesewas:
                 logger.warning(
@@ -353,7 +389,12 @@ def confirm_order_payment(reference: str) -> None:
                     verified.get("amount"),
                     expected_pesewas,
                 )
-                return
+                return _order_issue(
+                    verified,
+                    order,
+                    detail=f"Paid {verified.get('amount')!r} pesewas, expected "
+                    f"{expected_pesewas!r}.",
+                )
 
             items = list(order.items.select_related("product").order_by("product_id"))
             for item in items:
@@ -443,11 +484,63 @@ def confirm_order_payment(reference: str) -> None:
         # Task 47b. Outside the lock -- see check_retail_ratio_and_alert's
         # own docstring.
         check_retail_ratio_and_alert()
+        return _Result(PaymentOutcome.APPLIED)
+
+    def _verify_order_paid(ref):
+        try:
+            verified = verify_transaction(ref)
+        except PaystackNotFoundError:
+            return _Result(PaymentOutcome.NOT_PAID)
+        except PaystackError:
+            logger.exception(
+                "confirm_order_payment: Paystack verify_transaction "
+                "failed for reference=%s",
+                ref,
+            )
+            return _Result(PaymentOutcome.VERIFY_FAILED)
+        if verified.get("status") != "success":
+            return _Result(PaymentOutcome.NOT_PAID)
+        return _Result(None, verified=verified)
+
+    def _order_issue(verified, order=None, *, detail=""):
+        return _Result(
+            PaymentOutcome.ISSUE_RECORDED,
+            verified=verified,
+            order=order,
+            detail=detail,
+        )
 
     try:
-        retry_on_lock_contention(_attempt)
+        result = retry_on_lock_contention(_attempt)
     except InsufficientStockError:
-        _cancel_order_for_insufficient_stock(reference)
+        return _cancel_order_for_insufficient_stock(reference)
+
+    if result.outcome is PaymentOutcome.ISSUE_RECORDED:
+        issue = record_payment_issue(
+            reference,
+            PaymentIssue.Kind.ORDER_NOT_APPLIED,
+            verified=result.verified,
+            order=result.order,
+            detail=result.detail,
+        )
+        if issue is None:
+            # Nothing durable was written, so this must not read as
+            # resolved: the webhook asks Paystack to send it again.
+            return PaymentOutcome.VERIFY_FAILED
+    return result.outcome
+
+
+@dataclass
+class _Result:
+    """Task 68c/68d. What one locked confirm attempt concluded, carried back
+    out so a PaymentIssue is recorded after the transaction commits rather
+    than inside it -- a write inside the block would be rolled back with it,
+    losing the only record of who paid."""
+
+    outcome: PaymentOutcome | None
+    verified: dict | None = None
+    order: Order | None = None
+    detail: str = ""
 
 
 def _cancel_order_for_insufficient_stock(reference: str) -> None:
@@ -458,8 +551,14 @@ def _cancel_order_for_insufficient_stock(reference: str) -> None:
     2026-07-25: the customer's payment has already been captured by
     Paystack, so this is CANCELLED (not left PENDING to retry forever on
     every webhook redelivery) with an ERROR-level log for a human to
-    action the actual GHS refund -- real Paystack Refund API automation
-    is Task 18's scope, not assumed here."""
+    action the actual GHS refund.
+
+    Task 68e (user-chosen, 2026-09-18): that refund now happens by itself.
+    The customer's money was captured before we knew the stock was gone, and
+    leaving it to a human who was only told through an ERROR log line is how
+    a paid customer ends up waiting on nobody. The order is still cancelled
+    first, whatever the refund does -- giving the money back is never a
+    condition of closing the order."""
 
     def _attempt():
         with transaction.atomic():
@@ -485,12 +584,65 @@ def _cancel_order_for_insufficient_stock(reference: str) -> None:
         logger.error(
             "confirm_order_payment: payment verified but stock was "
             "insufficient for reference=%s -- Order CANCELLED, customer "
-            "already paid. Needs manual admin refund.",
+            "already paid; refunding.",
             reference,
         )
         _send_stock_unavailable_notification(order)
+        return order
 
-    retry_on_lock_contention(_attempt)
+    order = retry_on_lock_contention(_attempt)
+    if order is None:
+        # A concurrent attempt already handled it, refund included.
+        return PaymentOutcome.ISSUE_RECORDED
+    return _refund_unfulfillable_order(order)
+
+
+def _refund_unfulfillable_order(order) -> PaymentOutcome:
+    """Task 68e. Gives the money back, and records the payment either way --
+    refunded (nothing owed) or not (a human must). Never raises: it runs
+    after the cancellation has committed and inside confirm_order_payment's
+    retry wrapper, so anything escaping would either strand a paid order or
+    re-run committed work."""
+    refunded = False
+    try:
+        refund_transaction(
+            reference=order.payment_reference,
+            reason="Bancostore: item out of stock, order cancelled",
+        )
+        refunded = True
+        detail = (
+            "The item was out of stock by the time the payment was "
+            "confirmed, so the order was cancelled and the customer was "
+            "refunded automatically."
+        )
+    except Exception:
+        logger.exception(
+            "_cancel_order_for_insufficient_stock: automatic refund failed "
+            "for reference=%s -- this one needs refunding by hand.",
+            order.payment_reference,
+        )
+        detail = (
+            "The item was out of stock by the time the payment was "
+            "confirmed. The order was cancelled, but the refund could not "
+            "be completed -- refund this payment in the Paystack dashboard."
+        )
+
+    issue = record_payment_issue(
+        order.payment_reference,
+        PaymentIssue.Kind.ORDER_NOT_APPLIED,
+        order=order,
+        detail=detail,
+        resolved=refunded,
+    )
+    if issue is None:
+        return PaymentOutcome.VERIFY_FAILED
+    return PaymentOutcome.ISSUE_RECORDED
+
+
+# Task 68a. Paystack statuses that definitely mean "this was not paid".
+# "abandoned" is only "not yet" while a checkout is live, which is why an
+# order is only judged once it is older than the auto-cancel cutoff.
+_NOT_PAID_TRANSACTION_STATUSES = frozenset({"abandoned", "failed", "reversed"})
 
 
 def _auto_cancel_pending_order(order_id) -> bool:
@@ -505,7 +657,53 @@ def _auto_cancel_pending_order(order_id) -> bool:
     Returns True if this call actually cancelled the order, False if it
     was a no-op (already resolved by something else -- e.g. the customer
     completed payment in the same instant this cycle reached it, or a
-    previous cycle/manual action already resolved it)."""
+    previous cycle/manual action already resolved it).
+
+    Task 68a: Paystack is asked FIRST. Until this, an order was cancelled
+    purely on age while its Paystack checkout page stayed payable -- and a
+    payment arriving afterwards was dropped silently by confirm_order_payment
+    (its `status != PENDING` guard), with not even a log line. That is the
+    exact shape of the 2026-09-16 registration incident, on the
+    highest-volume entry point in the shop. An order is now cancelled only
+    on a definite "not paid" answer; a paid one is confirmed instead, and
+    "we could not reach Paystack" leaves it for the next run."""
+    order = Order.objects.filter(pk=order_id).first()
+    if order is None:
+        logger.error("_auto_cancel_pending_order: no Order pk=%s", order_id)
+        return False
+    if order.status != Order.Status.PENDING:
+        return False  # Already resolved -- no reason to call Paystack.
+
+    # Deliberately outside the row lock below: a 10s HTTP call inside
+    # select_for_update would hold this order's row against the webhook
+    # trying to confirm that very payment.
+    try:
+        verified = verify_transaction(order.payment_reference)
+    except PaystackNotFoundError:
+        pass  # Paystack never saw it -- there is nothing to wait for.
+    except PaystackError:
+        logger.warning(
+            "_auto_cancel_pending_order: could not verify reference=%s -- "
+            "leaving the order pending for the next run rather than "
+            "cancelling a checkout that may yet be paid.",
+            order.payment_reference,
+            exc_info=True,
+        )
+        return False
+    else:
+        status = verified.get("status")
+        if status == "success":
+            logger.info(
+                "_auto_cancel_pending_order: reference=%s was paid after all "
+                "-- confirming instead of cancelling.",
+                order.payment_reference,
+            )
+            confirm_order_payment(order.payment_reference)
+            return False
+        if status not in _NOT_PAID_TRANSACTION_STATUSES:
+            # "ongoing"/"pending"/"processing": a mobile-money prompt the
+            # customer has not approved yet. Not our call to cancel.
+            return False
 
     def _attempt():
         with transaction.atomic():

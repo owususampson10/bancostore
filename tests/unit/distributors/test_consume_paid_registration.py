@@ -9,11 +9,9 @@ import pytest
 from constance import config
 
 from apps.distributors.models import Distributor, PaymentIssue, PendingRegistration
+from apps.distributors.payment_outcomes import PaymentOutcome
 from apps.distributors.paystack import PaystackError, PaystackNotFoundError
-from apps.distributors.services import (
-    RegistrationPaymentOutcome,
-    consume_paid_registration,
-)
+from apps.distributors.services import consume_paid_registration
 
 User = get_user_model()
 
@@ -188,7 +186,7 @@ def test_paystack_verify_error_does_not_crash(mock_verify):
 # Found 2026-09-16: a registration fee paid on a checkout page left open past
 # cleanup created nothing, and the only trace was a log line.
 
-Outcome = RegistrationPaymentOutcome
+Outcome = PaymentOutcome
 
 
 @pytest.fixture(autouse=True)
@@ -208,7 +206,7 @@ def test_creating_the_account_records_which_reference_paid(mock_verify):
     pending = _make_pending(_make_sponsor())
     mock_verify.return_value = _success_verify()
 
-    assert consume_paid_registration("ref-1") == Outcome.CREATED
+    assert consume_paid_registration("ref-1") == Outcome.APPLIED
 
     pending.refresh_from_db()
     assert pending.consumed_reference == "ref-1"
@@ -261,7 +259,7 @@ def test_a_payment_on_an_older_checkout_tab_still_creates_the_account(mock_verif
     older_reference = _reg_reference(pending, "aaaaaaaa")
     mock_verify.return_value = _success_verify()
 
-    assert consume_paid_registration(older_reference) == Outcome.CREATED
+    assert consume_paid_registration(older_reference) == Outcome.APPLIED
 
     pending.refresh_from_db()
     assert pending.consumed_reference == older_reference
