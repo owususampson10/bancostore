@@ -80,6 +80,27 @@ def record_payment_issue(
         )
         return None
 
+    if not created and issue.kind != kind:
+        # Agent code review (Task 68): one row per reference is right for
+        # "the admin refunds this once", but a DIFFERENT problem on the same
+        # payment is new news -- a dispute raised on a payment already
+        # recorded as refunded has a bank deadline and is lost by default if
+        # nobody answers it. Update and alert again.
+        try:
+            with transaction.atomic():
+                PaymentIssue.objects.filter(pk=issue.pk).update(
+                    kind=kind, detail=fields["detail"], resolved_at=None
+                )
+            issue.refresh_from_db()
+        except Exception:
+            logger.exception(
+                "record_payment_issue: could not update %s to %s",
+                reference,
+                kind,
+            )
+            return None
+        created = True
+
     if created:
         logger.error(
             "record_payment_issue: %s for reference=%s (payment_issue_id=%s)",

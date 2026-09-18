@@ -261,3 +261,47 @@ def test_a_reference_of_an_odd_shape_never_reaches_a_paystack_url(mock_verify):
 
     mock_verify.assert_not_called()
     assert not PaymentIssue.objects.exists()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.external_refunds.verify_transaction")
+def test_an_empty_wallet_does_not_get_clawed_back_twice(mock_verify):
+    """Paystack sends refund.pending and refund.processed. The first
+    clawback correctly debits nothing when the wallet is empty and writes no
+    transaction -- so a wallet-row check would run it again, taking money
+    the sponsor earned in between (agent code review)."""
+    from apps.wallet.models import WalletTransaction
+    from apps.wallet.services import credit as credit_wallet
+    from apps.wallet.services import debit as debit_wallet
+
+    sponsor = _make_distributor()
+    distributor = _make_distributor(sponsor=sponsor)
+    Distributor.objects.filter(pk=distributor.pk).update(
+        starter_pack_payment_reference="pack-abc"
+    )
+    credit_wallet(
+        sponsor,
+        Decimal("100.00"),
+        transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+        reference="pack-abc",
+    )
+    debit_wallet(
+        sponsor,
+        Decimal("100.00"),
+        transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT,
+        reference="withdrawal-1",
+    )
+    mock_verify.return_value = _reversed_verify()
+    handle_external_refund("pack-abc")  # refund.pending: debits nothing
+
+    # The sponsor earns again before the second event arrives.
+    credit_wallet(
+        sponsor,
+        Decimal("80.00"),
+        transaction_type=WalletTransaction.TransactionType.BINARY_BONUS,
+        reference="binary-1",
+    )
+    handle_external_refund("pack-abc")  # refund.processed
+
+    sponsor.wallet.refresh_from_db()
+    assert sponsor.wallet.balance == Decimal("80.00")

@@ -293,7 +293,7 @@ def test_the_returns_policy_explains_the_automatic_stock_out_refund(client):
     body = client.get(reverse("pages:returns_refunds_shipping")).content.decode()
 
     assert "refund you automatically" in body
-    assert "You do not need to ask" in body
+    assert "you do not need to ask" in body
 
 
 @pytest.mark.django_db
@@ -302,6 +302,9 @@ def test_the_returns_policy_explains_a_payment_that_reaches_us_late(client):
 
     assert "Payments That Reach Us Late" in body
     assert "we do not keep it" in body
+    # Says a person handles it, because a person does -- only the stock-out
+    # refund is automatic (agent code review).
+    assert "flagged for our team" in body
     assert "before closing an unpaid order we check with paystack" in body.lower()
 
 

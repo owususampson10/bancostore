@@ -387,9 +387,18 @@ def _alert_on_stuck_payouts(now):
     from apps.withdrawal.models import WithdrawalRequest
     from apps.withdrawal.services import _generate_transfer_reference
 
-    stuck = WithdrawalRequest.objects.select_related("distributor").filter(
-        status=WithdrawalRequest.Status.QUEUED_FOR_PAYOUT,
-        created_at__lte=now - STUCK_PAYOUT_AFTER,
+    # queued_for_payout_at, not created_at: the clock starts when Paystack
+    # was actually asked, not when the distributor submitted the request
+    # (agent code review). A row queued before that field existed falls back
+    # to created_at rather than never being checked.
+    cutoff = now - STUCK_PAYOUT_AFTER
+    stuck = (
+        WithdrawalRequest.objects.select_related("distributor")
+        .filter(status=WithdrawalRequest.Status.QUEUED_FOR_PAYOUT)
+        .filter(
+            Q(queued_for_payout_at__lte=cutoff)
+            | Q(queued_for_payout_at__isnull=True, created_at__lte=cutoff)
+        )
     )
     for request in stuck:
         record_payment_issue(

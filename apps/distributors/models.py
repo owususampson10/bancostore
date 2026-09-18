@@ -258,9 +258,16 @@ class StarterPackCheckout(models.Model):
         "Distributor", on_delete=models.CASCADE, related_name="starter_pack_checkouts"
     )
     reference = models.CharField(max_length=100, unique=True)
-    # The price as it was when this checkout opened, never re-read later.
+    # The pack exactly as it was when this checkout opened, never re-read
+    # later. Price AND what the price buys: checking the amount against this
+    # checkout while applying the distributor's CURRENT selection would let
+    # someone open a Pack A checkout, re-pick Pack B, then pay the Pack A tab
+    # and receive Pack B's PV, rank and referral bonus for Pack A's money
+    # (agent code review, Task 68b).
     amount_pesewas = models.PositiveIntegerField()
     choice = models.CharField(max_length=1)
+    pv = models.PositiveIntegerField(default=0)
+    rank = models.CharField(max_length=20, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     # Set on the one checkout whose payment actually applied the pack, so a
     # payment on a DIFFERENT checkout is recognisable as a second payment

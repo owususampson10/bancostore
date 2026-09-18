@@ -30,14 +30,14 @@
 
 <h2>3. Cancellations</h2>
 <p>You may request cancellation of an order any time before it has been dispatched by contacting us through our <a href="{% url 'pages:contact' %}">Contact page</a> with your order number. Once an order has been dispatched, it can no longer be cancelled — the return process below applies instead.</p>
-<p>If an item in your order turns out to be unavailable after your payment is confirmed, we cancel that order and refund you automatically through Paystack, to the payment method you used. We will also message you to explain what happened. You do not need to ask.</p>
+<p>If an item in your order turns out to be unavailable after your payment is confirmed, we cancel that order and refund you automatically through Paystack, to the payment method you used — you do not need to ask. We will also message you to explain what happened. In the rare case the automatic refund does not go through, our team is alerted and will complete it by hand.</p>
 
 <h2>4. Returns and Refunds</h2>
 <p>If you receive a defective, damaged, or incorrect item, contact us through our <a href="{% url 'pages:contact' %}">Contact page</a> with your order number and a description (and photo, where possible) of the issue. Our team will review your request and, where approved, arrange a refund. Approved refunds are returned via Paystack to your original payment method; processing time after approval depends on your bank or Mobile Money provider.</p>
 
 <h2>5. Payments That Reach Us Late</h2>
 <p>A Paystack checkout page can still accept payment after we have closed the order it belongs to — for example, an unpaid order that was automatically cancelled after {{ pending_order_auto_cancel_hours }} hours, or a payment page left open in your browser and completed much later.</p>
-<p>Before closing an unpaid order we check with Paystack, and if payment has in fact been made we complete the order instead of cancelling it. If a payment still reaches us after an order is closed, we do not keep it: it is recorded for review and refunded to you, or the order is honoured where we can still fulfil it. Please contact us with your payment reference if you have paid and have not heard from us.</p>
+<p>Before closing an unpaid order we check with Paystack, and if payment has in fact been made we complete the order instead of cancelling it. If a payment still reaches us after an order is closed, we do not keep it: it is flagged for our team, who will contact you to arrange a refund or, where we can still fulfil the order, honour it. This is reviewed by a person, so please allow a few working days — and contact us with your payment reference if you have paid and have not heard from us.</p>
 <p>The same applies to registration fees and starter pack payments made after the relevant sign-up has expired or been completed another way, and to a second payment made for something you have already paid for.</p>
 
 <h2>6. Refunds We Send, and Payment Disputes</h2>

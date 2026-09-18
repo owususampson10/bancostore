@@ -16,6 +16,8 @@ def backfill_checkouts(apps, schema_editor):
             reference=distributor.starter_pack_payment_reference,
             amount_pesewas=distributor.starter_pack_price_pesewas or 0,
             choice=distributor.starter_pack_choice or "",
+            pv=distributor.starter_pack_pv or 0,
+            rank=distributor.starter_pack_rank or "",
         )
         for distributor in Distributor.objects.exclude(
             starter_pack_payment_reference__isnull=True

@@ -11,6 +11,7 @@ import pytest
 from constance import config
 
 from apps.binary_tree.models import BinaryTreeEdge
+from apps.commissions.services import calculate_direct_referral_bonus
 from apps.distributors.models import Distributor, PaymentIssue, StarterPackCheckout
 from apps.distributors.payment_outcomes import PaymentOutcome
 from apps.distributors.paystack import PaystackError
@@ -615,13 +616,15 @@ def test_a_payment_after_cooling_off_cancellation_records_an_issue(mock_verify):
 # --- Task 68b: an earlier checkout is never orphaned --------------------------
 
 
-def _reselect_pack(distributor, reference, *, choice="A", price_pesewas=150000):
+def _reselect_pack(
+    distributor, reference, *, choice="A", price_pesewas=150000, pv=None, rank=None
+):
     """What a back-button re-selection does: a new reference replaces the
     old one on the distributor."""
     distributor.starter_pack_choice = choice
     distributor.starter_pack_price_pesewas = price_pesewas
-    distributor.starter_pack_pv = config.STARTER_PACK_A_PV
-    distributor.starter_pack_rank = config.STARTER_PACK_A_RANK
+    distributor.starter_pack_pv = config.STARTER_PACK_A_PV if pv is None else pv
+    distributor.starter_pack_rank = config.STARTER_PACK_A_RANK if rank is None else rank
     distributor.starter_pack_payment_reference = reference
     distributor.save(
         update_fields=[
@@ -637,6 +640,8 @@ def _reselect_pack(distributor, reference, *, choice="A", price_pesewas=150000):
         reference=reference,
         amount_pesewas=price_pesewas,
         choice=choice,
+        pv=distributor.starter_pack_pv,
+        rank=distributor.starter_pack_rank,
     )
 
 
@@ -684,3 +689,40 @@ def test_paying_twice_on_two_checkouts_applies_once_and_reports_the_second(
 
     assert outcome == PaymentOutcome.ISSUE_RECORDED
     assert PaymentIssue.objects.filter(reference="pack-second").exists()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_paying_an_older_checkout_gives_that_pack_not_the_newer_one(mock_verify):
+    """Agent code review of 68b: checking the amount against the paid
+    checkout while applying the CURRENT selection would hand out Pack B's PV,
+    rank and referral bonus for Pack A's money -- self-service and
+    repeatable."""
+    sponsor = _make_distributor()
+    distributor = _make_distributor(sponsor=sponsor)
+    _reselect_pack(
+        distributor,
+        "pack-cheap",
+        choice="A",
+        price_pesewas=50000,
+        pv=500,
+        rank="bronze",
+    )
+    _reselect_pack(
+        distributor,
+        "pack-dear",
+        choice="B",
+        price_pesewas=150000,
+        pv=1000,
+        rank="silver",
+    )
+    mock_verify.return_value = _success_verify(50000)  # paid the cheap one
+
+    assert consume_paid_starter_pack("pack-cheap") == PaymentOutcome.APPLIED
+
+    distributor.refresh_from_db()
+    assert distributor.rank == "bronze"
+    assert MonthlyPersonalPv.objects.get(distributor=distributor).pv == 500
+    # The sponsor's bonus follows the pack that was paid for, too.
+    sponsor.wallet.refresh_from_db()
+    assert sponsor.wallet.balance == calculate_direct_referral_bonus(500)

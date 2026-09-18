@@ -73,6 +73,13 @@ class WithdrawalRequest(models.Model):
         max_length=100, null=True, blank=True, unique=True
     )
 
+    # Task 68i (agent code review): when the payout was actually handed to
+    # Paystack, which is what "stuck waiting for an answer" is measured
+    # from. created_at is when the distributor submitted -- a request
+    # submitted on Monday and queued by the Friday batch is already days
+    # old the moment it is queued, so alerting on created_at would flag
+    # nearly every healthy payout.
+    queued_for_payout_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Task 16b: audit trail for every status transition (who approved/

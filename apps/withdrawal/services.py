@@ -583,6 +583,7 @@ def claim_for_payout(withdrawal_request) -> WithdrawalRequest:
                 locked_request.pk
             )
             locked_request.status = WithdrawalRequest.Status.QUEUED_FOR_PAYOUT
+            locked_request.queued_for_payout_at = timezone.now()
             locked_request.save()
             logger.info(
                 "claim_for_payout: withdrawal_request_id=%s reference=%s",

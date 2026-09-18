@@ -7,6 +7,7 @@ from unittest.mock import patch
 from django.core.cache import cache
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 
 import pytest
 
@@ -415,3 +416,41 @@ def test_an_order_with_no_reference_is_not_sent_to_paystack(
     assert _auto_cancel_pending_order(order.pk) is False
 
     _paystack_says_never_paid.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("apps.orders.services.record_payment_issue")
+def test_a_payment_left_unfinished_for_weeks_does_not_hold_an_order_for_ever(
+    mock_record, _paystack_says_never_paid
+):
+    """An "ongoing" mobile-money prompt nobody ever approved would otherwise
+    keep the order alive and cost a Paystack call every cycle, for ever."""
+    from apps.orders.services import UNFINISHED_PAYMENT_MAX_AGE
+
+    order = _make_order(
+        created_at=RUN_AT - UNFINISHED_PAYMENT_MAX_AGE - timedelta(days=1)
+    )
+    Order.objects.filter(pk=order.pk).update(
+        created_at=timezone.now() - UNFINISHED_PAYMENT_MAX_AGE - timedelta(days=1)
+    )
+    _paystack_says_never_paid.return_value = {"status": "ongoing"}
+
+    with patch("apps.orders.services._send_auto_cancel_notification"):
+        assert _auto_cancel_pending_order(order.pk) is True
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+    mock_record.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_a_recently_unfinished_payment_is_still_left_alone(
+    _paystack_says_never_paid,
+):
+    order = _make_order()
+    _paystack_says_never_paid.return_value = {"status": "ongoing"}
+
+    assert _auto_cancel_pending_order(order.pk) is False
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.PENDING

@@ -103,13 +103,13 @@ def test_no_address_anywhere_still_records_and_rings_the_bell(locmem):
 
 
 @pytest.mark.django_db
-def test_the_same_reference_alerts_only_once(locmem):
+def test_the_same_problem_on_one_reference_alerts_only_once(locmem):
+    """A DIFFERENT problem on the same payment does alert again -- see
+    test_a_dispute_on_an_already_recorded_payment_is_still_heard."""
     config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
 
     first = record_payment_issue("reg-abc", KIND, verified=_verified())
-    second = record_payment_issue(
-        "reg-abc", PaymentIssue.Kind.REGISTRATION_DUPLICATE, verified=_verified()
-    )
+    second = record_payment_issue("reg-abc", KIND, verified=_verified())
 
     assert first.pk == second.pk
     assert second.kind == KIND
@@ -306,3 +306,43 @@ def test_an_unreachable_settings_store_does_not_warn_misleadingly():
     # replacing the module attribute is what a real outage looks like to it.
     with patch("constance.config", Unreachable()):
         assert payment_alert_email_is_set(None) == []
+
+
+# --- Agent code review: a different problem on the same payment --------------
+
+
+@pytest.mark.django_db
+def test_a_dispute_on_an_already_recorded_payment_is_still_heard(locmem):
+    """One row per payment is right for "refund this once", but a dispute
+    raised on a payment already recorded has a bank deadline and is lost by
+    default if nobody answers it."""
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+    record_payment_issue(
+        "order-abc",
+        PaymentIssue.Kind.REFUND_RECEIVED,
+        verified=_verified(),
+        detail="Refunded automatically.",
+        resolved=True,
+    )
+
+    record_payment_issue(
+        "order-abc",
+        PaymentIssue.Kind.DISPUTE_OPENED,
+        detail="A customer has disputed this payment.",
+    )
+
+    issue = PaymentIssue.objects.get(reference="order-abc")
+    assert issue.kind == PaymentIssue.Kind.DISPUTE_OPENED
+    assert issue.resolved_at is None  # back on the to-do list
+    assert len(mail.outbox) == 2
+
+
+@pytest.mark.django_db
+def test_the_same_problem_twice_still_alerts_only_once(locmem):
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+
+    record_payment_issue("order-abc", KIND, verified=_verified())
+    record_payment_issue("order-abc", KIND, verified=_verified())
+
+    assert len(mail.outbox) == 1
+    assert PaymentIssue.objects.count() == 1

@@ -1,6 +1,7 @@
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.mail import send_mail
@@ -591,10 +592,20 @@ def _cancel_order_for_insufficient_stock(reference: str) -> None:
         return order
 
     order = retry_on_lock_contention(_attempt)
-    if order is None:
-        # A concurrent attempt already handled it, refund included.
+    if order is not None:
+        return _refund_unfulfillable_order(order)
+
+    # _attempt returned nothing: the order was not PENDING when it got there.
+    # That is USUALLY a concurrent attempt which refunded it too -- but it
+    # also covers an order auto-cancelled moments earlier, whose customer
+    # then paid. Reading them as the same thing left that customer charged,
+    # un-refunded and unrecorded (agent code review).
+    existing = Order.objects.filter(payment_reference=reference).first()
+    if existing is None:
         return PaymentOutcome.ISSUE_RECORDED
-    return _refund_unfulfillable_order(order)
+    if PaymentIssue.objects.filter(reference=reference).exists():
+        return PaymentOutcome.ISSUE_RECORDED
+    return _refund_unfulfillable_order(existing)
 
 
 def _refund_unfulfillable_order(order) -> PaymentOutcome:
@@ -643,6 +654,12 @@ def _refund_unfulfillable_order(order) -> PaymentOutcome:
 # "abandoned" is only "not yet" while a checkout is live, which is why an
 # order is only judged once it is older than the auto-cancel cutoff.
 _NOT_PAID_TRANSACTION_STATUSES = frozenset({"abandoned", "failed", "reversed"})
+
+# How long an order may sit on a payment Paystack reports as still in
+# progress before it is closed anyway. Long enough that no real
+# mobile-money prompt is still live, short enough that the order does not
+# cost a verify call every cycle for ever (agent code review, Task 68a).
+UNFINISHED_PAYMENT_MAX_AGE = timedelta(days=14)
 
 
 def _auto_cancel_pending_order(order_id) -> bool:
@@ -702,8 +719,27 @@ def _auto_cancel_pending_order(order_id) -> bool:
             return False
         if status not in _NOT_PAID_TRANSACTION_STATUSES:
             # "ongoing"/"pending"/"processing": a mobile-money prompt the
-            # customer has not approved yet. Not our call to cancel.
-            return False
+            # customer has not approved yet. Not our call to cancel -- until
+            # it is clearly never going to be approved, or the order would
+            # live forever and cost a Paystack call every cycle (agent code
+            # review).
+            if order.created_at > timezone.now() - UNFINISHED_PAYMENT_MAX_AGE:
+                return False
+            logger.warning(
+                "_auto_cancel_pending_order: reference=%s has sat at %r since "
+                "%s -- cancelling and recording it for review.",
+                order.payment_reference,
+                status,
+                order.created_at,
+            )
+            record_payment_issue(
+                order.payment_reference,
+                PaymentIssue.Kind.ORDER_NOT_APPLIED,
+                order=order,
+                detail=f"This payment sat unfinished on Paystack ({status}) "
+                "for weeks, so the order was cancelled. If the customer was "
+                "in fact charged, refund them.",
+            )
 
     def _attempt():
         with transaction.atomic():
@@ -867,8 +903,8 @@ def _send_stock_unavailable_notification(order: Order) -> None:
             str(order.phone_number),
             "We're sorry -- an item in your Bancostore order "
             f"({order.payment_reference}) is no longer available. Your "
-            "payment was received; our team will contact you about a "
-            "refund.",
+            "payment is being refunded to the account you paid from; you "
+            "do not need to do anything.",
         )
     except Exception:
         logger.exception(
@@ -884,8 +920,9 @@ def _send_stock_unavailable_notification(order: Order) -> None:
                 message=(
                     "We're sorry -- an item in your order "
                     f"({order.payment_reference}) is no longer available. "
-                    "Your payment was received; our team will contact you "
-                    "about a refund."
+                    "Your payment is being refunded to the account you "
+                    "paid from; you do not need to do anything. If it has "
+                    "not reached you within a few working days, contact us."
                 ),
                 from_email=get_sender_email(),
                 recipient_list=[order.email],

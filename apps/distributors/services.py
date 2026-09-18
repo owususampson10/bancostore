@@ -634,6 +634,8 @@ def snapshot_starter_pack_choice(distributor_pk, choice: str) -> Distributor:
                 reference=distributor.starter_pack_payment_reference,
                 amount_pesewas=distributor.starter_pack_price_pesewas,
                 choice=choice,
+                pv=pv,
+                rank=rank,
             )
             distributor.save(
                 update_fields=[
@@ -820,16 +822,27 @@ def consume_paid_starter_pack(reference: str) -> PaymentOutcome:
             now = timezone.now()
             today = now.date()
 
-            record_purchase_pv(distributor, distributor.starter_pack_pv, today=today)
+            # Task 68b (agent code review): the pack THIS checkout was for,
+            # not whatever the distributor has since re-selected. Applying
+            # the current selection to an older checkout's payment would
+            # hand out a dearer pack for a cheaper pack's money.
+            pack_pv = (
+                checkout.pv if checkout is not None else distributor.starter_pack_pv
+            )
+            pack_rank = (
+                checkout.rank if checkout is not None else distributor.starter_pack_rank
+            )
+
+            record_purchase_pv(distributor, pack_pv, today=today)
             # Task 13a: record_purchase_pv only credits ANCESTORS' legs --
             # nothing previously credited the purchasing distributor's own
             # personal PV, needed for Binary/Matching Bonus eligibility.
-            record_personal_pv(distributor, distributor.starter_pack_pv, today=today)
+            record_personal_pv(distributor, pack_pv, today=today)
 
             if distributor.sponsor_id:
-                _credit_direct_referral_bonus(distributor, reference)
+                _credit_direct_referral_bonus(distributor, reference, pack_pv)
 
-            distributor.rank = distributor.starter_pack_rank
+            distributor.rank = pack_rank
             distributor.starter_pack_confirmed_at = now
             distributor.save(update_fields=["rank", "starter_pack_confirmed_at"])
             if checkout is not None:
@@ -878,14 +891,18 @@ def consume_paid_starter_pack(reference: str) -> PaymentOutcome:
     return result.outcome
 
 
-def _credit_direct_referral_bonus(distributor, reference: str) -> None:
+def _credit_direct_referral_bonus(distributor, reference: str, pack_pv=None) -> None:
     """Task 12b/12c: instant credit to distributor.sponsor, plus an SMS
     notification. Called from inside consume_paid_starter_pack's own
     locked/idempotent block, so a webhook/callback race can't
     double-credit -- this function does no locking of its own. Only
     called when distributor.sponsor_id is set; root-of-tree distributors
     don't generate this bonus."""
-    bonus = calculate_direct_referral_bonus(distributor.starter_pack_pv)
+    # Task 68b: the PV of the pack actually paid for, which is not always
+    # the distributor's current selection (see consume_paid_starter_pack).
+    if pack_pv is None:
+        pack_pv = distributor.starter_pack_pv
+    bonus = calculate_direct_referral_bonus(pack_pv)
     credit_wallet(
         distributor.sponsor,
         bonus,

@@ -174,11 +174,24 @@ def _refund_starter_pack(reference, verified) -> PaymentOutcome:
             detail="A starter-pack payment was refunded on Paystack.",
         )
 
-    already_reversed = WalletTransaction.objects.filter(
-        wallet__distributor_id=distributor.sponsor_id,
-        transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS_REVERSAL,
-        reference=reference,
-    ).exists()
+    # Guarded on this refund having been handled at all, NOT on a reversal
+    # transaction existing: when the sponsor's wallet is empty the clawback
+    # correctly debits nothing and writes no transaction, and Paystack sends
+    # both refund.pending and refund.processed -- so a wallet-row check alone
+    # would claw the bonus back a second time if the sponsor earned in
+    # between (agent code review).
+    already_reversed = (
+        WalletTransaction.objects.filter(
+            wallet__distributor_id=distributor.sponsor_id,
+            transaction_type=(
+                WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS_REVERSAL
+            ),
+            reference=reference,
+        ).exists()
+        or PaymentIssue.objects.filter(
+            reference=reference, kind=PaymentIssue.Kind.REFUND_RECEIVED
+        ).exists()
+    )
     detail = (
         "This starter-pack payment was refunded on Paystack. The sponsor's "
         "direct referral bonus has been taken back. The distributor's "
