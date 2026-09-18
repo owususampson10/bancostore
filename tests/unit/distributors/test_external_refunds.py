@@ -454,9 +454,7 @@ def test_a_cooling_off_cancellation_and_a_refund_cannot_both_claw_back(mock_veri
     a distributor who cancelled under cooling-off and whose pack was then
     refunded on Paystack had their sponsor debited twice -- taking commission
     earned elsewhere."""
-    from apps.distributors.cooling_off_services import (
-        _reverse_direct_referral_bonus,
-    )
+    from apps.distributors.cooling_off_services import _reverse_direct_referral_bonus
     from apps.distributors.models import StarterPackCheckout
     from apps.wallet.models import WalletTransaction
     from apps.wallet.services import credit as credit_wallet
