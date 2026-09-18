@@ -1,68 +1,80 @@
-{# Task 67b. Swapped on its own by the search/filter form above, so every #}
-{# control inside it keeps the active search and filter. #}
+{% comment %}
+Task 67b/67c. Swapped on its own by the search/filter form above, so every
+control inside it keeps the active search and filter.
+{% endcomment %}
 <div id="payment-issue-results">
 {% if page_obj.object_list %}
 <div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
 <!-- Sizing convention (2026-07-24): an explicit min-width inside
      overflow-x-auto, or narrow viewports crush the columns instead of
      scrolling the table as a block. Every cell carries BOTH a font-X and
-     its paired text-X class. -->
+     its paired text-X class.
+
+     Task 67c: four one-line columns, not six stacked ones. The rest --
+     full reference, phone, email, when it was paid, the whole explanation
+     -- is one click away in the detail popup, the same shape the Audit Log
+     screen already uses. -->
 <div class="overflow-x-auto">
-<table class="w-full min-w-[1000px] text-left border-collapse">
+<table class="w-full min-w-[720px] text-left border-collapse">
 <thead class="bg-surface-container-low">
 <tr>
-<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Payment</th>
+<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Paid for</th>
 <th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Payer</th>
 <th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Amount</th>
-<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">What went wrong</th>
 <th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Status</th>
-<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Action</th>
+<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider text-right">Action</th>
 </tr>
 </thead>
 <tbody class="divide-y divide-outline-variant/30">
 {% for issue in page_obj.object_list %}
-<tr class="hover:bg-surface-container-low transition-colors {% if not issue.resolved_at %}bg-error/[0.03]{% endif %}">
-<td class="px-6 py-5">
-<p class="font-body-md text-body-md font-semibold text-on-surface break-all">{{ issue.reference }}</p>
-<p class="font-label-md text-label-md text-on-surface-variant mt-1">Paid {{ issue.paid_at|default:issue.created_at }}</p>
+{{ issue.row_data|json_script:issue.row_id }}
+<tr class="hover:bg-surface-container-low transition-colors cursor-pointer {% if not issue.resolved_at %}bg-error/[0.03]{% endif %}"
+    @click="openDetail('{{ issue.row_id }}')">
+<td class="px-6 py-4">
+<p class="font-body-md text-body-md font-semibold text-on-surface">{{ issue.payment_type_label }}</p>
+<p class="font-label-md text-label-md text-on-surface-variant mt-0.5">{{ issue.short_reference }}</p>
 </td>
-<td class="px-6 py-5">
-<p class="font-body-md text-body-md text-on-surface">{{ issue.payer_name|default:"Name unknown" }}</p>
-<p class="font-label-md text-label-md text-on-surface-variant mt-1">{{ issue.payer_phone|default:"" }}</p>
-{% if issue.payer_email %}<p class="font-label-md text-label-md text-on-surface-variant break-all">{{ issue.payer_email }}</p>{% endif %}
-</td>
-<td class="px-6 py-5 font-body-md text-body-md text-on-surface whitespace-nowrap">
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface whitespace-nowrap">{{ issue.payer_name|default:"Name unknown" }}</td>
+<td class="px-6 py-4 font-body-md text-body-md text-on-surface whitespace-nowrap">
 {% if issue.amount_in_cedis is not None %}GHS {{ issue.amount_in_cedis|floatformat:2 }}{% else %}&mdash;{% endif %}
 </td>
-<td class="px-6 py-5 max-w-sm">
-<p class="font-body-md text-body-md text-on-surface">{{ issue.get_kind_display }}</p>
-{% if issue.detail %}<p class="font-label-md text-label-md text-on-surface-variant mt-1">{{ issue.detail }}</p>{% endif %}
-</td>
-<td class="px-6 py-5 whitespace-nowrap">
+<td class="px-6 py-4 whitespace-nowrap">
 {% if issue.resolved_at %}
-<span class="px-2.5 py-1 rounded-full font-body-md text-body-md font-semibold bg-green-50 text-green-700 inline-flex items-center gap-1">
+<span class="px-2.5 py-1 rounded-full font-label-md text-label-md font-semibold bg-green-50 text-green-700 inline-flex items-center gap-1">
 <span class="material-symbols-outlined text-[16px]" aria-hidden="true">check</span>Sorted
 </span>
 {% else %}
-<span class="px-2.5 py-1 rounded-full font-body-md text-body-md font-semibold bg-error/10 text-error inline-flex items-center gap-1">
+<span class="px-2.5 py-1 rounded-full font-label-md text-label-md font-semibold bg-error/10 text-error inline-flex items-center gap-1">
 <span class="material-symbols-outlined text-[16px]" aria-hidden="true">report_problem</span>Still to sort
 </span>
 {% endif %}
 </td>
-<td class="px-6 py-5">
-{# The hidden fields send the admin back to the same search, filter and #}
-{# page they acted from, rebuilt server-side rather than from a #}
-{# caller-supplied URL. #}
-<form method="post" action="{% if issue.resolved_at %}{% url 'admin_portal:payment_issue_reopen' issue.pk %}{% else %}{% url 'admin_portal:payment_issue_resolve' issue.pk %}{% endif %}">
+<td class="px-6 py-4">
+<div class="flex items-center justify-end gap-1">
+{% comment %}
+One-click tick stays in the row: marking sorted is the main job here, and
+after refunding in Paystack the admin already knows which row. @click.stop
+so it never also opens the popup.
+{% endcomment %}
+<form method="post" @click.stop
+      action="{% if issue.resolved_at %}{% url 'admin_portal:payment_issue_reopen' issue.pk %}{% else %}{% url 'admin_portal:payment_issue_resolve' issue.pk %}{% endif %}">
 {% csrf_token %}
 <input type="hidden" name="q" value="{{ query }}">
 <input type="hidden" name="status" value="{{ status }}">
 <input type="hidden" name="page" value="{{ page_obj.number }}">
-<button type="submit" class="px-4 py-2 rounded-lg font-bold text-label-md border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-all flex items-center gap-2 whitespace-nowrap">
+<button type="submit"
+        class="w-9 h-9 flex items-center justify-center rounded-full border border-outline-variant text-primary hover:bg-primary/10 transition-all"
+        aria-label="{% if issue.resolved_at %}Reopen {{ issue.reference }}{% else %}Mark {{ issue.reference }} sorted{% endif %}"
+        title="{% if issue.resolved_at %}Reopen{% else %}Mark sorted{% endif %}">
 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">{% if issue.resolved_at %}undo{% else %}check{% endif %}</span>
-{% if issue.resolved_at %}Reopen{% else %}Mark sorted{% endif %}
 </button>
 </form>
+<button type="button" class="w-9 h-9 flex items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container transition-all"
+        aria-label="Details for {{ issue.reference }}"
+        @click.stop="openDetail('{{ issue.row_id }}')">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
+</button>
+</div>
 </td>
 </tr>
 {% endfor %}

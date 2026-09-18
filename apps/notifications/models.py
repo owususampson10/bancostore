@@ -170,6 +170,22 @@ class AdminNotification(models.Model):
             models.Index(fields=["-created_at", "-id"]),
         ]
 
+    @property
+    def link_url(self):
+        """Where clicking this notification takes the admin, or None when
+        there is nowhere useful to go (Task 67c: a payment problem used to
+        be text with no link, leaving the admin to find the screen).
+
+        Reverse-imported here rather than stored on the row: a link is a
+        fact about today's URLs, not about the event that happened."""
+        from django.urls import reverse
+
+        if self.order_id:
+            return reverse("admin_portal:order_detail", args=[self.order_id])
+        if self.event_type == self.EventType.PAYMENT_ISSUE:
+            return reverse("admin_portal:payment_issue_list")
+        return None
+
     def __str__(self):
         return f"{self.get_event_type_display()}: {self.message}"
 

@@ -216,3 +216,70 @@ def test_the_sidebar_links_to_the_screen(staff_client):
     body = staff_client.get(reverse("admin_portal:dashboard")).content.decode()
 
     assert _list_url() in body
+
+
+# --- Task 67c: a calmer table, with the detail in a popup ----------------------
+
+
+@pytest.mark.django_db
+def test_the_table_says_what_the_payment_was_for_in_plain_words(staff_client):
+    _make_issue("reg-a7dc13a96d844de081e5ba21dc5cadfc-80151a91")
+    _make_issue("pack-12-9f2c1d44")
+    _make_issue("order-25afaf10775745439dea")
+
+    body = staff_client.get(_list_url()).content.decode()
+
+    assert "Registration fee" in body
+    assert "Starter pack" in body
+    assert "Order" in body
+
+
+@pytest.mark.django_db
+def test_a_long_reference_is_shortened_in_the_table(staff_client):
+    _make_issue("reg-a7dc13a96d844de081e5ba21dc5cadfc-80151a91")
+
+    body = staff_client.get(_list_url()).content.decode()
+
+    assert "reg-a7dc13a9…80151a91" in body
+
+
+@pytest.mark.django_db
+def test_every_detail_is_in_the_page_for_the_popup_to_show(staff_client):
+    """json_script, so opening a row costs no second request -- the same
+    pattern as the Audit Log screen's detail modal."""
+    _make_issue(
+        "reg-a7dc13a96d844de081e5ba21dc5cadfc-80151a91",
+        payer_email="ama@example.test",
+        detail="No pending registration was found for this payment.",
+    )
+
+    body = staff_client.get(_list_url()).content.decode()
+
+    assert 'type="application/json"' in body
+    # The full reference, for copying into the Paystack dashboard.
+    assert "reg-a7dc13a96d844de081e5ba21dc5cadfc-80151a91" in body
+    assert "ama@example.test" in body
+    assert "No pending registration was found for this payment." in body
+    assert "+233241234567" in body
+
+
+@pytest.mark.django_db
+def test_hostile_payer_text_cannot_break_out_of_the_popup_data(staff_client):
+    """Payer name comes from Paystack metadata, which a stranger can choose."""
+    _make_issue("reg-abc", payer_name="</script><img src=x onerror=alert(1)>")
+
+    body = staff_client.get(_list_url()).content.decode()
+
+    assert "<img src=x onerror=alert(1)>" not in body
+    assert "onerror" not in body or "\\u003C" in body or "&lt;" in body
+
+
+@pytest.mark.django_db
+def test_the_row_still_has_a_one_click_mark_sorted(staff_client):
+    """Marking sorted is the main job here; after refunding in Paystack the
+    admin already knows the row they want."""
+    issue = _make_issue()
+
+    body = staff_client.get(_list_url()).content.decode()
+
+    assert _resolve_url(issue) in body

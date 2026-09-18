@@ -14,7 +14,9 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.utils.formats import date_format
 from django.utils.http import urlencode
+from django.utils.timezone import localtime
 from django.views.decorators.http import require_POST
 
 from constance import config
@@ -2595,6 +2597,50 @@ def _filtered_payment_issues(request):
     return issues, query, status
 
 
+def _payment_issue_row(issue):
+    """Task 67c. Everything the detail popup shows, rendered into the page
+    as json_script so opening a row costs no second request -- the same
+    shape as the Audit Log screen's own detail modal. Django escapes it for
+    the script tag, so payer text taken from Paystack metadata (which a
+    stranger can choose) cannot break out of it."""
+    return (
+        f"payment-issue-{issue.pk}",
+        {
+            "reference": issue.reference,
+            "type_label": issue.payment_type_label,
+            "kind": issue.get_kind_display(),
+            "amount": (
+                f"GHS {issue.amount_in_cedis:.2f}"
+                if issue.amount_in_cedis is not None
+                else "Amount unknown"
+            ),
+            "payer_name": issue.payer_name,
+            "payer_phone": issue.payer_phone,
+            "payer_email": issue.payer_email,
+            "paid_at": (
+                date_format(localtime(issue.paid_at), "j M Y, H:i")
+                if issue.paid_at
+                else ""
+            ),
+            "created_at": date_format(localtime(issue.created_at), "j M Y, H:i"),
+            "detail": issue.detail,
+            "resolved_at": (
+                date_format(localtime(issue.resolved_at), "j M Y, H:i")
+                if issue.resolved_at
+                else ""
+            ),
+            "action_url": reverse(
+                (
+                    "admin_portal:payment_issue_reopen"
+                    if issue.resolved_at
+                    else "admin_portal:payment_issue_resolve"
+                ),
+                args=[issue.pk],
+            ),
+        },
+    )
+
+
 @login_required(login_url="two_factor:login")
 def payment_issue_list(request):
     """Task 67b. Payments Paystack confirmed that did not become what they
@@ -2606,6 +2652,8 @@ def payment_issue_list(request):
     issues, query, status = _filtered_payment_issues(request)
     paginator = Paginator(issues, 20)
     page_obj = paginator.get_page(request.GET.get("page"))
+    for issue in page_obj.object_list:
+        issue.row_id, issue.row_data = _payment_issue_row(issue)
 
     params = request.GET.copy()
     params.pop("page", None)

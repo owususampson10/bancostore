@@ -330,3 +330,30 @@ def test_a_staff_user_without_verified_2fa_is_refused(client):
 
     assert response.status_code != 200
     assert "two_factor/setup" in response["Location"]
+
+
+# --- Task 67c: where a bell notification takes you ----------------------------
+
+
+@pytest.mark.django_db
+def test_a_payment_issue_notification_links_to_the_payments_screen():
+    """Before this it showed the text with nowhere to click, so the admin had
+    to find the screen themselves."""
+    from django.urls import reverse
+
+    notification = AdminNotification.objects.create(
+        event_type=AdminNotification.EventType.PAYMENT_ISSUE,
+        message="Payment reg-abc needs attention",
+    )
+
+    assert notification.link_url == reverse("admin_portal:payment_issue_list")
+
+
+@pytest.mark.django_db
+def test_an_sms_credit_notification_has_nowhere_to_link():
+    notification = AdminNotification.objects.create(
+        event_type=AdminNotification.EventType.SMS_CREDIT,
+        message="SMS credit has run out",
+    )
+
+    assert notification.link_url is None

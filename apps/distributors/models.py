@@ -290,6 +290,30 @@ class PaymentIssue(models.Model):
     class Meta:
         ordering = ["-created_at", "-pk"]
 
+    # Task 67c. The admin reads this screen to decide on a refund; they
+    # should never have to know that "reg-" means a registration fee.
+    _TYPE_LABELS = (
+        ("reg-", "Registration fee"),
+        ("pack-", "Starter pack"),
+        ("order-", "Order"),
+    )
+
+    @property
+    def payment_type_label(self):
+        """What the money was for, in plain words."""
+        for prefix, label in self._TYPE_LABELS:
+            if self.reference.startswith(prefix):
+                return label
+        return "Payment"
+
+    @property
+    def short_reference(self):
+        """Shortened in the middle for the table; the full reference is in
+        the detail popup, where it can be copied into Paystack."""
+        if len(self.reference) <= 24:
+            return self.reference
+        return f"{self.reference[:12]}\u2026{self.reference[-8:]}"
+
     @property
     def amount_in_cedis(self):
         """Decimal, never float -- money in this codebase is always exact."""

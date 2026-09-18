@@ -225,3 +225,41 @@ def test_a_paid_issue_email_tells_the_admin_to_refund(locmem):
     (message,) = mail.outbox
     assert "Paystack confirmed this payment" in message.body
     assert "Refund" in message.body
+
+
+# --- How a payment is labelled on the admin screen (Task 67c) ------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "reference,expected",
+    [
+        ("reg-a7dc13a96d844de081e5ba21dc5cadfc-80151a91", "Registration fee"),
+        ("pack-12-9f2c1d44", "Starter pack"),
+        ("order-25afaf10775745439dea", "Order"),
+        ("T123456789", "Payment"),
+    ],
+)
+def test_the_payment_type_is_spelled_out_never_left_as_a_prefix(reference, expected):
+    """The admin should not have to know that "reg-" means a registration
+    fee."""
+    assert PaymentIssue(reference=reference).payment_type_label == expected
+
+
+@pytest.mark.django_db
+def test_a_long_reference_is_shortened_in_the_middle():
+    issue = PaymentIssue(reference="reg-a7dc13a96d844de081e5ba21dc5cadfc-80151a91")
+
+    short = issue.short_reference
+
+    assert short.startswith("reg-a7dc13a9")
+    assert short.endswith("80151a91")
+    assert "…" in short
+    assert len(short) < len(issue.reference)
+
+
+@pytest.mark.django_db
+def test_a_short_reference_is_left_alone():
+    assert PaymentIssue(reference="pack-12-9f2c1d44").short_reference == (
+        "pack-12-9f2c1d44"
+    )

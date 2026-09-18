@@ -38,8 +38,8 @@ all, so the socket cannot be the only path.
         </span>
         <div class="min-w-0">
           <p class="font-body-sm text-body-sm text-on-surface break-words">
-            {% if notification.order_id %}
-              <a href="{% url 'admin_portal:order_detail' notification.order_id %}"
+            {% if notification.link_url %}
+              <a href="{{ notification.link_url }}"
                  class="hover:underline">{{ notification.message }}</a>
             {% else %}
               {{ notification.message }}
