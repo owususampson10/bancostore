@@ -14,6 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.hashers import make_password
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
+from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import Max, Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
@@ -65,6 +66,7 @@ from .didit import DiditError
 from .didit import create_verification_session as create_didit_session
 from .didit import verify_webhook_signature as verify_didit_webhook_signature
 from .forms import (
+    REGISTRATION_IN_PROGRESS_MESSAGE,
     DistributorForgotPasswordForm,
     DistributorLoginForm,
     DistributorRegistrationForm,
@@ -84,11 +86,14 @@ from .services import (
     MembershipCancelled,
     PendingRegistrationAlreadyConsumed,
     PendingRegistrationNotFound,
+    PendingRegistrationResolution,
+    RegistrationPaymentOutcome,
     StarterPackAlreadyConfirmed,
     attempt_distributor_login,
     consume_didit_result,
     consume_paid_registration,
     consume_paid_starter_pack,
+    resolve_unconsumed_pending_registration,
     snapshot_payment_reference,
     snapshot_starter_pack_choice,
 )
@@ -132,6 +137,49 @@ def _redirect_if_cooling_off_cancelled(view_func):
     return wrapper
 
 
+# Task 67. An unfinished registration for a number can be taken over once its
+# checkout has been idle for an hour (the person is not on the payment page),
+# or it is a day old whatever its checkout is doing -- so nobody can hold a
+# number by reopening the payment page every hour.
+REGISTRATION_TAKEOVER_IDLE = timedelta(hours=1)
+REGISTRATION_TAKEOVER_MAX_AGE = timedelta(hours=24)
+
+
+def _release_abandoned_registration(form):
+    """Task 67. Returns True when the submitted phone number is free to
+    register. Cleanup keeps an unpaid registration for 72 hours now, so
+    without this a person who gave up and came back later could not register
+    their own number for days. The old registration is only removed once
+    Paystack confirms it was not paid; if it was, it is completed instead."""
+    existing = PendingRegistration.objects.filter(
+        phone_number=form.cleaned_data["phone_number"], consumed_at__isnull=True
+    ).first()
+    if existing is None:
+        return True
+    try:
+        resolution = resolve_unconsumed_pending_registration(
+            existing.pk,
+            idle_for=REGISTRATION_TAKEOVER_IDLE,
+            max_age=REGISTRATION_TAKEOVER_MAX_AGE,
+            delete_unconfirmed=False,
+        )
+    except OperationalError:
+        # Code review (Task 67): a webhook or callback holding this row's
+        # lock across its own Paystack call outlasts the lock retries. That
+        # registration is being worked on right now, which is exactly what
+        # the form error says.
+        logger.warning(
+            "register: pending_registration_id=%s was locked during takeover",
+            existing.pk,
+            exc_info=True,
+        )
+        resolution = PendingRegistrationResolution.KEPT
+    if resolution is PendingRegistrationResolution.DELETED:
+        return True
+    form.add_error("phone_number", REGISTRATION_IN_PROGRESS_MESSAGE)
+    return False
+
+
 @ratelimit(key="ip", rate="5/h", method="POST")
 @ratelimit(key="ip", rate="20/h", method="GET")
 def register(request):
@@ -157,19 +205,26 @@ def register(request):
         # readonly field said," which is circular and adds nothing.
         sponsor_locked = request.POST.get("sponsor_locked") == "1"
         form = DistributorRegistrationForm(request.POST, lock_sponsor=sponsor_locked)
-        if form.is_valid():
-            pending = PendingRegistration.objects.create(
-                full_name=form.cleaned_data["full_name"],
-                phone_number=str(form.cleaned_data["phone_number"]),
-                email=form.cleaned_data.get("email", ""),
-                address=form.cleaned_data["address"],
-                area=form.cleaned_data["area"],
-                landmark=form.cleaned_data.get("landmark", ""),
-                password_hash=make_password(form.cleaned_data["password1"]),
-                sponsor=form.cleaned_data["sponsor"],
-            )
-            request.session["pending_registration_token"] = str(pending.token)
-            return redirect("distributors:pay_registration_fee")
+        if form.is_valid() and _release_abandoned_registration(form):
+            try:
+                with transaction.atomic():
+                    pending = PendingRegistration.objects.create(
+                        full_name=form.cleaned_data["full_name"],
+                        phone_number=str(form.cleaned_data["phone_number"]),
+                        email=form.cleaned_data.get("email", ""),
+                        address=form.cleaned_data["address"],
+                        area=form.cleaned_data["area"],
+                        landmark=form.cleaned_data.get("landmark", ""),
+                        password_hash=make_password(form.cleaned_data["password1"]),
+                        sponsor=form.cleaned_data["sponsor"],
+                    )
+            except IntegrityError:
+                # Task 67: another submission for the same number got there
+                # first.
+                form.add_error("phone_number", REGISTRATION_IN_PROGRESS_MESSAGE)
+            else:
+                request.session["pending_registration_token"] = str(pending.token)
+                return redirect("distributors:pay_registration_fee")
     else:
         ref = request.GET.get("ref", "")
         # Only lock the field for a referral link that actually resolves to
@@ -220,6 +275,26 @@ def pay_registration_fee(request):
             amount_pesewas=pending.fee_amount_pesewas,
             reference=pending.payment_reference,
             callback_url=callback_url,
+            # Task 67: who is paying, carried on the transaction itself so a
+            # payment can still be tied to a person if this pending
+            # registration is gone by the time the money arrives. Name and
+            # phone only -- nothing Paystack's dashboard shouldn't show.
+            metadata={
+                "full_name": pending.full_name,
+                "phone_number": str(pending.phone_number),
+                "custom_fields": [
+                    {
+                        "display_name": "Full name",
+                        "variable_name": "full_name",
+                        "value": pending.full_name,
+                    },
+                    {
+                        "display_name": "Phone number",
+                        "variable_name": "phone_number",
+                        "value": str(pending.phone_number),
+                    },
+                ],
+            },
         )
     except PaystackError:
         logger.exception(
@@ -234,6 +309,9 @@ def pay_registration_fee(request):
     return redirect(data["authorization_url"])
 
 
+# Task 67: public, and a well-formed reference costs an authenticated
+# Paystack call. Generous enough for a person refreshing the confirming page.
+@ratelimit(key="ip", rate="60/h", method="GET")
 def registration_payment_callback(request):
     """The user's browser lands here after attempting payment on Paystack's
     hosted checkout. NOT the source of truth for account creation (the
@@ -415,7 +493,13 @@ def paystack_webhook(request):
             None,
         )
         if handler:
-            handler(reference)
+            outcome = handler(reference)
+            # Task 67: Paystack only redelivers a webhook that did not get a
+            # 2xx. When we could not verify the payment ourselves, say so,
+            # rather than acknowledging the one push we get for a payment
+            # nothing has been done about yet.
+            if outcome is RegistrationPaymentOutcome.VERIFY_FAILED:
+                return HttpResponse(status=503)
         elif reference:
             logger.warning(
                 "paystack_webhook: unrecognized reference prefix: %s", reference

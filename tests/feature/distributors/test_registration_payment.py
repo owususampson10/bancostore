@@ -279,3 +279,80 @@ def test_webhook_with_malformed_json_returns_400_not_500(client):
     )
 
     assert response.status_code == 400
+
+
+# --- Task 67 ------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.views.initialize_transaction")
+def test_pay_registration_fee_records_when_checkout_opened_and_sends_payer_details(
+    mock_init, client
+):
+    """The payer's name and phone travel with the Paystack transaction, so a
+    payment can still be tied to a person if the pending registration is
+    gone by the time it arrives. Never the password or address."""
+    _register(client, _make_sponsor())
+    mock_init.return_value = {"authorization_url": "https://checkout.paystack.com/x"}
+
+    client.get(reverse("distributors:pay_registration_fee"))
+
+    pending = PendingRegistration.objects.get(phone_number="+233241234567")
+    assert pending.payment_initialized_at is not None
+    metadata = mock_init.call_args.kwargs["metadata"]
+    assert metadata["full_name"] == "Kofi Mensah"
+    assert metadata["phone_number"] == "+233241234567"
+    assert "password" not in json.dumps(metadata).lower()
+    assert "Ring Road" not in json.dumps(metadata)
+
+
+def _signed_webhook(client, reference):
+    body = json.dumps(
+        {"event": "charge.success", "data": {"reference": reference}}
+    ).encode()
+    signature = hmac.new(b"sk_test_fake", body, hashlib.sha512).hexdigest()
+    return client.post(
+        reverse("distributors:paystack_webhook"),
+        data=body,
+        content_type="application/json",
+        HTTP_X_PAYSTACK_SIGNATURE=signature,
+    )
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@pytest.mark.django_db
+@patch("apps.distributors.views.consume_paid_registration")
+def test_webhook_asks_paystack_to_retry_when_verification_failed(mock_consume, client):
+    """Paystack only redelivers a webhook that did not get a 2xx. Answering
+    200 after a verify timeout threw away the one push we get."""
+    from apps.distributors.services import RegistrationPaymentOutcome
+
+    mock_consume.return_value = RegistrationPaymentOutcome.VERIFY_FAILED
+
+    response = _signed_webhook(client, "reg-anything")
+
+    assert response.status_code == 503
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_fake")
+@pytest.mark.django_db
+@patch("apps.distributors.views.consume_paid_registration")
+def test_webhook_answers_200_for_every_definite_outcome(mock_consume, client):
+    from apps.distributors.services import RegistrationPaymentOutcome
+
+    for outcome in RegistrationPaymentOutcome:
+        if outcome is RegistrationPaymentOutcome.VERIFY_FAILED:
+            continue
+        mock_consume.return_value = outcome
+        assert _signed_webhook(client, "reg-anything").status_code == 200
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.views.consume_paid_registration")
+def test_callback_is_rate_limited_per_ip(mock_consume, client):
+    """Public, and every call can cost an authenticated Paystack request."""
+    url = reverse("distributors:registration_payment_callback")
+    statuses = [client.get(url, {"reference": "ref-x"}).status_code for _ in range(61)]
+
+    assert statuses[:60] == [200] * 60
+    assert statuses[60] != 200

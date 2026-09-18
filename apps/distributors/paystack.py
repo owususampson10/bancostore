@@ -147,22 +147,31 @@ def _raise_as_paystack_error(exc, action):
     raise PaystackError(f"Paystack {action} failed: {exc}{detail}") from exc
 
 
-def initialize_transaction(*, email, amount_pesewas, reference, callback_url):
+def initialize_transaction(
+    *, email, amount_pesewas, reference, callback_url, metadata=None
+):
     """Source: https://paystack.com/docs/api/transaction/ ("Initialize
     Transaction"). POST /transaction/initialize; amount is in the subunit
     of the currency (pesewas for GHS). Returns the response's `data` object
-    (authorization_url, access_code, reference)."""
+    (authorization_url, access_code, reference).
+
+    Task 67: `metadata` travels with the transaction and comes back on
+    verify, so a payment can still be tied to a person if our own record of
+    them is gone. Only sent when given."""
+    payload = {
+        "email": email,
+        "amount": str(amount_pesewas),
+        "reference": reference,
+        "callback_url": callback_url,
+        "currency": "GHS",
+    }
+    if metadata:
+        payload["metadata"] = metadata
     try:
         response = requests.post(
             f"{PAYSTACK_BASE_URL}/transaction/initialize",
             headers=_auth_headers(),
-            json={
-                "email": email,
-                "amount": str(amount_pesewas),
-                "reference": reference,
-                "callback_url": callback_url,
-                "currency": "GHS",
-            },
+            json=payload,
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
@@ -175,7 +184,14 @@ def verify_transaction(reference):
     """Source: https://paystack.com/docs/api/transaction/ ("Verify
     Transaction"). GET /transaction/verify/:reference -- the authoritative
     source of a transaction's status/amount/currency; never trust a
-    webhook body's own claims about these instead of calling this."""
+    webhook body's own claims about these instead of calling this.
+
+    Task 67: raises PaystackNotFoundError when Paystack has never seen the
+    reference. Checked against the live API on 2026-09-17, that answer is
+    HTTP 400 with the message "Transaction reference not found." -- not the
+    404 Paystack's OpenAPI spec lists -- so both are recognised. Every other
+    400 stays a plain PaystackError: "we don't know" must never be read as
+    "never paid"."""
     try:
         response = requests.get(
             f"{PAYSTACK_BASE_URL}/transaction/verify/{reference}",
@@ -184,8 +200,46 @@ def verify_transaction(reference):
         )
         response.raise_for_status()
     except requests.RequestException as exc:
+        if _is_reference_not_found(getattr(exc, "response", None)):
+            raise PaystackNotFoundError(
+                f"Paystack verify_transaction failed: reference not found " f"({exc})"
+            ) from exc
         _raise_as_paystack_error(exc, "verify_transaction")
     return response.json()["data"]
+
+
+def _is_reference_not_found(response):
+    if response is None or response.status_code != 400:
+        return False
+    try:
+        message = response.json().get("message") or ""
+    except (ValueError, AttributeError):
+        return False
+    return "reference not found" in str(message).lower()
+
+
+def list_transactions(*, status, page, per_page, from_=None):
+    """Source: https://paystack.com/docs/api/transaction/ ("List
+    Transactions"). GET /transaction, newest first. Returns (data, meta);
+    meta carries pageCount. Task 67: the daily payment reconciliation reads
+    successful payments through this. `perPage` confirmed live 2026-09-17
+    (the response's meta echoes it back). `from_` is a datetime; Paystack
+    does not document whether it filters on creation or payment time."""
+    params = {"status": status, "page": page, "perPage": per_page}
+    if from_ is not None:
+        params["from"] = from_.isoformat()
+    try:
+        response = requests.get(
+            f"{PAYSTACK_BASE_URL}/transaction",
+            headers=_auth_headers(),
+            params=params,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        _raise_as_paystack_error(exc, "list_transactions")
+    body = response.json()
+    return body.get("data") or [], body.get("meta") or {}
 
 
 def list_banks(*, country="ghana", currency="GHS", bank_type="mobile_money"):

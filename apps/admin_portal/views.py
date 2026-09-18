@@ -7,13 +7,14 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, Max, Prefetch, ProtectedError, Q, Sum
+from django.db.models import Count, F, Max, Prefetch, ProtectedError, Q, Sum
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.utils.http import urlencode
 from django.views.decorators.http import require_POST
 
 from constance import config
@@ -26,7 +27,7 @@ from apps.commissions.models import CommissionCycleRun
 from apps.commissions.services import COMMISSION_TRANSACTION_TYPES
 from apps.compliance.models import EscrowLedger
 from apps.compliance.services import get_retail_distributor_ratio, get_unified_audit_log
-from apps.distributors.models import Distributor
+from apps.distributors.models import Distributor, PaymentIssue
 from apps.distributors.services import approve_kyc, reject_kyc
 from apps.notifications.models import AdminNotification, NotificationTemplate
 from apps.notifications.services import broadcast_admin_unread_count
@@ -2547,3 +2548,133 @@ def sms_credit_banner_check(request):
         "admin_portal/_sms_credit_banner.html",
         {"banner": credit_banner(), "check_message": message},
     )
+
+
+# ---------------------------------------------------------------------------
+# Payments needing attention (Task 67b) -- the branded screen for
+# apps.distributors.models.PaymentIssue, which Task 67 records whenever
+# Paystack confirms a payment that did not become an account, a starter pack
+# or an order. It was reachable only through raw Django Admin; every other
+# admin-facing surface here is a designed screen (Tasks 26/27/28).
+# ---------------------------------------------------------------------------
+
+PAYMENT_ISSUE_STATUSES = ("unresolved", "resolved")
+
+
+def _filtered_payment_issues(request):
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
+    if status not in PAYMENT_ISSUE_STATUSES:
+        status = ""
+
+    issues = PaymentIssue.objects.order_by(
+        # Unresolved first: that is the work. "-pk" tie-breaks a timestamp
+        # collision so pagination can't skip or repeat a row (the same fix
+        # as earnings_history and the review queue).
+        F("resolved_at").asc(nulls_first=True),
+        "-created_at",
+        "-pk",
+    )
+    if query:
+        # An admin reads a phone number off the alert email in E.164
+        # (+233...) but may type the local 0... form, as in the distributor
+        # directory's own search.
+        phone_query = query
+        if phone_query.startswith("0") and phone_query[1:].isdigit():
+            phone_query = "+233" + phone_query[1:]
+        issues = issues.filter(
+            Q(reference__icontains=query)
+            | Q(payer_name__icontains=query)
+            | Q(payer_phone__icontains=phone_query)
+            | Q(payer_email__icontains=query)
+        )
+    if status == "unresolved":
+        issues = issues.filter(resolved_at__isnull=True)
+    elif status == "resolved":
+        issues = issues.filter(resolved_at__isnull=False)
+    return issues, query, status
+
+
+@login_required(login_url="two_factor:login")
+def payment_issue_list(request):
+    """Task 67b. Payments Paystack confirmed that did not become what they
+    paid for, newest unresolved first. Search and status filter are
+    real-time htmx, matching distributor_directory's own pattern."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    issues, query, status = _filtered_payment_issues(request)
+    paginator = Paginator(issues, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    params = request.GET.copy()
+    params.pop("page", None)
+
+    context = {
+        "page_obj": page_obj,
+        "query": query,
+        "status": status,
+        "querystring_no_page": params.urlencode(),
+        # Deliberately the platform-wide figure, not the filtered one: it
+        # answers "how much is outstanding", which a search must not change.
+        "unresolved_count": PaymentIssue.objects.filter(
+            resolved_at__isnull=True
+        ).count(),
+        "active_nav": "payment_issues",
+    }
+    if request.htmx:
+        return render(
+            request, "admin_portal/partials/payment_issue_results.html", context
+        )
+    return render(request, "admin_portal/payment_issues.html", context)
+
+
+@login_required(login_url="two_factor:login")
+@require_POST
+def payment_issue_resolve(request, pk):
+    """Marks one sorted. Money moves in the Paystack dashboard, never here --
+    this only records that a human has dealt with it."""
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    issue = get_object_or_404(PaymentIssue, pk=pk)
+    if issue.resolved_at is None:
+        issue.resolved_at = timezone.now()
+        issue.save(update_fields=["resolved_at"])
+        messages.success(request, f"Payment {issue.reference} marked as sorted.")
+    return redirect(_payment_issue_redirect(request))
+
+
+@login_required(login_url="two_factor:login")
+@require_POST
+def payment_issue_reopen(request, pk):
+    if not is_admin_portal_staff(request.user):
+        raise PermissionDenied
+
+    issue = get_object_or_404(PaymentIssue, pk=pk)
+    if issue.resolved_at is not None:
+        issue.resolved_at = None
+        issue.save(update_fields=["resolved_at"])
+        messages.success(request, f"Payment {issue.reference} reopened.")
+    return redirect(_payment_issue_redirect(request))
+
+
+def _payment_issue_redirect(request):
+    """Back to the list the admin was looking at, keeping their search and
+    filter -- rebuilt from the posted values, never from a caller-supplied
+    URL (an open redirect)."""
+    params = {
+        key: value
+        for key, value in (
+            ("q", request.POST.get("q", "").strip()),
+            ("status", request.POST.get("status", "").strip()),
+            ("page", request.POST.get("page", "").strip()),
+        )
+        if value
+    }
+    if params.get("status") not in PAYMENT_ISSUE_STATUSES:
+        params.pop("status", None)
+    if not (params.get("page") or "").isdigit():
+        params.pop("page", None)
+    url = reverse("admin_portal:payment_issue_list")
+    return f"{url}?{urlencode(params)}" if params else url

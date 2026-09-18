@@ -1,0 +1,105 @@
+{# Task 67b. Swapped on its own by the search/filter form above, so every #}
+{# control inside it keeps the active search and filter. #}
+<div id="payment-issue-results">
+{% if page_obj.object_list %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden">
+<!-- Sizing convention (2026-07-24): an explicit min-width inside
+     overflow-x-auto, or narrow viewports crush the columns instead of
+     scrolling the table as a block. Every cell carries BOTH a font-X and
+     its paired text-X class. -->
+<div class="overflow-x-auto">
+<table class="w-full min-w-[1000px] text-left border-collapse">
+<thead class="bg-surface-container-low">
+<tr>
+<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Payment</th>
+<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Payer</th>
+<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Amount</th>
+<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">What went wrong</th>
+<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Status</th>
+<th scope="col" class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Action</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/30">
+{% for issue in page_obj.object_list %}
+<tr class="hover:bg-surface-container-low transition-colors {% if not issue.resolved_at %}bg-error/[0.03]{% endif %}">
+<td class="px-6 py-5">
+<p class="font-body-md text-body-md font-semibold text-on-surface break-all">{{ issue.reference }}</p>
+<p class="font-label-md text-label-md text-on-surface-variant mt-1">Paid {{ issue.paid_at|default:issue.created_at }}</p>
+</td>
+<td class="px-6 py-5">
+<p class="font-body-md text-body-md text-on-surface">{{ issue.payer_name|default:"Name unknown" }}</p>
+<p class="font-label-md text-label-md text-on-surface-variant mt-1">{{ issue.payer_phone|default:"" }}</p>
+{% if issue.payer_email %}<p class="font-label-md text-label-md text-on-surface-variant break-all">{{ issue.payer_email }}</p>{% endif %}
+</td>
+<td class="px-6 py-5 font-body-md text-body-md text-on-surface whitespace-nowrap">
+{% if issue.amount_in_cedis is not None %}GHS {{ issue.amount_in_cedis|floatformat:2 }}{% else %}&mdash;{% endif %}
+</td>
+<td class="px-6 py-5 max-w-sm">
+<p class="font-body-md text-body-md text-on-surface">{{ issue.get_kind_display }}</p>
+{% if issue.detail %}<p class="font-label-md text-label-md text-on-surface-variant mt-1">{{ issue.detail }}</p>{% endif %}
+</td>
+<td class="px-6 py-5 whitespace-nowrap">
+{% if issue.resolved_at %}
+<span class="px-2.5 py-1 rounded-full font-body-md text-body-md font-semibold bg-green-50 text-green-700 inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]" aria-hidden="true">check</span>Sorted
+</span>
+{% else %}
+<span class="px-2.5 py-1 rounded-full font-body-md text-body-md font-semibold bg-error/10 text-error inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]" aria-hidden="true">report_problem</span>Still to sort
+</span>
+{% endif %}
+</td>
+<td class="px-6 py-5">
+{# The hidden fields send the admin back to the same search, filter and #}
+{# page they acted from, rebuilt server-side rather than from a #}
+{# caller-supplied URL. #}
+<form method="post" action="{% if issue.resolved_at %}{% url 'admin_portal:payment_issue_reopen' issue.pk %}{% else %}{% url 'admin_portal:payment_issue_resolve' issue.pk %}{% endif %}">
+{% csrf_token %}
+<input type="hidden" name="q" value="{{ query }}">
+<input type="hidden" name="status" value="{{ status }}">
+<input type="hidden" name="page" value="{{ page_obj.number }}">
+<button type="submit" class="px-4 py-2 rounded-lg font-bold text-label-md border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-all flex items-center gap-2 whitespace-nowrap">
+<span class="material-symbols-outlined text-[18px]" aria-hidden="true">{% if issue.resolved_at %}undo{% else %}check{% endif %}</span>
+{% if issue.resolved_at %}Reopen{% else %}Mark sorted{% endif %}
+</button>
+</form>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="px-6 py-4 bg-surface-container-low border-t border-outline-variant flex flex-col sm:flex-row items-center justify-between gap-4">
+<p class="font-body-md text-body-md text-on-surface-variant">
+Showing {{ page_obj.start_index }} to {{ page_obj.end_index }} of {{ page_obj.paginator.count }} payments
+</p>
+<div class="flex items-center gap-2">
+{% if page_obj.has_previous %}
+<a href="?page={{ page_obj.previous_page_number }}{% if querystring_no_page %}&{{ querystring_no_page }}{% endif %}" class="p-2 border border-outline-variant rounded-lg hover:bg-white transition-all" aria-label="Previous page">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+</a>
+{% endif %}
+<span class="font-body-md text-body-md text-on-surface-variant px-2">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+{% if page_obj.has_next %}
+<a href="?page={{ page_obj.next_page_number }}{% if querystring_no_page %}&{{ querystring_no_page }}{% endif %}" class="p-2 border border-outline-variant rounded-lg hover:bg-white transition-all" aria-label="Next page">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+</a>
+{% endif %}
+</div>
+</div>
+{% endif %}
+</div>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant flex flex-col items-center justify-center text-center py-24 px-6">
+<span class="material-symbols-outlined text-primary text-[48px] mb-4" aria-hidden="true">check_circle</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface mb-2">
+{% if query or status %}Nothing matches that search{% else %}No payments need attention{% endif %}
+</h3>
+<p class="font-body-md text-body-md text-on-surface-variant max-w-md">
+{% if query or status %}Try a different reference, name or phone number, or clear the filter.{% else %}Every payment Paystack has confirmed became an account, a starter pack or an order. Anything that does not will appear here, and the admin alert email will say so.{% endif %}
+</p>
+</div>
+{% endif %}
+</div>

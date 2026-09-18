@@ -42,6 +42,17 @@ urlpatterns = [
         name="commission_cycle_detail",
     ),
     path("audit-log/", views.audit_log, name="audit_log"),
+    path("payments/", views.payment_issue_list, name="payment_issue_list"),
+    path(
+        "payments/<int:pk>/resolve/",
+        views.payment_issue_resolve,
+        name="payment_issue_resolve",
+    ),
+    path(
+        "payments/<int:pk>/reopen/",
+        views.payment_issue_reopen,
+        name="payment_issue_reopen",
+    ),
     path("orders/", views.order_management_queue, name="order_management_queue"),
     path("orders/<int:pk>/", views.order_detail, name="order_detail"),
     path(

@@ -19,6 +19,14 @@ CHECKBOX_CLASSES = (
 )
 
 
+# Task 67: one message for every "this number can't register right now"
+# reason -- completed, still being paid for, or losing a race -- so the form
+# never tells a stranger which numbers already belong to a distributor.
+REGISTRATION_IN_PROGRESS_MESSAGE = (
+    "A registration for this phone number is already in progress."
+)
+
+
 class DistributorRegistrationForm(forms.Form):
     """Task 10a extends this with the fields Section 4 step 1 requires
     beyond basic auth mechanics (full name, address, area, landmark,
@@ -136,11 +144,15 @@ class DistributorRegistrationForm(forms.Form):
         # whether it belongs to an actual distributor. Needed regardless,
         # to avoid an unhandled IntegrityError from PendingRegistration's
         # unique phone_number constraint.
+        #
+        # Task 67: only a COMPLETED registration is rejected here. An
+        # unfinished one may be abandoned, and the register view decides --
+        # with Paystack -- whether this new submission can take it over.
         phone_number = self.cleaned_data["phone_number"]
-        if PendingRegistration.objects.filter(phone_number=phone_number).exists():
-            raise forms.ValidationError(
-                "A registration for this phone number is already in progress."
-            )
+        if PendingRegistration.objects.filter(
+            phone_number=phone_number, consumed_at__isnull=False
+        ).exists():
+            raise forms.ValidationError(REGISTRATION_IN_PROGRESS_MESSAGE)
         return phone_number
 
     def clean(self):
