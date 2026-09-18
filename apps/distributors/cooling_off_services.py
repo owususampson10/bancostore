@@ -17,7 +17,7 @@ from bancostore.concurrency import (
     select_for_update_nowait_if_supported,
 )
 
-from .models import Distributor
+from .models import Distributor, StarterPackCheckout
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +187,26 @@ def cancel_membership_and_refund(distributor_id) -> Decimal | None:
     return retry_on_lock_contention(_attempt)
 
 
-def _reverse_direct_referral_bonus(distributor, reference: str) -> None:
+def _credited_pack_reference(distributor) -> str:
+    """Which checkout's payment actually credited the sponsor's bonus. Since
+    Task 68b a distributor can have several starter-pack checkouts and pay an
+    older one, so the current starter_pack_payment_reference is only right
+    when nothing was ever re-selected."""
+    consumed = (
+        StarterPackCheckout.objects.filter(
+            distributor_id=distributor.pk, consumed_at__isnull=False
+        )
+        .order_by("-consumed_at", "-pk")
+        .first()
+    )
+    if consumed is not None:
+        return consumed.reference
+    return distributor.starter_pack_payment_reference
+
+
+def _reverse_direct_referral_bonus(
+    distributor, reference: str, credited_reference: str | None = None
+) -> bool:
     """ADR-0007 Decisions 3/4: reverses the ONE-TIME direct referral bonus
     `distributor.sponsor` was credited at starter-pack confirmation --
     nothing else. Called from inside cancel_membership_and_refund's own
@@ -211,10 +230,17 @@ def _reverse_direct_referral_bonus(distributor, reference: str) -> None:
     cancellation right must not be blocked by an unrelated wallet state
     (ADR-0007 Decision 4, mirroring ADR-0006's identical
     already-paid-out-is-an-accepted-limitation precedent)."""
+    # Task 68 (adversarial security review): the credit was written against
+    # the checkout that was ACTUALLY paid, which since 68b is not always the
+    # distributor's current starter_pack_payment_reference -- a back-button
+    # re-selection leaves them different. Looking the credit up by the
+    # current reference silently found nothing, returned quietly, and let
+    # the caller report a clawback that never happened.
+    credited_reference = credited_reference or _credited_pack_reference(distributor)
     original_bonus_txn = WalletTransaction.objects.filter(
         wallet__distributor_id=distributor.sponsor_id,
         transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
-        reference=distributor.starter_pack_payment_reference,
+        reference=credited_reference,
     ).first()
     if original_bonus_txn is None:
         logger.error(
@@ -225,9 +251,9 @@ def _reverse_direct_referral_bonus(distributor, reference: str) -> None:
             "manual investigation.",
             distributor.pk,
             distributor.sponsor_id,
-            distributor.starter_pack_payment_reference,
+            credited_reference,
         )
-        return
+        return False
 
     bonus = original_bonus_txn.amount
 
@@ -244,7 +270,7 @@ def _reverse_direct_referral_bonus(distributor, reference: str) -> None:
             distributor.pk,
             distributor.sponsor_id,
         )
-        return
+        return False
 
     debit_amount = min(sponsor_wallet.balance, bonus)
     if debit_amount > 0:
@@ -266,3 +292,4 @@ def _reverse_direct_referral_bonus(distributor, reference: str) -> None:
             sponsor_wallet.balance,
             bonus,
         )
+    return debit_amount > 0

@@ -69,7 +69,7 @@ def record_payment_issue(
             fields["resolved_at"] = timezone.now()
         with transaction.atomic():
             issue, created = PaymentIssue.objects.get_or_create(
-                reference=reference[:100], defaults=fields
+                reference=_clean(reference, 100), defaults=fields
             )
     except Exception:
         logger.exception(
@@ -194,9 +194,18 @@ _ACTION_BY_KIND = {
 }
 
 
+# Task 68g (adversarial security review): these are recorded and belled, but
+# never emailed. The first run after the window widened to 30 days sweeps a
+# month of transactions, and every Paystack payment link on the same merchant
+# account would be one more email on the SAME Gmail quota that carries
+# registration and password-reset mail. The screen and the bell carry them.
+_KINDS_WITHOUT_EMAIL = frozenset({PaymentIssue.Kind.UNRECOGNISED_PAYMENT})
+
+
 def _alert_admin(issue):
     summary = f"Payment {issue.reference} needs attention: {issue.get_kind_display()}"
-    _email_admin(issue, summary)
+    if issue.kind not in _KINDS_WITHOUT_EMAIL:
+        _email_admin(issue, summary)
     try:
         send_admin_notification(AdminNotification.EventType.PAYMENT_ISSUE, summary)
     except Exception:

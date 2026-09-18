@@ -42,17 +42,29 @@ AUTO_CANCEL_LOCK_KEY = "orders:auto_cancel_lock"
 AUTO_CANCEL_LOCK_TIMEOUT_SECONDS = 5 * 60
 
 
+# Bounds one run's Paystack calls (10s timeout each) well inside the 30
+# minutes before the next run, and stops an unfinished mobile-money prompt
+# being re-asked about every cycle for a fortnight.
+AUTO_CANCEL_BATCH_SIZE = 100
+AUTO_CANCEL_RECHECK_INTERVAL = timedelta(hours=6)
+
+
 def _pending_order_ids_query(cutoff):
     """Ordered oldest-first, matching Withdrawal's own batch driver
     convention -- not a correctness requirement (this is one
     .iterator() snapshot processed once), but a deliberate, consistent
     fairness choice rather than leaving row order to whatever plan the
     database happens to pick."""
-    return (
+    # Task 68a (adversarial security review): each of these now costs one
+    # blocking Paystack call, so a run is capped and an order already asked
+    # about within RECHECK_INTERVAL waits its turn. Least-recently-checked
+    # first, so nothing is starved.
+    recheck_cutoff = timezone.now() - AUTO_CANCEL_RECHECK_INTERVAL
+    return iter(
         Order.objects.filter(status=Order.Status.PENDING, created_at__lt=cutoff)
-        .order_by("created_at")
-        .values_list("pk", flat=True)
-        .iterator()
+        .exclude(payment_checked_at__gt=recheck_cutoff)
+        .order_by(F("payment_checked_at").asc(nulls_first=True), "created_at")
+        .values_list("pk", flat=True)[:AUTO_CANCEL_BATCH_SIZE]
     )
 
 

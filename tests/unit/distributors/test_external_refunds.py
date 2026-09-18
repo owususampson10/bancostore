@@ -10,6 +10,7 @@ from itertools import count
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 import pytest
 
@@ -70,19 +71,40 @@ def test_a_refund_is_confirmed_with_paystack_not_taken_on_trust(mock_verify):
 @pytest.mark.django_db
 @patch("apps.distributors.external_refunds.verify_transaction")
 def test_a_refunded_order_is_marked_refunded_and_recorded(mock_verify):
+    """The real reversal runs here, not a mock: the detail the admin reads is
+    built from the order's status AFTERWARDS, so mocking it away would test
+    the wrong branch (adversarial security review)."""
     mock_verify.return_value = _reversed_verify()
-    order = _make_order("order-abc")
+    order = _make_order("order-abc", confirmed_at=timezone.now())
 
-    with patch("apps.orders.services.cancel_or_refund_order") as mock_cancel:
+    with (
+        patch("apps.orders.services.send_sms"),
+        patch("apps.orders.services.send_mail"),
+    ):
         outcome = handle_external_refund("order-abc")
 
     assert outcome == PaymentOutcome.ISSUE_RECORDED
-    mock_cancel.assert_called_once()
-    assert mock_cancel.call_args.args[0] == order.pk
-    assert mock_cancel.call_args.kwargs["restock"] is False
+    order.refresh_from_db()
+    assert order.status == Order.Status.REFUNDED
     issue = PaymentIssue.objects.get(reference="order-abc")
     assert issue.kind == PaymentIssue.Kind.REFUND_RECEIVED
     assert "stock was not put back" in issue.detail.lower()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.external_refunds.verify_transaction")
+def test_an_order_that_could_not_be_reversed_says_so_plainly(mock_verify):
+    """cancel_or_refund_order is a quiet no-op for an order that was never
+    confirmed. Claiming "its PV was reversed" would send the admin looking
+    for a reversal that never happened."""
+    mock_verify.return_value = _reversed_verify()
+    _make_order("order-abc", status=Order.Status.PENDING)
+
+    handle_external_refund("order-abc")
+
+    detail = PaymentIssue.objects.get(reference="order-abc").detail
+    assert "could not be marked refunded" in detail
+    assert "pending" in detail
 
 
 @pytest.mark.django_db
@@ -302,6 +324,124 @@ def test_an_empty_wallet_does_not_get_clawed_back_twice(mock_verify):
         reference="binary-1",
     )
     handle_external_refund("pack-abc")  # refund.processed
+
+    sponsor.wallet.refresh_from_db()
+    assert sponsor.wallet.balance == Decimal("80.00")
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.external_refunds.verify_transaction")
+def test_the_clawback_finds_the_bonus_paid_on_an_older_checkout(mock_verify):
+    """Adversarial security review. Since 68b the bonus is credited against
+    whichever checkout was actually paid, which after a back-button
+    re-selection is NOT the distributor's current reference. Looking it up by
+    the current one found nothing, took nothing back, and told the admin it
+    had worked."""
+    from apps.distributors.models import StarterPackCheckout
+    from apps.wallet.models import WalletTransaction
+    from apps.wallet.services import credit as credit_wallet
+
+    sponsor = _make_distributor()
+    distributor = _make_distributor(sponsor=sponsor)
+    # Paid the older checkout; the distributor's current field is the newer.
+    StarterPackCheckout.objects.create(
+        distributor=distributor,
+        reference="pack-old",
+        amount_pesewas=50000,
+        choice="A",
+        pv=500,
+        rank="bronze",
+        consumed_at=timezone.now(),
+    )
+    Distributor.objects.filter(pk=distributor.pk).update(
+        starter_pack_payment_reference="pack-new"
+    )
+    credit_wallet(
+        sponsor,
+        Decimal("50.00"),
+        transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+        reference="pack-old",
+    )
+    mock_verify.return_value = _reversed_verify()
+
+    handle_external_refund("pack-old")
+
+    sponsor.wallet.refresh_from_db()
+    assert sponsor.wallet.balance == Decimal("0.00")
+    assert "has been taken back" in (
+        PaymentIssue.objects.get(reference="pack-old").detail
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.external_refunds.verify_transaction")
+def test_a_clawback_that_took_nothing_back_says_so(mock_verify):
+    """The sponsor had already withdrawn it. That is the accepted outcome --
+    but the admin must not be told money came back when it did not."""
+    from apps.wallet.models import WalletTransaction
+    from apps.wallet.services import credit as credit_wallet
+    from apps.wallet.services import debit as debit_wallet
+
+    sponsor = _make_distributor()
+    distributor = _make_distributor(sponsor=sponsor)
+    Distributor.objects.filter(pk=distributor.pk).update(
+        starter_pack_payment_reference="pack-abc"
+    )
+    credit_wallet(
+        sponsor,
+        Decimal("50.00"),
+        transaction_type=WalletTransaction.TransactionType.DIRECT_REFERRAL_BONUS,
+        reference="pack-abc",
+    )
+    debit_wallet(
+        sponsor,
+        Decimal("50.00"),
+        transaction_type=WalletTransaction.TransactionType.WITHDRAWAL_DEBIT,
+        reference="withdrawal-1",
+    )
+    mock_verify.return_value = _reversed_verify()
+
+    handle_external_refund("pack-abc")
+
+    assert "could NOT be taken back" in (
+        PaymentIssue.objects.get(reference="pack-abc").detail
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.external_refunds.verify_transaction")
+def test_a_dispute_after_a_refund_cannot_trigger_a_second_clawback(mock_verify):
+    """The double-clawback guard is a durable field, not the PaymentIssue's
+    kind -- a dispute event rewrites that kind."""
+    from apps.distributors.models import StarterPackCheckout
+    from apps.wallet.models import WalletTransaction
+    from apps.wallet.services import credit as credit_wallet
+
+    sponsor = _make_distributor()
+    distributor = _make_distributor(sponsor=sponsor)
+    StarterPackCheckout.objects.create(
+        distributor=distributor,
+        reference="pack-abc",
+        amount_pesewas=50000,
+        choice="A",
+        pv=500,
+        rank="bronze",
+        consumed_at=timezone.now(),
+    )
+    Distributor.objects.filter(pk=distributor.pk).update(
+        starter_pack_payment_reference="pack-abc"
+    )
+    mock_verify.return_value = _reversed_verify()
+    handle_external_refund("pack-abc")  # nothing to take back: empty wallet
+
+    handle_payment_dispute("pack-abc", "charge.dispute.create")  # rewrites kind
+    credit_wallet(
+        sponsor,
+        Decimal("80.00"),
+        transaction_type=WalletTransaction.TransactionType.BINARY_BONUS,
+        reference="binary-1",
+    )
+    handle_external_refund("pack-abc")  # a redelivered refund event
 
     sponsor.wallet.refresh_from_db()
     assert sponsor.wallet.balance == Decimal("80.00")

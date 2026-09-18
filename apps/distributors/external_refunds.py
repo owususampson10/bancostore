@@ -22,10 +22,11 @@ import logging
 import re
 
 from django.db import transaction
+from django.utils import timezone
 
 from apps.wallet.models import WalletTransaction
 
-from .models import Distributor, PaymentIssue
+from .models import Distributor, PaymentIssue, StarterPackCheckout
 from .payment_issues import record_payment_issue
 from .payment_outcomes import PaymentOutcome
 from .paystack import PaystackError, PaystackNotFoundError, verify_transaction
@@ -127,12 +128,6 @@ def _refund_order(reference, verified) -> PaymentOutcome:
     if order.status == Order.Status.REFUNDED:
         return PaymentOutcome.ALREADY_APPLIED
 
-    detail = (
-        "This payment was refunded on Paystack, so the order was marked "
-        "refunded and its PV reversed. Stock was NOT put back: whether the "
-        "goods came back is something only you know -- adjust the product's "
-        "stock by hand if they did."
-    )
     try:
         cancel_or_refund_order(
             order.pk,
@@ -148,10 +143,26 @@ def _refund_order(reference, verified) -> PaymentOutcome:
             "handle_external_refund: could not mark order refunded for " "reference=%s",
             reference,
         )
+
+    # Read the order back rather than describe what we hoped happened:
+    # cancel_or_refund_order is a quiet no-op for an order that was never
+    # confirmed, and an admin reading "its PV was reversed" about an order
+    # where nothing was reversed is worse than no detail at all
+    # (adversarial security review).
+    order.refresh_from_db()
+    if order.status == Order.Status.REFUNDED:
         detail = (
-            "This payment was refunded on Paystack, but the order could not "
-            "be marked refunded automatically. Refund it by hand from the "
-            "order screen so its PV and stock are put right."
+            "This payment was refunded on Paystack, so the order was marked "
+            "refunded and its PV reversed. Stock was NOT put back: whether "
+            "the goods came back is something only you know -- adjust the "
+            "product's stock by hand if they did."
+        )
+    else:
+        detail = (
+            "This payment was refunded on Paystack, but the order is still "
+            f"{order.get_status_display().lower()} -- it could not be marked "
+            "refunded automatically. Check it on the order screen and put its "
+            "PV and stock right by hand."
         )
     return _record(reference, PaymentIssue.Kind.REFUND_RECEIVED, verified, detail)
 
@@ -163,9 +174,18 @@ def _refund_starter_pack(reference, verified) -> PaymentOutcome:
     or to the cooling-off flow, not to a webhook."""
     from .cooling_off_services import _reverse_direct_referral_bonus
 
-    distributor = Distributor.objects.filter(
-        starter_pack_payment_reference=reference
-    ).first()
+    # Via the checkout this reference belongs to, falling back to the
+    # distributor's current reference for a payment made before Task 68b
+    # started recording checkouts. Looking only at the current reference
+    # missed every re-selected distributor entirely (adversarial security
+    # review) -- the same lookup gap the payment path already fixed.
+    checkout = StarterPackCheckout.objects.filter(reference=reference).first()
+    if checkout is not None:
+        distributor = Distributor.objects.filter(pk=checkout.distributor_id).first()
+    else:
+        distributor = Distributor.objects.filter(
+            starter_pack_payment_reference=reference
+        ).first()
     if distributor is None or not distributor.sponsor_id:
         return _record(
             reference,
@@ -180,6 +200,17 @@ def _refund_starter_pack(reference, verified) -> PaymentOutcome:
     # both refund.pending and refund.processed -- so a wallet-row check alone
     # would claw the bonus back a second time if the sponsor earned in
     # between (agent code review).
+    # A durable fact of its own, not a wallet row an empty wallet never
+    # writes, nor a PaymentIssue kind that a later dispute event overwrites
+    # (adversarial security review).
+    if checkout is not None and checkout.refund_handled_at is not None:
+        return _record(
+            reference,
+            PaymentIssue.Kind.REFUND_RECEIVED,
+            verified,
+            "This starter-pack payment was already handled as refunded.",
+        )
+
     already_reversed = (
         WalletTransaction.objects.filter(
             wallet__distributor_id=distributor.sponsor_id,
@@ -192,26 +223,55 @@ def _refund_starter_pack(reference, verified) -> PaymentOutcome:
             reference=reference, kind=PaymentIssue.Kind.REFUND_RECEIVED
         ).exists()
     )
-    detail = (
-        "This starter-pack payment was refunded on Paystack. The sponsor's "
-        "direct referral bonus has been taken back. The distributor's "
-        "membership was left active -- cancel it yourself if it should end."
-    )
+    reversed_any = False
+    failed = False
     if not already_reversed:
         try:
             with transaction.atomic():
-                _reverse_direct_referral_bonus(distributor, reference)
+                # credited_reference is THIS checkout's own reference: since
+                # Task 68b the bonus may have been credited against a
+                # checkout that is no longer the distributor's current one
+                # (adversarial security review -- the lookup used to miss
+                # entirely and report success anyway).
+                reversed_any = _reverse_direct_referral_bonus(
+                    distributor, reference, credited_reference=reference
+                )
         except Exception:
+            failed = True
             logger.exception(
                 "handle_external_refund: could not reverse the referral bonus "
                 "for reference=%s",
                 reference,
             )
-            detail = (
-                "This starter-pack payment was refunded on Paystack, but the "
-                "sponsor's direct referral bonus could not be taken back "
-                "automatically."
-            )
+
+    if failed:
+        detail = (
+            "This starter-pack payment was refunded on Paystack, but the "
+            "sponsor's direct referral bonus could not be taken back "
+            "automatically."
+        )
+    elif reversed_any:
+        detail = (
+            "This starter-pack payment was refunded on Paystack. The "
+            "sponsor's direct referral bonus has been taken back. The "
+            "distributor's membership was left active -- cancel it yourself "
+            "if it should end."
+        )
+    else:
+        # Never claim a clawback that did not happen. An empty sponsor wallet
+        # is the accepted outcome (money already withdrawn is not pursued),
+        # but the admin should be told which of the two it was.
+        detail = (
+            "This starter-pack payment was refunded on Paystack. The "
+            "sponsor's direct referral bonus could NOT be taken back -- "
+            "their wallet no longer held it. The distributor's membership "
+            "was left active."
+        )
+
+    if checkout is not None:
+        StarterPackCheckout.objects.filter(pk=checkout.pk).update(
+            refund_handled_at=timezone.now()
+        )
     return _record(reference, PaymentIssue.Kind.REFUND_RECEIVED, verified, detail)
 
 

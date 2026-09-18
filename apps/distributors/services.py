@@ -40,6 +40,7 @@ from .models import (
     IrIdSequence,
     PaymentIssue,
     PendingRegistration,
+    RegistrationCheckout,
     StarterPackCheckout,
 )
 from .payment_issues import record_payment_issue
@@ -202,6 +203,14 @@ def snapshot_payment_reference(token) -> PendingRegistration:
                 f"reg-{pending.token.hex}-{uuid.uuid4().hex[:8]}"
             )
             pending.payment_initialized_at = timezone.now()
+            # Remembered per reference, so a payment made on an earlier tab
+            # is checked against the fee IT was issued at, not a fee an admin
+            # has since changed (adversarial security review).
+            RegistrationCheckout.objects.create(
+                pending_registration=pending,
+                reference=pending.payment_reference,
+                fee_amount_pesewas=pending.fee_amount_pesewas,
+            )
             pending.save(
                 update_fields=[
                     "fee_amount_pesewas",
@@ -312,20 +321,27 @@ def consume_paid_registration(reference: str) -> PaymentOutcome:
                     pending,
                     detail=f"Paid in {verified.get('currency')!r}, not GHS.",
                 )
-            if verified.get("amount") != pending.fee_amount_pesewas:
+            # The fee this very checkout was issued at, not the latest one.
+            checkout = RegistrationCheckout.objects.filter(reference=reference).first()
+            expected_pesewas = (
+                checkout.fee_amount_pesewas
+                if checkout is not None
+                else pending.fee_amount_pesewas
+            )
+            if verified.get("amount") != expected_pesewas:
                 logger.warning(
                     "consume_paid_registration: amount mismatch for "
                     "reference=%s (paid=%r, expected=%r)",
                     reference,
                     verified.get("amount"),
-                    pending.fee_amount_pesewas,
+                    expected_pesewas,
                 )
                 return _issue(
                     PaymentIssue.Kind.REGISTRATION_NOT_CREATED,
                     verified,
                     pending,
                     detail=f"Paid {verified.get('amount')!r} pesewas, expected "
-                    f"{pending.fee_amount_pesewas!r}.",
+                    f"{expected_pesewas!r}.",
                 )
 
             if Distributor.objects.filter(phone_number=pending.phone_number).exists():

@@ -346,3 +346,31 @@ def test_the_same_problem_twice_still_alerts_only_once(locmem):
 
     assert len(mail.outbox) == 1
     assert PaymentIssue.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_an_unrecognised_payment_rings_the_bell_but_sends_no_email(locmem):
+    """The first 30-day sweep could otherwise put one email per stray
+    Paystack link onto the same Gmail quota that carries registration and
+    password-reset mail (adversarial security review)."""
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+
+    record_payment_issue(
+        "T123456789",
+        PaymentIssue.Kind.UNRECOGNISED_PAYMENT,
+        verified=_verified(),
+    )
+
+    assert mail.outbox == []
+    assert AdminNotification.objects.count() == 1
+    assert PaymentIssue.objects.filter(reference="T123456789").exists()
+
+
+@pytest.mark.django_db
+def test_a_reference_with_control_characters_cannot_reach_an_email_subject(locmem):
+    config.PAYMENT_ISSUE_ALERT_EMAIL = "ops@bancostore.test"
+
+    issue = record_payment_issue("reg-abc\r\nBcc: x@y.z", KIND, verified=_verified())
+
+    assert "\n" not in issue.reference and "\r" not in issue.reference
+    assert len(mail.outbox) == 1

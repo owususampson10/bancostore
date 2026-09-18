@@ -614,6 +614,24 @@ def _refund_unfulfillable_order(order) -> PaymentOutcome:
     after the cancellation has committed and inside confirm_order_payment's
     retry wrapper, so anything escaping would either strand a paid order or
     re-run committed work."""
+    # Claimed before the HTTP call, not after it (adversarial security
+    # review): the webhook and the public callback can both reach this for
+    # the same reference, and a guard written only after refund_transaction
+    # returns leaves a window where both call it.
+    claim = record_payment_issue(
+        order.payment_reference,
+        PaymentIssue.Kind.ORDER_NOT_APPLIED,
+        order=order,
+        detail="The item was out of stock by the time the payment was "
+        "confirmed. The order was cancelled and the refund is being sent.",
+    )
+    if claim is None:
+        # Nothing durable was written, so the refund must not be attempted
+        # blind -- the webhook asks Paystack to send this again.
+        return PaymentOutcome.VERIFY_FAILED
+    if claim.resolved_at is not None:
+        return PaymentOutcome.ALREADY_APPLIED
+
     refunded = False
     try:
         refund_transaction(
@@ -638,15 +656,9 @@ def _refund_unfulfillable_order(order) -> PaymentOutcome:
             "be completed -- refund this payment in the Paystack dashboard."
         )
 
-    issue = record_payment_issue(
-        order.payment_reference,
-        PaymentIssue.Kind.ORDER_NOT_APPLIED,
-        order=order,
-        detail=detail,
-        resolved=refunded,
+    PaymentIssue.objects.filter(pk=claim.pk).update(
+        detail=detail, resolved_at=timezone.now() if refunded else None
     )
-    if issue is None:
-        return PaymentOutcome.VERIFY_FAILED
     return PaymentOutcome.ISSUE_RECORDED
 
 
@@ -694,6 +706,7 @@ def _auto_cancel_pending_order(order_id) -> bool:
     # Deliberately outside the row lock below: a 10s HTTP call inside
     # select_for_update would hold this order's row against the webhook
     # trying to confirm that very payment.
+    Order.objects.filter(pk=order.pk).update(payment_checked_at=timezone.now())
     try:
         verified = verify_transaction(order.payment_reference)
     except PaystackNotFoundError:

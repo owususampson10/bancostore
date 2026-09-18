@@ -140,6 +140,13 @@ class Order(models.Model):
         max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True
     )
     confirmed_at = models.DateTimeField(null=True, blank=True)
+    # Task 68a (adversarial security review): when auto-cancel last asked
+    # Paystack about this order. Without it, an order whose payment Paystack
+    # reports as still "ongoing" -- a mobile-money prompt nobody approves --
+    # was re-verified every 30 minutes for the whole 14 days before it can be
+    # closed, roughly 670 blocking API calls per order, and a few thousand
+    # such orders would stall the job past its own interval.
+    payment_checked_at = models.DateTimeField(null=True, blank=True)
     # Task 62 follow-up (CodeRabbit, PR #93): when the receipt email was
     # actually sent. NULL on a confirmed order with an email address means
     # the receipt has not gone out yet, and resend_missing_order_receipts

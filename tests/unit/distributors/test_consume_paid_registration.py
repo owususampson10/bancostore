@@ -399,3 +399,28 @@ def test_an_issue_that_could_not_be_saved_is_not_reported_as_handled(
 
     assert outcome == Outcome.VERIFY_FAILED
     mock_record.assert_called_once()
+
+
+@pytest.mark.django_db
+@patch("apps.distributors.services.verify_transaction")
+def test_the_fee_is_checked_against_the_checkout_that_was_paid(mock_verify):
+    """Adversarial security review: the fee snapshot is overwritten on every
+    visit to the payment step, so an admin changing REGISTRATION_FEE between
+    a tab opening and its payment would reject a perfectly good payment --
+    money captured, no account."""
+    from apps.distributors.models import RegistrationCheckout
+
+    pending = _make_pending(_make_sponsor(), reference=None, fee_pesewas=15000)
+    old_reference = f"reg-{pending.token.hex}-aaaaaaaa"
+    RegistrationCheckout.objects.create(
+        pending_registration=pending,
+        reference=old_reference,
+        fee_amount_pesewas=10000,  # the fee when that tab was opened
+    )
+    pending.payment_reference = f"reg-{pending.token.hex}-bbbbbbbb"
+    pending.save()
+    mock_verify.return_value = _success_verify(amount=10000)
+
+    assert consume_paid_registration(old_reference) == Outcome.APPLIED
+
+    assert Distributor.objects.filter(phone_number=pending.phone_number).exists()

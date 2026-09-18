@@ -454,3 +454,52 @@ def test_a_recently_unfinished_payment_is_still_left_alone(
 
     order.refresh_from_db()
     assert order.status == Order.Status.PENDING
+
+
+# --- Adversarial security review: the job's Paystack calls are bounded -------
+
+
+@pytest.mark.django_db
+def test_one_run_asks_paystack_a_bounded_number_of_times(_paystack_says_never_paid):
+    """Each pending order now costs a 10s blocking call. Unbounded, a few
+    thousand never-approved mobile-money prompts would stall the job past its
+    own interval and stop genuinely unpaid orders being cancelled at all."""
+    from apps.orders.tasks import AUTO_CANCEL_BATCH_SIZE
+
+    _paystack_says_never_paid.return_value = {"status": "ongoing"}
+    old = timezone.now() - timedelta(days=3)
+    for _ in range(AUTO_CANCEL_BATCH_SIZE + 5):
+        _make_order(created_at=old)
+
+    auto_cancel_unpaid_orders()
+
+    assert _paystack_says_never_paid.call_count == AUTO_CANCEL_BATCH_SIZE
+
+
+@pytest.mark.django_db
+def test_an_order_asked_about_recently_waits_its_turn(_paystack_says_never_paid):
+    _paystack_says_never_paid.return_value = {"status": "ongoing"}
+    old = timezone.now() - timedelta(days=3)
+    asked_recently = _make_order(created_at=old)
+    Order.objects.filter(pk=asked_recently.pk).update(
+        payment_checked_at=timezone.now() - timedelta(minutes=30)
+    )
+    never_asked = _make_order(created_at=old)
+
+    auto_cancel_unpaid_orders()
+
+    checked = [c.args[0] for c in _paystack_says_never_paid.call_args_list]
+    assert checked == [never_asked.payment_reference]
+
+
+@pytest.mark.django_db
+def test_asking_paystack_is_recorded_even_when_nothing_changes(
+    _paystack_says_never_paid,
+):
+    _paystack_says_never_paid.return_value = {"status": "ongoing"}
+    order = _make_order(created_at=timezone.now() - timedelta(days=3))
+
+    _auto_cancel_pending_order(order.pk)
+
+    order.refresh_from_db()
+    assert order.payment_checked_at is not None

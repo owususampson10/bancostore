@@ -236,6 +236,34 @@ class PendingRegistration(models.Model):
         return f"PendingRegistration<{self.phone_number}>"
 
 
+class RegistrationCheckout(models.Model):
+    """Task 68 (adversarial security review). Every registration-fee checkout
+    ever opened, with the fee as it stood then.
+
+    snapshot_payment_reference overwrites PendingRegistration.
+    fee_amount_pesewas on every visit to the payment step, so a correct
+    payment made on an earlier tab was checked against a NEWER fee if an
+    admin changed REGISTRATION_FEE in between -- money captured, no account,
+    and a PaymentIssue for a payment that was in fact perfectly good. The
+    same gap StarterPackCheckout closes for starter packs.
+    """
+
+    pending_registration = models.ForeignKey(
+        "PendingRegistration",
+        on_delete=models.CASCADE,
+        related_name="checkouts",
+    )
+    reference = models.CharField(max_length=100, unique=True)
+    fee_amount_pesewas = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+
+    def __str__(self):
+        return f"RegistrationCheckout<{self.reference}>"
+
+
 class StarterPackCheckout(models.Model):
     """Task 68b. Every starter-pack checkout ever opened for a distributor,
     with the price as it stood when that checkout was created.
@@ -274,6 +302,10 @@ class StarterPackCheckout(models.Model):
     # rather than mistaken for a replay of the first (Task 68b, mirroring
     # PendingRegistration.consumed_reference).
     consumed_at = models.DateTimeField(null=True, blank=True)
+    # Set once this checkout's payment has been handled as refunded, so a
+    # second refund event cannot claw the sponsor's bonus back twice
+    # (adversarial security review, Task 68f).
+    refund_handled_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at", "-pk"]
