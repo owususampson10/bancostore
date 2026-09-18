@@ -279,3 +279,53 @@ def test_earnings_disclosure_states_no_guaranteed_income(client):
     assert (
         "no income is ever guaranteed" in content or "no guaranteed income" in content
     )
+
+
+# --- Task 68k: the written terms cover what the code now does ----------------
+#
+# The user's condition for shipping Task 68: nothing goes live until the
+# policies explain the behaviour and protect the platform. Asserted here so a
+# later edit cannot quietly drop a clause the code relies on.
+
+
+@pytest.mark.django_db
+def test_the_returns_policy_explains_the_automatic_stock_out_refund(client):
+    body = client.get(reverse("pages:returns_refunds_shipping")).content.decode()
+
+    assert "refund you automatically" in body
+    assert "You do not need to ask" in body
+
+
+@pytest.mark.django_db
+def test_the_returns_policy_explains_a_payment_that_reaches_us_late(client):
+    body = client.get(reverse("pages:returns_refunds_shipping")).content.decode()
+
+    assert "Payments That Reach Us Late" in body
+    assert "we do not keep it" in body
+    assert "before closing an unpaid order we check with paystack" in body.lower()
+
+
+@pytest.mark.django_db
+def test_the_returns_policy_covers_disputes_and_chargebacks(client):
+    body = client.get(reverse("pages:returns_refunds_shipping")).content.decode()
+
+    assert "dispute or chargeback" in body
+    assert "commission" in body.lower()
+
+
+@pytest.mark.django_db
+def test_the_terms_warn_that_a_referral_bonus_can_be_reversed(client):
+    """Taking money back that nobody was warned about is how disputes start."""
+    body = client.get(reverse("pages:terms_of_use")).content.decode()
+
+    assert "may be reversed from your wallet" in body
+    assert "already been withdrawn" in body
+    assert "Binary and Matching Bonuses" in body
+
+
+@pytest.mark.django_db
+def test_the_earnings_disclosure_says_a_bonus_can_be_reversed(client):
+    body = client.get(reverse("pages:earnings_disclosure")).content.decode()
+
+    assert "A bonus can be reversed" in body
+    assert "taken back from your wallet" in body
