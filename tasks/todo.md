@@ -8854,54 +8854,54 @@ transactions created after 08:30 and NOT the one created before it but paid afte
 reconciliation's 7-day window genuinely cannot see a payment made more than 7 days after its
 checkout opened -- the exact late-payment case it exists to catch.
 
-- [ ] **68a: An order is never cancelled without asking Paystack first.** The incident's exact
+- [x] **68a: An order is never cancelled without asking Paystack first.** The incident's exact
       twin, still open: `auto_cancel_unpaid_orders` flips a PENDING order to CANCELLED after
       `PENDING_ORDER_AUTO_CANCEL_HOURS` (24) with no Paystack call, the checkout page stays
       payable, and `confirm_order_payment` then returns silently on `status != PENDING` -- not
       even a log line. Reuse `resolve_unconsumed_pending_registration`'s shape: verify first,
       consume a `success`, cancel only on a definite not-paid answer, keep it for the next run
       when Paystack cannot be reached.
-- [ ] **68b: Every reference ever issued is remembered (starter packs and orders).**
+- [x] **68b: Every reference ever issued is remembered (starter packs and orders).**
       `snapshot_starter_pack_choice` overwrites `starter_pack_payment_reference` on every
       re-selection, so a back-button retry orphans the first checkout for good -- at GHS 1,500+ the
       most expensive single loss on the platform. A child table per entry point (reference, amount
       snapshotted AT ISSUE TIME, issued_at) also fixes the price-changed-mid-checkout case for
       both, since the amount check stops reading the latest snapshot.
-- [ ] **68c: The pack and order webhooks ask Paystack to retry.** Only the registration path
+- [x] **68c: The pack and order webhooks ask Paystack to retry.** Only the registration path
       returns 503 on a failed verify; the other two answer 200 and burn Paystack's one push (it
       retries for 72h). Give `consume_paid_starter_pack` and `confirm_order_payment` outcome enums
       mirroring `RegistrationPaymentOutcome`, and return 503 on `VERIFY_FAILED`.
-- [ ] **68d: A problem is recorded where it happens, not only the next day.** Both functions
+- [x] **68d: A problem is recorded where it happens, not only the next day.** Both functions
       currently log-and-return on a currency mismatch, an amount mismatch, or (orders) an
       insufficient-stock cancellation, so the Payments screen is blind to two of three entry
       points until reconciliation runs. Record the PaymentIssue at the failure site.
-- [ ] **68e: A stock-out refunds the customer automatically (the Amazon way, user-chosen).**
+- [x] **68e: A stock-out refunds the customer automatically (the Amazon way, user-chosen).**
       `_cancel_order_for_insufficient_stock` takes the money and leaves the refund to a human who
       is never told. First real use of Paystack's Refund API in this codebase (ADR-0005 deferred
       it; SPEC Boundaries require asking first -- user authorised 2026-09-18). Idempotent, never
       raising into the caller's committed transaction, and a PaymentIssue when the refund itself
       fails.
-- [ ] **68f: Refunds and chargebacks are heard and acted on.** Nothing handles `refund.processed`
+- [x] **68f: Refunds and chargebacks are heard and acted on.** Nothing handles `refund.processed`
       or a dispute today: the order stays CONFIRMED, stock stays decremented, PV and the referral
       bonus stay paid. Handle the events, reverse the order through the existing
       `cancel_or_refund_order`, and claw back the direct referral bonus per the decision above.
-- [ ] **68g: Nothing successful is ignored.** A payment whose reference this app never issued
+- [x] **68g: Nothing successful is ignored.** A payment whose reference this app never issued
       (a Paystack payment page or inline checkout on the same merchant account) is skipped
       entirely; reconciliation's page cap silently drops the oldest in-window payments with only a
       log line. Record the first as an unmatched PaymentIssue, alert on the second.
-- [ ] **68h: The reconciliation window covers a late payment.** Widen it now that the `from`
+- [x] **68h: The reconciliation window covers a late payment.** Widen it now that the `from`
       filter is proven to be created-time, and document the trade (API pages per run) against the
       restored 72h webhook retry from 68c.
-- [ ] **68i: A withdrawal cannot be debited and silently never paid.** Only `failed`/`reversed`
+- [x] **68i: A withdrawal cannot be debited and silently never paid.** Only `failed`/`reversed`
       reverse the wallet; Paystack's vocabulary also includes `otp`, `abandoned`, `blocked`,
       `rejected`, any of which leave a request in `queued_for_payout` forever with the money gone.
       Treat any non-success, non-pending status as not-paid, and alert on a request stuck past a
       threshold. The real status set still cannot be confirmed live -- the Starter-tier account
       blocks transfers (`project_paystack_transfer_account_tier_blocked`) -- so fail safe.
-- [ ] **68j: The platform says so at startup if nobody can be alerted.** Both alert addresses
+- [x] **68j: The platform says so at startup if nobody can be alerted.** Both alert addresses
       default blank; `_email_admin` then returns silently. A `manage.py check` warning, not a hard
       failure.
-- [ ] **68k: Terms, policies and distributor-facing copy updated LAST, before any push.** User's
+- [x] **68k: Terms, policies and distributor-facing copy updated LAST, before any push.** User's
       explicit condition: nothing ships until the written terms cover and protect the platform --
       bonus clawback on a reversed payment (68f), automatic refunds on a stock-out (68e), what
       happens to a payment that arrives after an order is closed (68a), and the refund/returns
@@ -8910,3 +8910,34 @@ checkout opened -- the exact late-payment case it exists to catch.
 **Verification:** every slice RED->GREEN tested; `make check-task` per slice and the full suite at
 the end; a fresh-context review pass before the PR; real-browser checks for anything user-facing.
 No push and no deploy until 68k is done, per the user's instruction.
+
+**Closed 2026-09-18, deployed the same day.** All eleven slices shipped; the terms were updated
+last, per the user's condition, before anything was pushed. Three review rounds ran, and the
+second and third each found a defect the previous round had missed -- a pattern worth recording,
+because both were in code written to fix the previous finding:
+
+- Round 1 (`code-reviewer`, whole change): one critical -- 68b checked the amount against the PAID
+  checkout but applied the distributor's CURRENT selection, so paying a Pack A checkout after
+  re-picking Pack B granted Pack B's PV, rank and referral bonus. Plus four required (stuck-payout
+  alerts firing on healthy payouts because they measured from submission not queueing; a dispute on
+  an already-recorded payment silently dropped; a stock-out refund skippable; an order able to stay
+  pending for ever) and three optional.
+- Round 2 (`security-auditor`, whole change): one critical -- the direct-referral clawback looked
+  the original credit up by the distributor's CURRENT reference while the credit was written
+  against the checkout actually paid, so it silently reversed nothing and reported success. Plus
+  two high (unbounded per-order Paystack verify calls; an alert-email flood on the shared Gmail
+  quota from the widened window) and three medium.
+- Round 3 (`security-auditor`, scoped to round 2's own fix commit): one critical -- that fix closed
+  the bonus leg only. `consume_paid_starter_pack` applied the paid checkout's pv/rank but never
+  wrote them back, and cooling-off reads exactly those fields, so the same back-button sequence
+  refunded a GHS 2,000 pack's price for a GHS 500 payment and stripped upline PV that was never
+  credited. Plus one high: the double-clawback guard lived in one caller, while the cooling-off
+  path reverses the same bonus under its own reference -- so both could fire.
+
+**The lesson, recorded because it cost three rounds:** a fix that follows the reported path rather
+than the property that makes the path possible closes the test, not the hole. Each of these three
+criticals was a sibling path of the one just fixed.
+
+**Deployed and verified against production 2026-09-18:** 9 migrations applied, under a minute of
+downtime, both distributors' starter-pack checkouts backfilled, the daily reconciliation scheduled,
+zero payments needing attention, and all live pages plus the two updated policy pages serving 200.

@@ -188,6 +188,47 @@ ten features shipped across Tasks 39-48, Checkpoint O signed off. Tasks 39 (Wish
   set, so the new `@font-face`'s `url()` resolved to `/assets/...` instead of `/static/assets/...`
   — caught by live-browser screenshot, not assumed fixed from a green build. Fixed with
   `base: "/static/"`.
+- **Tasks 67 and 68 (payments that can be taken and never become anything), closed and deployed
+  2026-09-18.** Found live: a distributor filled in the registration form at 07:56, was sent to
+  Paystack, and paid GHS 100 at 09:39 on the checkout page still open in their browser. Cleanup had
+  deleted their `PendingRegistration` at ~09:00 (unconsumed, over an hour old), so the payment
+  matched nothing — no account, no way to log in, and one ERROR line in a log nobody reads. Refunded
+  by hand. **Task 67** built detection: `PaymentIssue` (one row per Paystack reference = one admin
+  to-do), an email + bell alert, a branded admin **Payments** screen (`admin_portal`, detail popup
+  reusing audit_log's json_script + Alpine shape), cleanup that asks Paystack before deleting and
+  keeps a row for 72h of idle checkout rather than 1h from the form, resolution of a payment made on
+  an older checkout tab via the token its reference carries, and a daily reconciliation. **Task 68**
+  then closed the causes across all three inbound entry points and the payout path, after a
+  fresh-context audit found thirteen: an order is never cancelled without asking Paystack first
+  (the incident's exact twin, on the highest-volume entry point); `StarterPackCheckout` /
+  `RegistrationCheckout` remember every reference ever issued with the price, PV and rank it was
+  issued at (a back-button re-selection used to orphan a live GHS 1,500+ checkout, and an admin
+  price change used to reject a correct payment); all three paths return a shared `PaymentOutcome`
+  so the webhook answers 503 on a failed verify and Paystack's 72h retry is real again; a
+  `PaymentIssue` is recorded at the failure site rather than a day later; an insufficient-stock
+  cancellation refunds the customer automatically (**first use of Paystack's Refund API here**,
+  ADR-0005 had deferred it); `refund.*`/`charge.dispute.*` events are handled and always
+  re-verified server-side (a refunded transaction reports `reversed`, confirmed live); the
+  direct-referral bonus is clawed back best-effort with a logged shortfall rather than a debt, while
+  binary/matching stay paid per ADR-0006; unrecognised payments are recorded (belled, never emailed
+  — the 30-day window would flood the shared Gmail quota); a stuck payout is reported but never
+  auto-reversed (an unknown Paystack transfer status can still complete, and reversing would pay
+  twice); and `manage.py check` warns when no alert email is set. **Two Paystack facts were settled
+  by live experiment rather than assumption:** a reference it has never seen answers **HTTP 400
+  "Transaction reference not found."**, not 404; and List Transactions' `from` filter is on
+  **created** time, not paid time — proven by asking from 08:30 on the incident's own day and
+  getting back the transactions created after 08:30 but not the one created at 07:56 and paid at
+  09:39, which is why the reconciliation window is 30 days and not 7. **Three review rounds ran, and
+  rounds 2 and 3 each found a critical in code written to fix the previous round's finding** —
+  pay-Pack-A-get-Pack-B; a clawback that silently reversed nothing yet reported success; and, in
+  that fix, the same exploit's refund leg still paying out a GHS 2,000 refund on a GHS 500 payment
+  because the paid pack was never written back to the distributor. See `tasks/todo.md` Task 68 for
+  the full history and the lesson: a fix that follows the reported path rather than the property
+  that makes the path possible closes the test, not the hole. **Process note:** all of Task 68 was
+  committed straight to `main` — `gh pr merge --delete-branch` had switched the checkout back after
+  Task 67's PR #97, so it shipped with CI but with no CodeRabbit pass (a review-only PR is refused
+  by CodeRabbit: "reviews are disabled for this base branch"). Check `git branch --show-current`
+  before the first commit of a task.
 
 Task 25 didn't exist in the original plan either — added
 2026-07-27 after a `source-driven-development` read of the primary source doc's Section 6.4 found
