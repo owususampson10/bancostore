@@ -8826,3 +8826,87 @@ token, so the logo sits on the header with no visible seam.
 **Verification:** tests for the HTML part, both parts present, logo CID referenced, admin text
 escaped (an admin typing `<script>` must see it rendered as text), a live admin edit reaching the
 real send; `make check-fast`; one PR, reviewed, before merge.
+
+---
+
+## Task 68: Close every way a payment can be taken and nothing given back
+
+Task 67 shipped detection: a `PaymentIssue` row, an admin alert, and the Payments screen. The
+user then asked the right question -- "what are ALL the circumstances where this can still
+happen, so we can close them?" A fresh-context `security-auditor` audit of all three inbound
+entry points (`reg-`/`pack-`/`order-`) and the outbound payout path found 13. Two decisions were
+taken before any code:
+
+- **Commission clawback (68f):** reverse the DIRECT REFERRAL bonus only, best-effort, and log +
+  alert when the money has already been withdrawn rather than creating a debt. Binary and
+  matching bonuses stay un-clawed-back, upholding ADR-0006's existing reasoning (a batch-cycle
+  payout from a fungible PV pool cannot be attributed to one sale). User-accepted 2026-09-18.
+- **Holding period before withdrawal: deliberately NOT built.** Task 47a's escrow reserve already
+  sets aside a percentage of every confirmed sale against exactly this risk, withdrawals are
+  already hand-approved and paid in a Friday batch, and ageing every cedi in a `Wallet` (one
+  number today) is the riskiest possible change to a live money system. Revisit only if real
+  refund losses ever exceed what escrow covers. User-accepted 2026-09-18.
+
+**Settled by experiment, not assumption (2026-09-18):** Paystack's `from` filter on List
+Transactions is on CREATED time, not paid time. Proven against the live API using the incident's
+own transaction (created 07:56, paid 09:39): asking `from=08:30` that day returns the two
+transactions created after 08:30 and NOT the one created before it but paid after. So the daily
+reconciliation's 7-day window genuinely cannot see a payment made more than 7 days after its
+checkout opened -- the exact late-payment case it exists to catch.
+
+- [ ] **68a: An order is never cancelled without asking Paystack first.** The incident's exact
+      twin, still open: `auto_cancel_unpaid_orders` flips a PENDING order to CANCELLED after
+      `PENDING_ORDER_AUTO_CANCEL_HOURS` (24) with no Paystack call, the checkout page stays
+      payable, and `confirm_order_payment` then returns silently on `status != PENDING` -- not
+      even a log line. Reuse `resolve_unconsumed_pending_registration`'s shape: verify first,
+      consume a `success`, cancel only on a definite not-paid answer, keep it for the next run
+      when Paystack cannot be reached.
+- [ ] **68b: Every reference ever issued is remembered (starter packs and orders).**
+      `snapshot_starter_pack_choice` overwrites `starter_pack_payment_reference` on every
+      re-selection, so a back-button retry orphans the first checkout for good -- at GHS 1,500+ the
+      most expensive single loss on the platform. A child table per entry point (reference, amount
+      snapshotted AT ISSUE TIME, issued_at) also fixes the price-changed-mid-checkout case for
+      both, since the amount check stops reading the latest snapshot.
+- [ ] **68c: The pack and order webhooks ask Paystack to retry.** Only the registration path
+      returns 503 on a failed verify; the other two answer 200 and burn Paystack's one push (it
+      retries for 72h). Give `consume_paid_starter_pack` and `confirm_order_payment` outcome enums
+      mirroring `RegistrationPaymentOutcome`, and return 503 on `VERIFY_FAILED`.
+- [ ] **68d: A problem is recorded where it happens, not only the next day.** Both functions
+      currently log-and-return on a currency mismatch, an amount mismatch, or (orders) an
+      insufficient-stock cancellation, so the Payments screen is blind to two of three entry
+      points until reconciliation runs. Record the PaymentIssue at the failure site.
+- [ ] **68e: A stock-out refunds the customer automatically (the Amazon way, user-chosen).**
+      `_cancel_order_for_insufficient_stock` takes the money and leaves the refund to a human who
+      is never told. First real use of Paystack's Refund API in this codebase (ADR-0005 deferred
+      it; SPEC Boundaries require asking first -- user authorised 2026-09-18). Idempotent, never
+      raising into the caller's committed transaction, and a PaymentIssue when the refund itself
+      fails.
+- [ ] **68f: Refunds and chargebacks are heard and acted on.** Nothing handles `refund.processed`
+      or a dispute today: the order stays CONFIRMED, stock stays decremented, PV and the referral
+      bonus stay paid. Handle the events, reverse the order through the existing
+      `cancel_or_refund_order`, and claw back the direct referral bonus per the decision above.
+- [ ] **68g: Nothing successful is ignored.** A payment whose reference this app never issued
+      (a Paystack payment page or inline checkout on the same merchant account) is skipped
+      entirely; reconciliation's page cap silently drops the oldest in-window payments with only a
+      log line. Record the first as an unmatched PaymentIssue, alert on the second.
+- [ ] **68h: The reconciliation window covers a late payment.** Widen it now that the `from`
+      filter is proven to be created-time, and document the trade (API pages per run) against the
+      restored 72h webhook retry from 68c.
+- [ ] **68i: A withdrawal cannot be debited and silently never paid.** Only `failed`/`reversed`
+      reverse the wallet; Paystack's vocabulary also includes `otp`, `abandoned`, `blocked`,
+      `rejected`, any of which leave a request in `queued_for_payout` forever with the money gone.
+      Treat any non-success, non-pending status as not-paid, and alert on a request stuck past a
+      threshold. The real status set still cannot be confirmed live -- the Starter-tier account
+      blocks transfers (`project_paystack_transfer_account_tier_blocked`) -- so fail safe.
+- [ ] **68j: The platform says so at startup if nobody can be alerted.** Both alert addresses
+      default blank; `_email_admin` then returns silently. A `manage.py check` warning, not a hard
+      failure.
+- [ ] **68k: Terms, policies and distributor-facing copy updated LAST, before any push.** User's
+      explicit condition: nothing ships until the written terms cover and protect the platform --
+      bonus clawback on a reversed payment (68f), automatic refunds on a stock-out (68e), what
+      happens to a payment that arrives after an order is closed (68a), and the refund/returns
+      policy page. Touches the Task 34 legal pages and the constance-editable policy text.
+
+**Verification:** every slice RED->GREEN tested; `make check-task` per slice and the full suite at
+the end; a fresh-context review pass before the PR; real-browser checks for anything user-facing.
+No push and no deploy until 68k is done, per the user's instruction.
