@@ -10,6 +10,7 @@ from celery import shared_task
 
 from apps.orders.models import Order
 from apps.orders.services import confirm_order_payment
+from bancostore.concurrency import retry_on_lock_contention
 
 from .models import Distributor, PaymentIssue, PendingRegistration
 from .payment_issues import record_payment_issue
@@ -40,35 +41,75 @@ CLEANUP_BATCH_SIZE = 50
 CLEANUP_RECHECK_INTERVAL = timedelta(hours=1)
 
 
-def _claim_cleanup_candidates(now):
-    """Picks this run's rows and stamps last_checked_at on them in one
-    transaction, so an overlapping run takes different rows rather than
-    repeating the same Paystack calls (CodeRabbit, PR #97).
+def _eligible_for_cleanup(queryset, now):
+    """The rows cleanup may look at: unconsumed, idle long enough (or past
+    the hard age limit), and not already checked within the last hour.
 
-    SKIP LOCKED where the backend has it (MySQL 8 in CI and production): a
-    second run steps over rows the first already holds instead of blocking
-    behind them. SQLite, used only for local dev and tests, has no row-level
-    locking at all, so the guarantee is real in production but cannot be
-    proven by the local suite -- the same honest limit as every other
-    select_for_update in this codebase."""
+    That last one is an exclude(), not filter(last_checked_at__lte=...), on
+    purpose: last_checked_at is NULL for every row nobody has checked yet,
+    which is most of them, and a filter would silently drop all of them and
+    stop cleanup dead."""
     idle_cutoff = now - PENDING_REGISTRATION_IDLE_TTL
-    candidates = (
-        PendingRegistration.objects.filter(consumed_at__isnull=True)
+    return (
+        queryset.filter(consumed_at__isnull=True)
         .filter(
             Q(payment_initialized_at__lte=idle_cutoff)
             | Q(payment_initialized_at__isnull=True, created_at__lte=idle_cutoff)
             | Q(created_at__lte=now - PENDING_REGISTRATION_MAX_AGE)
         )
         .exclude(last_checked_at__gt=now - CLEANUP_RECHECK_INTERVAL)
-        .order_by(F("last_checked_at").asc(nulls_first=True), "created_at", "pk")
     )
-    if connection.features.has_select_for_update_skip_locked:
-        candidates = candidates.select_for_update(skip_locked=True)
 
-    with transaction.atomic():
-        claimed = list(candidates.values_list("pk", flat=True)[:CLEANUP_BATCH_SIZE])
-        PendingRegistration.objects.filter(pk__in=claimed).update(last_checked_at=now)
-    return claimed
+
+def _claim_cleanup_candidates(now):
+    """Picks this run's rows and stamps last_checked_at on them in one
+    transaction, so an overlapping run takes different rows rather than
+    repeating the same Paystack calls (CodeRabbit, PR #97).
+
+    Two statements on purpose (agent code review): a plain SELECT shortlists
+    the batch, then only those rows are locked. Locking the ordered
+    candidate query itself would have InnoDB lock every row it reads -- the
+    whole backlog during a Paystack outage, not the 50 taken -- so an
+    overlapping run would SKIP LOCKED past all of them and claim nothing at
+    all, which is worse than the duplication this exists to prevent.
+
+    SKIP LOCKED where the backend has it (MySQL 8 in CI and production): a
+    second run steps over rows the first already holds instead of blocking
+    behind them. SQLite, used only for local dev and tests, has no row-level
+    locking at all, so the guarantee is real in production but cannot be
+    proven by the local suite -- the same honest limit as every other
+    select_for_update in this codebase.
+
+    last_checked_at is stamped with the batch's start time, before any
+    Paystack call, so a worker killed mid-batch leaves its rows for the next
+    hour rather than having them re-checked immediately. For a job whose
+    entire cost is outbound API calls, that is the right way round."""
+
+    def _claim():
+        with transaction.atomic():
+            shortlist = list(
+                _eligible_for_cleanup(PendingRegistration.objects, now)
+                .order_by(
+                    F("last_checked_at").asc(nulls_first=True), "created_at", "pk"
+                )
+                .values_list("pk", flat=True)[:CLEANUP_BATCH_SIZE]
+            )
+            # Eligibility re-checked under the lock: a row another run
+            # claimed between the two statements is not claimed twice.
+            locked = _eligible_for_cleanup(
+                PendingRegistration.objects.filter(pk__in=shortlist), now
+            )
+            if connection.features.has_select_for_update_skip_locked:
+                locked = locked.select_for_update(skip_locked=True)
+            claimed = list(locked.values_list("pk", flat=True))
+            PendingRegistration.objects.filter(pk__in=claimed).update(
+                last_checked_at=now
+            )
+            return claimed
+
+    # Every other write in this codebase goes through this; without it a
+    # single lock-wait timeout kills the whole cleanup cycle for 15 minutes.
+    return retry_on_lock_contention(_claim)
 
 
 @shared_task

@@ -400,3 +400,88 @@ def test_one_run_is_capped(mock_verify):
     cleanup_expired_pending_registrations()
 
     assert mock_verify.call_count == CLEANUP_BATCH_SIZE
+
+
+# --- Claiming the batch (agent code review of the CodeRabbit fix) --------------
+
+
+@pytest.mark.django_db
+@patch(VERIFY)
+def test_a_row_paystack_keeps_failing_on_is_stamped_as_checked(mock_verify):
+    """The point of claiming up front: a row that stays KEPT must not walk
+    straight back into the next batch."""
+    mock_verify.side_effect = PaystackError("down")
+    pending = _make_pending(_make_sponsor(), "+233241111111", idle=timedelta(days=4))
+
+    cleanup_expired_pending_registrations()
+
+    pending.refresh_from_db()
+    assert pending.last_checked_at is not None
+
+
+@pytest.mark.django_db
+@patch(VERIFY)
+def test_only_the_batch_is_claimed_not_every_waiting_row(mock_verify):
+    """Locking the whole candidate query would make an overlapping run skip
+    every row and do nothing at all."""
+    from apps.distributors.tasks import CLEANUP_BATCH_SIZE
+
+    mock_verify.side_effect = PaystackError("down")
+    sponsor = _make_sponsor()
+    for i in range(CLEANUP_BATCH_SIZE + 5):
+        _make_pending(
+            sponsor, f"+2332411{i:05d}", reference=f"ref-{i}", idle=timedelta(days=4)
+        )
+
+    cleanup_expired_pending_registrations()
+
+    assert (
+        PendingRegistration.objects.filter(last_checked_at__isnull=False).count()
+        == CLEANUP_BATCH_SIZE
+    )
+
+
+@pytest.mark.django_db
+@patch(VERIFY)
+def test_the_least_recently_checked_rows_go_first(mock_verify):
+    mock_verify.side_effect = PaystackError("down")
+    sponsor = _make_sponsor()
+    now = timezone.now()
+    never_checked = _make_pending(
+        sponsor, "+233241111111", reference="never", idle=timedelta(days=4)
+    )
+    checked_long_ago = _make_pending(
+        sponsor, "+233241111112", reference="old", idle=timedelta(days=4)
+    )
+    PendingRegistration.objects.filter(pk=checked_long_ago.pk).update(
+        last_checked_at=now - timedelta(hours=6)
+    )
+    checked_recently_enough = _make_pending(
+        sponsor, "+233241111113", reference="recent", idle=timedelta(days=4)
+    )
+    PendingRegistration.objects.filter(pk=checked_recently_enough.pk).update(
+        last_checked_at=now - timedelta(hours=2)
+    )
+
+    cleanup_expired_pending_registrations()
+
+    assert [c.args[0] for c in mock_verify.call_args_list] == [
+        "never",
+        "old",
+        "recent",
+    ]
+    assert PendingRegistration.objects.filter(pk=never_checked.pk).exists()
+
+
+@pytest.mark.django_db
+@patch(VERIFY)
+def test_a_never_checked_row_is_never_skipped(mock_verify):
+    """last_checked_at is NULL for most rows; a filter() instead of the
+    exclude() would drop them all and stop cleanup dead, silently."""
+    mock_verify.return_value = {"status": "abandoned"}
+    pending = _make_pending(_make_sponsor(), "+233241111111", idle=timedelta(days=4))
+    assert pending.last_checked_at is None
+
+    cleanup_expired_pending_registrations()
+
+    assert not _exists(pending)

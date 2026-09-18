@@ -219,6 +219,19 @@ class PendingRegistration(models.Model):
     # keeps has to wait its turn behind the others.
     last_checked_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        indexes = [
+            # Task 67 (agent code review). The cleanup job's candidate query
+            # every 15 minutes: unconsumed rows, least recently checked
+            # first. Without it MySQL full-scans and filesorts this table,
+            # and the claim's SELECT ... FOR UPDATE would lock every row it
+            # reads rather than the batch it takes.
+            models.Index(
+                fields=["consumed_at", "last_checked_at"],
+                name="pendingreg_cleanup_idx",
+            ),
+        ]
+
     def __str__(self):
         return f"PendingRegistration<{self.phone_number}>"
 
